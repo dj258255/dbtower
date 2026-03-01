@@ -1,0 +1,28 @@
+# 플랫폼 자체 메타데이터(레지스트리·스냅샷)는 H2 파일 DB에 저장한다.
+# 관리 "대상" DB와 플랫폼 "자체" DB를 분리해 두면, 대상 DB 장애가 플랫폼을 무너뜨리지 않는다.
+spring:
+  datasource:
+    url: jdbc:h2:file:./data/dbhub;MODE=LEGACY
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+server:
+  port: 8080
+
+dbhub:
+  snapshot:
+    interval-ms: 60000   # 쿼리 통계 수집 주기
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus

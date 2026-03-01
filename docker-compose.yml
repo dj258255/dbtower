@@ -1,0 +1,52 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: dbhub-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: dbhub1234
+      MYSQL_DATABASE: sample
+    # 슬로우 쿼리를 mysql.slow_log 테이블로 남겨 플랫폼이 조회할 수 있게 한다
+    command: >
+      --slow_query_log=ON
+      --log_output=TABLE
+      --long_query_time=0.5
+      --max_digest_length=4096
+      --performance_schema_max_digest_length=4096
+    ports:
+      - "13306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  postgres:
+    image: postgres:16
+    container_name: dbhub-postgres
+    environment:
+      POSTGRES_PASSWORD: dbhub1234
+      POSTGRES_DB: sample
+    # 쿼리 통계 수집을 위한 pg_stat_statements 프리로드
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+    ports:
+      - "15432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: dbhub-mssql
+    platform: linux/amd64   # Apple Silicon에서는 Docker Desktop Rosetta 에뮬레이션 필요
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Dbhub1234!"
+    ports:
+      - "11433:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+
+volumes:
+  mysql-data:
+  postgres-data:
+  mssql-data:
