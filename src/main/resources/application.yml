@@ -11,8 +11,8 @@ spring:
     open-in-view: false
   h2:
     console:
-      enabled: true
-      path: /h2-console
+      # 무인증 콘솔은 노출 사고로 이어진다. 필요할 때만 로컬에서 임시로 켠다
+      enabled: false
 
 server:
   port: 8080

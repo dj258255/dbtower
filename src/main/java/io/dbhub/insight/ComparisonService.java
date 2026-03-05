@@ -23,35 +23,65 @@ public class ComparisonService {
         this.snapshotRepository = snapshotRepository;
     }
 
-    public List<QueryDiff> compare(Long instanceId,
-                                   LocalDateTime baseFrom, LocalDateTime baseTo,
-                                   LocalDateTime targetFrom, LocalDateTime targetTo) {
+    /** 구간 전체 요약 — 쿼리별 표를 읽기 전에 "전반적으로 무엇이 변했는지"부터 보여준다 */
+    public record WindowSummary(long totalCalls, double totalTimeMs, double avgLatencyMs,
+                                long totalRowsExamined, int queryCount) {
+    }
+
+    public record CompareResult(WindowSummary base, WindowSummary target,
+                                Double totalCallsChangePct, Double avgLatencyChangePct,
+                                Double rowsExaminedChangePct, int newQueryCount,
+                                List<QueryDiff> queries) {
+    }
+
+    public CompareResult compare(Long instanceId,
+                                 LocalDateTime baseFrom, LocalDateTime baseTo,
+                                 LocalDateTime targetFrom, LocalDateTime targetTo) {
         Map<String, WindowStat> base = windowStats(instanceId, baseFrom, baseTo);
         Map<String, WindowStat> target = windowStats(instanceId, targetFrom, targetTo);
 
         List<QueryDiff> diffs = new ArrayList<>();
+        int newQueryCount = 0;
         for (Map.Entry<String, WindowStat> e : target.entrySet()) {
             String queryId = e.getKey();
             WindowStat t = e.getValue();
             WindowStat b = base.get(queryId);
             boolean isNew = (b == null);
+            if (isNew) {
+                newQueryCount++;
+            }
 
             double baseQps = isNew ? 0 : b.qps();
             double baseAvgMs = isNew ? 0 : b.avgMs();
+            double baseRowsPerCall = isNew ? 0 : b.rowsPerCall();
             diffs.add(new QueryDiff(
                     queryId,
                     t.queryText,
-                    round(baseQps),
-                    round(t.qps()),
-                    changePct(baseQps, t.qps()),
-                    round(baseAvgMs),
-                    round(t.avgMs()),
-                    changePct(baseAvgMs, t.avgMs()),
+                    round(baseQps), round(t.qps()), changePct(baseQps, t.qps()),
+                    round(baseAvgMs), round(t.avgMs()), changePct(baseAvgMs, t.avgMs()),
+                    round(baseRowsPerCall), round(t.rowsPerCall()), changePct(baseRowsPerCall, t.rowsPerCall()),
                     isNew));
         }
         // 문제 구간에서 시간을 가장 많이 쓴 쿼리부터
         diffs.sort(Comparator.comparingDouble((QueryDiff d) -> d.targetQps() * d.targetAvgMs()).reversed());
-        return diffs;
+
+        WindowSummary baseSummary = summarize(base);
+        WindowSummary targetSummary = summarize(target);
+        return new CompareResult(
+                baseSummary, targetSummary,
+                changePct(baseSummary.totalCalls(), targetSummary.totalCalls()),
+                changePct(baseSummary.avgLatencyMs(), targetSummary.avgLatencyMs()),
+                changePct(baseSummary.totalRowsExamined(), targetSummary.totalRowsExamined()),
+                newQueryCount,
+                diffs);
+    }
+
+    private WindowSummary summarize(Map<String, WindowStat> stats) {
+        long totalCalls = stats.values().stream().mapToLong(WindowStat::deltaCalls).sum();
+        double totalTimeMs = stats.values().stream().mapToDouble(WindowStat::deltaTimeMs).sum();
+        long totalRows = stats.values().stream().mapToLong(WindowStat::deltaRows).sum();
+        double avgLatency = totalCalls == 0 ? 0 : totalTimeMs / totalCalls;
+        return new WindowSummary(totalCalls, round(totalTimeMs), round(avgLatency), totalRows, stats.size());
     }
 
     /** 구간 양 끝 배치의 누적 카운터 차분으로 구간 내 발생량을 구한다 */
@@ -80,10 +110,12 @@ public class ComparisonService {
             long deltaCalls = start == null ? end.getCalls() : Math.max(0, end.getCalls() - start.getCalls());
             double deltaTimeMs = start == null ? end.getTotalTimeMs()
                     : Math.max(0, end.getTotalTimeMs() - start.getTotalTimeMs());
+            long deltaRows = start == null ? end.getRowsExamined()
+                    : Math.max(0, end.getRowsExamined() - start.getRowsExamined());
             if (deltaCalls == 0) {
                 continue; // 이 구간에 실행되지 않은 쿼리는 비교 대상이 아니다
             }
-            result.put(e.getKey(), new WindowStat(end.getQueryText(), deltaCalls, deltaTimeMs, windowSeconds));
+            result.put(e.getKey(), new WindowStat(end.getQueryText(), deltaCalls, deltaTimeMs, deltaRows, windowSeconds));
         }
         return result;
     }
@@ -103,13 +135,18 @@ public class ComparisonService {
         return Math.round(v * 100) / 100.0;
     }
 
-    private record WindowStat(String queryText, long deltaCalls, double deltaTimeMs, long windowSeconds) {
+    private record WindowStat(String queryText, long deltaCalls, double deltaTimeMs,
+                              long deltaRows, long windowSeconds) {
         double qps() {
             return (double) deltaCalls / windowSeconds;
         }
 
         double avgMs() {
             return deltaCalls == 0 ? 0 : deltaTimeMs / deltaCalls;
+        }
+
+        double rowsPerCall() {
+            return deltaCalls == 0 ? 0 : (double) deltaRows / deltaCalls;
         }
     }
 }
