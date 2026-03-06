@@ -4,6 +4,7 @@ import io.dbhub.analysis.RuleBasedAnalyzer;
 import io.dbhub.operator.DbmsOperatorFactory;
 import io.dbhub.operator.QueryStat;
 import io.dbhub.operator.SlowQuery;
+import io.dbhub.operator.TableStat;
 import io.dbhub.registry.DatabaseInstance;
 import io.dbhub.registry.RegistryService;
 import jakarta.validation.constraints.NotBlank;
@@ -30,9 +31,28 @@ public class InsightController {
         this.analyzer = analyzer;
     }
 
+    /**
+     * load(점유율%) = 이 쿼리의 누적 수행시간 / 상위 N개 전체 수행시간.
+     * 호출수가 아니라 "시간 점유율"로 랭킹해야 DB를 실제로 붙잡고 있는 쿼리가 보인다. (PMM QAN 방식)
+     */
+    public record QueryStatView(String queryId, String queryText, long calls,
+                                double totalTimeMs, long rowsExamined, double loadPct) {
+    }
+
     @GetMapping("/query-stats")
-    public List<QueryStat> queryStats(@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
-        return operatorFactory.create(registryService.findById(id)).queryStats(limit);
+    public List<QueryStatView> queryStats(@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
+        List<QueryStat> stats = operatorFactory.create(registryService.findById(id)).queryStats(limit);
+        double totalTime = stats.stream().mapToDouble(QueryStat::totalTimeMs).sum();
+        return stats.stream()
+                .map(s -> new QueryStatView(s.queryId(), s.queryText(), s.calls(), s.totalTimeMs(),
+                        s.rowsExamined(),
+                        totalTime == 0 ? 0 : Math.round(s.totalTimeMs() / totalTime * 10000) / 100.0))
+                .toList();
+    }
+
+    @GetMapping("/table-stats")
+    public List<TableStat> tableStats(@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
+        return operatorFactory.create(registryService.findById(id)).tableStats(limit);
     }
 
     @GetMapping("/slow-queries")

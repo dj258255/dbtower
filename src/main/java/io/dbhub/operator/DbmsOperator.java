@@ -23,6 +23,9 @@ public interface DbmsOperator {
     /** SELECT 쿼리의 실행계획(JSON/XML 문자열) */
     String explain(String sql);
 
+    /** 테이블별 행수·데이터/인덱스 크기 — 용량 추이와 튜닝 판단의 기초 자료 */
+    List<TableStat> tableStats(int limit);
+
     /** 추상 정책을 기종별 백업 구문으로 실행 (확장1) */
     void backup(BackupPolicy policy);
 

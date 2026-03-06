@@ -19,8 +19,8 @@ import java.util.List;
  */
 public class MsSqlOperator extends AbstractJdbcOperator {
 
-    public MsSqlOperator(DatabaseInstance instance) {
-        super(instance);
+    public MsSqlOperator(DatabaseInstance instance, ConnectionPools pools) {
+        super(instance, pools);
     }
 
     @Override
@@ -93,6 +93,38 @@ public class MsSqlOperator extends AbstractJdbcOperator {
             }
         } catch (SQLException e) {
             throw new OperatorException("MSSQL 슬로우 쿼리 조회 실패: " + e.getMessage(), e);
+        }
+        return result;
+    }
+
+    @Override
+    public List<TableStat> tableStats(int limit) {
+        // used_page_count는 8KB 페이지 단위라 바이트로 환산한다
+        String sql = """
+                SELECT TOP (?)
+                       t.name AS table_name,
+                       SUM(CASE WHEN ps.index_id IN (0, 1) THEN ps.row_count ELSE 0 END) AS row_count,
+                       SUM(CASE WHEN ps.index_id IN (0, 1) THEN ps.used_page_count ELSE 0 END) * 8192 AS data_bytes,
+                       SUM(CASE WHEN ps.index_id > 1 THEN ps.used_page_count ELSE 0 END) * 8192 AS index_bytes
+                FROM sys.dm_db_partition_stats ps
+                JOIN sys.tables t ON t.object_id = ps.object_id
+                GROUP BY t.name
+                ORDER BY SUM(ps.used_page_count) DESC
+                """;
+        List<TableStat> result = new ArrayList<>();
+        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new TableStat(
+                            rs.getString("table_name"),
+                            rs.getLong("row_count"),
+                            rs.getLong("data_bytes"),
+                            rs.getLong("index_bytes")));
+                }
+            }
+        } catch (SQLException e) {
+            throw new OperatorException("MSSQL 테이블 통계 조회 실패: " + e.getMessage(), e);
         }
         return result;
     }

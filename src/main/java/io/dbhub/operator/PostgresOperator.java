@@ -21,8 +21,8 @@ public class PostgresOperator extends AbstractJdbcOperator {
     /** 통계 기반 슬로우 쿼리 판정 임계값(평균 수행시간 ms) */
     private static final double SLOW_MEAN_MS = 500.0;
 
-    public PostgresOperator(DatabaseInstance instance) {
-        super(instance);
+    public PostgresOperator(DatabaseInstance instance, ConnectionPools pools) {
+        super(instance, pools);
     }
 
     @Override
@@ -89,6 +89,36 @@ public class PostgresOperator extends AbstractJdbcOperator {
             }
         } catch (SQLException e) {
             throw new OperatorException("PostgreSQL 슬로우 쿼리 조회 실패: " + e.getMessage(), e);
+        }
+        return result;
+    }
+
+    @Override
+    public List<TableStat> tableStats(int limit) {
+        // n_live_tup은 autovacuum 통계 기반 추정치
+        String sql = """
+                SELECT relname,
+                       n_live_tup,
+                       pg_relation_size(relid) AS data_bytes,
+                       pg_indexes_size(relid) AS index_bytes
+                FROM pg_stat_user_tables
+                ORDER BY pg_total_relation_size(relid) DESC
+                LIMIT ?
+                """;
+        List<TableStat> result = new ArrayList<>();
+        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new TableStat(
+                            rs.getString("relname"),
+                            rs.getLong("n_live_tup"),
+                            rs.getLong("data_bytes"),
+                            rs.getLong("index_bytes")));
+                }
+            }
+        } catch (SQLException e) {
+            throw new OperatorException("PostgreSQL 테이블 통계 조회 실패: " + e.getMessage(), e);
         }
         return result;
     }

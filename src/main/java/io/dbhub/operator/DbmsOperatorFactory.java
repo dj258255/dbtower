@@ -10,11 +10,17 @@ import org.springframework.stereotype.Component;
 @Component
 public class DbmsOperatorFactory {
 
+    private final ConnectionPools pools;
+
+    public DbmsOperatorFactory(ConnectionPools pools) {
+        this.pools = pools;
+    }
+
     public DbmsOperator create(DatabaseInstance instance) {
         return switch (instance.getType()) {
-            case MYSQL -> new MySqlOperator(instance);
-            case POSTGRESQL -> new PostgresOperator(instance);
-            case MSSQL -> new MsSqlOperator(instance);
+            case MYSQL -> new MySqlOperator(instance, pools);
+            case POSTGRESQL -> new PostgresOperator(instance, pools);
+            case MSSQL -> new MsSqlOperator(instance, pools);
         };
     }
 }

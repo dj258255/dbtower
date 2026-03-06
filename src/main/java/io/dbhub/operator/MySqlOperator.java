@@ -18,8 +18,8 @@ import java.util.List;
  */
 public class MySqlOperator extends AbstractJdbcOperator {
 
-    public MySqlOperator(DatabaseInstance instance) {
-        super(instance);
+    public MySqlOperator(DatabaseInstance instance, ConnectionPools pools) {
+        super(instance, pools);
     }
 
     @Override
@@ -90,6 +90,35 @@ public class MySqlOperator extends AbstractJdbcOperator {
             }
         } catch (SQLException e) {
             throw new OperatorException("MySQL 슬로우 쿼리 조회 실패: " + e.getMessage(), e);
+        }
+        return result;
+    }
+
+    @Override
+    public List<TableStat> tableStats(int limit) {
+        // TABLE_ROWS는 InnoDB 통계 기반 추정치다 (정확한 COUNT 아님)
+        String sql = """
+                SELECT TABLE_NAME, TABLE_ROWS, DATA_LENGTH, INDEX_LENGTH
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = ?
+                ORDER BY DATA_LENGTH + INDEX_LENGTH DESC
+                LIMIT ?
+                """;
+        List<TableStat> result = new ArrayList<>();
+        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, instance.getDbName());
+            ps.setInt(2, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new TableStat(
+                            rs.getString("TABLE_NAME"),
+                            rs.getLong("TABLE_ROWS"),
+                            rs.getLong("DATA_LENGTH"),
+                            rs.getLong("INDEX_LENGTH")));
+                }
+            }
+        } catch (SQLException e) {
+            throw new OperatorException("MySQL 테이블 통계 조회 실패: " + e.getMessage(), e);
         }
         return result;
     }

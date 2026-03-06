@@ -1,5 +1,6 @@
 package io.dbhub.registry;
 
+import io.dbhub.operator.ConnectionPools;
 import io.dbhub.operator.DbmsOperatorFactory;
 import io.dbhub.operator.HealthStatus;
 import org.springframework.stereotype.Service;
@@ -12,10 +13,13 @@ public class RegistryService {
 
     private final DatabaseInstanceRepository repository;
     private final DbmsOperatorFactory operatorFactory;
+    private final ConnectionPools pools;
 
-    public RegistryService(DatabaseInstanceRepository repository, DbmsOperatorFactory operatorFactory) {
+    public RegistryService(DatabaseInstanceRepository repository, DbmsOperatorFactory operatorFactory,
+                           ConnectionPools pools) {
         this.repository = repository;
         this.operatorFactory = operatorFactory;
+        this.pools = pools;
     }
 
     /** 등록 전에 실제로 붙어보고, 붙지 않으면 등록을 거부한다 — 죽은 인스턴스가 레지스트리에 쌓이는 것 방지 */
@@ -42,5 +46,6 @@ public class RegistryService {
 
     public void delete(Long id) {
         repository.deleteById(id);
+        pools.close(id); // 풀 정리 — 안 하면 삭제된 대상의 커넥션이 남는다
     }
 }

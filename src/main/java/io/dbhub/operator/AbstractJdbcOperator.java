@@ -3,7 +3,6 @@ package io.dbhub.operator;
 import io.dbhub.registry.DatabaseInstance;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -11,16 +10,17 @@ import java.sql.Statement;
 /**
  * JDBC 기반 Operator 공통 골격.
  *
- * 현재는 호출마다 DriverManager로 새 커넥션을 연다 — 의도적인 초기 구현이다.
- * 수집 주기가 짧아지면 연결 비용이 병목이 되므로, 인스턴스별 HikariCP 풀로 교체하며
- * before/after를 측정하는 것이 성능 개선 아크 1번이다. (docs/DESIGN.md 참고)
+ * 처음엔 호출마다 DriverManager로 새 커넥션을 열었다(TCP+인증 핸드셰이크 반복).
+ * 개선 아크 1에서 인스턴스별 HikariCP 풀로 교체 — before/after 실측은 docs/DESIGN.md 참고.
  */
 public abstract class AbstractJdbcOperator implements DbmsOperator {
 
     protected final DatabaseInstance instance;
+    private final ConnectionPools pools;
 
-    protected AbstractJdbcOperator(DatabaseInstance instance) {
+    protected AbstractJdbcOperator(DatabaseInstance instance, ConnectionPools pools) {
         this.instance = instance;
+        this.pools = pools;
     }
 
     /** 기종별 JDBC URL */
@@ -30,7 +30,7 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
     protected abstract String versionSql();
 
     protected Connection open() throws SQLException {
-        return DriverManager.getConnection(jdbcUrl(), instance.getUsername(), instance.getPassword());
+        return pools.getConnection(instance, jdbcUrl());
     }
 
     @Override
