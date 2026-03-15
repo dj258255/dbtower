@@ -81,7 +81,7 @@
 | # | 병목 (의도적 초기 구현) | 개선 | 측정 방법 |
 |---|---|---|---|
 | 1 | 수집마다 DriverManager 새 커넥션 | 인스턴스별 HikariCP 풀 | 완료 — MySQL 47.1→11.8ms(4.0배), PG 34.1→14.4ms, MSSQL 49.5→14.6ms (VERIFICATION.md 6절) |
-| 2 | 스냅샷 JPA saveAll 단건 insert | JDBC batch insert | 배치 100행 저장 시간 |
+| 2 | 스냅샷 JPA saveAll 단건 insert | JDBC batchUpdate + reWriteBatchedInserts | 완료 — PG 행당 1.51->0.11ms(13.8배), MySQL 2.33->0.95ms (VERIFICATION.md 7절) |
 | 3 | 시점 비교 조회 풀스캔 | (instanceId, capturedAt) 복합 인덱스 | **DBHub의 explain으로 DBHub 자신을 진단** (도그푸딩) |
 | 4 | max_digest_length 1024 | 4096 상향 | 긴 쿼리 2종이 구분되는지 + 메모리 영향 실측 |
 | 5 | API 전체 | k6 부하 | P95 응답시간 |

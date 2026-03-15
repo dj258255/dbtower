@@ -38,10 +38,13 @@ public class PostgresOperator extends AbstractJdbcOperator {
 
     @Override
     public List<QueryStat> queryStats(int limit) {
+        // pg_stat_statements는 클러스터 전역 뷰라 dbid로 현재 DB만 필터해야 한다.
+        // 안 하면 같은 클러스터의 다른 데이터베이스 쿼리까지 섞여 통계가 오염된다.
         String sql = """
                 SELECT queryid::text AS query_id, query, calls,
                        total_exec_time AS total_ms, rows
                 FROM pg_stat_statements
+                WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
                 ORDER BY total_exec_time DESC
                 LIMIT ?
                 """;
@@ -70,7 +73,8 @@ public class PostgresOperator extends AbstractJdbcOperator {
         String sql = """
                 SELECT query, mean_exec_time, rows
                 FROM pg_stat_statements
-                WHERE mean_exec_time > ?
+                WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+                  AND mean_exec_time > ?
                 ORDER BY mean_exec_time DESC
                 LIMIT ?
                 """;

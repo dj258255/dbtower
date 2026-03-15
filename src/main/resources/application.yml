@@ -1,18 +1,17 @@
-# 플랫폼 자체 메타데이터(레지스트리·스냅샷)는 H2 파일 DB에 저장한다.
-# 관리 "대상" DB와 플랫폼 "자체" DB를 분리해 두면, 대상 DB 장애가 플랫폼을 무너뜨리지 않는다.
+# 플랫폼 자체 메타데이터(레지스트리·스냅샷)는 PostgreSQL(dbhub 데이터베이스)에 저장한다.
+# 처음엔 H2 파일이었지만, 플랫폼 자신을 관리 대상으로 등록해 자기 쿼리를 진단하는
+# 도그푸딩(개선 아크 3)을 위해 Operator가 지원하는 기종으로 이전했다.
+# 운영이라면 대상 DB와 물리적으로 분리된 전용 인스턴스를 쓴다 — 대상 장애가 플랫폼을 무너뜨리면 안 되므로.
 spring:
   datasource:
-    url: jdbc:h2:file:./data/dbhub;MODE=LEGACY
-    username: sa
-    password:
+    # reWriteBatchedInserts: JDBC 배치를 multi-values INSERT 한 문장으로 재작성 (개선 아크 2)
+    url: jdbc:postgresql://127.0.0.1:15432/dbhub?reWriteBatchedInserts=true
+    username: postgres
+    password: dbhub1234
   jpa:
     hibernate:
       ddl-auto: update
     open-in-view: false
-  h2:
-    console:
-      # 무인증 콘솔은 노출 사고로 이어진다. 필요할 때만 로컬에서 임시로 켠다
-      enabled: false
 
 server:
   port: 8080

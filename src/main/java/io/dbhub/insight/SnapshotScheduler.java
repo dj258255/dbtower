@@ -26,14 +26,14 @@ public class SnapshotScheduler {
     private static final int TOP_N = 100;
 
     private final DatabaseInstanceRepository instanceRepository;
-    private final QuerySnapshotRepository snapshotRepository;
+    private final SnapshotWriter snapshotWriter;
     private final DbmsOperatorFactory operatorFactory;
 
     public SnapshotScheduler(DatabaseInstanceRepository instanceRepository,
-                             QuerySnapshotRepository snapshotRepository,
+                             SnapshotWriter snapshotWriter,
                              DbmsOperatorFactory operatorFactory) {
         this.instanceRepository = instanceRepository;
-        this.snapshotRepository = snapshotRepository;
+        this.snapshotWriter = snapshotWriter;
         this.operatorFactory = operatorFactory;
     }
 
@@ -43,14 +43,21 @@ public class SnapshotScheduler {
             long start = System.currentTimeMillis();
             try {
                 List<QueryStat> stats = operatorFactory.create(instance).queryStats(TOP_N);
+                long collectMs = System.currentTimeMillis() - start;
+
                 LocalDateTime capturedAt = LocalDateTime.now();
                 List<QuerySnapshot> rows = stats.stream()
                         .map(s -> new QuerySnapshot(instance.getId(), capturedAt, s.queryId(),
                                 s.queryText(), s.calls(), s.totalTimeMs(), s.rowsExamined()))
                         .toList();
-                snapshotRepository.saveAll(rows);
-                log.info("스냅샷 수집 완료 instance={} rows={} elapsedMs={}",
-                        instance.getName(), rows.size(), System.currentTimeMillis() - start);
+
+                long saveStart = System.currentTimeMillis();
+                snapshotWriter.saveBatch(rows);
+                long saveMs = System.currentTimeMillis() - saveStart;
+
+                // collect(대상 DB 조회)와 save(플랫폼 DB 저장)를 분리 측정 — 개선 아크 1, 2의 근거 데이터
+                log.info("스냅샷 수집 완료 instance={} rows={} collectMs={} saveMs={}",
+                        instance.getName(), rows.size(), collectMs, saveMs);
             } catch (Exception e) {
                 // 한 인스턴스 실패가 나머지 수집을 막으면 안 된다
                 log.warn("스냅샷 수집 실패 instance={} cause={}", instance.getName(), e.getMessage());

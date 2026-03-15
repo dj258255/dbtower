@@ -152,3 +152,55 @@ local-mssql:    avg=17.2ms (풀 생성 첫 회 제외 avg=14.6ms) min=13 max=30 
 줄어든 것은 쿼리 시간이 아니라 매번 반복하던 TCP 연결 + 인증 핸드셰이크 비용이다.
 각 배열의 첫 값(56/15/30)에 풀 생성 비용이 그대로 보인다.
 풀 크기를 max 2로 작게 잡은 이유: 관제 도구가 대상 DB의 커넥션 슬롯을 점유하면 안 되기 때문.
+
+## 7. 성능 개선 아크 2 — JPA saveAll vs JDBC batchUpdate
+
+플랫폼 저장소를 H2에서 PostgreSQL로 이전(도그푸딩 목적, DESIGN.md 참고) 후 측정.
+스냅샷은 불변 로그라 영속성 컨텍스트가 불필요 — JDBC batchUpdate + reWriteBatchedInserts=true로 교체.
+
+before (JPA saveAll, 행마다 INSERT, n=6):
+
+```
+local-postgres: avg=83.3ms rows(avg)=55  [59, 70, 73, 96, 55, 147]
+local-mysql:    avg=16.3ms rows(avg)=7   [11, 17, 15, 25, 12, 18]
+local-mssql:    avg=6.5ms  rows(avg)=3   [1, 4, 3, 4, 7, 20]
+```
+
+after (JDBC batchUpdate, n=6):
+
+```
+local-postgres: avg=3.5ms rows(avg)=32  [4, 4, 2, 3, 3, 5]
+local-mysql:    avg=5.7ms rows(avg)=6   [7, 4, 8, 5, 4, 6]
+local-mssql:    avg=1.2ms rows(avg)=2   [0, 2, 1, 1, 1, 2]
+```
+
+중간에 dbid 필터 수정으로 배치당 행수가 달라져(55->32), 행당 비용으로 비교한다:
+
+| 인스턴스 | before | after | 행당 개선 |
+|---|---|---|---|
+| local-postgres | 1.51ms/행 | 0.11ms/행 | 13.8배 |
+| local-mysql | 2.33ms/행 | 0.95ms/행 | 2.5배 |
+
+## 8. 수집 중 발견한 정합성 버그와 격리 원칙 검증
+
+pg_stat_statements는 클러스터 전역 뷰다 — dbid 필터 없이 조회하면
+같은 클러스터의 다른 데이터베이스 쿼리까지 섞여 통계가 오염된다.
+sample과 dbhub(플랫폼 자체 DB)가 서로의 쿼리를 보고 있던 것을 발견해
+`WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())` 필터를 추가했다.
+
+또 pg_stat_statements 확장은 데이터베이스 단위 설치라, dbhub DB에 확장이 없어
+dbhub-self 수집만 실패했다:
+
+```
+WARN 스냅샷 수집 실패 instance=dbhub-self cause=... relation "pg_stat_statements" does not exist
+INFO 스냅샷 수집 완료 instance=local-mysql ...      (다른 인스턴스는 정상 수집 계속)
+```
+
+한 인스턴스의 실패가 나머지 수집을 막지 않는 격리 원칙이 실제 장애에서 동작함을 확인.
+CREATE EXTENSION 후 자기 수집 성공:
+
+```
+INFO 스냅샷 수집 완료 instance=dbhub-self rows=49 collectMs=4 saveMs=3
+```
+
+플랫폼이 자기 자신을 관리 대상으로 등록해 감시하는 도그푸딩 구성 완료 (id=4 dbhub-self).
