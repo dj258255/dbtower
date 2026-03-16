@@ -11,9 +11,10 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(indexes = {
-        // 시점 비교 조회의 접근 경로. 인덱스 없이 시작해 풀스캔을 실측한 뒤 추가하는 것이
-        // 성능 개선 아크 3번이므로, 최초 커밋에서는 주석으로 남겨둔다.
-        // @Index(name = "idx_snapshot_instance_time", columnList = "instanceId, capturedAt")
+        // 개선 아크 3: 인덱스 없이 시작해 DBHub 자신의 explain으로 Seq Scan을 진단한 뒤 추가했다.
+        // 50만 행 기준 21.269ms(Parallel Seq Scan) -> 인덱스 후 실측은 VERIFICATION.md 9절.
+        // instanceId 등치 + capturedAt 범위 — 등치 컬럼을 선두에 두는 복합 인덱스.
+        @Index(name = "idx_snapshot_instance_time", columnList = "instanceId, capturedAt")
 })
 public class QuerySnapshot {
 

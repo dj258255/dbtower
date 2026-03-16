@@ -204,3 +204,45 @@ INFO 스냅샷 수집 완료 instance=dbhub-self rows=49 collectMs=4 saveMs=3
 ```
 
 플랫폼이 자기 자신을 관리 대상으로 등록해 감시하는 도그푸딩 구성 완료 (id=4 dbhub-self).
+
+## 9. 성능 개선 아크 3 — 도그푸딩: DBHub로 DBHub 자신을 진단해 개선
+
+시점 비교가 읽는 스냅샷 테이블은 의도적으로 인덱스 없이 시작했다.
+벤치마크용 합성 데이터 50만 행을 백필한 뒤(합성임을 명시함), DBHub 자신의 explain API로
+자기 시점 비교 쿼리를 진단했다.
+
+before — DBHub의 규칙 분석기가 자기 쿼리의 풀스캔을 지적:
+
+```
+POST /api/instances/4/explain  (instance 4 = dbhub-self, 플랫폼 자체 DB)
+{"sql":"SELECT * FROM query_snapshot WHERE instance_id = 1 AND captured_at BETWEEN ... ORDER BY captured_at"}
+findings: ["Seq Scan 발생 — 테이블 전체를 읽고 있습니다. WHERE 조건에 맞는 인덱스를 검토하세요"]
+
+EXPLAIN ANALYZE (50만 행):
+Parallel Seq Scan on query_snapshot ...
+Execution Time: 21.269 ms
+```
+
+개선 — instanceId 등치 + capturedAt 범위 조건이므로 등치 컬럼을 선두에 둔 복합 인덱스:
+
+```sql
+CREATE INDEX idx_snapshot_instance_time ON query_snapshot (instance_id, captured_at);
+```
+
+after — 같은 API로 재진단:
+
+```
+findings: ["규칙에 걸린 비효율 신호가 없습니다"]
+
+EXPLAIN ANALYZE:
+Index Scan using idx_snapshot_instance_time on query_snapshot
+  Index Cond: ((instance_id = 1) AND (captured_at >= ...) AND (captured_at <= ...))
+Execution Time: 0.062 ms
+```
+
+| | before | after | 개선 |
+|---|---|---|---|
+| 접근 경로 | Parallel Seq Scan | Index Scan | |
+| 실행 시간 (50만 행) | 21.269ms | 0.062ms | 343배 |
+
+플랫폼이 제공하는 진단 기능이 플랫폼 자신의 병목을 찾고, 고친 결과를 같은 기능으로 재검증했다.
