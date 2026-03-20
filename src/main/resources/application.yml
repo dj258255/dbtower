@@ -5,9 +5,11 @@
 spring:
   datasource:
     # reWriteBatchedInserts: JDBC 배치를 multi-values INSERT 한 문장으로 재작성 (개선 아크 2)
-    url: jdbc:postgresql://127.0.0.1:15432/dbhub?reWriteBatchedInserts=true
-    username: postgres
-    password: dbhub1234
+    # 접속 정보는 환경변수 우선, 없으면 로컬 docker compose 기본값.
+    # 운영이라면 기본값 없이 시크릿 스토어(Vault/KMS)에서 주입하고, superuser가 아닌 전용 계정을 쓴다.
+    url: ${DBHUB_DB_URL:jdbc:postgresql://127.0.0.1:15432/dbhub?reWriteBatchedInserts=true}
+    username: ${DBHUB_DB_USERNAME:postgres}
+    password: ${DBHUB_DB_PASSWORD:dbhub1234}
   jpa:
     hibernate:
       ddl-auto: update
