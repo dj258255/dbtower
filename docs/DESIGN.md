@@ -83,8 +83,8 @@
 | 1 | 수집마다 DriverManager 새 커넥션 | 인스턴스별 HikariCP 풀 | 완료 — MySQL 47.1→11.8ms(4.0배), PG 34.1→14.4ms, MSSQL 49.5→14.6ms (VERIFICATION.md 6절) |
 | 2 | 스냅샷 JPA saveAll 단건 insert | JDBC batchUpdate + reWriteBatchedInserts | 완료 — PG 행당 1.51->0.11ms(13.8배), MySQL 2.33->0.95ms (VERIFICATION.md 7절) |
 | 3 | 시점 비교 조회 풀스캔 | (instanceId, capturedAt) 복합 인덱스 | 완료 — 도그푸딩으로 Seq Scan 진단 후 21.269->0.062ms(343배) (VERIFICATION.md 9절) |
-| 4 | max_digest_length 1024 | 4096 상향 | 긴 쿼리 2종이 구분되는지 + 메모리 영향 실측 |
-| 5 | API 전체 | k6 부하 | P95 응답시간 |
+| 4 | max_digest_length 1024 | 4096 상향 | 완료 — 기본값에선 다른 쿼리 2개가 digest 1개로 병합됨을 side-by-side 재현 (VERIFICATION.md 10절) |
+| 5 | API 전체 | k6 부하 | 완료 — 10VU 30s, 2,832 req/s, P95 5.86ms, 실패 0% (VERIFICATION.md 11절) |
 
 ## 5. 로드맵 (완성 기준: 확장3까지)
 

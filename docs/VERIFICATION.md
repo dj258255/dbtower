@@ -246,3 +246,49 @@ Execution Time: 0.062 ms
 | 실행 시간 (50만 행) | 21.269ms | 0.062ms | 343배 |
 
 플랫폼이 제공하는 진단 기능이 플랫폼 자신의 병목을 찾고, 고친 결과를 같은 기능으로 재검증했다.
+
+## 10. 성능 개선 아크 4 — max_digest_length 1024 vs 4096 실측
+
+MySQL digest는 max_digest_length(기본 1024)까지만 정규화한다.
+앞부분이 동일한 긴 쿼리들이 하나의 digest로 뭉개지는 문제를 side-by-side로 재현했다.
+
+구성: 기본 설정(1024) MySQL 컨테이너를 임시로 추가해, 우리 설정(4096)과 같은 쿼리 쌍을 실행.
+쿼리 쌍: 동일한 프리픽스(AND name = ? 반복 200회) + 꼬리만 다름
+(`AND city IS NOT NULL` vs `AND name IS NOT NULL`), 원문 4,260자.
+
+```
+-- 기본값 1024 서버
+executions=2  len=1646  tail="NAME = ? AND NAME = ?"        <- 두 쿼리가 1개 digest로 병합, 꼬리 소실
+-- 우리 설정 4096 서버
+executions=1  len=2670  tail="AND `city` IS NOT NULL"        <- 구분 유지
+executions=1  len=2668  tail="AND NAME IS NOT NULL"
+```
+
+의미: 기본값에서는 "둘 중 어느 쿼리가 문제인지" 식별이 불가능해진다.
+당근 KDMS가 4096으로 상향한 것과 같은 판단 — 우리는 docker-compose에서 처음부터 반영했다.
+
+부수 발견: 절단 기준은 정규화 텍스트 길이가 아니라 토큰 버퍼 바이트다.
+원문 1,740자(반복 80회) 쿼리는 정규화 텍스트가 1,108자여도 잘리지 않았고,
+반복 200회로 늘려서야 1024 서버에서 절단이 발생했다.
+
+메모리 영향: performance_schema_max_digest_length 상향은 digest 테이블 행당 텍스트 컬럼이
+커지는 것 — 기본 1만 행 기준 약 3KB x 10,000 = 수십 MB 수준의 증가로, 식별 불가 리스크와
+맞바꿀 만한 비용이라 판단했다.
+
+PostgreSQL은 이 이슈가 없다 — 텍스트가 아니라 쿼리 파싱 결과 기반으로 digest를 만들기 때문.
+같은 "쿼리 통계"도 기종 내부가 이렇게 다르다 (DbmsOperator 추상화가 필요한 또 하나의 근거).
+
+## 11. 성능 개선 아크 5 — k6 부하 테스트
+
+조회 계열 API 5종(목록·헬스체크·쿼리통계 x2·테이블통계)을 무작위로 때리는 시나리오.
+쿼리통계/테이블통계는 매 요청이 대상 DB를 실시간 조회한다(캐시 없음).
+
+```
+k6: 10 VU, 30s
+http_reqs:         84,991  (2,832 req/s)
+http_req_duration: avg=3.48ms  med=3.37ms  p(90)=5.29ms  p(95)=5.86ms  max=93.57ms
+checks_succeeded:  100.00% (0 failed)
+```
+
+매 요청이 대상 DB 왕복임에도 P95 5.86ms를 유지한 것은 아크 1(HikariCP)의 효과가 크다 —
+풀 없이 매 요청 새 커넥션이었다면 요청당 수십 ms의 핸드셰이크가 더해졌을 것이다.
