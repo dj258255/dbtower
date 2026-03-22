@@ -1,0 +1,5 @@
+package io.dbhub.operator;
+
+/** 백업 실행 결과 — 산출물 위치와 크기 */
+public record BackupResult(String location, long bytes) {
+}

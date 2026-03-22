@@ -292,3 +292,47 @@ checks_succeeded:  100.00% (0 failed)
 
 매 요청이 대상 DB 왕복임에도 P95 5.86ms를 유지한 것은 아크 1(HikariCP)의 효과가 크다 —
 풀 없이 매 요청 새 커넥션이었다면 요청당 수십 ms의 핸드셰이크가 더해졌을 것이다.
+
+## 12. 확장1 — 백업 정책: 추상 정책이 기종별 실행 방식으로 갈라진다
+
+"N분 주기 전체 백업"이라는 추상 정책 하나가 기종마다 완전히 다른 실행 모델로 번역된다:
+
+| 기종 | 실행 모델 | 방식 |
+|---|---|---|
+| MySQL | 클라이언트 도구 | mysqldump --single-transaction (MVCC 스냅샷으로 락 없이) |
+| PostgreSQL | 클라이언트 도구 | pg_dump (비밀번호는 인자가 아닌 PGPASSWORD 환경변수) |
+| SQL Server | 서버 사이드 SQL | BACKUP DATABASE ... TO DISK — 외부 도구 없이 서버가 직접 파일 기록 |
+
+첫 실행은 2/3이 실패했다 — 실전 운영에서 마주치는 이슈가 그대로 나왔다:
+
+```
+MySQL  FAILED: Can't connect to MySQL server on '127.0.0.1:13306'
+  -> mysqldump가 컨테이너 안에서 실행되는데 호스트 관점 주소를 넘겼다 (네트워크 관점 차이)
+PG     FAILED: server version: 16.14; pg_dump version: 14.19 - version mismatch
+  -> 호스트 pg_dump(14)가 서버(16)보다 낮으면 거부된다 (클라이언트-서버 버전 호환)
+MSSQL  SUCCESS (서버 사이드라 도구·버전 이슈 자체가 없음)
+```
+
+해결: 백업 명령을 {host} {port} {user} {password} {db} 플레이스홀더 템플릿으로 바꿔,
+실행 위치(호스트/컨테이너/에이전트)마다 달라지는 접속 관점을 설정이 흡수하게 했다.
+
+수정 후 3종 전부 성공:
+
+```
+POST /api/instances/1/backup -> SUCCESS 153ms  mysql-....sql (214,330 bytes)
+POST /api/instances/2/backup -> SUCCESS 168ms  postgres-....sql (165,621 bytes)
+POST /api/instances/3/backup -> SUCCESS 130ms  (server) /var/opt/mssql/data/....bak
+```
+
+정책 자동 실행 — 1분 주기 정책을 걸자 폴러가 정확히 1분 간격으로 실행:
+
+```
+PUT /api/instances/1/backup-policy {"intervalMinutes":1,"type":"FULL"}
+backup-runs:
+  02:54:51 SUCCESS 102ms
+  02:55:51 SUCCESS  92ms
+  02:56:52 SUCCESS 110ms
+```
+
+로그 백업(LOG)은 기종별로 요구 구성이 달라(binlog/WAL 아카이빙, 복구 모델) FULL만 구현하고
+나머지는 명시적 UnsupportedOperationException으로 남겼다.

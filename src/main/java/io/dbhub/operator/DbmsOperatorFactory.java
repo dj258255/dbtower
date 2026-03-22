@@ -11,16 +11,21 @@ import org.springframework.stereotype.Component;
 public class DbmsOperatorFactory {
 
     private final ConnectionPools pools;
+    private final BackupTools backupTools;
 
-    public DbmsOperatorFactory(ConnectionPools pools) {
+    public DbmsOperatorFactory(ConnectionPools pools,
+                               @org.springframework.beans.factory.annotation.Value("${dbhub.backup.mysqldump-command:mysqldump}") String mysqldumpCommand,
+                               @org.springframework.beans.factory.annotation.Value("${dbhub.backup.pg-dump-command:pg_dump}") String pgDumpCommand,
+                               @org.springframework.beans.factory.annotation.Value("${dbhub.backup.dir:./backups}") String backupDir) {
         this.pools = pools;
+        this.backupTools = new BackupTools(mysqldumpCommand, pgDumpCommand, backupDir);
     }
 
     public DbmsOperator create(DatabaseInstance instance) {
         return switch (instance.getType()) {
-            case MYSQL -> new MySqlOperator(instance, pools);
-            case POSTGRESQL -> new PostgresOperator(instance, pools);
-            case MSSQL -> new MsSqlOperator(instance, pools);
+            case MYSQL -> new MySqlOperator(instance, pools, backupTools);
+            case POSTGRESQL -> new PostgresOperator(instance, pools, backupTools);
+            case MSSQL -> new MsSqlOperator(instance, pools, backupTools);
         };
     }
 }

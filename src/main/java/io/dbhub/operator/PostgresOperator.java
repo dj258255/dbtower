@@ -21,8 +21,20 @@ public class PostgresOperator extends AbstractJdbcOperator {
     /** 통계 기반 슬로우 쿼리 판정 임계값(평균 수행시간 ms) */
     private static final double SLOW_MEAN_MS = 500.0;
 
-    public PostgresOperator(DatabaseInstance instance, ConnectionPools pools) {
-        super(instance, pools);
+    public PostgresOperator(DatabaseInstance instance, ConnectionPools pools, BackupTools backupTools) {
+        super(instance, pools, backupTools);
+    }
+
+    /** PostgreSQL 백업 = 호스트 CLI(pg_dump) 실행 모델. 비밀번호는 인자가 아니라 PGPASSWORD 환경변수로 */
+    @Override
+    public BackupResult backup(BackupPolicy policy) {
+        if (policy.type() == BackupPolicy.BackupType.LOG) {
+            throw new UnsupportedOperationException("PostgreSQL 로그 백업은 WAL 아카이빙으로 별도 구성 필요");
+        }
+        java.nio.file.Path out = java.nio.file.Path.of(backupTools.backupDir(),
+                "postgres-%s-%s.sql".formatted(instance.getName(), backupTimestamp()));
+        return runCliBackup(renderCommand(backupTools.pgDumpCommand()),
+                java.util.Map.of("PGPASSWORD", instance.getPassword()), out);
     }
 
     @Override

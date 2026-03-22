@@ -26,8 +26,8 @@ public interface DbmsOperator {
     /** 테이블별 행수·데이터/인덱스 크기 — 용량 추이와 튜닝 판단의 기초 자료 */
     List<TableStat> tableStats(int limit);
 
-    /** 추상 정책을 기종별 백업 구문으로 실행 (확장1) */
-    void backup(BackupPolicy policy);
+    /** 추상 정책을 기종별 백업 방식으로 실행 (확장1) — mysqldump / pg_dump / BACKUP DATABASE */
+    BackupResult backup(BackupPolicy policy);
 
     /** 복제 토폴로지 상태 (확장2) */
     ReplicationState replicationState();

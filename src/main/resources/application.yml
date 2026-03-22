@@ -21,6 +21,15 @@ server:
 dbhub:
   snapshot:
     interval-ms: 60000   # 쿼리 통계 수집 주기
+  backup:
+    dir: ./backups
+    # 백업 명령은 {host} {port} {user} {password} {db} 플레이스홀더 템플릿.
+    # 실행 위치(호스트/컨테이너/에이전트)마다 접속 주소가 달라지는 현실을 설정이 흡수한다.
+    # 로컬: mysqldump가 호스트에 없어 컨테이너 안에서 실행(컨테이너 관점이라 localhost:3306),
+    #       호스트 pg_dump(14)가 서버(16)와 버전 불일치라 pg_dump도 컨테이너 것을 사용.
+    mysqldump-command: "docker exec dbhub-mysql mysqldump -h localhost -P 3306 -u {user} -p{password} --single-transaction --databases {db}"
+    pg-dump-command: "docker exec dbhub-postgres pg_dump -U {user} -d {db}"
+    poll-ms: 30000
 
 management:
   endpoints:

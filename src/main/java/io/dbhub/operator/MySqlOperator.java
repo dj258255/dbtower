@@ -18,8 +18,22 @@ import java.util.List;
  */
 public class MySqlOperator extends AbstractJdbcOperator {
 
-    public MySqlOperator(DatabaseInstance instance, ConnectionPools pools) {
-        super(instance, pools);
+    public MySqlOperator(DatabaseInstance instance, ConnectionPools pools, BackupTools backupTools) {
+        super(instance, pools, backupTools);
+    }
+
+    /**
+     * MySQL 백업 = 클라이언트 도구(mysqldump) 실행 모델.
+     * --single-transaction: InnoDB에서 락 없이 일관된 스냅샷으로 덤프 (MVCC 활용)
+     */
+    @Override
+    public BackupResult backup(BackupPolicy policy) {
+        if (policy.type() == BackupPolicy.BackupType.LOG) {
+            throw new UnsupportedOperationException("MySQL 로그 백업은 binlog 아카이빙으로 별도 구성 필요");
+        }
+        java.nio.file.Path out = java.nio.file.Path.of(backupTools.backupDir(),
+                "mysql-%s-%s.sql".formatted(instance.getName(), backupTimestamp()));
+        return runCliBackup(renderCommand(backupTools.mysqldumpCommand()), java.util.Map.of(), out);
     }
 
     @Override

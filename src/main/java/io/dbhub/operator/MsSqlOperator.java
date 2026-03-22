@@ -19,8 +19,27 @@ import java.util.List;
  */
 public class MsSqlOperator extends AbstractJdbcOperator {
 
-    public MsSqlOperator(DatabaseInstance instance, ConnectionPools pools) {
-        super(instance, pools);
+    public MsSqlOperator(DatabaseInstance instance, ConnectionPools pools, BackupTools backupTools) {
+        super(instance, pools, backupTools);
+    }
+
+    /**
+     * SQL Server 백업 = 서버 사이드 SQL 실행 모델(BACKUP DATABASE).
+     * 외부 도구 없이 SQL만으로 서버가 직접 파일을 쓴다 — 경로도 서버(컨테이너) 기준.
+     */
+    @Override
+    public BackupResult backup(BackupPolicy policy) {
+        String serverPath = "/var/opt/mssql/data/%s-%s.bak".formatted(instance.getName(), backupTimestamp());
+        String sql = policy.type() == BackupPolicy.BackupType.LOG
+                ? "BACKUP LOG [%s] TO DISK = ?".formatted(instance.getDbName())
+                : "BACKUP DATABASE [%s] TO DISK = ?".formatted(instance.getDbName());
+        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, serverPath);
+            ps.execute();
+            return new BackupResult("(server) " + serverPath, -1); // 서버 측 파일이라 크기는 조회 생략
+        } catch (SQLException e) {
+            throw new OperatorException("MSSQL 백업 실패: " + e.getMessage(), e);
+        }
     }
 
     @Override
