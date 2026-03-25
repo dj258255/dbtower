@@ -14,9 +14,10 @@
 
 ```
 [Web/curl] ──REST──> [Spring Boot API]
-                        ├── registry   : 이기종 인스턴스 등록/헬스 (H2에 메타 저장)
+                        ├── registry   : 이기종 인스턴스 등록/헬스 (PG 'dbhub' DB에 메타 저장 — 자신도 관리 대상으로 등록)
                         ├── operator   : DbmsOperator 인터페이스 + 기종별 어댑터
                         ├── insight    : 스냅샷 수집 스케줄러 + 시점 비교
+                        ├── backup     : 백업 정책 + 폴러 + 실행 이력
                         └── analysis   : 실행계획 규칙 기반 분석
                               │
               ┌───────────────┼────────────────┐
@@ -89,9 +90,9 @@
 ## 5. 로드맵 (완성 기준: 확장3까지)
 
 - [x] MVP1: 이기종 등록 + Operator 추상화 (MySQL/PG/MSSQL)
-- [ ] MVP2: 시점 비교 검증 (샘플 워크로드로 신규 쿼리/급증 시나리오 재현)
+- [x] MVP2: 시점 비교 검증 — 신규 쿼리/급증/rows-call 폭증 검출 (VERIFICATION.md 3절)
 - [ ] MVP3: EXPLAIN 규칙 분석 고도화 (docs/ai-analysis-rules.md 채우기)
-- [ ] 성능 개선 아크 1~5
+- [x] 성능 개선 아크 1~5 (VERIFICATION.md 6~11절)
 - [x] 확장1: 백업 정책 (추상 정책 -> 기종별 실행) — VERIFICATION.md 12절
 - [ ] 확장2: Prometheus/Grafana + 복제 상태
 - [ ] 확장3: 슬랙 알림 + 규칙 프롬프트 기반 AI 1차 분석
