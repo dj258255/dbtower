@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  # DBHub 플랫폼 자신의 메트릭 (JVM·HTTP·HikariCP 풀)
+  - job_name: dbhub
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+
+  # 대상 DB exporter — MSSQL은 표준 exporter가 없어 제외 (서드파티뿐, DESIGN.md 참고)
+  - job_name: mysql
+    static_configs:
+      - targets: ["mysqld-exporter:9104"]
+
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]

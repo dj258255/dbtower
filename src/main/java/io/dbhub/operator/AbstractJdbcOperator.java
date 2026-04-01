@@ -84,15 +84,37 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
      * 백업 명령 템플릿의 플레이스홀더를 인스턴스 값으로 치환한다.
      * 템플릿 방식을 쓰는 이유: 같은 mysqldump라도 실행 위치(호스트/컨테이너/원격 에이전트)에 따라
      * 접속 주소와 인자가 달라진다 — 그 환경 차이를 코드가 아니라 설정이 흡수하게 한다.
+     *
+     * 보안: 먼저 토큰으로 나눈 뒤 토큰 안에서만 치환한다(치환 후 split 금지 —
+     * 값에 공백을 넣어 인자를 주입하는 것 방지). 치환 값은 허용 문자만 통과시키고
+     * "-"로 시작하는 값(플래그 주입)을 거부한다. 비밀번호는 argv에 절대 싣지 않고
+     * 환경변수(MYSQL_PWD/PGPASSWORD)로만 전달한다.
      */
     protected java.util.List<String> renderCommand(String template) {
-        String rendered = template
-                .replace("{host}", instance.getHost())
-                .replace("{port}", String.valueOf(instance.getPort()))
-                .replace("{user}", instance.getUsername())
-                .replace("{password}", instance.getPassword())
-                .replace("{db}", instance.getDbName());
-        return java.util.List.of(rendered.split(" "));
+        if (template.contains("{password}")) {
+            throw new OperatorException(
+                    "백업 명령에 {password}를 쓸 수 없습니다 — 비밀번호는 환경변수로 전달됩니다", null);
+        }
+        return java.util.Arrays.stream(template.split(" "))
+                .filter(t -> !t.isBlank())
+                .map(t -> t
+                        .replace("{host}", safeValue(instance.getHost()))
+                        .replace("{port}", String.valueOf(instance.getPort()))
+                        .replace("{user}", safeValue(instance.getUsername()))
+                        .replace("{db}", safeValue(instance.getDbName())))
+                .toList();
+    }
+
+    private String safeValue(String value) {
+        if (value == null || !value.matches("[A-Za-z0-9._-]+") || value.startsWith("-")) {
+            throw new OperatorException("백업 명령에 쓸 수 없는 값: " + value, null);
+        }
+        return value;
+    }
+
+    /** 파일 경로에 들어가는 이름은 안전한 문자만 남긴다 (경로 탈출 방지) */
+    protected String safeFileName(String name) {
+        return name.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
     /** explain 대상은 SELECT만 허용한다 — 관리 플랫폼이 임의 DML을 실행하면 안 되기 때문. */

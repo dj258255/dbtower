@@ -29,10 +29,13 @@ public class MsSqlOperator extends AbstractJdbcOperator {
      */
     @Override
     public BackupResult backup(BackupPolicy policy) {
-        String serverPath = "/var/opt/mssql/data/%s-%s.bak".formatted(instance.getName(), backupTimestamp());
+        String serverPath = "/var/opt/mssql/data/%s-%s.bak"
+                .formatted(safeFileName(instance.getName()), backupTimestamp());
+        // 식별자는 바인딩이 안 되므로 ]를 ]]로 이스케이프해 대괄호 탈출을 막는다 (등록 시 패턴 검증 + 심층 방어)
+        String escapedDb = instance.getDbName().replace("]", "]]");
         String sql = policy.type() == BackupPolicy.BackupType.LOG
-                ? "BACKUP LOG [%s] TO DISK = ?".formatted(instance.getDbName())
-                : "BACKUP DATABASE [%s] TO DISK = ?".formatted(instance.getDbName());
+                ? "BACKUP LOG [%s] TO DISK = ?".formatted(escapedDb)
+                : "BACKUP DATABASE [%s] TO DISK = ?".formatted(escapedDb);
         try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, serverPath);
             ps.execute();
@@ -146,6 +149,26 @@ public class MsSqlOperator extends AbstractJdbcOperator {
             throw new OperatorException("MSSQL 테이블 통계 조회 실패: " + e.getMessage(), e);
         }
         return result;
+    }
+
+    /** 복제 상태 — AlwaysOn 가용성 그룹의 DMV. AG 미구성 단독 인스턴스면 행이 없다 */
+    @Override
+    public ReplicationState replicationState() {
+        String sql = """
+                SELECT rs.is_primary_replica, COUNT(*) OVER () AS replica_count
+                FROM sys.dm_hadr_database_replica_states rs
+                """;
+        try (Connection conn = open();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) {
+                String role = rs.getBoolean("is_primary_replica") ? "PRIMARY" : "REPLICA";
+                return new ReplicationState(role, -1, "AlwaysOn replicas=" + rs.getInt("replica_count"));
+            }
+            return new ReplicationState("STANDALONE", 0, "AlwaysOn 가용성 그룹 미구성");
+        } catch (SQLException e) {
+            throw new OperatorException("MSSQL 복제 상태 조회 실패: " + e.getMessage(), e);
+        }
     }
 
     @Override

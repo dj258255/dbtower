@@ -32,8 +32,10 @@ public class MySqlOperator extends AbstractJdbcOperator {
             throw new UnsupportedOperationException("MySQL 로그 백업은 binlog 아카이빙으로 별도 구성 필요");
         }
         java.nio.file.Path out = java.nio.file.Path.of(backupTools.backupDir(),
-                "mysql-%s-%s.sql".formatted(instance.getName(), backupTimestamp()));
-        return runCliBackup(renderCommand(backupTools.mysqldumpCommand()), java.util.Map.of(), out);
+                "mysql-%s-%s.sql".formatted(safeFileName(instance.getName()), backupTimestamp()));
+        // 비밀번호는 argv가 아니라 MYSQL_PWD 환경변수로 — ps로 노출되지 않게
+        return runCliBackup(renderCommand(backupTools.mysqldumpCommand()),
+                java.util.Map.of("MYSQL_PWD", instance.getPassword()), out);
     }
 
     @Override
@@ -146,6 +148,32 @@ public class MySqlOperator extends AbstractJdbcOperator {
             return rs.next() ? rs.getString(1) : "{}";
         } catch (SQLException e) {
             throw new OperatorException("MySQL EXPLAIN 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /** 복제 상태 — 레플리카면 SHOW REPLICA STATUS에 행이 있고, Seconds_Behind_Source가 지연이다 */
+    @Override
+    public ReplicationState replicationState() {
+        try (Connection conn = open()) {
+            try (ResultSet rs = conn.createStatement().executeQuery("SHOW REPLICA STATUS")) {
+                if (rs.next()) {
+                    double lag = rs.getObject("Seconds_Behind_Source") == null
+                            ? -1 : rs.getDouble("Seconds_Behind_Source");
+                    return new ReplicationState("REPLICA", lag,
+                            "source=" + rs.getString("Source_Host") + ":" + rs.getInt("Source_Port"));
+                }
+            }
+            try (ResultSet rs = conn.createStatement().executeQuery("SHOW REPLICAS")) {
+                int replicas = 0;
+                while (rs.next()) {
+                    replicas++;
+                }
+                return replicas > 0
+                        ? new ReplicationState("PRIMARY", 0, "replicas=" + replicas)
+                        : new ReplicationState("STANDALONE", 0, "복제 구성 없음");
+            }
+        } catch (SQLException e) {
+            throw new OperatorException("MySQL 복제 상태 조회 실패: " + e.getMessage(), e);
         }
     }
 }

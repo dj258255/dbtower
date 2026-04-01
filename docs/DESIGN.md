@@ -94,7 +94,7 @@
 - [ ] MVP3: EXPLAIN 규칙 분석 고도화 (docs/ai-analysis-rules.md 채우기)
 - [x] 성능 개선 아크 1~5 (VERIFICATION.md 6~11절)
 - [x] 확장1: 백업 정책 (추상 정책 -> 기종별 실행) — VERIFICATION.md 12절
-- [ ] 확장2: Prometheus/Grafana + 복제 상태
+- [x] 확장2: Prometheus/Grafana + 복제 상태 — VERIFICATION.md 13절
 - [ ] 확장3: 슬랙 알림 + 규칙 프롬프트 기반 AI 1차 분석
 
 ## 6. 참고

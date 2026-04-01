@@ -32,7 +32,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
             throw new UnsupportedOperationException("PostgreSQL 로그 백업은 WAL 아카이빙으로 별도 구성 필요");
         }
         java.nio.file.Path out = java.nio.file.Path.of(backupTools.backupDir(),
-                "postgres-%s-%s.sql".formatted(instance.getName(), backupTimestamp()));
+                "postgres-%s-%s.sql".formatted(safeFileName(instance.getName()), backupTimestamp()));
         return runCliBackup(renderCommand(backupTools.pgDumpCommand()),
                 java.util.Map.of("PGPASSWORD", instance.getPassword()), out);
     }
@@ -152,6 +152,34 @@ public class PostgresOperator extends AbstractJdbcOperator {
             return sb.toString();
         } catch (SQLException e) {
             throw new OperatorException("PostgreSQL EXPLAIN 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 복제 상태 — pg_is_in_recovery()면 레플리카(재생 지연 = now - 마지막 재생 시각),
+     * 아니면 pg_stat_replication의 연결 수로 프라이머리/단독을 구분한다.
+     */
+    @Override
+    public ReplicationState replicationState() {
+        try (Connection conn = open()) {
+            try (ResultSet rs = conn.createStatement().executeQuery(
+                    "SELECT pg_is_in_recovery() AS in_recovery, " +
+                    "COALESCE(EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp())), 0) AS lag_sec")) {
+                rs.next();
+                if (rs.getBoolean("in_recovery")) {
+                    return new ReplicationState("REPLICA", rs.getDouble("lag_sec"), "recovery 모드");
+                }
+            }
+            try (ResultSet rs = conn.createStatement().executeQuery(
+                    "SELECT COUNT(*) AS replicas FROM pg_stat_replication")) {
+                rs.next();
+                int replicas = rs.getInt("replicas");
+                return replicas > 0
+                        ? new ReplicationState("PRIMARY", 0, "replicas=" + replicas)
+                        : new ReplicationState("STANDALONE", 0, "복제 구성 없음");
+            }
+        } catch (SQLException e) {
+            throw new OperatorException("PostgreSQL 복제 상태 조회 실패: " + e.getMessage(), e);
         }
     }
 }

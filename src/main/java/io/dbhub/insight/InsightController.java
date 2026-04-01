@@ -55,6 +55,12 @@ public class InsightController {
         return operatorFactory.create(registryService.findById(id)).tableStats(limit);
     }
 
+    /** 복제 상태 통합 뷰 — SHOW REPLICA STATUS / pg_stat_replication / AlwaysOn DMV를 하나의 모델로 */
+    @GetMapping("/replication")
+    public io.dbhub.operator.ReplicationState replication(@PathVariable Long id) {
+        return operatorFactory.create(registryService.findById(id)).replicationState();
+    }
+
     @GetMapping("/slow-queries")
     public List<SlowQuery> slowQueries(@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
         return operatorFactory.create(registryService.findById(id)).slowQueries(limit);

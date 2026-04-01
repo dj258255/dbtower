@@ -336,3 +336,47 @@ backup-runs:
 
 로그 백업(LOG)은 기종별로 요구 구성이 달라(binlog/WAL 아카이빙, 복구 모델) FULL만 구현하고
 나머지는 명시적 UnsupportedOperationException으로 남겼다.
+
+## 13. 확장2 — 복제 상태 통합 뷰 + Prometheus/Grafana
+
+복제 상태도 기종별 소스가 전부 다르다 — 하나의 모델(role/lagSeconds/detail)로 통합:
+
+| 기종 | 소스 | 역할 판정 |
+|---|---|---|
+| MySQL | SHOW REPLICA STATUS / SHOW REPLICAS | 레플리카면 Seconds_Behind_Source가 지연 |
+| PostgreSQL | pg_is_in_recovery() / pg_stat_replication | recovery 모드면 재생 지연 계산 |
+| SQL Server | sys.dm_hadr_database_replica_states | AlwaysOn 미구성이면 행 없음 |
+
+```
+GET /api/instances/1/replication -> {"role":"STANDALONE","lagSeconds":0.0,"detail":"복제 구성 없음"}
+GET /api/instances/2/replication -> {"role":"STANDALONE","lagSeconds":0.0,"detail":"복제 구성 없음"}
+GET /api/instances/3/replication -> {"role":"STANDALONE","lagSeconds":0.0,"detail":"AlwaysOn 가용성 그룹 미구성"}
+```
+
+로컬은 단일 인스턴스 3대라 전부 STANDALONE으로 정확히 판정된다.
+(복제 토폴로지를 실제로 꾸며 lag을 보는 것은 향후 과제)
+
+모니터링 스택 — exporter + Prometheus + Grafana, 플랫폼 자신의 메트릭도 함께 수집:
+
+```
+Prometheus 타깃 (전부 up):
+  dbhub      up  http://host.docker.internal:8080/actuator/prometheus  (JVM·HTTP·HikariCP 풀)
+  mysql      up  http://mysqld-exporter:9104/metrics
+  postgres   up  http://postgres-exporter:9187/metrics
+
+PromQL 확인:
+  mysql_global_status_threads_connected = 2
+
+Grafana: 11.1.0 database ok (datasource 프로비저닝 자동)
+```
+
+MSSQL exporter는 표준(prometheus 공식/커뮤니티 주류)이 없어 제외 — 서드파티 의존을 늘리는
+것보다 플랫폼의 queryStats/tableStats API로 커버하는 편이 낫다고 판단.
+
+## 14. 백업 보안 보강 (자동 보안 리뷰 지적 반영)
+
+- 명령 템플릿: 치환 후 split -> 토큰 분리 후 토큰 내 치환으로 변경 (공백 값으로 인자 주입 방지)
+  + 치환 값 허용 문자 검증([A-Za-z0-9._-]) + "-" 시작 값(플래그 주입) 거부
+- 비밀번호를 argv에서 제거: mysqldump는 MYSQL_PWD, pg_dump는 PGPASSWORD 환경변수로만 전달
+  ({password} 플레이스홀더 자체를 금지 — 실수로도 argv에 못 싣게)
+- MSSQL 식별자: dbName의 ]를 ]]로 이스케이프(대괄호 탈출 방지), 백업 파일명은 안전 문자만 허용
