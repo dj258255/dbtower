@@ -380,3 +380,34 @@ MSSQL exporter는 표준(prometheus 공식/커뮤니티 주류)이 없어 제외
 - 비밀번호를 argv에서 제거: mysqldump는 MYSQL_PWD, pg_dump는 PGPASSWORD 환경변수로만 전달
   ({password} 플레이스홀더 자체를 금지 — 실수로도 argv에 못 싣게)
 - MSSQL 식별자: dbName의 ]를 ]]로 이스케이프(대괄호 탈출 방지), 백업 파일명은 안전 문자만 허용
+
+## 15. 확장3 — 쿼리 회귀 자동 감지 + 웹훅 알림 + AI 1차 분석
+
+시점 비교를 사람이 구간을 고르는 대신 플랫폼이 스스로 돌린다 —
+주기적으로 "최근 구간 vs 직전 베이스라인 구간"을 비교해 회귀를 자동 감지하고 웹훅으로 알린다.
+(Datadog Query Regression Detection의 축소판 — 베이스라인은 직전 구간 하나로 단순화)
+
+감지 규칙(쿼리별 쿨다운으로 중복 알림 방지):
+- 신규 쿼리 유입 (base에 없던 쿼리)
+- 호출량 급증 (QPS +200% 이상)
+- 레이턴시 회귀 (평균 +200% 이상)
+- 읽는 행수 폭증 (rows/call +500% 이상 — 플랜 변화·IN절 폭증 대리 신호)
+
+E2E 검증(감지 구간 최근 1분 vs 직전 2분으로 단축):
+1. 점조회 베이스라인 2,249회
+2. 신규 LIKE 풀스캔 + 점조회 급증 주입
+3. 감지 폴러가 자동으로 잡아 Discord로 발송
+
+```
+INFO RegressionDetector: 회귀 감지 알림 instance=local-mysql findings=2
+웹훅 발송 실패: 0건
+Discord webhook: HTTP 204
+```
+
+웹훅 어댑터도 이기종 대응 — URL에 discord.com이 있으면 {"content":...},
+아니면 Slack 포맷 {"text":...}로 자동 전환. URL은 비밀값이라 환경변수(DBHUB_WEBHOOK_URL)로만 주입.
+
+AI 1차 분석(확장3): 감지 결과를 Anthropic Messages API(Java SDK)로 1차 분석해 알림에 첨부.
+판단을 통째로 맡기지 않고 docs/ai-analysis-rules.md의 기종별 판단 기준을 system 프롬프트로 넣어
+같은 입력에 일관된 판정이 나오게 한다(KDMS와 같은 접근). ANTHROPIC_API_KEY 미설정이면
+조용히 비활성화되고 규칙 기반 알림만 발송 — 분석 실패가 알림 자체를 막지 않는다.

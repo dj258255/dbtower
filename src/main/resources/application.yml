@@ -31,6 +31,15 @@ dbhub:
     mysqldump-command: "docker exec -e MYSQL_PWD dbhub-mysql mysqldump -h localhost -P 3306 -u {user} --single-transaction --databases {db}"
     pg-dump-command: "docker exec dbhub-postgres pg_dump -U {user} -d {db}"
     poll-ms: 30000
+  regression:
+    poll-ms: 120000       # 회귀 감지 주기
+    recent-minutes: 5     # 문제 후보 구간(최근 N분)
+    baseline-minutes: 15  # 베이스라인 구간(그 직전 N분)
+    cooldown-minutes: 30  # 같은 쿼리 재알림 쿨다운
+  ai:
+    model: claude-opus-4-8
+    rules-path: docs/ai-analysis-rules.md
+# 웹훅 URL은 비밀값 — 환경변수 DBHUB_WEBHOOK_URL로만 주입 (Discord/Slack 자동 판별)
 
 management:
   endpoints:
