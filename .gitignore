@@ -36,3 +36,4 @@ out/
 ### VS Code ###
 .vscode/
 backups/
+docs/reference/kdms-meetup/*.png
