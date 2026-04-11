@@ -91,7 +91,7 @@
 
 - [x] MVP1: 이기종 등록 + Operator 추상화 (MySQL/PG/MSSQL)
 - [x] MVP2: 시점 비교 검증 — 신규 쿼리/급증/rows-call 폭증 검출 (VERIFICATION.md 3절)
-- [ ] MVP3: EXPLAIN 규칙 분석 고도화 (docs/ai-analysis-rules.md 채우기)
+- [x] MVP3: EXPLAIN 규칙 분석 — 3종 감지 + 판단 근거 문서화 (db-hobby 원리 연결) — ai-analysis-rules.md
 - [x] 성능 개선 아크 1~5 (VERIFICATION.md 6~11절)
 - [x] 확장1: 백업 정책 (추상 정책 -> 기종별 실행) — VERIFICATION.md 12절
 - [x] 확장2: Prometheus/Grafana + 복제 상태 — VERIFICATION.md 13절
