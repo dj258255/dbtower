@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DBHub — 이기종 DBMS 운영 관리 플랫폼</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">DB</span><span class="brand-name">Hub</span>
+    <span class="brand-tag">이기종 DBMS 운영 관리 플랫폼</span>
+  </div>
+  <nav class="topnav">
+    <a href="http://localhost:3000" target="_blank" rel="noopener">Grafana</a>
+    <a href="http://localhost:9090" target="_blank" rel="noopener">Prometheus</a>
+  </nav>
+</header>
+
+<main class="container">
+
+  <!-- 인스턴스 선택 -->
+  <section class="panel">
+    <h2 class="panel-title">Instances</h2>
+    <div id="instance-list" class="instance-list">
+      <div class="muted">불러오는 중...</div>
+    </div>
+  </section>
+
+  <!-- 시간대 선택 -->
+  <section class="panel" id="time-panel" hidden>
+    <h2 class="panel-title">시간대 선택</h2>
+    <div class="time-row">
+      <span class="range-label target-label">조회 구간 (분석 대상)</span>
+      <input type="datetime-local" id="target-from" step="60">
+      <span class="tilde">~</span>
+      <input type="datetime-local" id="target-to" step="60">
+      <span class="presets">
+        <button data-mins="30" class="preset">30분</button>
+        <button data-mins="60" class="preset">1시간</button>
+        <button data-mins="180" class="preset">3시간</button>
+      </span>
+      <button id="btn-query" class="btn btn-primary">조회</button>
+    </div>
+    <div class="time-row">
+      <span class="range-label base-label">비교 구간 (베이스라인)</span>
+      <input type="datetime-local" id="base-from" step="60">
+      <span class="tilde">~</span>
+      <input type="datetime-local" id="base-to" step="60">
+      <button id="btn-compare" class="btn btn-accent">비교 조회</button>
+    </div>
+
+    <!-- 활동 그래프 + 드래그 구간 선택 -->
+    <div class="chart-head">
+      <span>그래프로 구간 선택하기 — QPS</span>
+      <span class="chart-tools">
+        <button id="mode-target" class="btn btn-small btn-target">조회구간 드래그</button>
+        <button id="mode-base" class="btn btn-small btn-base">비교구간 드래그</button>
+      </span>
+    </div>
+    <div id="chart-wrap" class="chart-wrap">
+      <svg id="activity-chart" width="100%" height="180" preserveAspectRatio="none"></svg>
+      <div id="chart-empty" class="muted center" hidden>이 구간에 수집된 스냅샷이 없습니다</div>
+    </div>
+  </section>
+
+  <!-- 결과 탭 -->
+  <section class="panel" id="result-panel" hidden>
+    <div class="tabs">
+      <button class="tab active" data-tab="top">Top Query</button>
+      <button class="tab" data-tab="slow">Slow Query</button>
+      <button class="tab" data-tab="monitor">Monitoring</button>
+    </div>
+
+    <div id="tab-top" class="tab-body">
+      <div id="compare-summary" class="summary-strip" hidden></div>
+      <div class="table-scroll">
+        <table class="qtable" id="top-table">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <!-- 쿼리 상세: EXPLAIN + AI 분석 -->
+      <div id="query-detail" class="detail" hidden>
+        <div class="detail-head">
+          <span id="detail-qid" class="qid"></span>
+          <span class="detail-actions">
+            <button id="btn-explain" class="btn btn-primary btn-small">실행계획 보기</button>
+            <button id="btn-ai" class="btn btn-dark btn-small">AI 분석</button>
+          </span>
+        </div>
+        <div class="detail-section">
+          <h3>SQL 쿼리 <span class="hint">(통계의 정규화 텍스트 — 파라미터 자리(?, $1)는 실제 값으로 고쳐서 실행계획을 확인하세요)</span></h3>
+          <textarea id="detail-sql" class="codeblock sql-edit" rows="7" spellcheck="false"></textarea>
+        </div>
+        <div class="detail-section" id="plan-section" hidden>
+          <h3>실행계획 결과</h3>
+          <pre id="detail-plan" class="codeblock"></pre>
+          <div id="detail-findings" class="findings"></div>
+        </div>
+        <div class="detail-section" id="ai-section" hidden>
+          <h3>AI 1차 분석 <span class="hint">(docs/ai-analysis-rules.md 판단 기준 기반)</span></h3>
+          <pre id="detail-ai" class="codeblock ai"></pre>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-slow" class="tab-body" hidden>
+      <div class="table-scroll">
+        <table class="qtable" id="slow-table">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="tab-monitor" class="tab-body" hidden>
+      <div class="monitor-grid">
+        <div class="monitor-card">
+          <h3>복제 상태</h3>
+          <pre id="replication-box" class="codeblock">조회 중...</pre>
+        </div>
+        <div class="monitor-card">
+          <h3>대시보드</h3>
+          <p class="muted">시계열 지표는 표준 도구에 위임합니다 — 플랫폼은 쿼리 수준 분석에 집중.</p>
+          <p>
+            <a class="btn btn-primary btn-small" href="http://localhost:3000" target="_blank" rel="noopener">Grafana 열기</a>
+            <a class="btn btn-small" href="http://localhost:9090" target="_blank" rel="noopener">Prometheus 열기</a>
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  DBHub — DbmsOperator 추상화 위의 컨트롤 플레인. MySQL / PostgreSQL / SQL Server.
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

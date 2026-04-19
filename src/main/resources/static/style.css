@@ -1,0 +1,192 @@
+/* DBHub 웹 콘솔 — 의존성 없는 정적 SPA (KDMS Database Insight 화면 구도를 참고한 라이트 어드민) */
+:root {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --line: #e3e6ea;
+  --text: #1e232a;
+  --muted: #7b8494;
+  --primary: #4f5ef7;       /* 조회(파랑) */
+  --target: #22a06b;        /* 조회 구간(초록) — KDMS의 초록 하이라이트 */
+  --base: #f08c2d;          /* 비교 구간(주황) */
+  --up: #d6404f;            /* 증가(빨강) */
+  --down: #2f6fdb;          /* 감소(파랑) */
+  --new-bg: #fdeef0;        /* 신규 쿼리 행 */
+  --dark: #23272f;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* 상단바 */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+  padding: 10px 24px; position: sticky; top: 0; z-index: 10;
+}
+.brand { display: flex; align-items: baseline; gap: 8px; }
+.brand-mark {
+  background: var(--dark); color: #fff; font-weight: 800;
+  padding: 2px 7px; border-radius: 6px; font-size: 15px;
+}
+.brand-name { font-weight: 800; font-size: 18px; letter-spacing: -0.3px; }
+.brand-tag { color: var(--muted); font-size: 12.5px; margin-left: 6px; }
+.topnav a { color: var(--muted); text-decoration: none; margin-left: 16px; font-size: 13px; }
+.topnav a:hover { color: var(--text); }
+
+.container { max-width: 1200px; margin: 20px auto 60px; padding: 0 20px; }
+
+/* 패널 */
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 18px 20px; margin-bottom: 16px;
+}
+.panel-title { margin: 0 0 12px; font-size: 15px; font-weight: 700; }
+
+/* 인스턴스 카드 */
+.instance-list { display: flex; flex-wrap: wrap; gap: 10px; }
+.instance-card {
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px;
+  cursor: pointer; min-width: 210px; background: #fff; transition: border-color .15s;
+}
+.instance-card:hover { border-color: #b9c0cc; }
+.instance-card.selected { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(79,94,247,.15); }
+.instance-name { font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.type-badge {
+  font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; color: #fff;
+}
+.type-MYSQL { background: #00758f; }
+.type-POSTGRESQL { background: #336791; }
+.type-MSSQL { background: #a91d22; }
+.instance-host { color: var(--muted); font-size: 12px; margin-top: 3px; }
+.health-dot {
+  width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: #c6ccd6;
+}
+.health-dot.up { background: #22a06b; }
+.health-dot.down { background: #d6404f; }
+.health-ms { color: var(--muted); font-size: 11.5px; }
+
+/* 시간대 선택 */
+.time-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.range-label {
+  font-size: 12.5px; font-weight: 700; padding: 3px 9px; border-radius: 6px; min-width: 150px; text-align: center;
+}
+.target-label { background: rgba(34,160,107,.12); color: var(--target); }
+.base-label { background: rgba(240,140,45,.14); color: #c26a12; }
+.tilde { color: var(--muted); }
+input[type="datetime-local"] {
+  border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font-size: 13px;
+  font-family: inherit; color: var(--text); background: #fff;
+}
+.presets { display: inline-flex; gap: 4px; }
+.preset {
+  border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 4px 9px;
+  cursor: pointer; font-size: 12.5px; color: var(--muted);
+}
+.preset:hover { color: var(--text); border-color: #b9c0cc; }
+
+/* 버튼 */
+.btn {
+  border: 1px solid var(--line); background: #fff; color: var(--text);
+  border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+  text-decoration: none; display: inline-block;
+}
+.btn:hover { filter: brightness(.97); }
+.btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.btn-accent { background: var(--base); border-color: var(--base); color: #fff; }
+.btn-dark { background: var(--dark); border-color: var(--dark); color: #fff; }
+.btn-small { padding: 4px 10px; font-size: 12.5px; }
+.btn-target { border-color: var(--target); color: var(--target); }
+.btn-base { border-color: var(--base); color: #c26a12; }
+.btn-target.active { background: var(--target); color: #fff; }
+.btn-base.active { background: var(--base); color: #fff; }
+
+/* 차트 */
+.chart-head {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 13px; font-weight: 700; margin: 14px 0 6px;
+}
+.chart-tools { display: inline-flex; gap: 6px; }
+.chart-wrap { position: relative; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+#activity-chart { display: block; cursor: crosshair; }
+.center { text-align: center; padding: 40px 0; }
+
+/* 탭 */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.tab {
+  border: none; background: none; padding: 8px 14px; font-size: 13.5px; font-weight: 600;
+  color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent;
+}
+.tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+/* 비교 요약 */
+.summary-strip[hidden] { display: none; } /* display:flex가 hidden 속성(UA display:none)을 이기지 못하게 */
+.summary-strip {
+  display: flex; gap: 18px; flex-wrap: wrap; background: #f8f9fb;
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px; margin-bottom: 12px;
+  font-size: 13px;
+}
+.summary-item b { font-size: 15px; }
+
+/* 테이블 */
+.table-scroll { overflow-x: auto; }
+.qtable { width: 100%; border-collapse: collapse; font-size: 13px; }
+.qtable th {
+  text-align: left; color: var(--muted); font-weight: 600; font-size: 12px;
+  border-bottom: 1px solid var(--line); padding: 8px 10px; white-space: nowrap;
+}
+.qtable td { border-bottom: 1px solid #eef0f3; padding: 8px 10px; vertical-align: top; }
+.qtable tbody tr { cursor: pointer; }
+.qtable tbody tr:hover { background: #f6f8ff; }
+.qtable tbody tr.selected { background: #eef1ff; }
+.qtable tbody tr.new-query { background: var(--new-bg); }
+.qtable tbody tr.new-query:hover { background: #fbe2e6; }
+.qtext {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+  max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta-up { color: var(--up); font-weight: 700; }
+.delta-down { color: var(--down); font-weight: 700; }
+.badge-new {
+  background: var(--up); color: #fff; font-size: 10.5px; font-weight: 800;
+  padding: 1px 6px; border-radius: 4px; margin-right: 6px; vertical-align: 1px;
+}
+
+/* 상세 */
+.detail { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-top: 14px; background: #fafbfc; }
+.detail-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.qid {
+  font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #0a7d4f;
+  background: rgba(34,160,107,.1); padding: 2px 8px; border-radius: 5px;
+}
+.detail-actions { display: inline-flex; gap: 8px; }
+.detail-section h3 { font-size: 13px; margin: 12px 0 6px; }
+.hint { color: var(--muted); font-weight: 400; font-size: 11.5px; }
+.codeblock {
+  background: #14181f; color: #e8ecf2; border-radius: 8px; padding: 12px 14px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+  overflow-x: auto; white-space: pre-wrap; word-break: break-word; margin: 0;
+}
+.codeblock.ai { background: #10141b; color: #d9e6d9; }
+.sql-edit { width: 100%; resize: vertical; border: none; outline: none; line-height: 1.55; }
+.findings { margin-top: 8px; }
+.finding-item {
+  background: #fff7e8; border: 1px solid #f0dcb4; border-radius: 6px;
+  padding: 6px 10px; font-size: 12.5px; margin-bottom: 5px;
+}
+
+/* 모니터링 */
+.monitor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.monitor-card h3 { margin: 0 0 8px; font-size: 13.5px; }
+@media (max-width: 800px) { .monitor-grid { grid-template-columns: 1fr; } }
+
+.muted { color: var(--muted); }
+.foot { text-align: center; color: var(--muted); font-size: 12px; padding: 20px 0 40px; }
+.loading { opacity: .5; pointer-events: none; }
