@@ -21,27 +21,17 @@
 | 확장 1 | 백업 정책 — 추상 정책 + 기종별 실행(mysqldump/pg_dump/BACKUP DATABASE), 보안 보강 | 12·14절 |
 | 확장 2 | 모니터링 통합 — Prometheus/Grafana/exporters + 복제 상태 통합 뷰 | 13절 |
 | 확장 3 | 쿼리 회귀 자동 감지(4규칙+쿨다운) + Discord/Slack 웹훅 + AI 1차 분석 | 15절 |
+| 확장 4 | 웹 UI — 활동 그래프 구간 드래그, 시점 비교(증감·NEW 뱃지), EXPLAIN+AI 분석 화면 | 16절 |
 
 ## 다음 (KDMS 갭 분석 기반)
 
-### 확장 4 — 웹 UI (진행 중, 우선순위 1)
-
-KDMS Database Insight 화면의 축소판. JD의 "API 서버부터 사용자에게 보여지는 Web까지" 충족.
-
-- 인스턴스 선택 (등록된 이기종 목록 + 헬스 상태)
-- 활동 그래프(구간별 QPS) 위에서 조회/비교 구간 선택
-- Top Query 표: load% / QPS / 평균 레이턴시 / rows-per-call — 비교 시 증감 색상 + NEW 뱃지
-- 쿼리 클릭 -> EXPLAIN 결과 + 규칙 기반 지적 + AI 1차 분석
-- 구현: Spring Boot가 서빙하는 정적 SPA(빌드 체인 없음) — 백엔드가 본질이라 프론트는
-  의존성 없이 얇게. `java -jar` 하나로 화면까지 뜨게 해서 과제 제출·데모를 단순하게 유지
-
-### 확장 5 — MCP 서버 (우선순위 2)
+### 확장 5 — MCP 서버 (우선순위 1)
 
 compare / explain / health / query-stats를 MCP tool로 노출해 AI 에이전트가 DBHub를
 도구로 쓰게 한다. "알림을 받은 사람이 화면을 여는" push형에 더해, "AI가 필요할 때 스스로
 조회하는" pull형 채널 확보 (KDMS의 최신 방향과 동일).
 
-### 문서 보강 (우선순위 3, 저비용)
+### 문서 보강 (우선순위 2, 저비용)
 
 - events_statements_summary_by_digest 가득참(digests_size) 대응 규칙 — 80% 초과 시 Truncate
 - prepared statement와 통계 가시성 트레이드오프 가이드
