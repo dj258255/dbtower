@@ -39,3 +39,14 @@ dependencies {
 tasks.named('test') {
 	useJUnitPlatform()
 }
+
+// MCP stdio 서버(scripts/dbhub-mcp.sh)가 쓸 런타임 클래스패스를 파일로 남긴다.
+// MCP 클라이언트는 이 자바 프로세스를 직접 띄우므로 gradle을 거치지 않고 java -cp로 실행해야
+// stdout이 JSON-RPC 전용으로 유지된다 (gradle 로그가 섞이면 프로토콜이 깨진다).
+tasks.register('writeMcpClasspath') {
+	dependsOn 'classes'
+	doLast {
+		file('build/mcp-classpath.txt').text =
+				sourceSets.main.output.classesDirs.asPath + File.pathSeparator + configurations.runtimeClasspath.asPath
+	}
+}

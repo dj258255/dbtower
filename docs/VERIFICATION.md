@@ -452,3 +452,41 @@ GET /api/instances/1/compare?... -> newQueryCount: 1, totalCallsChangePct: 174.0
 밟은 함정: hidden 속성은 UA 스타일 display:none으로 동작하는데, 요약 스트립의
 display:flex가 이를 덮어써 빈 박스가 보였다. `.summary-strip[hidden]{display:none}`으로 해소 —
 "hidden 속성은 display를 지정한 요소에서는 무력화된다"는 표준 동작.
+
+## 17. 확장5 — MCP 서버: AI 에이전트가 DBHub를 도구로 쓴다
+
+웹 UI(확장4)가 사람의 채널이라면 MCP(Model Context Protocol)는 AI 에이전트의 채널이다.
+회귀 감지(확장3)가 push(플랫폼이 사람에게 민다)라면 MCP는 pull(에이전트가 필요할 때 당겨쓴다) —
+같은 코어를 채널만 바꿔 노출한다. 당근 KDMS가 시점비교·실행계획 등을 MCP로 제공해
+Slack의 AI가 DB 알럿을 스스로 분석하게 한 것과 같은 방향.
+
+구현: SDK 없이 JSON-RPC 2.0을 직접 구현했다 (io.dbhub.mcp.McpStdioServer, 의존성은
+클래스패스에 이미 있는 Jackson뿐). MCP stdio는 "한 줄 = JSON-RPC 메시지" 프레이밍이고
+서버가 알아야 할 메서드는 initialize / notifications/initialized / tools/list / tools/call 네 개다.
+도구 실행은 전부 기존 REST API 위임 — MCP 계층에 비즈니스 로직이 없어서 채널이 늘어도
+검증·보안은 코어 한 곳에서 끝난다.
+
+노출 도구 8종: list_instances, health, query_stats, slow_queries, compare, activity,
+explain, replication. stdout은 JSON-RPC 전용이므로 gradle을 거치지 않고 java -cp로 직접
+실행한다 (scripts/dbhub-mcp.sh + ./gradlew writeMcpClasspath).
+
+E2E 실측 (JSON-RPC를 stdio로 직접 주입):
+
+```
+initialize      -> {"name":"dbhub","version":"0.1.0"}
+tools/list      -> [list_instances, health, query_stats, slow_queries,
+                    compare, activity, explain, replication]
+tools/call list_instances -> 이기종 4대 목록 (isError:false)
+tools/call compare(부하 구간)  -> newQueryCount: 1, totalCallsChangePct: 174.08
+tools/call explain(LIKE 풀스캔) -> findings: ["테이블 풀스캔(access_type=ALL) — ..."]
+tools/call health(instanceId=999) -> isError:true "DBHub API 400: 등록되지 않은 인스턴스: 999"
+```
+
+즉 웹 UI에서 사람이 하던 "비교로 범인 지목 -> EXPLAIN으로 원인 확인" 흐름을
+AI 에이전트가 도구 호출로 그대로 수행할 수 있다.
+
+Claude Code 등록 방법:
+```
+./gradlew writeMcpClasspath
+claude mcp add dbhub -- sh /path/to/dbhub/scripts/dbhub-mcp.sh
+```

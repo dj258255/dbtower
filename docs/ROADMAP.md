@@ -22,16 +22,11 @@
 | 확장 2 | 모니터링 통합 — Prometheus/Grafana/exporters + 복제 상태 통합 뷰 | 13절 |
 | 확장 3 | 쿼리 회귀 자동 감지(4규칙+쿨다운) + Discord/Slack 웹훅 + AI 1차 분석 | 15절 |
 | 확장 4 | 웹 UI — 활동 그래프 구간 드래그, 시점 비교(증감·NEW 뱃지), EXPLAIN+AI 분석 화면 | 16절 |
+| 확장 5 | MCP 서버 — JSON-RPC 직접 구현, 도구 8종으로 AI 에이전트에 pull형 분석 채널 제공 | 17절 |
 
 ## 다음 (KDMS 갭 분석 기반)
 
-### 확장 5 — MCP 서버 (우선순위 1)
-
-compare / explain / health / query-stats를 MCP tool로 노출해 AI 에이전트가 DBHub를
-도구로 쓰게 한다. "알림을 받은 사람이 화면을 여는" push형에 더해, "AI가 필요할 때 스스로
-조회하는" pull형 채널 확보 (KDMS의 최신 방향과 동일).
-
-### 문서 보강 (우선순위 2, 저비용)
+### 문서 보강 (우선순위 1, 저비용)
 
 - events_statements_summary_by_digest 가득참(digests_size) 대응 규칙 — 80% 초과 시 Truncate
 - prepared statement와 통계 가시성 트레이드오프 가이드
