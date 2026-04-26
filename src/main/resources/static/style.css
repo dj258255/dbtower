@@ -187,6 +187,22 @@ input[type="datetime-local"] {
 .monitor-card h3 { margin: 0 0 8px; font-size: 13.5px; }
 @media (max-width: 800px) { .monitor-grid { grid-template-columns: 1fr; } }
 
+/* MCP 카드 */
+.mcp-card { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 16px; }
+.mcp-cmd-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.mcp-cmd {
+  flex: 1; background: #14181f; color: #9fe8c1; border-radius: 6px; padding: 8px 12px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+  overflow-x: auto; white-space: nowrap;
+}
+.mcp-tools-title { margin-top: 16px; }
+.mcp-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.mcp-tool {
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: #fff;
+}
+.mcp-tool b { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; color: var(--primary); }
+.mcp-tool p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+
 .muted { color: var(--muted); }
 .foot { text-align: center; color: var(--muted); font-size: 12px; padding: 20px 0 40px; }
 .loading { opacity: .5; pointer-events: none; }

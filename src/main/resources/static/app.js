@@ -347,6 +347,36 @@ async function loadSlow() {
     </tr>`).join("") : '<tr><td colspan="4" class="muted">슬로우 쿼리가 없습니다.</td></tr>';
 }
 
+// MCP 카드 — 도구 목록을 실제 /mcp 엔드포인트(tools/list)에서 받아와 그린다.
+// 하드코딩하지 않는 이유: 이 목록이 곧 "MCP가 살아 있다"의 증거가 되기 때문.
+async function loadMcpTools() {
+  const box = $("#mcp-tools");
+  try {
+    const res = await fetch("/mcp", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    const data = await res.json();
+    box.classList.remove("muted");
+    box.innerHTML = data.result.tools.map((t) => `
+      <div class="mcp-tool"><b>${esc(t.name)}</b><p>${esc(t.description)}</p></div>`).join("");
+  } catch (e) { box.textContent = `도구 목록 조회 실패: ${e.message}`; }
+}
+
+function setupCopyButtons() {
+  document.querySelectorAll("[data-copy]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const text = $(`#${btn.dataset.copy}`).textContent.split("   (")[0].trim();
+      try {
+        await navigator.clipboard.writeText(text);
+        const old = btn.textContent;
+        btn.textContent = "복사됨";
+        setTimeout(() => { btn.textContent = old; }, 1200);
+      } catch { /* http 컨텍스트 등 클립보드 불가 환경 — 무시 */ }
+    });
+  });
+}
+
 async function loadReplication() {
   try {
     const r = await api(`/api/instances/${state.instance.id}/replication`);
@@ -386,6 +416,8 @@ document.addEventListener("DOMContentLoaded", () => {
   setupTabs();
   setupPresets();
   setupChartDrag();
+  setupCopyButtons();
+  loadMcpTools();
   $("#btn-query").addEventListener("click", runQuery);
   $("#btn-compare").addEventListener("click", runCompare);
   $("#btn-explain").addEventListener("click", runExplain);

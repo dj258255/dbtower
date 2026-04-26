@@ -130,6 +130,20 @@
           </p>
         </div>
       </div>
+      <div class="monitor-card mcp-card">
+        <h3>MCP 연동 — AI 에이전트가 DBHub를 도구로 씁니다</h3>
+        <p class="muted">앱이 떠 있으면 준비 완료. 아래 명령 한 줄이면 Claude Code가 시점 비교·실행계획 분석을 직접 수행합니다.</p>
+        <div class="mcp-cmd-row">
+          <code id="mcp-cmd-http" class="mcp-cmd">claude mcp add --transport http dbhub http://localhost:8080/mcp</code>
+          <button class="btn btn-primary btn-small" data-copy="mcp-cmd-http">복사</button>
+        </div>
+        <div class="mcp-cmd-row">
+          <code id="mcp-cmd-stdio" class="mcp-cmd">claude mcp add dbhub -- sh scripts/dbhub-mcp.sh   (stdio 방식 — 앱과 분리 실행)</code>
+          <button class="btn btn-small" data-copy="mcp-cmd-stdio">복사</button>
+        </div>
+        <h3 class="mcp-tools-title">제공 도구 <span class="hint">(이 목록 자체가 POST /mcp tools/list 응답입니다)</span></h3>
+        <div id="mcp-tools" class="mcp-tools muted">불러오는 중...</div>
+      </div>
     </div>
   </section>
 

@@ -490,3 +490,21 @@ Claude Code 등록 방법:
 ./gradlew writeMcpClasspath
 claude mcp add dbhub -- sh /path/to/dbhub/scripts/dbhub-mcp.sh
 ```
+
+### 17-1. MCP HTTP 전송 + 웹 UI 연동 카드
+
+stdio에 더해 Streamable HTTP 전송(POST /mcp)을 앱에 내장했다 — 앱이 떠 있으면 MCP 연동
+준비가 끝나고, 별도 프로세스·클래스패스 준비가 필요 없다. 프로토콜 코어(McpProtocolHandler)는
+stdio와 공유 — 전송만 다르고 도구·검증은 같다.
+
+```
+POST /mcp initialize                 -> {"serverInfo":{"name":"dbhub","version":"0.1.0"}}
+POST /mcp notifications/initialized  -> 202 Accepted (알림 — 본문 없음)
+POST /mcp tools/list                 -> 도구 8종
+POST /mcp tools/call compare(부하구간) -> newQueryCount: 1, totalCallsChangePct: 174.08
+```
+
+웹 UI Monitoring 탭에 MCP 연동 카드 추가 (docs/images/webui/06-mcp.png):
+- 등록 명령 원클릭 복사 — `claude mcp add --transport http dbhub http://localhost:8080/mcp`
+- 제공 도구 8종 카드 — 하드코딩이 아니라 화면이 직접 POST /mcp tools/list를 호출해 그린다.
+  이 목록이 보인다는 것 자체가 "MCP 엔드포인트가 살아 있다"의 증거.
