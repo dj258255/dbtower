@@ -328,7 +328,7 @@ async function runAiAnalysis() {
     $("#detail-findings").innerHTML = (data.findings ?? []).map((f) =>
       `<div class="finding-item">${esc(f)}</div>`).join("");
     $("#detail-ai").textContent = data.aiAnalysis ??
-      "AI 분석 비활성화 상태입니다 (ANTHROPIC_API_KEY 미설정) — 규칙 기반 지적까지만 표시합니다.";
+      "AI 분석 비활성화 상태입니다 (ANTHROPIC_API_KEY도 claude CLI도 없음) — 규칙 기반 지적까지만 표시합니다.";
   } finally { btn.classList.remove("loading"); }
 }
 

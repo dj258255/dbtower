@@ -508,3 +508,23 @@ POST /mcp tools/call compare(부하구간) -> newQueryCount: 1, totalCallsChange
 - 등록 명령 원클릭 복사 — `claude mcp add --transport http dbhub http://localhost:8080/mcp`
 - 제공 도구 8종 카드 — 하드코딩이 아니라 화면이 직접 POST /mcp tools/list를 호출해 그린다.
   이 목록이 보인다는 것 자체가 "MCP 엔드포인트가 살아 있다"의 증거.
+
+### 16-1. AI 1차 분석 실측 — claude CLI 백엔드 (API 키 없이)
+
+AiAnalyzer에 백엔드 자동 선택을 추가했다:
+- ANTHROPIC_API_KEY 있음 -> Anthropic Java SDK (운영 구성)
+- 키 없음 + claude CLI 설치됨 -> headless 모드(claude -p)로 호출 — 로컬 개발은 Claude 구독으로 동작
+- 둘 다 없음 -> 조용히 비활성화
+
+CLI 호출 설계:
+- 프롬프트는 argv가 아니라 stdin으로 전달 — SQL·실행계획에 어떤 문자가 와도 인자 파싱과 무관
+- --setting-sources "" 로 사용자/프로젝트 설정을 배제 — 어떤 로컬 환경에서도 같은 형식의
+  순수 분석 텍스트가 나온다 (처음엔 사용자의 출력 스타일 설정이 응답에 섞여 나왔다 — 실측으로 발견)
+- 판단 기준 문서는 --append-system-prompt 로 주입 (API 백엔드와 동일한 프롬프트)
+
+실측 (04-ai.png 교체, 응답 약 16초):
+LIKE '%user1%' 풀스캔 쿼리에 대해 — access_type=ALL의 원인을 앞 와일드카드로 특정하고
+(B+Tree 시작점 원리 인용), filtered=11.11을 문서 기준으로 해석하고, 접두사 전환/FULLTEXT/
+검색 엔진 전환까지 판단 기준 문서 안에서만 제안했다. 문서 밖 수치에 대해서는
+"주어진 계획만으로 판단할 수 없다"고 답해 — "근거 없으면 모른다고 말하라"는 프롬프트 규칙이
+실제로 지켜지는 것을 확인했다.
