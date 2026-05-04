@@ -1,4 +1,4 @@
-# 플랫폼 자체 메타데이터(레지스트리·스냅샷)는 PostgreSQL(dbhub 데이터베이스)에 저장한다.
+# 플랫폼 자체 메타데이터(레지스트리·스냅샷)는 PostgreSQL(dbtower 데이터베이스)에 저장한다.
 # 처음엔 H2 파일이었지만, 플랫폼 자신을 관리 대상으로 등록해 자기 쿼리를 진단하는
 # 도그푸딩(개선 아크 3)을 위해 Operator가 지원하는 기종으로 이전했다.
 # 운영이라면 대상 DB와 물리적으로 분리된 전용 인스턴스를 쓴다 — 대상 장애가 플랫폼을 무너뜨리면 안 되므로.
@@ -7,9 +7,9 @@ spring:
     # reWriteBatchedInserts: JDBC 배치를 multi-values INSERT 한 문장으로 재작성 (개선 아크 2)
     # 접속 정보는 환경변수 우선, 없으면 로컬 docker compose 기본값.
     # 운영이라면 기본값 없이 시크릿 스토어(Vault/KMS)에서 주입하고, superuser가 아닌 전용 계정을 쓴다.
-    url: ${DBHUB_DB_URL:jdbc:postgresql://127.0.0.1:15432/dbhub?reWriteBatchedInserts=true}
-    username: ${DBHUB_DB_USERNAME:postgres}
-    password: ${DBHUB_DB_PASSWORD:dbhub1234}
+    url: ${DBTOWER_DB_URL:jdbc:postgresql://127.0.0.1:15432/dbtower?reWriteBatchedInserts=true}
+    username: ${DBTOWER_DB_USERNAME:postgres}
+    password: ${DBTOWER_DB_PASSWORD:dbtower1234}
   jpa:
     hibernate:
       ddl-auto: update
@@ -18,7 +18,7 @@ spring:
 server:
   port: 8080
 
-dbhub:
+dbtower:
   snapshot:
     interval-ms: 60000   # 쿼리 통계 수집 주기
   backup:
@@ -28,8 +28,8 @@ dbhub:
     # 로컬: mysqldump가 호스트에 없어 컨테이너 안에서 실행(컨테이너 관점이라 localhost:3306),
     #       호스트 pg_dump(14)가 서버(16)와 버전 불일치라 pg_dump도 컨테이너 것을 사용.
     # 비밀번호는 argv 금지 — MYSQL_PWD 환경변수로 전달되며, docker exec -e가 이를 컨테이너로 넘긴다
-    mysqldump-command: "docker exec -e MYSQL_PWD dbhub-mysql mysqldump -h localhost -P 3306 -u {user} --single-transaction --databases {db}"
-    pg-dump-command: "docker exec dbhub-postgres pg_dump -U {user} -d {db}"
+    mysqldump-command: "docker exec -e MYSQL_PWD dbtower-mysql mysqldump -h localhost -P 3306 -u {user} --single-transaction --databases {db}"
+    pg-dump-command: "docker exec dbtower-postgres pg_dump -U {user} -d {db}"
     poll-ms: 30000
   regression:
     poll-ms: 120000       # 회귀 감지 주기
@@ -39,7 +39,7 @@ dbhub:
   ai:
     model: claude-opus-4-8
     rules-path: docs/ai-analysis-rules.md
-# 웹훅 URL은 비밀값 — 환경변수 DBHUB_WEBHOOK_URL로만 주입 (Discord/Slack 자동 판별)
+# 웹훅 URL은 비밀값 — 환경변수 DBTOWER_WEBHOOK_URL로만 주입 (Discord/Slack 자동 판별)
 
 management:
   endpoints:

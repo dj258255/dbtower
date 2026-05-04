@@ -1,0 +1,199 @@
+package io.dbtower.operator;
+
+import io.dbtower.registry.DatabaseInstance;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * SQL Server 어댑터.
+ *
+ * 통계 소스: sys.dm_exec_query_stats DMV (플랜 캐시 기반 누적 통계)
+ * 실행계획: 임의 쿼리 실행 대신 플랜 캐시(sys.dm_exec_query_plan)에서 조회한다 —
+ * 운영 DB에 부하를 주지 않고 실제 사용된 플랜을 보는 방식.
+ */
+public class MsSqlOperator extends AbstractJdbcOperator {
+
+    public MsSqlOperator(DatabaseInstance instance, ConnectionPools pools, BackupTools backupTools) {
+        super(instance, pools, backupTools);
+    }
+
+    /**
+     * SQL Server 백업 = 서버 사이드 SQL 실행 모델(BACKUP DATABASE).
+     * 외부 도구 없이 SQL만으로 서버가 직접 파일을 쓴다 — 경로도 서버(컨테이너) 기준.
+     */
+    @Override
+    public BackupResult backup(BackupPolicy policy) {
+        String serverPath = "/var/opt/mssql/data/%s-%s.bak"
+                .formatted(safeFileName(instance.getName()), backupTimestamp());
+        // 식별자는 바인딩이 안 되므로 ]를 ]]로 이스케이프해 대괄호 탈출을 막는다 (등록 시 패턴 검증 + 심층 방어)
+        String escapedDb = instance.getDbName().replace("]", "]]");
+        String sql = policy.type() == BackupPolicy.BackupType.LOG
+                ? "BACKUP LOG [%s] TO DISK = ?".formatted(escapedDb)
+                : "BACKUP DATABASE [%s] TO DISK = ?".formatted(escapedDb);
+        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, serverPath);
+            ps.execute();
+            return new BackupResult("(server) " + serverPath, -1); // 서버 측 파일이라 크기는 조회 생략
+        } catch (SQLException e) {
+            throw new OperatorException("MSSQL 백업 실패: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    protected String jdbcUrl() {
+        return "jdbc:sqlserver://%s:%d;databaseName=%s;encrypt=false;loginTimeout=3"
+                .formatted(instance.getHost(), instance.getPort(), instance.getDbName());
+    }
+
+    @Override
+    protected String versionSql() {
+        return "SELECT @@VERSION";
+    }
+
+    @Override
+    public List<QueryStat> queryStats(int limit) {
+        // total_elapsed_time은 마이크로초 단위라 1000으로 나눠 ms로 환산한다
+        String sql = """
+                SELECT TOP (?)
+                       CONVERT(varchar(64), qs.query_hash, 1) AS query_id,
+                       SUBSTRING(st.text, 1, 2000) AS query_text,
+                       qs.execution_count,
+                       qs.total_elapsed_time / 1000.0 AS total_ms,
+                       qs.total_logical_reads
+                FROM sys.dm_exec_query_stats qs
+                CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+                ORDER BY qs.total_elapsed_time DESC
+                """;
+        List<QueryStat> stats = new ArrayList<>();
+        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    stats.add(new QueryStat(
+                            rs.getString("query_id"),
+                            rs.getString("query_text"),
+                            rs.getLong("execution_count"),
+                            rs.getDouble("total_ms"),
+                            rs.getLong("total_logical_reads")));
+                }
+            }
+        } catch (SQLException e) {
+            throw new OperatorException("MSSQL 쿼리 통계 수집 실패: " + e.getMessage(), e);
+        }
+        return stats;
+    }
+
+    @Override
+    public List<SlowQuery> slowQueries(int limit) {
+        String sql = """
+                SELECT TOP (?)
+                       SUBSTRING(st.text, 1, 2000) AS query_text,
+                       qs.total_elapsed_time / qs.execution_count / 1000.0 AS avg_ms,
+                       qs.total_logical_reads / qs.execution_count AS avg_reads
+                FROM sys.dm_exec_query_stats qs
+                CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+                WHERE qs.execution_count > 0
+                ORDER BY avg_ms DESC
+                """;
+        List<SlowQuery> result = new ArrayList<>();
+        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new SlowQuery(
+                            rs.getString("query_text"),
+                            rs.getDouble("avg_ms"),
+                            rs.getLong("avg_reads"),
+                            LocalDateTime.now().toString()));
+                }
+            }
+        } catch (SQLException e) {
+            throw new OperatorException("MSSQL 슬로우 쿼리 조회 실패: " + e.getMessage(), e);
+        }
+        return result;
+    }
+
+    @Override
+    public List<TableStat> tableStats(int limit) {
+        // used_page_count는 8KB 페이지 단위라 바이트로 환산한다
+        String sql = """
+                SELECT TOP (?)
+                       t.name AS table_name,
+                       SUM(CASE WHEN ps.index_id IN (0, 1) THEN ps.row_count ELSE 0 END) AS row_count,
+                       SUM(CASE WHEN ps.index_id IN (0, 1) THEN ps.used_page_count ELSE 0 END) * 8192 AS data_bytes,
+                       SUM(CASE WHEN ps.index_id > 1 THEN ps.used_page_count ELSE 0 END) * 8192 AS index_bytes
+                FROM sys.dm_db_partition_stats ps
+                JOIN sys.tables t ON t.object_id = ps.object_id
+                GROUP BY t.name
+                ORDER BY SUM(ps.used_page_count) DESC
+                """;
+        List<TableStat> result = new ArrayList<>();
+        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new TableStat(
+                            rs.getString("table_name"),
+                            rs.getLong("row_count"),
+                            rs.getLong("data_bytes"),
+                            rs.getLong("index_bytes")));
+                }
+            }
+        } catch (SQLException e) {
+            throw new OperatorException("MSSQL 테이블 통계 조회 실패: " + e.getMessage(), e);
+        }
+        return result;
+    }
+
+    /** 복제 상태 — AlwaysOn 가용성 그룹의 DMV. AG 미구성 단독 인스턴스면 행이 없다 */
+    @Override
+    public ReplicationState replicationState() {
+        String sql = """
+                SELECT rs.is_primary_replica, COUNT(*) OVER () AS replica_count
+                FROM sys.dm_hadr_database_replica_states rs
+                """;
+        try (Connection conn = open();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) {
+                String role = rs.getBoolean("is_primary_replica") ? "PRIMARY" : "REPLICA";
+                return new ReplicationState(role, -1, "AlwaysOn replicas=" + rs.getInt("replica_count"));
+            }
+            return new ReplicationState("STANDALONE", 0, "AlwaysOn 가용성 그룹 미구성");
+        } catch (SQLException e) {
+            throw new OperatorException("MSSQL 복제 상태 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public String explain(String sql) {
+        requireSelect(sql);
+        // 쿼리를 직접 실행하지 않고 플랜 캐시에서 유사 텍스트의 실제 사용 플랜(XML)을 찾는다
+        String planSql = """
+                SELECT TOP 1 qp.query_plan
+                FROM sys.dm_exec_query_stats qs
+                CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+                CROSS APPLY sys.dm_exec_query_plan(qs.plan_handle) qp
+                WHERE st.text LIKE ?
+                ORDER BY qs.last_execution_time DESC
+                """;
+        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(planSql)) {
+            String prefix = sql.length() > 100 ? sql.substring(0, 100) : sql;
+            ps.setString(1, "%" + prefix + "%");
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString(1);
+                }
+                return "플랜 캐시에서 해당 쿼리를 찾지 못했습니다. 쿼리가 한 번 이상 실행된 뒤 다시 시도하세요.";
+            }
+        } catch (SQLException e) {
+            throw new OperatorException("MSSQL 실행계획 조회 실패: " + e.getMessage(), e);
+        }
+    }
+}

@@ -1,4 +1,4 @@
-# DBHub 설계 문서
+# DBTower 설계 문서
 
 ## 1. 문제 정의
 
@@ -14,7 +14,7 @@
 
 ```
 [Web/curl] ──REST──> [Spring Boot API]
-                        ├── registry   : 이기종 인스턴스 등록/헬스 (PG 'dbhub' DB에 메타 저장 — 자신도 관리 대상으로 등록)
+                        ├── registry   : 이기종 인스턴스 등록/헬스 (PG 'dbtower' DB에 메타 저장 — 자신도 관리 대상으로 등록)
                         ├── operator   : DbmsOperator 인터페이스 + 기종별 어댑터
                         ├── insight    : 스냅샷 수집 스케줄러 + 시점 비교
                         ├── backup     : 백업 정책 + 폴러 + 실행 이력

@@ -1,9 +1,9 @@
 services:
   mysql:
     image: mysql:8.4
-    container_name: dbhub-mysql
+    container_name: dbtower-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: dbhub1234
+      MYSQL_ROOT_PASSWORD: dbtower1234
       MYSQL_DATABASE: sample
     # 슬로우 쿼리를 mysql.slow_log 테이블로 남겨 플랫폼이 조회할 수 있게 한다
     command: >
@@ -19,9 +19,9 @@ services:
 
   postgres:
     image: postgres:16
-    container_name: dbhub-postgres
+    container_name: dbtower-postgres
     environment:
-      POSTGRES_PASSWORD: dbhub1234
+      POSTGRES_PASSWORD: dbtower1234
       POSTGRES_DB: sample
     # 쿼리 통계 수집을 위한 pg_stat_statements 프리로드
     command: >
@@ -36,11 +36,11 @@ services:
 
   mssql:
     image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: dbhub-mssql
+    container_name: dbtower-mssql
     platform: linux/amd64   # Apple Silicon에서는 Docker Desktop Rosetta 에뮬레이션 필요
     environment:
       ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "Dbhub1234!"
+      MSSQL_SA_PASSWORD: "Dbtower1234!"
     ports:
       - "11433:1433"
     volumes:
@@ -49,38 +49,38 @@ services:
   # ===== 확장2: 통합 모니터링 =====
   mysqld-exporter:
     image: prom/mysqld-exporter:v0.16.0
-    container_name: dbhub-mysqld-exporter
+    container_name: dbtower-mysqld-exporter
     command:
       - "--mysqld.address=mysql:3306"
       - "--mysqld.username=root"
     environment:
-      MYSQLD_EXPORTER_PASSWORD: dbhub1234
+      MYSQLD_EXPORTER_PASSWORD: dbtower1234
     depends_on:
       - mysql
 
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.15.0
-    container_name: dbhub-postgres-exporter
+    container_name: dbtower-postgres-exporter
     environment:
-      DATA_SOURCE_NAME: "postgresql://postgres:dbhub1234@postgres:5432/sample?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://postgres:dbtower1234@postgres:5432/sample?sslmode=disable"
     depends_on:
       - postgres
 
   prometheus:
     image: prom/prometheus:v2.53.0
-    container_name: dbhub-prometheus
+    container_name: dbtower-prometheus
     volumes:
       - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - "19090:9090"
     extra_hosts:
-      - "host.docker.internal:host-gateway"   # DBHub 앱(호스트 8080)의 /actuator/prometheus 수집용
+      - "host.docker.internal:host-gateway"   # DBTower 앱(호스트 8080)의 /actuator/prometheus 수집용
 
   grafana:
     image: grafana/grafana:11.1.0
-    container_name: dbhub-grafana
+    container_name: dbtower-grafana
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: dbhub1234
+      GF_SECURITY_ADMIN_PASSWORD: dbtower1234
     volumes:
       - ./docker/grafana-datasource.yml:/etc/grafana/provisioning/datasources/prometheus.yml
     ports:
