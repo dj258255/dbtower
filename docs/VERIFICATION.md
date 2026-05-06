@@ -419,8 +419,8 @@ REST API 위에 의존성 없는 정적 SPA를 올렸다 (Spring Boot가 함께 
 Top Query 증감과 신규 쿼리를 보고, 클릭 한 번으로 실행계획과 분석까지 내려간다.
 
 E2E 시나리오 (실측 2026-07-03):
-1. 베이스라인 부하 3분(점조회) -> 급증 부하 2분(점조회 x3 + 신규 LIKE 풀스캔 COUNT)
-2. 비교 구간 15:20:30~15:23:10 vs 조회 구간 15:23:10~15:25:30 으로 비교 조회
+1. 베이스라인 부하 3분(점조회) -> 급증 부하 2분(점조회 x3 + 신규 LIKE 풀스캔 COUNT). 대상: sample.users 8,000행
+2. 비교 구간 20:54:30~20:57:05 vs 조회 구간 20:57:05~20:59:30 으로 비교 조회
 
 결과 (스크린샷 docs/images/webui/):
 
@@ -431,14 +431,14 @@ E2E 시나리오 (실측 2026-07-03):
 GET /api/instances/1/activity?from=...&to=...
 [{"time":"...15:18:00","qps":0.48,"avgLatencyMs":0.94}, ...]
 ```
-- 02-compare.png — 비교 조회. 요약 스트립 "호출량 +174% / 평균 레이턴시 +12% /
-  읽은 행수 +217% / 신규 쿼리 1개". 신규 LIKE 쿼리에 NEW 뱃지 + 행 하이라이트,
-  기존 점조회는 QPS 2.48 -> 11.8 (▲ 9.32) 증감 표시.
+- 02-compare.png — 비교 조회. 요약 스트립 "호출량 +461% / 평균 레이턴시 +69% /
+  읽은 행수 +852% / 신규 쿼리 1개". 신규 LIKE 쿼리에 NEW 뱃지 + 행 하이라이트,
+  기존 점조회는 QPS 2.4 -> 8.6 (▲ 6.2) 증감 표시.
 ```
-GET /api/instances/1/compare?... -> newQueryCount: 1, totalCallsChangePct: 174.08
+GET /api/instances/1/compare?... -> newQueryCount: 1, totalCallsChangePct: 460.88
 ```
 - 03-explain.png — NEW 쿼리 클릭 -> 정규화 텍스트의 파라미터(?)를 실제 값으로 고쳐
-  실행계획 실행 -> access_type=ALL(풀스캔), rows_examined_per_scan=7926 확인,
+  실행계획 실행 -> access_type=ALL(풀스캔), rows_examined_per_scan=8118 확인,
   규칙 기반 지적("테이블 풀스캔 — 인덱스가 없거나 타지 못하는 조건") 자동 표시.
   즉 "비교로 범인 지목 -> EXPLAIN으로 원인 확인"이 화면 안에서 완결된다.
 - 04-ai.png — AI 1차 분석 버튼. ANTHROPIC_API_KEY 미설정 상태라
@@ -477,7 +477,7 @@ initialize      -> {"name":"dbtower","version":"0.1.0"}
 tools/list      -> [list_instances, health, query_stats, slow_queries,
                     compare, activity, explain, replication]
 tools/call list_instances -> 이기종 4대 목록 (isError:false)
-tools/call compare(부하 구간)  -> newQueryCount: 1, totalCallsChangePct: 174.08
+tools/call compare(부하 구간)  -> newQueryCount: 1, totalCallsChangePct: 460.88
 tools/call explain(LIKE 풀스캔) -> findings: ["테이블 풀스캔(access_type=ALL) — ..."]
 tools/call health(instanceId=999) -> isError:true "DBTower API 400: 등록되지 않은 인스턴스: 999"
 ```
@@ -501,7 +501,7 @@ stdio와 공유 — 전송만 다르고 도구·검증은 같다.
 POST /mcp initialize                 -> {"serverInfo":{"name":"dbtower","version":"0.1.0"}}
 POST /mcp notifications/initialized  -> 202 Accepted (알림 — 본문 없음)
 POST /mcp tools/list                 -> 도구 8종
-POST /mcp tools/call compare(부하구간) -> newQueryCount: 1, totalCallsChangePct: 174.08
+POST /mcp tools/call compare(부하구간) -> newQueryCount: 1, totalCallsChangePct: 460.88
 ```
 
 웹 UI Monitoring 탭에 MCP 연동 카드 추가 (docs/images/webui/06-mcp.png):
@@ -522,8 +522,8 @@ CLI 호출 설계:
   순수 분석 텍스트가 나온다 (처음엔 사용자의 출력 스타일 설정이 응답에 섞여 나왔다 — 실측으로 발견)
 - 판단 기준 문서는 --append-system-prompt 로 주입 (API 백엔드와 동일한 프롬프트)
 
-실측 (04-ai.png 교체, 응답 약 16초):
-LIKE '%user1%' 풀스캔 쿼리에 대해 — access_type=ALL의 원인을 앞 와일드카드로 특정하고
+실측 (04-ai.png):
+LIKE '%user1%' 풀스캔 쿼리(8,118행)에 대해 — access_type=ALL의 원인을 앞 와일드카드로 특정하고
 (B+Tree 시작점 원리 인용), filtered=11.11을 문서 기준으로 해석하고, 접두사 전환/FULLTEXT/
 검색 엔진 전환까지 판단 기준 문서 안에서만 제안했다. 문서 밖 수치에 대해서는
 "주어진 계획만으로 판단할 수 없다"고 답해 — "근거 없으면 모른다고 말하라"는 프롬프트 규칙이
