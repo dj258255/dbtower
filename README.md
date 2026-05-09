@@ -1,43 +1,91 @@
 # DBTower — 이기종 DBMS 운영 관리 플랫폼
 
-MySQL·PostgreSQL·SQL Server처럼 서로 다른 DBMS를 하나의 플랫폼에서 등록하고,
-모니터링·슬로우 쿼리 분석·시점 비교·백업 정책 적용까지 일괄 관리하는 컨트롤 플레인입니다.
+MySQL / PostgreSQL / SQL Server를 하나의 인터페이스(`DbmsOperator`) 뒤에 등록하고,
+모니터링 -> 시점 비교 -> 실행계획 분석 -> 회귀 자동 감지 -> 알림까지 한 곳에서 처리하는
+컨트롤 플레인(관제탑)입니다. Java 21 + Spring Boot 4.
 
-같은 "백업"이라도 mysqldump / pg_basebackup / BACKUP DATABASE로 구문이 전부 다르고,
+같은 "백업"이라도 mysqldump / pg_dump / BACKUP DATABASE로 실행 방식이 전부 다르고,
 쿼리 통계도 performance_schema / pg_stat_statements / DMV로 소스가 전부 다릅니다.
-DBTower는 이 차이를 `DbmsOperator` 인터페이스 뒤로 숨겨, 사용자는 추상화된 정책만 다루게 합니다.
+DBTower는 이 차이를 인터페이스 뒤로 숨겨, 플랫폼 코드와 사용자는 추상화된 정책만 다룹니다.
+
+![대시보드 — 이기종 등록과 활동 그래프](docs/images/webui/01-dashboard.png)
 
 ## 왜 만들었나
 
 DB 이슈가 나면 개발자는 지표가 흩어진 여러 도구를 오가다 결국 DBA에게 문의하게 되고,
-DBA는 같은 질문에 반복적으로 답하게 됩니다. 반복되는 운영 작업을 플랫폼으로 자동화하면
-관리 대상 DB가 늘어도 필요한 사람 손이 선형으로 늘지 않습니다.
-당근 KDMS, 토스 등 사내 DB 플랫폼 사례를 참고해 그 축소판을 직접 설계했습니다.
+DBA는 같은 질문에 반복해서 답하게 됩니다. 정형화된 운영 작업을 플랫폼으로 자동화하면
+관리 대상 DB가 늘어도 필요한 사람 손이 선형으로 늘지 않습니다(DBRE).
+당근 KDMS 등 사내 DB 플랫폼 사례의 문제 정의를 출발점으로, 핵심 메커니즘을 직접 구현했습니다.
 
-## 핵심 기능
+## 무엇이 되나
 
 | 기능 | 설명 |
 |---|---|
-| 이기종 등록 | DB 인스턴스를 등록하면 기종에 맞는 Operator가 자동 연결 (등록 시 접속 검증) |
-| 통합 쿼리 통계 | 기종별 통계 소스를 하나의 API로 — 쿼리별 호출수·누적 시간·읽은 행수 |
-| 슬로우 쿼리 | MySQL slow_log 테이블 / PG·MSSQL 통계 기반 상위 조회 |
-| 시점 비교 | 평소 구간 vs 문제 구간의 쿼리별 QPS·레이턴시 증감률 + 신규 쿼리 표시 |
-| 실행계획 분석 | EXPLAIN + 기종별 비효율 판단 규칙(풀스캔·filesort·Seq Scan 등) 자동 지적 |
-| 백업 정책 (확장1) | "30분 주기 전체 백업" 같은 추상 정책을 기종별 구문으로 실행 |
-| 통합 모니터링 (확장2) | Prometheus + Grafana, 복제 상태 통합 뷰 |
-| 알림·AI 분석 (확장3) | 임계치 알림 + 실행계획 규칙을 프롬프트로 쓰는 1차 자동 분석 |
+| 이기종 등록 | 인스턴스를 등록하면 기종에 맞는 Operator가 연결 (등록 시 접속 검증) |
+| 통합 쿼리 통계 | 기종별 통계 소스를 하나의 API로 — load%(시간 점유율)·호출수·읽은 행수 |
+| 시점 비교 | 평소 구간 vs 문제 구간의 쿼리별 QPS·레이턴시·rows/call 증감 + 신규 쿼리 감지 |
+| 실행계획 분석 | EXPLAIN + 기종별 비효율 판단 규칙 자동 지적 (규칙마다 근거·예외 문서화) |
+| AI 1차 분석 | 판단 기준 문서를 프롬프트로 쓰는 일관 판정 — API 키 또는 claude CLI 자동 선택 |
+| 회귀 자동 감지 | 신규 쿼리·QPS 급증·레이턴시 회귀·rows/call 폭증을 폴러가 잡아 Discord/Slack 웹훅 |
+| 백업 정책 | "30분 주기 전체 백업" 같은 추상 정책을 기종별 실행 방식으로 번역 |
+| 통합 모니터링 | Prometheus + Grafana + 복제 상태 통합 뷰 |
+| 웹 콘솔 | 활동 그래프 드래그로 구간 선택 -> 증감 표 -> 클릭 한 번에 EXPLAIN + AI 분석 |
+| MCP 서버 | AI 에이전트가 위 기능들을 도구로 직접 사용 (stdio / HTTP) |
+
+### 시점 비교 — 장애 원인 쿼리를 찾는 핵심 기능
+
+상위 쿼리 목록만으로는 원인을 못 찾습니다. 평소에도 높던 쿼리일 수 있고, 낮던 쿼리가
+튄 것일 수 있고, 새로 유입된 쿼리일 수도 있기 때문입니다. 그래서 두 구간을 쿼리 단위로
+비교합니다 — 누적 카운터 스냅샷의 구간 차분, QPS 정규화, 신규 쿼리 표시.
+
+![시점 비교 — 증감률과 신규 쿼리 NEW 뱃지](docs/images/webui/02-compare.png)
+
+부하 실측: 베이스라인 대비 급증 구간에서 호출량 +461%, 읽은 행수 +852%,
+신규 LIKE 풀스캔 쿼리 1건이 NEW로 잡힙니다.
+
+### 실행계획 + AI 1차 분석
+
+쿼리를 클릭하면 해당 DB에 접속해 EXPLAIN을 실행하고, 기종별 규칙(access_type=ALL,
+filesort, Seq Scan, Clustered Index Scan 등)으로 비효율 신호를 지적합니다.
+AI 분석은 [판단 기준 문서](docs/ai-analysis-rules.md)를 시스템 프롬프트로 넣어
+같은 입력에 일관된 판정이 나오게 하고, 근거가 없으면 모른다고 답하게 합니다.
+
+![AI 1차 분석 — 판단 기준 문서 기반 판정](docs/images/webui/04-ai.png)
+
+### MCP — AI 에이전트의 채널
+
+웹 콘솔이 사람의 채널이라면 MCP는 AI 에이전트의 채널입니다. 회귀 감지가 push(플랫폼이
+사람에게 민다)라면 MCP는 pull(에이전트가 필요할 때 당겨쓴다) — 같은 코어를 채널만 바꿔
+노출합니다. JSON-RPC 2.0을 직접 구현했고 stdio/HTTP 두 전송이 프로토콜 코어를 공유합니다.
+
+```bash
+claude mcp add --transport http dbtower http://localhost:8080/mcp
+```
+
+![MCP 연동 카드 — 도구 8종은 실시간 tools/list 응답](docs/images/webui/06-mcp.png)
+
+## 성능 개선 기록 (전부 실측, 재현 로그: [VERIFICATION.md](docs/VERIFICATION.md))
+
+| # | 문제 | 개선 | 실측 |
+|---|---|---|---|
+| 1 | 수집마다 새 커넥션 | 인스턴스별 HikariCP 풀 | 수집 47.1 -> 11.8ms (4.0배) |
+| 2 | JPA saveAll 행별 INSERT | JDBC batchUpdate + reWriteBatchedInserts | 행당 1.51 -> 0.11ms (13.8배) |
+| 3 | 스냅샷 조회 Seq Scan | 복합 인덱스 (등치 컬럼 선두) | 50만 행 21.269 -> 0.062ms (343배) |
+| 4 | 긴 쿼리 digest 병합 | max_digest_length 1024 -> 4096 | side-by-side 재현·해소 |
+| 5 | 전체 부하 검증 | k6 10 VU 30s | 2,832 req/s, P95 5.86ms, 실패 0 |
+
+3번은 도그푸딩입니다 — DBTower 자신을 관리 대상으로 등록하고, DBTower의 explain API로
+자기 쿼리의 풀스캔을 진단해 고쳤습니다.
 
 ## 실행
 
 ```bash
-# 관리 대상 DB 3종 기동
-docker compose up -d
-
-# 플랫폼 기동
-./gradlew bootRun
+docker compose up -d                     # 관리 대상 DB 3종 + Prometheus/Grafana
+DBTOWER_WEBHOOK_URL="" ./gradlew bootRun # 플랫폼 기동
+open http://localhost:8080               # 웹 콘솔
 ```
 
-인스턴스 등록:
+인스턴스 등록 (웹 콘솔 또는 API):
 
 ```bash
 curl -X POST localhost:8080/api/instances -H 'Content-Type: application/json' -d '{
@@ -52,13 +100,29 @@ curl -X POST localhost:8080/api/instances -H 'Content-Type: application/json' -d
 ```
 GET  /api/instances                     등록 목록
 GET  /api/instances/{id}/health         헬스체크 (버전·응답시간)
-GET  /api/instances/{id}/query-stats    쿼리별 누적 통계 상위 N
+GET  /api/instances/{id}/query-stats    쿼리별 통계 상위 N (load% 랭킹)
 GET  /api/instances/{id}/slow-queries   슬로우 쿼리 상위 N
-POST /api/instances/{id}/explain        실행계획 + 규칙 기반 비효율 분석
 GET  /api/instances/{id}/compare        시점 비교 (base 구간 vs target 구간)
+GET  /api/instances/{id}/activity       활동 그래프 시계열 (QPS·평균 레이턴시)
+POST /api/instances/{id}/explain        실행계획 + 규칙 기반 비효율 지적
+POST /api/instances/{id}/ai-analysis    실행계획 + 규칙 + AI 1차 분석
+GET  /api/instances/{id}/replication    복제 상태 통합 뷰
+POST /mcp                                MCP (Streamable HTTP)
 ```
 
-## 설계 문서
+## 문서
 
-- [docs/DESIGN.md](docs/DESIGN.md) — 인터페이스 경계, 시점 비교 데이터 모델, 성능 개선 계획
-- [docs/ai-analysis-rules.md](docs/ai-analysis-rules.md) — 기종별 실행계획 판단 규칙과 근거
+- [PRESENTATION.md](docs/PRESENTATION.md) — 문제 정의부터 설계·실측·교훈까지 전체 서사
+- [DESIGN.md](docs/DESIGN.md) — 인터페이스 경계, 시점 비교 데이터 모델
+- [VERIFICATION.md](docs/VERIFICATION.md) — 17개 절의 실측 기록 (명령·출력·스크린샷)
+- [ai-analysis-rules.md](docs/ai-analysis-rules.md) — 기종별 실행계획 판단 규칙: 근거와 예외
+- [ROADMAP.md](docs/ROADMAP.md) — 완료 단계와 다음 단계, 그리고 의도적으로 안 한 것
+
+## 기술 선택 근거 (요약)
+
+- **Lombok 미사용** — 값 객체는 전부 Java 21 record. JPA 엔티티에 @Data/@ToString은
+  lazy 연관관계 지뢰라 명시적 코드를 유지
+- **Operator 계층은 JDBC 직접** — 기종별 통계 뷰·관리 명령은 ORM의 추상화 대상이 아님.
+  플랫폼 메타데이터는 JPA, 스냅샷 대량 쓰기는 JDBC batch — 적재적소
+- **프론트는 의존성 0 정적 SPA** — 백엔드가 본질. java -jar 하나로 API부터 Web까지
+- **AI는 판단자가 아니라 1차 분석기** — 판단 기준은 사람이 문서로 정하고, AI는 그 위에서만 판정
