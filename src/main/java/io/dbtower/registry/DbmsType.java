@@ -4,5 +4,7 @@ package io.dbtower.registry;
 public enum DbmsType {
     MYSQL,
     POSTGRESQL,
-    MSSQL
+    MSSQL,
+    MONGODB,
+    ORACLE
 }

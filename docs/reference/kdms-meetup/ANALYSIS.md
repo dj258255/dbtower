@@ -182,7 +182,7 @@ Alpha/Production 환경, KR/CA/GB/JP 리전 필터가 보인다.
 | digests_size 가득참 자동 Truncate | 미구현 | 운영 규칙으로 추가 가치 |
 | prepared statement 가이드 | 미구현 (문서 여지) | |
 | 백업 정책 (KDMS는 기능명만 언급) | 초과 달성 — 정책 CRUD + 폴러 + 기종별 실행 | |
-| 복제 상태 | 초과 달성 — replicationState 3기종 | |
+| 복제 상태 | 초과 달성 — replicationState 5기종 | |
 | **웹 UI (CPU 그래프 드래그, 탭, 증감 표시)** | **없음 — 최대 갭** | REST API + curl뿐 |
 | **MCP 서버 (AI 에이전트 채널)** | **없음 — 두번째 갭** | AiAnalyzer는 push형만 |
 | Wait Event 분석 | 없음 | 범위 밖으로 정리 가능 |

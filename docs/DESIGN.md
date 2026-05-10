@@ -2,7 +2,7 @@
 
 ## 1. 문제 정의
 
-여러 기종의 DBMS(MySQL·PostgreSQL·MSSQL)를 운영하는 조직에서 반복되는 문제:
+여러 기종의 DBMS(MySQL·PostgreSQL·MSSQL·Oracle·MongoDB)를 운영하는 조직에서 반복되는 문제:
 
 1. **지표 분산** — 쿼리 통계·슬로우 쿼리·실행계획이 기종마다 다른 도구/구문에 흩어져 있다
 2. **커뮤니케이션 비용** — 개발자가 스스로 DB 이슈를 분석하지 못해 DBA 문의가 반복된다
@@ -35,7 +35,7 @@
 
 - 이렇게 나눈 이유: 운영 작업의 "무엇"(백업하라)과 "어떻게"(mysqldump vs BACKUP DATABASE)를 분리.
   새 DBMS 지원이 구현체 1개 추가로 끝나는지가 이 설계의 성공 기준
-- 검증 방법: MSSQL 어댑터를 마지막에 추가하면서 플랫폼 코드 수정이 0인지 확인한다
+- 검증 방법: 새 기종을 추가할 때 플랫폼 코드 수정이 0인지 확인한다 — MSSQL로 1차, Oracle·MongoDB(비 JDBC)로 2차 검증 완료 (VERIFICATION 18절)
 
 ### 3.2 시점 비교 — 왜 상위 쿼리 나열로는 부족한가
 
@@ -49,12 +49,12 @@
 
 ### 3.3 기종별 통계 소스의 차이 (추상화가 필요한 실제 근거)
 
-| | MySQL | PostgreSQL | MSSQL |
-|---|---|---|---|
-| 소스 | performance_schema digest | pg_stat_statements | dm_exec_query_stats |
-| 정규화 방식 | 텍스트 앞 N바이트 | 파싱 결과 기반 | query_hash |
-| 함정 | max_digest_length(1024) 초과 시 긴 쿼리가 뭉개짐 → 4096으로 상향 | 프리로드 필요 | 플랜 캐시 축출 시 통계 소실 |
-| 시간 단위 | 피코초 | ms | 마이크로초 |
+| | MySQL | PostgreSQL | MSSQL | Oracle | MongoDB |
+|---|---|---|---|---|---|
+| 소스 | performance_schema digest | pg_stat_statements | dm_exec_query_stats | V$SQL | system.profile |
+| 정규화 방식 | 텍스트 앞 N바이트 | 파싱 결과 기반 | query_hash | sql_id (child cursor 합산 필요) | queryHash |
+| 함정 | max_digest_length(1024) 초과 시 긴 쿼리가 뭉개짐 → 4096으로 상향 | 프리로드 필요 | 플랜 캐시 축출 시 통계 소실 | 커서 축출 시 통계 소실, V$ 조회에 별도 권한 | capped collection이라 가득 차면 덮어씀 (누적 카운터가 아님) |
+| 시간 단위 | 피코초 | ms | 마이크로초 | 마이크로초 | ms |
 
 같은 "쿼리 통계"인데 소스·정규화·단위가 전부 다르다 — 이 표가 인터페이스 추상화의 존재 이유다.
 

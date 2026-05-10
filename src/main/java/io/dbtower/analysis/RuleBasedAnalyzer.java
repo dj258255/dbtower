@@ -58,6 +58,25 @@ public class RuleBasedAnalyzer {
                     findings.add("Sort 연산자 — 정렬 비용이 큰 경우 인덱스 정렬 순서 활용을 검토하세요");
                 }
             }
+            case ORACLE -> {
+                if (plan.contains("TABLE ACCESS FULL")) {
+                    findings.add("테이블 풀스캔(TABLE ACCESS FULL) — 조건에 맞는 인덱스가 없거나 타지 못합니다");
+                }
+                if (plan.contains("INDEX FULL SCAN")) {
+                    findings.add("인덱스 풀스캔(INDEX FULL SCAN) — 인덱스 전체를 훑고 있어 범위 조건 검토가 필요합니다");
+                }
+                if (plan.contains("SORT ORDER BY")) {
+                    findings.add("정렬 연산(SORT ORDER BY) — 인덱스가 정렬 순서를 제공하면 제거할 수 있습니다");
+                }
+            }
+            case MONGODB -> {
+                if (plan.contains("COLLSCAN")) {
+                    findings.add("컬렉션 풀스캔(COLLSCAN) — 필터 조건을 받는 인덱스가 없습니다");
+                }
+                if (plan.contains("\"stage\": \"SORT\"")) {
+                    findings.add("인메모리 정렬(SORT 스테이지) — 인덱스가 정렬 순서를 제공하지 못해 메모리에서 정렬합니다");
+                }
+            }
         }
         if (findings.isEmpty()) {
             findings.add("규칙에 걸린 비효율 신호가 없습니다");

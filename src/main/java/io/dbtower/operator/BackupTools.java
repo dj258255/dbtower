@@ -5,6 +5,9 @@ package io.dbtower.operator;
  * - MySQL: 클라이언트 도구(mysqldump)가 필요 — 호스트에 없으면 명령을 바꿔 우회(예: docker exec)
  * - PostgreSQL: 호스트의 pg_dump CLI
  * - SQL Server: 서버 사이드 SQL(BACKUP DATABASE)이라 도구가 필요 없다
+ * - MongoDB: mongodump CLI — 비밀번호는 --config /dev/stdin으로 stdin 전달
+ * - Oracle: 서버 사이드 API(DBMS_DATAPUMP)라 도구가 필요 없다
  */
-public record BackupTools(String mysqldumpCommand, String pgDumpCommand, String backupDir) {
+public record BackupTools(String mysqldumpCommand, String pgDumpCommand, String mongodumpCommand,
+                          String backupDir) {
 }

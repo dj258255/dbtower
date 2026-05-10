@@ -7,7 +7,7 @@
 ```bash
 ./gradlew compileJava          # 컴파일
 ./gradlew test                 # 테스트
-docker compose up -d           # 대상 DB 3종 + 모니터링 스택
+docker compose up -d           # 대상 DB 5종 + 모니터링 스택
 DBTOWER_WEBHOOK_URL="" ./gradlew bootRun   # 앱 기동 (http://localhost:8080)
 ```
 
@@ -19,7 +19,7 @@ DBTOWER_WEBHOOK_URL="" ./gradlew bootRun   # 앱 기동 (http://localhost:8080)
 
 ```text
 src/main/java/io/dbtower/
-├── operator/    DbmsOperator 인터페이스 + MySQL/PostgreSQL/MSSQL 구현, 커넥션 풀
+├── operator/    DbmsOperator 인터페이스 + 5기종 구현(MySQL/PostgreSQL/MSSQL/Oracle/MongoDB), 커넥션 풀/클라이언트 캐시
 ├── registry/    인스턴스 등록·헬스체크
 ├── insight/     스냅샷 수집, 시점 비교, 활동 그래프
 ├── analysis/    실행계획 규칙 기반 분석

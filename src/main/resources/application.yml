@@ -30,6 +30,8 @@ dbtower:
     # 비밀번호는 argv 금지 — MYSQL_PWD 환경변수로 전달되며, docker exec -e가 이를 컨테이너로 넘긴다
     mysqldump-command: "docker exec -e MYSQL_PWD dbtower-mysql mysqldump -h localhost -P 3306 -u {user} --single-transaction --databases {db}"
     pg-dump-command: "docker exec dbtower-postgres pg_dump -U {user} -d {db}"
+    # 비밀번호는 --config /dev/stdin으로 표준입력 전달 (mongodump에는 비밀번호 환경변수가 없다)
+    mongodump-command: "docker exec -i dbtower-mongo mongodump --host localhost --port 27017 -u {user} --authenticationDatabase admin --db {db} --archive --config /dev/stdin"
     poll-ms: 30000
   regression:
     poll-ms: 120000       # 회귀 감지 주기

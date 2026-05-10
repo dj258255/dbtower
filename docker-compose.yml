@@ -46,6 +46,34 @@ services:
     volumes:
       - mssql-data:/var/opt/mssql
 
+  mongo:
+    image: mongo:7
+    container_name: dbtower-mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: dbtower1234
+    # 프로파일러 레벨 2 — 모든 연산을 system.profile에 기록 (플랫폼의 통계 소스)
+    command: ["mongod", "--auth", "--profile", "2", "--slowms", "0"]
+    ports:
+      - "17017:27017"
+    volumes:
+      - mongo-data:/data/db
+      - ./docker/mongo-init.js:/docker-entrypoint-initdb.d/init.js
+
+  oracle:
+    image: gvenzl/oracle-free:23-slim-faststart
+    container_name: dbtower-oracle
+    environment:
+      ORACLE_PASSWORD: dbtower1234
+      APP_USER: sample
+      APP_USER_PASSWORD: dbtower1234
+    ports:
+      - "11521:1521"
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+      # V$ 뷰 조회·Data Pump 권한 부여 + 시드 (최초 기동 시 1회)
+      - ./docker/oracle-init.sql:/container-entrypoint-initdb.d/init.sql
+
   # ===== 확장2: 통합 모니터링 =====
   mysqld-exporter:
     image: prom/mysqld-exporter:v0.16.0
@@ -92,3 +120,5 @@ volumes:
   mysql-data:
   postgres-data:
   mssql-data:
+  mongo-data:
+  oracle-data:

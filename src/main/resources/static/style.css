@@ -64,6 +64,8 @@ body {
 .type-MYSQL { background: #00758f; }
 .type-POSTGRESQL { background: #336791; }
 .type-MSSQL { background: #a91d22; }
+.type-ORACLE { background: #c74634; }
+.type-MONGODB { background: #47a248; }
 .instance-host { color: var(--muted); font-size: 12px; margin-top: 3px; }
 .health-dot {
   width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: #c6ccd6;

@@ -23,6 +23,7 @@
 | 확장 3 | 쿼리 회귀 자동 감지(4규칙+쿨다운) + Discord/Slack 웹훅 + AI 1차 분석 | 15절 |
 | 확장 4 | 웹 UI — 활동 그래프 구간 드래그, 시점 비교(증감·NEW 뱃지), EXPLAIN+AI 분석 화면 | 16절 |
 | 확장 5 | MCP 서버 — JSON-RPC 직접 구현, 도구 8종으로 AI 에이전트에 pull형 분석 채널 제공 | 17절 |
+| 확장 6 | Oracle·MongoDB 추가 — 5기종. "새 기종 = 구현체 1개" 실측(플랫폼 코드 0줄), 비 JDBC 증명 | 18절 |
 
 ## 다음 (KDMS 갭 분석 기반)
 
@@ -31,6 +32,11 @@
 - events_statements_summary_by_digest 가득참(digests_size) 대응 규칙 — 80% 초과 시 Truncate
 - prepared statement와 통계 가시성 트레이드오프 가이드
 - AAS(Average Active Session) 개념과 load% 랭킹의 관계 정리
+
+### 품질 (우선순위 2)
+
+- 핵심 로직 단위 테스트 — 시점 비교 차분·경계, 회귀 감지 규칙·쿨다운, 백업 명령 렌더링 주입 방어, MCP 프로토콜
+- GitHub Actions CI (gradle test)
 
 ## 범위 밖 (의도적으로 안 한다)
 
