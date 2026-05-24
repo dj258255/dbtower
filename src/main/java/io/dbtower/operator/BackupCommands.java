@@ -67,6 +67,18 @@ final class BackupCommands {
         }
     }
 
+    /**
+     * mongodump --config /dev/stdin에 넣을 YAML 한 줄을 만든다.
+     * 값을 그대로 이어붙이면 개행으로 다른 설정 키(uri: 등)를 주입할 수 있으므로,
+     * 제어 문자를 거부하고 YAML 작은따옴표 스칼라로 감싼다(' -> '' 이스케이프).
+     */
+    static String yamlEntry(String key, String value) {
+        if (value == null || value.chars().anyMatch(Character::isISOControl)) {
+            throw new OperatorException("백업 설정 값에 제어 문자를 쓸 수 없습니다: " + key, null);
+        }
+        return key + ": '" + value.replace("'", "''") + "'\n";
+    }
+
     static String timestamp() {
         return java.time.LocalDateTime.now().toString().replace(":", "-");
     }

@@ -73,7 +73,7 @@ public final class McpProtocolHandler {
 
     private void registerTools() {
         tools.put("list_instances", new Tool(
-                "등록된 이기종 DBMS 인스턴스 목록(MySQL/PostgreSQL/SQL Server). id를 다른 도구의 instanceId로 쓴다.",
+                "등록된 이기종 DBMS 인스턴스 목록(MySQL/PostgreSQL/SQL Server/Oracle/MongoDB). id를 다른 도구의 instanceId로 쓴다.",
                 schema(Map.of()),
                 args -> get("/api/instances")));
 
@@ -90,7 +90,7 @@ public final class McpProtocolHandler {
                         + "/query-stats?limit=" + optInt(args, "limit", 20))));
 
         tools.put("slow_queries", new Tool(
-                "슬로우 쿼리 목록 — 기종별 소스(performance_schema / pg_stat_statements / DMV)를 통합한 뷰.",
+                "슬로우 쿼리 목록 — 기종별 소스(performance_schema / pg_stat_statements / DMV / V$SQL / system.profile)를 통합한 뷰.",
                 schema(Map.of("instanceId", intProp("대상 인스턴스 id"),
                         "limit", intProp("최대 개수 (기본 20)"))),
                 args -> get("/api/instances/" + args.get("instanceId").asLong()

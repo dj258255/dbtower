@@ -1,5 +1,7 @@
 # DBTower — 이기종 DBMS 운영 관리 플랫폼
 
+[![CI](https://github.com/dj258255/dbtower/actions/workflows/ci.yml/badge.svg)](https://github.com/dj258255/dbtower/actions/workflows/ci.yml)
+
 MySQL / PostgreSQL / SQL Server / Oracle / MongoDB를 하나의 인터페이스(`DbmsOperator`) 뒤에
 등록하고, 모니터링 -> 시점 비교 -> 실행계획 분석 -> 회귀 자동 감지 -> 알림까지 한 곳에서
 처리하는 컨트롤 플레인(관제탑)입니다. Java 21 + Spring Boot 4.

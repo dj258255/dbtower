@@ -209,7 +209,7 @@ public class MongoOperator implements DbmsOperator {
                 BackupCommands.render(backupTools.mongodumpCommand(), instance),
                 java.util.Map.of(),
                 out,
-                "password: " + instance.getPassword() + "\n");
+                BackupCommands.yamlEntry("password", instance.getPassword()));
     }
 
     @Override
