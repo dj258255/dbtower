@@ -25,18 +25,13 @@
 | 확장 5 | MCP 서버 — JSON-RPC 직접 구현, 도구 8종으로 AI 에이전트에 pull형 분석 채널 제공 | 17절 |
 | 확장 6 | Oracle·MongoDB 추가 — 5기종. "새 기종 = 구현체 1개" 실측(플랫폼 코드 0줄), 비 JDBC 증명 | 18절 |
 
-## 다음 (KDMS 갭 분석 기반)
+## 완료 (2차 — 품질·문서)
 
-### 문서 보강 (우선순위 1, 저비용)
-
-- events_statements_summary_by_digest 가득참(digests_size) 대응 규칙 — 80% 초과 시 Truncate
-- prepared statement와 통계 가시성 트레이드오프 가이드
-- AAS(Average Active Session) 개념과 load% 랭킹의 관계 정리
-
-### 품질 (우선순위 2)
-
-- 핵심 로직 단위 테스트 — 시점 비교 차분·경계, 회귀 감지 규칙·쿨다운, 백업 명령 렌더링 주입 방어, MCP 프로토콜
-- GitHub Actions CI (gradle test)
+| 항목 | 내용 | 위치 |
+|---|---|---|
+| 단위 테스트 31건 | 시점 비교 차분·경계, 회귀 감지 4규칙·쿨다운, 백업 명령 주입 방어, MCP 프로토콜, 5기종 판정 규칙 | src/test |
+| CI | GitHub Actions gradle test + 실패 리포트 아티팩트 (테스트 전용 H2 설정으로 실 DB 불필요) | .github/workflows/ci.yml |
+| 운영 규칙 문서 | digests_size 포화(80% Truncate), digest 길이, PS 가시성 가이드, AAS와 load%, system.profile capped | docs/operations.md |
 
 ## 범위 밖 (의도적으로 안 한다)
 
