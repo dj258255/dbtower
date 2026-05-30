@@ -33,6 +33,24 @@
 | CI | GitHub Actions gradle test + 실패 리포트 아티팩트 (테스트 전용 H2 설정으로 실 DB 불필요) | .github/workflows/ci.yml |
 | 운영 규칙 문서 | digests_size 포화(80% Truncate), digest 길이, PS 가시성 가이드, AAS와 load%, system.profile capped | docs/operations.md |
 
+## 현업 전환 갭 — 포트폴리오와 프로덕션 사이에 남은 것
+
+핵심 메커니즘의 증명(추상화·시점 비교·회귀 감지·채널)은 완료했지만, 실제 운영 투입에는
+아래가 더 필요하다. "무엇을 안 했는지"를 우선순위·이유·업계 근거와 함께 적어 둔다.
+
+| 순위 | 갭 | 왜 필요한가 / 업계 근거 |
+|---|---|---|
+| 1 | 인증·인가 (RBAC) | 현재 콘솔·API·MCP 전부 무인증. DB 접속정보를 다루는 도구라 최우선. Percona PMM은 서비스 계정 + 라벨 기반 접근 제어(환경·기종 단위로 보이는 데이터 제한)를 제공하고, 운영 가이드에서 관리자 수 최소화·신뢰 네트워크 제한을 권고한다 ([PMM Security](https://docs.percona.com/percona-monitoring-and-management/3/admin/security/index.html), [PMM Access Control](https://www.percona.com/blog/pmm-access-control-a-comprehensive-guide-with-use-cases-and-examples/)) |
+| 2 | 인스턴스 비밀번호 보관 | 현재 메타 DB에 평문 저장. 최소 애플리케이션 레벨 암호화(AES-GCM + KMS 키), 정석은 Vault database secrets engine — 저장된 정적 비밀번호 대신 짧은 TTL의 동적 계정을 발급·자동 회수하고 접근 주체별 감사가 된다 ([Vault Database Secrets](https://developer.hashicorp.com/vault/docs/secrets/databases)) |
+| 3 | 스키마 마이그레이션 | ddl-auto=update가 기존 CHECK 제약을 갱신하지 않아 기종 추가가 수동 ALTER가 됐다(VERIFICATION 18-3, 직접 밟은 근거). 커뮤니티 표준은 운영에서 ddl-auto=validate + Flyway가 스키마의 단일 권위 ([Flyway + Hibernate Best Practices](https://rieckpil.de/howto-best-practices-for-flyway-and-hibernate-with-spring-boot/)) |
+| 4 | 스냅샷 보존 정책 | 1분 주기 스냅샷이 무한 적재된다. 선례: AWS Performance Insights의 기본 보존이 7일이고 그 이상은 명시적 선택·과금이다 — 보존기간 + 삭제 배치(또는 시간 파티셔닝)가 기본값이어야 한다 ([PI Pricing & Retention](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PerfInsights.Overview.cost.html)) |
+| 5 | 다중 인스턴스(HA) | 폴러·회귀 감지 쿨다운이 인메모리라 단일 프로세스 전제. 스케일아웃 시 리더 선출(ShedLock 등) + 쿨다운 상태 외부화(메타 DB/Redis) 필요 |
+| 6 | 감사 로그 | 누가 언제 어떤 인스턴스에 explain·백업을 실행했는지 기록. 관리 도구의 기본 요건이자 Vault 동적 계정의 감사 이점과 짝을 이룬다 |
+| 7 | 백업 복원 검증 | "테스트해 본 적 없는 백업은 백업이 아니다" — 주기적 복원 리허설과 검증 0-에러 원칙(3-2-1-1-0), 덤프 원격 보관·암호화 ([Veeam 3-2-1](https://www.veeam.com/blog/321-backup-rule.html), [Datto 3-2-1-1-0](https://www.datto.com/blog/3-2-1-1-0-backup-rule/)) |
+| 8 | 대상 DB 최소 권한 계정 | 현재 root/sa/system급으로 접속. Datadog DBM도 기종별 전용 읽기 계정과 필요한 grant 목록만 부여하는 방식을 문서화한다 — 기종별 권한 목록 가이드 필요 ([Datadog DBM MySQL Setup](https://docs.datadoghq.com/database_monitoring/setup_mysql/selfhosted/)) |
+| 9 | 분석 보호장치 | explain에 statement timeout, 대상 DB 과부하 시 수집 백오프 — 진단 도구가 부하 유발자가 되지 않게 |
+| 10 | 문의 채널 (KDMS 3단계) | 분석 결과를 첨부해 Slack 쓰레드를 여는 버튼 — 웹훅 인프라가 있어 소규모 작업. 스키마·인덱스 목록 표시(원인 분석 화면 보강)와 함께 KDMS 흐름의 마지막 조각 |
+
 ## 범위 밖 (의도적으로 안 한다)
 
 - Wait Event 분석, 파티션 자동 관리, Schema Diff, DB 생성 자동화 — KDMS 본체 기능이지만
