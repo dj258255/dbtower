@@ -33,10 +33,14 @@
 | CI | GitHub Actions gradle test + 실패 리포트 아티팩트 (테스트 전용 H2 설정으로 실 DB 불필요) | .github/workflows/ci.yml |
 | 운영 규칙 문서 | digests_size 포화(80% Truncate), digest 길이, PS 가시성 가이드, AAS와 load%, system.profile capped | docs/operations.md |
 
-## 현업 전환 갭 — 포트폴리오와 프로덕션 사이에 남은 것
+## 다음 구현 로드맵
 
-핵심 메커니즘의 증명(추상화·시점 비교·회귀 감지·채널)은 완료했지만, 실제 운영 투입에는
-아래가 더 필요하다. "무엇을 안 했는지"를 우선순위·이유·업계 근거와 함께 적어 둔다.
+핵심 메커니즘의 증명(추상화·시점 비교·회귀 감지·채널·5기종)은 완료. 여기부터는
+실제 운영 투입을 향해 계속 구현한다. 세 단계 — A(운영 안전) -> B(DBA 진단 심화) -> C(프로비저닝 연동).
+
+### Phase A — 운영 안전 (프로덕션 전제조건)
+
+우선순위·이유·업계 근거. B의 세션 킬 같은 위험 기능이 A의 인증·감사에 의존하므로 A가 먼저다.
 
 | 순위 | 갭 | 왜 필요한가 / 업계 근거 |
 |---|---|---|
@@ -49,10 +53,40 @@
 | 7 | 백업 복원 검증 | "테스트해 본 적 없는 백업은 백업이 아니다" — 주기적 복원 리허설과 검증 0-에러 원칙(3-2-1-1-0), 덤프 원격 보관·암호화 ([Veeam 3-2-1](https://www.veeam.com/blog/321-backup-rule.html), [Datto 3-2-1-1-0](https://www.datto.com/blog/3-2-1-1-0-backup-rule/)) |
 | 8 | 대상 DB 최소 권한 계정 | 현재 root/sa/system급으로 접속. Datadog DBM도 기종별 전용 읽기 계정과 필요한 grant 목록만 부여하는 방식을 문서화한다 — 기종별 권한 목록 가이드 필요 ([Datadog DBM MySQL Setup](https://docs.datadoghq.com/database_monitoring/setup_mysql/selfhosted/)) |
 | 9 | 분석 보호장치 | explain에 statement timeout, 대상 DB 과부하 시 수집 백오프 — 진단 도구가 부하 유발자가 되지 않게 |
-| 10 | 문의 채널 (KDMS 3단계) | 분석 결과를 첨부해 Slack 쓰레드를 여는 버튼 — 웹훅 인프라가 있어 소규모 작업. 스키마·인덱스 목록 표시(원인 분석 화면 보강)와 함께 KDMS 흐름의 마지막 조각 |
 
-## 범위 밖 (의도적으로 안 한다)
+### Phase B — DBA 진단 심화 (현업 DBA가 매일 쓰는 것들)
 
-- Wait Event 분석, 파티션 자동 관리, Schema Diff, DB 생성 자동화 — KDMS 본체 기능이지만
-  이 프로젝트의 핵심 서사(추상화 + 시점 비교 + 자동 회귀 감지)와 겹치지 않아 제외.
+시점 비교가 "무엇이 변했나"를 답한다면, B는 "지금 무엇이 막고 있나"와 "어떻게 고치나"를 답한다.
+이전에 범위 밖이던 KDMS 본체 기능(Wait Event, Schema Diff)도 여기로 승격.
+
+| # | 기능 | 내용 / 업계 근거 |
+|---|---|---|
+| B1 | Wait Event 분석 (AAS 분해) | load%가 "누가 시간을 쓰나"라면 Wait Event는 "그 시간에 무엇을 기다렸나"(CPU/IO/Lock/LWLock). PostgreSQL은 pg_wait_sampling 확장(기본 10ms 샘플링)으로 ASH 스타일 히스토그램, MySQL은 performance_schema events_waits, MSSQL은 sys.dm_os_wait_stats, Oracle은 v$session 샘플링 — DbmsOperator에 waitProfile() 메서드 1개 추가로 5기종 통합 ([GitLab ASH 대시보드 운영 사례](https://runbooks.gitlab.com/patroni/wait-events-analisys/), [PostgreSQL Wait Events 가이드](https://stormatics.tech/blogs/understanding-wait-events-in-postgresql)) |
+| B2 | 블로킹 트리 + 세션 관리 | "지금 누가 누구를 막고 있나"를 트리로 — PG는 pg_stat_activity + pg_blocking_pids(), 종료는 pg_cancel_backend(정상 롤백 유도) -> pg_terminate_backend(강제) 2단계. 킬 버튼은 위험 기능이라 Phase A의 인증·감사 로그가 전제 ([pg_stat_activity·pg_locks 모니터링](https://www.mssqltips.com/sqlservertip/8222/postgresql-monitoring-with-pg-stat-activity-and-pg-locks/)) |
+| B3 | 인덱스 어드바이저 | explain 규칙이 "인덱스가 없다"까지 지적하니, 다음은 "이 인덱스를 만들면 플랜이 이렇게 바뀐다" — PG의 HypoPG로 가상 인덱스를 만들어 실제 생성 없이 플랜 변화를 시뮬레이션, 결과를 AI 1차 분석의 근거로 주입 |
+| B4 | 온라인 스키마 변경 연동 | 대형 테이블 ALTER를 락 없이 — gh-ost/pt-online-schema-change 실행·진행률·스로틀을 플랫폼에서 관리. 두 도구 모두 원자적 cut-over와 실행 중 재설정을 지원 ([온라인 스키마 변경 도구 비교](https://planetscale.com/docs/vitess/schema-changes/online-schema-change-tools-comparison)) |
+| B5 | 장기 트랜잭션·복제 지연·디스크 증가 알림 | 회귀 감지 폴러의 규칙 확장 — idle-in-transaction 방치(VACUUM 차단), 복제 lag 임계, 디스크 사용 추세 기반 소진 예측(용량 계획) |
+| B6 | 파라미터 드리프트 감지 | 같은 역할의 인스턴스 간 설정 diff(max_connections, work_mem 등) — "왜 저 장비만 느리지"의 단골 원인 |
+| B7 | Schema Diff | 환경 간(스테이징 vs 운영) 테이블·인덱스 구조 비교 — B3·B4와 묶여 스키마 관리 축 완성. 원인 분석 화면에 인덱스 목록·DDL 표시(KDMS 2단계 갭)부터 시작 |
+| B8 | 문의 채널 (KDMS 3단계) | 분석 결과를 첨부해 Slack 쓰레드를 여는 버튼 — 웹훅 인프라 재사용, KDMS 흐름의 마지막 조각 |
+
+### Phase C — 프로비저닝 연동 (DB의 탄생부터 관제까지)
+
+지금은 "이미 존재하는 DB"를 수동 등록한다. 현업에서 DB는 IaC로 태어난다 —
+태어나는 순간 관제탑에 자동 등록되는 것이 이 층의 목표다.
+
+| # | 환경 | 방식 |
+|---|---|---|
+| C1 | Kubernetes | CloudNativePG(PostgreSQL)·Percona Operator(MySQL/PG/MongoDB) CR로 클러스터 선언 -> Operator가 프로비저닝·복제·백업·failover 자동화 -> 생성 완료 시 접속 Secret을 읽어 DBTower 등록 API 호출. Operator가 Day-1/Day-2 운영을 맡고 DBTower는 그 위의 쿼리 수준 관제를 맡는 분업 ([CloudNativePG](https://cloudnative-pg.io/), [Percona Operators](https://docs.percona.com/percona-operators/)) |
+| C2 | 클라우드 (AWS 등) | Terraform 모듈로 RDS 생성 -> output(엔드포인트·시크릿 ARN)을 등록 API로 전달하는 프로비저닝 파이프라인 |
+| C3 | 온프레미스/VM | Ansible 플레이북 — DBMS 설치·모니터링 계정 생성(Phase A8의 최소 권한 grant 목록을 코드화)·exporter 배치·DBTower 등록까지 한 플레이북으로 |
+| C4 | 자동 발견·해제 | 등록 API의 자동화 훅 + 제거된 인스턴스 정리 — "등록을 잊은 DB"가 관제 사각지대가 되는 것 방지 |
+
+KDMS가 "DB 생성 자동화"를 본체 기능으로 갖는 이유가 이것이다 — 생성과 관제가 이어져야
+플랫폼이고, 끊어져 있으면 도구 모음이다.
+
+## 범위 밖 (여전히 의도적으로 안 한다)
+
+- 파티션 자동 관리, DBaaS 수준의 멀티테넌시·과금·셀프서비스 포털 — 플랫폼 엔지니어링의
+  다른 제품 영역. Wait Event·Schema Diff·DB 생성 자동화는 범위 밖에서 로드맵(B·C)으로 승격했다.
   "무엇을 안 했는지"를 아는 것도 범위 관리의 일부.

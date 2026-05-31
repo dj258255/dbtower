@@ -162,7 +162,7 @@ POST /mcp                                MCP (Streamable HTTP)
 - [VERIFICATION.md](docs/VERIFICATION.md) — 18개 절의 실측 기록 (명령·출력·스크린샷)
 - [ai-analysis-rules.md](docs/ai-analysis-rules.md) — 기종별 실행계획 판단 규칙: 근거와 예외
 - [operations.md](docs/operations.md) — 운영 규칙: 통계 소스의 함정과 대응 (digest 포화·PS 가시성·AAS)
-- [ROADMAP.md](docs/ROADMAP.md) — 완료 단계와 다음 단계, 그리고 의도적으로 안 한 것
+- [ROADMAP.md](docs/ROADMAP.md) — 완료 단계와 3단계 구현 로드맵(운영 안전 -> DBA 진단 심화 -> 프로비저닝 연동)
 
 ## 기술 선택 근거 (요약)
 
