@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>로그인 — DBTower</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="login-body">
+
+<div class="login-box">
+  <div class="brand login-brand">
+    <span class="brand-mark">DB</span><span class="brand-name">Tower</span>
+  </div>
+  <p class="login-tag">이기종 DBMS 운영 관리 플랫폼</p>
+
+  <div id="login-error" class="login-error" hidden>아이디 또는 비밀번호가 올바르지 않습니다</div>
+
+  <form method="post" action="/login" class="login-form">
+    <label for="username">아이디</label>
+    <input type="text" id="username" name="username" autocomplete="username" autofocus required>
+    <label for="password">비밀번호</label>
+    <input type="password" id="password" name="password" autocomplete="current-password" required>
+    <input type="hidden" name="_csrf" id="csrf-field">
+    <button type="submit" class="btn btn-primary login-btn">로그인</button>
+  </form>
+
+  <p class="login-hint">
+    최초 기동 시 admin 계정이 자동 생성됩니다 — 비밀번호는 앱 로그 또는
+    <code>DBTOWER_ADMIN_PASSWORD</code> 환경변수를 확인하세요.
+  </p>
+</div>
+
+<script>
+// CSRF 쿠키(XSRF-TOKEN)를 폼 히든 필드로 — 서버가 GET 응답에서 심어준 값을 되돌려주는 표준 패턴
+const token = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
+if (token) document.getElementById("csrf-field").value = decodeURIComponent(token[1]);
+if (location.search.includes("error")) document.getElementById("login-error").hidden = false;
+</script>
+</body>
+</html>

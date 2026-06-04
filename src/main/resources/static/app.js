@@ -4,10 +4,22 @@
 // -> Top Query 증감(NEW 뱃지) -> 쿼리 클릭 -> 실행계획 + AI 분석.
 
 const $ = (sel) => document.querySelector(sel);
-const api = (path) => fetch(path).then((r) => {
-  if (!r.ok) return r.text().then((t) => { throw new Error(`${r.status} ${t}`); });
-  return r.json();
-});
+
+// CSRF: 서버가 XSRF-TOKEN 쿠키로 준 토큰을 변경 요청 헤더로 되돌려준다 (A1)
+const csrfToken = () => {
+  const m = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : "";
+};
+
+const api = (path, opts = {}) => {
+  const headers = { ...(opts.headers || {}) };
+  if (opts.method && opts.method !== "GET") headers["X-XSRF-TOKEN"] = csrfToken();
+  return fetch(path, { ...opts, headers }).then((r) => {
+    if (r.status === 401) { location.href = "/login.html"; throw new Error("로그인이 필요합니다"); }
+    if (!r.ok) return r.text().then((t) => { throw new Error(`${r.status} ${t}`); });
+    return r.json();
+  });
+};
 
 const state = {
   instance: null,      // 선택된 인스턴스 {id, name, type, ...}
@@ -292,13 +304,14 @@ async function runExplain() {
   const btn = $("#btn-explain");
   btn.classList.add("loading");
   try {
-    const res = await fetch(`/api/instances/${state.instance.id}/explain`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
-    });
-    const data = await res.json();
+    let data;
     $("#plan-section").hidden = false;
-    if (!res.ok) {
-      $("#detail-plan").textContent = `실행 실패: ${JSON.stringify(data)}`;
+    try {
+      data = await api(`/api/instances/${state.instance.id}/explain`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
+      });
+    } catch (e) {
+      $("#detail-plan").textContent = `실행 실패: ${e.message}`;
       $("#detail-findings").innerHTML = "";
       return;
     }
@@ -317,11 +330,12 @@ async function runAiAnalysis() {
   $("#ai-section").hidden = false;
   $("#detail-ai").textContent = "분석 중... (실행계획 조회 후 AI 판정)";
   try {
-    const res = await fetch(`/api/instances/${state.instance.id}/ai-analysis`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
-    });
-    const data = await res.json();
-    if (!res.ok) { $("#detail-ai").textContent = `실패: ${JSON.stringify(data)}`; return; }
+    let data;
+    try {
+      data = await api(`/api/instances/${state.instance.id}/ai-analysis`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
+      });
+    } catch (e) { $("#detail-ai").textContent = `실패: ${e.message}`; return; }
     // 실행계획 섹션도 함께 갱신 (같은 응답에 plan/findings 포함)
     $("#plan-section").hidden = false;
     $("#detail-plan").textContent = data.plan;
@@ -352,15 +366,40 @@ async function loadSlow() {
 async function loadMcpTools() {
   const box = $("#mcp-tools");
   try {
-    const res = await fetch("/mcp", {
+    const data = await api("/mcp", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
-    const data = await res.json();
     box.classList.remove("muted");
     box.innerHTML = data.result.tools.map((t) => `
       <div class="mcp-tool"><b>${esc(t.name)}</b><p>${esc(t.description)}</p></div>`).join("");
-  } catch (e) { box.textContent = `도구 목록 조회 실패: ${e.message}`; }
+  } catch (e) {
+    box.textContent = e.message.startsWith("403")
+      ? "MCP 카드는 ADMIN 역할만 볼 수 있습니다 (서비스 토큰 노출 방지)"
+      : `도구 목록 조회 실패: ${e.message}`;
+  }
+}
+
+// MCP 등록 명령 — ADMIN이면 서비스 토큰을 받아 실제 명령을 완성한다 (A1)
+async function loadMcpCommand() {
+  try {
+    const { token } = await api("/api/security/mcp-token");
+    $("#mcp-cmd-http").textContent =
+      `claude mcp add --transport http dbtower http://localhost:8080/mcp --header "Authorization: Bearer ${token}"`;
+  } catch { /* VIEWER — 기본 안내 문구 유지 */ }
+}
+
+// 상단 사용자 표시 + 로그아웃
+async function loadMe() {
+  try {
+    const me = await api("/api/me");
+    $("#user-chip").innerHTML =
+      `${esc(me.username)}<span class="role-badge">${esc(me.role)}</span>`;
+  } catch { /* 401이면 api()가 로그인으로 보낸다 */ }
+  $("#logout-btn")?.addEventListener("click", async () => {
+    await fetch("/logout", { method: "POST", headers: { "X-XSRF-TOKEN": csrfToken() } });
+    location.href = "/login.html";
+  });
 }
 
 function setupCopyButtons() {
@@ -412,6 +451,8 @@ function setupPresets() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  loadMe();
+  loadMcpCommand();
   loadInstances();
   setupTabs();
   setupPresets();

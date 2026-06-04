@@ -208,3 +208,32 @@ input[type="datetime-local"] {
 .muted { color: var(--muted); }
 .foot { text-align: center; color: var(--muted); font-size: 12px; padding: 20px 0 40px; }
 .loading { opacity: .5; pointer-events: none; }
+
+/* ---------- 로그인 (A1) ---------- */
+.login-body {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh; background: var(--bg, #f5f6f8);
+}
+.login-box {
+  background: #fff; border: 1px solid #e3e6ea; border-radius: 12px;
+  padding: 40px 44px; width: 360px; box-shadow: 0 4px 16px rgba(0,0,0,.06);
+}
+.login-brand { justify-content: center; display: flex; }
+.login-tag { text-align: center; color: #8a94a0; font-size: 13px; margin: 6px 0 24px; }
+.login-form { display: flex; flex-direction: column; gap: 6px; }
+.login-form label { font-size: 13px; color: #4a5560; margin-top: 8px; }
+.login-form input {
+  padding: 10px 12px; border: 1px solid #d4d9df; border-radius: 8px; font-size: 14px;
+}
+.login-form input:focus { outline: 2px solid #4c6ef5; border-color: transparent; }
+.login-btn { margin-top: 18px; padding: 11px; font-size: 14px; }
+.login-error {
+  background: #fdecec; color: #c0392b; border: 1px solid #f5c6c6;
+  border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 14px;
+}
+.login-hint { margin-top: 20px; font-size: 12px; color: #8a94a0; line-height: 1.6; }
+.login-hint code { background: #f0f2f5; padding: 1px 5px; border-radius: 4px; }
+.user-chip { color: #4a5560; font-size: 13px; margin-right: 4px; }
+.user-chip .role-badge {
+  background: #eef1f5; border-radius: 10px; padding: 2px 8px; font-size: 11px; margin-left: 4px;
+}

@@ -15,6 +15,8 @@
   <nav class="topnav">
     <a href="http://localhost:3000" target="_blank" rel="noopener">Grafana</a>
     <a href="http://localhost:9090" target="_blank" rel="noopener">Prometheus</a>
+    <span id="user-chip" class="user-chip"></span>
+    <button id="logout-btn" class="btn btn-small">로그아웃</button>
   </nav>
 </header>
 
@@ -134,7 +136,7 @@
         <h3>MCP 연동 — AI 에이전트가 DBTower를 도구로 씁니다</h3>
         <p class="muted">앱이 떠 있으면 준비 완료. 아래 명령 한 줄이면 Claude Code가 시점 비교·실행계획 분석을 직접 수행합니다.</p>
         <div class="mcp-cmd-row">
-          <code id="mcp-cmd-http" class="mcp-cmd">claude mcp add --transport http dbtower http://localhost:8080/mcp</code>
+          <code id="mcp-cmd-http" class="mcp-cmd">claude mcp add --transport http dbtower http://localhost:8080/mcp   (ADMIN 로그인 시 토큰 포함 명령으로 완성됩니다)</code>
           <button class="btn btn-primary btn-small" data-copy="mcp-cmd-http">복사</button>
         </div>
         <div class="mcp-cmd-row">

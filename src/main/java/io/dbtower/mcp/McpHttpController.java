@@ -3,6 +3,7 @@ package io.dbtower.mcp;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.dbtower.security.ApiTokenProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -30,8 +31,9 @@ public class McpHttpController {
     private final ObjectMapper mapper = new ObjectMapper();
     private final McpProtocolHandler handler;
 
-    public McpHttpController(@Value("${server.port:8080}") int port) {
-        this.handler = new McpProtocolHandler("http://localhost:" + port);
+    public McpHttpController(@Value("${server.port:8080}") int port, ApiTokenProvider tokens) {
+        // 도구 실행이 자기 REST API로 위임되므로 서비스 토큰으로 인증한다 (A1)
+        this.handler = new McpProtocolHandler("http://localhost:" + port, tokens.token());
     }
 
     @PostMapping(value = "/mcp", produces = MediaType.APPLICATION_JSON_VALUE)

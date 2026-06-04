@@ -40,6 +40,13 @@ dbtower:
     cooldown-minutes: 30  # 같은 쿼리 재알림 쿨다운
   ai:
     model: claude-opus-4-8
+  security:
+    # 기계(MCP 클라이언트·자동화)용 서비스 토큰 — 미설정이면 기동마다 랜덤 생성 (fail-closed)
+    api-token: ${DBTOWER_API_TOKEN:}
+    # 최초 기동 부트스트랩 — admin은 항상 생성(비밀번호 미설정 시 랜덤+로그 안내),
+    # viewer(조회·진단 전용)는 비밀번호를 준 경우에만 생성
+    admin-password: ${DBTOWER_ADMIN_PASSWORD:}
+    viewer-password: ${DBTOWER_VIEWER_PASSWORD:}
     rules-path: docs/ai-analysis-rules.md
 # 웹훅 URL은 비밀값 — 환경변수 DBTOWER_WEBHOOK_URL로만 주입 (Discord/Slack 자동 판별)
 

@@ -614,3 +614,61 @@ ALTER TABLE database_instance ADD CONSTRAINT database_instance_type_check
 ```
 운영 교훈: enum을 DDL 제약으로 내리는 순간, enum 확장은 코드 배포가 아니라 스키마 마이그레이션이 된다.
 Flyway 같은 마이그레이션 도구가 필요한 이유를 이 프로젝트 안에서 직접 만났다.
+
+## 19. Phase A1 — 인증·인가: "누구나 들어올 수 있는 관제탑"이라는 한계를 닫다
+
+### 19-1. 한계의 인지
+
+확장6까지의 DBTower에는 인증이 없었다. 콘솔·REST·MCP 전부 열려 있어서,
+네트워크에 접근 가능한 누구든 인스턴스를 등록·삭제하고 백업을 실행할 수 있었다 —
+DB 접속정보를 다루는 관리 도구로서 가장 큰 결격 사유였고, 같은 장르의 Percona PMM이
+서비스 계정 + 접근 제어를 갖추는 이유이기도 하다. 그래서 로드맵 Phase A의 1번으로 올렸다.
+
+### 19-2. 설계 — 주체가 둘이라 인증도 둘이다
+
+| 주체 | 인증 | CSRF |
+|---|---|---|
+| 사람 (웹 콘솔) | 세션 폼 로그인, 사용자는 메타 DB에 BCrypt 저장 | 쿠키(XSRF-TOKEN) -> SPA가 헤더로 반환하는 표준 패턴 |
+| 기계 (MCP 클라이언트·자동화) | Bearer 서비스 토큰 (상수 시간 비교) | 대상 아님 — 쿠키 세션이 없어 CSRF가 성립하지 않는다 |
+
+인가는 역할 2개: 진단(조회·explain)은 VIEWER부터, 대상 DB를 바꾸는 행위
+(등록/삭제/백업/정책)와 서비스 토큰 조회는 ADMIN만.
+
+fail-closed 원칙 두 가지:
+- admin 초기 비밀번호를 하드코딩(admin/admin)하지 않는다 — 미설정 시 랜덤 생성 + 로그 1회 안내(Jenkins 방식)
+- 서비스 토큰 미설정 시 "무인증"이 아니라 "기동마다 랜덤 토큰" — 모르면 아무도 못 쓴다
+
+### 19-3. 실측 (2026-07-04)
+
+```
+미인증:  GET /            -> 302 /login.html   (브라우저는 로그인으로)
+         GET /api/...     -> 401               (API는 상태코드로 — SPA가 구분 처리)
+         POST /mcp        -> 401
+
+viewer:  GET /api/instances                    -> 200
+         POST /api/instances/8/explain         -> 200  (진단은 VIEWER부터)
+         POST /api/instances (등록)             -> 403
+         POST /api/instances/8/backup          -> 403
+         GET /api/security/mcp-token           -> 403
+
+admin:   GET /api/security/mcp-token           -> 200  (MCP 카드가 이걸로 등록 명령을 완성)
+
+기계:    Bearer 올바른 토큰  GET /api/...        -> 200 (ADMIN 권한)
+         Bearer 틀린 토큰                        -> 401
+         POST /mcp tools/call health(mongo)     -> 정상 (CSRF 없이 — 쿠키가 없으므로)
+```
+
+MCP 등록 명령은 토큰 포함으로 바뀐다:
+`claude mcp add --transport http dbtower http://localhost:8080/mcp --header "Authorization: Bearer <토큰>"`
+stdio 방식은 별도 프로세스라 DBTOWER_API_TOKEN 환경변수를 앱과 동일하게 준다.
+
+### 19-4. 밟은 함정 둘 (Spring Boot 4 / Security 7)
+
+- **AntPathRequestMatcher가 사라졌다.** Security 7에서 제거 — 람다 RequestMatcher로 대체했다.
+- **로그인하면 CSRF 토큰이 회전한다.** 세션 고정 방어로 인증 성공 시 기존 CSRF 토큰이
+  무효화된다. curl로 E2E를 짤 때 로그인 전 토큰을 재사용해 403을 맞고 확인했다 —
+  브라우저 SPA는 매 요청 쿠키를 다시 읽으므로 자연히 무관하다.
+- (부수) Boot 4 모듈화로 @AutoConfigureMockMvc 패키지가 이동했고, spring-security-test와
+  MockMvc의 연결(@WithMockUser)도 spring-boot-starter-security-test라는 전용 스타터가 맡는다.
+
+보안 테스트 10건(SecurityConfigTest)으로 인가 표를 코드로 고정 — 총 41건 전부 통과, CI 그린.

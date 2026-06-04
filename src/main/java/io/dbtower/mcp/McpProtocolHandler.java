@@ -31,6 +31,7 @@ public final class McpProtocolHandler {
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final String baseUrl;
+    private final String apiToken; // REST 위임 호출용 서비스 토큰 (null이면 헤더 생략 — 테스트 등)
     private final Map<String, Tool> tools = new LinkedHashMap<>();
 
     private record Tool(String description, ObjectNode inputSchema, ToolCall call) {
@@ -42,7 +43,12 @@ public final class McpProtocolHandler {
     }
 
     public McpProtocolHandler(String baseUrl) {
+        this(baseUrl, null);
+    }
+
+    public McpProtocolHandler(String baseUrl, String apiToken) {
         this.baseUrl = baseUrl;
+        this.apiToken = apiToken;
         registerTools();
     }
 
@@ -194,17 +200,21 @@ public final class McpProtocolHandler {
     // ---------- REST 위임 ----------
 
     private String get(String path) throws Exception {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + path))
-                .timeout(Duration.ofSeconds(30)).GET().build();
+        HttpRequest req = authorized(HttpRequest.newBuilder(URI.create(baseUrl + path))
+                .timeout(Duration.ofSeconds(30)).GET()).build();
         return require2xx(http.send(req, HttpResponse.BodyHandlers.ofString()));
     }
 
     private String post(String path, String jsonBody) throws Exception {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + path))
+        HttpRequest req = authorized(HttpRequest.newBuilder(URI.create(baseUrl + path))
                 .timeout(Duration.ofSeconds(30))
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(jsonBody)).build();
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))).build();
         return require2xx(http.send(req, HttpResponse.BodyHandlers.ofString()));
+    }
+
+    private HttpRequest.Builder authorized(HttpRequest.Builder builder) {
+        return apiToken == null ? builder : builder.header("Authorization", "Bearer " + apiToken);
     }
 
     private static String require2xx(HttpResponse<String> res) {
