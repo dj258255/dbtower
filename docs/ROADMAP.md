@@ -24,6 +24,8 @@
 | 확장 4 | 웹 UI — 활동 그래프 구간 드래그, 시점 비교(증감·NEW 뱃지), EXPLAIN+AI 분석 화면 | 16절 |
 | 확장 5 | MCP 서버 — JSON-RPC 직접 구현, 도구 8종으로 AI 에이전트에 pull형 분석 채널 제공 | 17절 |
 | 확장 6 | Oracle·MongoDB 추가 — 5기종. "새 기종 = 구현체 1개" 실측(플랫폼 코드 0줄), 비 JDBC 증명 | 18절 |
+| A1 | 인증·인가 — 세션 로그인(BCrypt)+Bearer 토큰, VIEWER/ADMIN, CSRF 쿠키 패턴, fail-closed | 19절 |
+| 모듈리스 | Spring Modulith — 모듈 8개 경계를 빌드가 강제, 도입 시 순환 2개 발견·의존 역전으로 해소 | 20절 |
 
 ## 완료 (2차 — 품질·문서)
 

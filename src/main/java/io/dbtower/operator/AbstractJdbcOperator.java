@@ -1,6 +1,7 @@
 package io.dbtower.operator;
 
 import io.dbtower.registry.DatabaseInstance;
+import io.dbtower.registry.HealthStatus;
 
 import java.sql.Connection;
 import java.sql.ResultSet;

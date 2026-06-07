@@ -1,4 +1,4 @@
-package io.dbtower.alert;
+package io.dbtower.analysis;
 
 import com.anthropic.client.AnthropicClient;
 import com.anthropic.client.okhttp.AnthropicOkHttpClient;

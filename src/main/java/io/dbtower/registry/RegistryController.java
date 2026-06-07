@@ -1,6 +1,5 @@
 package io.dbtower.registry;
 
-import io.dbtower.operator.HealthStatus;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;

@@ -1,9 +1,5 @@
 package io.dbtower.registry;
 
-import io.dbtower.operator.ConnectionPools;
-import io.dbtower.operator.DbmsOperatorFactory;
-import io.dbtower.operator.MongoClientCache;
-import io.dbtower.operator.HealthStatus;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -13,21 +9,16 @@ import java.util.List;
 public class RegistryService {
 
     private final DatabaseInstanceRepository repository;
-    private final DbmsOperatorFactory operatorFactory;
-    private final ConnectionPools pools;
-    private final MongoClientCache mongoClients;
+    private final InstanceOperations operations;
 
-    public RegistryService(DatabaseInstanceRepository repository, DbmsOperatorFactory operatorFactory,
-                           ConnectionPools pools, MongoClientCache mongoClients) {
+    public RegistryService(DatabaseInstanceRepository repository, InstanceOperations operations) {
         this.repository = repository;
-        this.operatorFactory = operatorFactory;
-        this.pools = pools;
-        this.mongoClients = mongoClients;
+        this.operations = operations;
     }
 
     /** 등록 전에 실제로 붙어보고, 붙지 않으면 등록을 거부한다 — 죽은 인스턴스가 레지스트리에 쌓이는 것 방지 */
     public DatabaseInstance register(DatabaseInstance instance) {
-        HealthStatus health = operatorFactory.create(instance).health();
+        HealthStatus health = operations.health(instance);
         if (!health.up()) {
             throw new IllegalArgumentException("접속 실패로 등록 거부: " + health.message());
         }
@@ -44,12 +35,11 @@ public class RegistryService {
     }
 
     public HealthStatus health(Long id) {
-        return operatorFactory.create(findById(id)).health();
+        return operations.health(findById(id));
     }
 
     public void delete(Long id) {
         repository.deleteById(id);
-        pools.close(id); // 풀 정리 — 안 하면 삭제된 대상의 커넥션이 남는다
-        mongoClients.close(id);
+        operations.release(id);
     }
 }

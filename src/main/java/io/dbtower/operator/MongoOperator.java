@@ -8,6 +8,7 @@ import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import io.dbtower.registry.DatabaseInstance;
+import io.dbtower.registry.HealthStatus;
 import org.bson.Document;
 import org.bson.json.JsonWriterSettings;
 

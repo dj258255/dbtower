@@ -1,5 +1,7 @@
 package io.dbtower.operator;
 
+import io.dbtower.registry.HealthStatus;
+
 import java.util.List;
 
 /**

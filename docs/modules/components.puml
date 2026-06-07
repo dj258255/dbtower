@@ -1,0 +1,46 @@
+@startuml
+title <size:24>DbtowerApplication</size>
+
+set separator none
+top to bottom direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Component>
+
+System_Boundary("DbtowerApplication_boundary", "DbtowerApplication", $tags="") {
+  Container_Boundary("DbtowerApplication.DbtowerApplication_boundary", "DbtowerApplication", $tags="") {
+    Component(DbtowerApplication.DbtowerApplication.Alert, "Alert", $techn="Module", $descr="", $tags="", $link="")
+    Component(DbtowerApplication.DbtowerApplication.Registry, "Registry", $techn="Module", $descr="", $tags="", $link="")
+    Component(DbtowerApplication.DbtowerApplication.Security, "Security", $techn="Module", $descr="", $tags="", $link="")
+    Component(DbtowerApplication.DbtowerApplication.Analysis, "Analysis", $techn="Module", $descr="", $tags="", $link="")
+    Component(DbtowerApplication.DbtowerApplication.Mcp, "Mcp", $techn="Module", $descr="", $tags="", $link="")
+    Component(DbtowerApplication.DbtowerApplication.Operator, "Operator", $techn="Module", $descr="", $tags="", $link="")
+    Component(DbtowerApplication.DbtowerApplication.Backup, "Backup", $techn="Module", $descr="", $tags="", $link="")
+    Component(DbtowerApplication.DbtowerApplication.Insight, "Insight", $techn="Module", $descr="", $tags="", $link="")
+  }
+
+}
+
+Rel(DbtowerApplication.DbtowerApplication.Insight, DbtowerApplication.DbtowerApplication.Registry, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Insight, DbtowerApplication.DbtowerApplication.Operator, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Insight, DbtowerApplication.DbtowerApplication.Analysis, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Operator, DbtowerApplication.DbtowerApplication.Registry, "depends on", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Alert, DbtowerApplication.DbtowerApplication.Registry, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Alert, DbtowerApplication.DbtowerApplication.Insight, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Alert, DbtowerApplication.DbtowerApplication.Analysis, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Backup, DbtowerApplication.DbtowerApplication.Registry, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Backup, DbtowerApplication.DbtowerApplication.Operator, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Mcp, DbtowerApplication.DbtowerApplication.Security, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Analysis, DbtowerApplication.DbtowerApplication.Registry, "depends on", $techn="", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml

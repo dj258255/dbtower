@@ -1,5 +1,6 @@
 package io.dbtower.alert;
 
+import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.QueryDiff;
 import io.dbtower.registry.DatabaseInstance;

@@ -1,6 +1,6 @@
 package io.dbtower.insight;
 
-import io.dbtower.alert.AiAnalyzer;
+import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.RuleBasedAnalyzer;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.QueryStat;

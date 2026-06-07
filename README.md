@@ -97,6 +97,13 @@ DB 접속정보를 다루는 관리 도구라 인증 없이는 운영에 못 들
 
 ![로그인 — 최초 기동 admin 부트스트랩 안내](docs/images/webui/07-login.png)
 
+## 아키텍처 경계는 빌드가 지킨다 (Spring Modulith)
+
+패키지 = 모듈(8개: registry·operator·insight·alert·analysis·backup·mcp·security)로 선언하고,
+모듈 간 순환 의존을 테스트(ModularityTests)가 빌드에서 실패시킵니다. 도입 첫 실행에서
+실제로 순환 2개(registry<->operator, insight<->alert)를 잡아 의존 역전으로 해소했습니다 —
+과정은 [VERIFICATION 20절](docs/VERIFICATION.md), 모듈 다이어그램은 [docs/modules/](docs/modules/).
+
 ## 기존 모니터링 스택과의 관계
 
 exporter + Prometheus + Grafana(또는 Telegraf + InfluxDB + Grafana)는 이미 검증된

@@ -1,0 +1,35 @@
+== DbtowerApplication
+plantuml::components.puml[,,format=svg]
+
+== Registry
+plantuml::module-registry.puml[,,format=svg]
+include::module-registry.adoc[]
+
+== Security
+plantuml::module-security.puml[,,format=svg]
+include::module-security.adoc[]
+
+== Analysis
+plantuml::module-analysis.puml[,,format=svg]
+include::module-analysis.adoc[]
+
+== Mcp
+plantuml::module-mcp.puml[,,format=svg]
+include::module-mcp.adoc[]
+
+== Operator
+plantuml::module-operator.puml[,,format=svg]
+include::module-operator.adoc[]
+
+== Backup
+plantuml::module-backup.puml[,,format=svg]
+include::module-backup.adoc[]
+
+== Insight
+plantuml::module-insight.puml[,,format=svg]
+include::module-insight.adoc[]
+
+== Alert
+plantuml::module-alert.puml[,,format=svg]
+include::module-alert.adoc[]
+

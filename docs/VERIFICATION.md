@@ -672,3 +672,36 @@ stdio 방식은 별도 프로세스라 DBTOWER_API_TOKEN 환경변수를 앱과 
   MockMvc의 연결(@WithMockUser)도 spring-boot-starter-security-test라는 전용 스타터가 맡는다.
 
 보안 테스트 10건(SecurityConfigTest)으로 인가 표를 코드로 고정 — 총 41건 전부 통과, CI 그린.
+
+## 20. Spring Modulith — "경계는 문서가 아니라 빌드가 지킨다"
+
+### 20-1. 왜
+
+"기종 분기는 팩토리 한 곳", "플랫폼 코드는 인터페이스만 안다"는 주장을 계속 문서에 써 왔다.
+그런데 문서 속 아키텍처는 강제력이 없다 — 커밋 하나가 조용히 무너뜨려도 아무도 모른다.
+Spring Modulith를 도입해 패키지 = 모듈로 선언하고, 모듈 간 순환 의존을 테스트가
+빌드에서 실패시키게 했다 (ModularityTests, CI에 포함).
+
+### 20-2. 도입하자마자 순환 2개를 잡혔다
+
+verify() 첫 실행이 바로 실패했다 — 좋은 실패다. 문서로는 깨끗하다고 믿었던 구조에
+순환이 실재했다는 뜻이니까.
+
+**registry <-> operator**: RegistryService가 등록 검증·풀 정리를 위해
+DbmsOperatorFactory/ConnectionPools를 직접 사용 -> registry가 operator에 의존,
+동시에 모든 Operator가 registry의 DatabaseInstance를 사용 -> 순환.
+해소: 의존 역전 — registry가 필요로 하는 최소 능력을 registry 소유 인터페이스
+(InstanceOperations: health/release)로 선언하고 operator가 구현. HealthStatus 레코드도
+"연결 상태"라는 의미상 registry로 이동. 방향은 operator -> registry 한쪽만 남았다.
+
+**insight <-> alert**: InsightController가 alert.AiAnalyzer를 쓰고, alert.RegressionDetector가
+insight.ComparisonService를 쓰는 순환. 해소: AiAnalyzer는 애초에 "판정"이므로
+analysis 모듈로 이동 — insight/alert 둘 다 analysis를 바라보는 한 방향 구조가 됐다.
+
+### 20-3. 결과 (2026-07-04 실측)
+
+- 모듈 8개 인식: registry / operator / insight / alert / analysis / backup / mcp / security
+- ModularityTests 2건 통과 (경계 검증 + C4 다이어그램 생성 -> docs/modules/)
+- 전체 테스트 43건 통과, 리팩터 후 스모크: 5기종 health 정상,
+  죽은 인스턴스 등록 시 DIP 경유 검증이 "접속 실패로 등록 거부" 응답 — 동작 동일
+- 이제 누군가 registry에서 operator를 import하는 순간 CI가 빨간불이 된다
