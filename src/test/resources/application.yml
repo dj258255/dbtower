@@ -12,6 +12,7 @@ spring:
 dbtower:
   snapshot:
     interval-ms: 3600000   # 테스트 중 폴러가 돌지 않게 사실상 정지
+    retention-sweep-ms: 3600000
   regression:
     poll-ms: 3600000
   backup:
