@@ -1,5 +1,6 @@
 package io.dbtower.registry;
 
+import io.dbtower.security.EncryptedStringConverter;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
@@ -32,7 +33,11 @@ public class DatabaseInstance {
     @Column(nullable = false)
     private String username;
 
-    /** 토이 단계라 평문 저장. 운영이라면 Vault/KMS 등 시크릿 관리로 대체해야 한다. */
+    /**
+     * AES-256-GCM으로 암호화 저장(키 미설정 시 평문 — SecretCipher 참고).
+     * 접두사 디스패치("enc:v1:") 덕에 암호화 도입 전 평문 행도 그대로 읽힌다.
+     */
+    @Convert(converter = EncryptedStringConverter.class)
     @Column(nullable = false)
     private String password;
 

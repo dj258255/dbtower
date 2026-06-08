@@ -47,6 +47,9 @@ dbtower:
     # viewer(조회·진단 전용)는 비밀번호를 준 경우에만 생성
     admin-password: ${DBTOWER_ADMIN_PASSWORD:}
     viewer-password: ${DBTOWER_VIEWER_PASSWORD:}
+    # 인스턴스 비밀번호 암호화 키 — base64 인코딩 32바이트 (생성: openssl rand -base64 32).
+    # 미설정이면 평문 저장으로 기동하되 WARN 로그로 경고 (fail-open 근거는 SecretCipher 주석)
+    encryption-key: ${DBTOWER_ENCRYPTION_KEY:}
     rules-path: docs/ai-analysis-rules.md
 # 웹훅 URL은 비밀값 — 환경변수 DBTOWER_WEBHOOK_URL로만 주입 (Discord/Slack 자동 판별)
 
