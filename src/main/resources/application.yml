@@ -12,8 +12,15 @@ spring:
     password: ${DBTOWER_DB_PASSWORD:dbtower1234}
   jpa:
     hibernate:
-      ddl-auto: update
+      # 스키마의 단일 권위는 Flyway(db/migration) — Hibernate는 만들지 않고 검증만 한다.
+      # update는 기존 CHECK 제약을 갱신하지 않아 enum 확장 때 등록이 500으로 막혔다(VERIFICATION.md 18-3).
+      # validate라 마이그레이션과 엔티티가 어긋나면 부팅이 실패한다 — 어긋남을 런타임이 아니라 기동 시점에 잡는다.
+      ddl-auto: validate
     open-in-view: false
+  flyway:
+    # 이미 테이블·데이터가 있는 DB에 Flyway를 도입할 때의 표준 절차 —
+    # 기존 스키마를 V1(베이스라인)으로 표시만 하고 건너뛴다(비파괴). 빈 DB에는 V1부터 전부 실행된다.
+    baseline-on-migrate: true
 
 server:
   port: 8080
