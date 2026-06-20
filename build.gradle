@@ -26,6 +26,11 @@ dependencies {
 	implementation 'com.anthropic:anthropic-java:2.34.0'
 	implementation 'org.mongodb:mongodb-driver-sync'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	// 스키마의 단일 권위를 Hibernate(ddl-auto)에서 마이그레이션 도구로 이관 (Phase A3).
+	// Boot 4는 자동구성이 모듈로 분리돼 flyway-core만 넣으면 아무 일도 안 일어난다(부팅은 되지만 미적용) —
+	// starter가 flyway-core + 자동구성을 묶고, PostgreSQL 지원 모듈은 별도. 버전은 Boot BOM이 관리.
+	implementation 'org.springframework.boot:spring-boot-starter-flyway'
+	implementation 'org.flywaydb:flyway-database-postgresql'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
