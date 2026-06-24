@@ -705,3 +705,60 @@ analysis 모듈로 이동 — insight/alert 둘 다 analysis를 바라보는 한
 - 전체 테스트 43건 통과, 리팩터 후 스모크: 5기종 health 정상,
   죽은 인스턴스 등록 시 DIP 경유 검증이 "접속 실패로 등록 거부" 응답 — 동작 동일
 - 이제 누군가 registry에서 operator를 import하는 순간 CI가 빨간불이 된다
+
+## 21. Phase A2 — 인스턴스 비밀번호 암호화: 평문 저장이라는 한계를 닫다
+
+한계: 등록된 인스턴스의 비밀번호가 메타 DB에 평문으로 저장됐다 — 메타 DB가 유출되면
+관리 대상 DB 전체의 열쇠가 함께 유출되는 구조.
+
+설계:
+- AES-256-GCM (랜덤 IV 12바이트를 암호문 앞에 결합, 태그 128비트), 키는 DBTOWER_ENCRYPTION_KEY(base64 32바이트)
+- JPA AttributeConverter + `enc:v1:` 접두사 디스패치 — 기존 평문 행은 마이그레이션 없이 읽히고
+  다음 저장 때 자연 재암호화. v1은 향후 키·알고리즘 교체 대비
+- 키 정책의 비대칭: API 토큰은 미설정 시 랜덤 생성(fail-closed)이지만, 암호화 키는 랜덤 생성이
+  오히려 위험하다 — 재기동하면 기존 암호문을 영영 못 푼다. 그래서 미설정=WARN+평문(과도기),
+  잘못된 키=기동 거부, 키 없이 암호문 조우=예외. "조용히 평문으로 새는" 경로는 없다
+
+실측 (2026-07-04):
+```
+기존 평문 행:   id 1(MySQL)·7(Mongo)·8(Oracle) health 전부 up — 하위 호환 확인
+신규 등록:      raw 컬럼 = enc:v1:PflkG...  (psql로 직접 확인)
+복호화 경로:    암호문 저장 상태에서 health up (MongoDB 7.0.37)
+테스트:         SecretCipher 8건(변조 시 복호 실패 포함) + Converter 6건 + JPA 통합 2건
+```
+
+## 22. Phase A3 — Flyway: 18-3절에서 밟은 함정의 정식 해결
+
+한계(18-3절에서 실측): ddl-auto=update는 기존 CHECK 제약을 갱신하지 않아 기종 추가가
+수동 ALTER가 됐다. 스키마의 단일 권위를 마이그레이션으로 이관한다.
+
+- V1__baseline.sql: 테이블 5개(database_instance 5기종 CHECK, query_snapshot 복합 인덱스,
+  backup_policy_entity, backup_run, platform_user) — 엔티티 소스 + 라이브 스키마 \d 대조로 작성
+- ddl-auto update -> validate: 이제 엔티티-스키마 불일치는 조용한 드리프트가 아니라 부팅 실패다
+- 기존 DB는 baseline-on-migrate로 비파괴 도입 — instances 6·snapshots 46,711 무손상 실측,
+  빈 스크래치 DB에서는 V1이 실제 실행되어 기동까지 검증
+
+**Boot 4 함정 (실측으로 발견)**: flyway-database-postgresql 의존성만 넣으면 부팅은 되는데
+Flyway가 조용히 실행되지 않는다 — 로그 0건, history 테이블 없음. Boot 4의 자동구성
+모듈화로 spring-boot-starter-flyway가 따로 필요하다. "조용한 미실행"이 가장 나쁜 실패
+양식이라는 점에서 digest 절단(10절)과 같은 계열의 함정.
+
+## 23. Phase A4 — 스냅샷 보존 정책: 무한 적재를 닫다
+
+한계: 60초 주기 스냅샷이 무한 적재됐다 (이 시점 실측 50,960행/이틀 — 방치하면 메타 DB가
+플랫폼의 병목이 된다). 선례: AWS Performance Insights 기본 보존 7일.
+
+- SnapshotRetentionJob: 1시간 주기, cutoff(기본 7일) 이전을 JPQL 벌크 DELETE 한 문장으로 —
+  대상 행을 영속성 컨텍스트에 올리지 않는다 (수십만 행 로딩 금지)
+- @Modifying(clearAutomatically=true)로 벌크 우회에 따른 1차 캐시 불일치 차단
+- retention-days <= 0 = 보존 무제한 스위치
+- H2 통합 테스트: cutoff 이전 2행만 삭제, 이후 2행 보존 — 경계 정확성 고정
+
+## 24. 병렬 개발 방식 기록 — 아크 3개를 worktree로 동시에
+
+A2·A3·A4는 서로 다른 모듈(security/설정/insight)이라 병렬 가능했다. 각 아크를
+git worktree + 브랜치(arc/*)로 격리해 동시에 구현하고, 순차 병합 후 통합 검증했다:
+- 병합 순서 A4 -> A2 -> A3 (스키마 권위를 바꾸는 Flyway를 마지막에)
+- application.yml은 셋 다 수정했지만 서로 다른 블록이라 자동 병합
+- 병합마다 전체 테스트, 최종 통합 상태에서 라이브 E2E (21~23절의 실측이 그 결과)
+- 테스트 65건 전부 통과 (31 -> 43 -> 65: 보안 10 + 모듈 2 + 암호화 16 + 보존 6)
