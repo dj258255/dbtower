@@ -127,6 +127,14 @@ public final class McpProtocolHandler {
                 args -> post("/api/instances/" + args.get("instanceId").asLong() + "/explain",
                         mapper.createObjectNode().put("sql", args.get("sql").asText()).toString())));
 
+        tools.put("wait_events", new Tool(
+                "상위 대기 이벤트 — 그 시간에 무엇을 기다렸나(CPU/IO/Lock). MySQL/MSSQL/Oracle은 기동 이후 누적, "
+                        + "PostgreSQL은 현재 활성 세션 스냅샷, MongoDB는 대기 큐/티켓 게이지. query_stats(누가 시간을 쓰나)와 함께 본다.",
+                schema(Map.of("instanceId", intProp("대상 인스턴스 id"),
+                        "limit", intProp("최대 개수 (기본 20)"))),
+                args -> get("/api/instances/" + args.get("instanceId").asLong()
+                        + "/wait-events?limit=" + optInt(args, "limit", 20))));
+
         tools.put("replication", new Tool(
                 "복제 상태 통합 뷰 — role, 지연 초, 상세. SHOW REPLICA STATUS / pg_stat_replication / AlwaysOn DMV를 하나의 모델로.",
                 schema(Map.of("instanceId", intProp("대상 인스턴스 id"))),

@@ -44,7 +44,7 @@ class McpProtocolHandlerTest {
     }
 
     @Test
-    void 도구_8종이_이름과_입력_스키마를_갖고_노출된다() throws Exception {
+    void 도구_9종이_이름과_입력_스키마를_갖고_노출된다() throws Exception {
         ObjectNode response = handler.handle(parse(
                 "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}"));
 
@@ -57,8 +57,8 @@ class McpProtocolHandlerTest {
         });
         assertTrue(names.containsAll(List.of(
                 "list_instances", "health", "query_stats", "slow_queries",
-                "compare", "activity", "explain", "replication")));
-        assertEquals(8, names.size());
+                "compare", "activity", "explain", "wait_events", "replication")));
+        assertEquals(9, names.size());
     }
 
     @Test

@@ -151,6 +151,77 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         return result;
     }
 
+    /**
+     * 대기 이벤트 — sys.dm_os_wait_stats (서버 기동 이후 누적).
+     *
+     * 이 DMV는 백그라운드 스레드가 "일이 올 때까지 자는" 시간까지 전부 기록해서, 필터 없이는
+     * SLEEP/BROKER/DISPATCHER류가 상위를 도배한다(실측: SOS_WORK_DISPATCHER 하나가 8억 ms).
+     * 그래서 무해한 idle/백그라운드 대기를 제외하는 것이 정석이며, 아래 목록은 SQL Server
+     * 커뮤니티에서 널리 쓰이는 벤치마크 필터(Paul Randal의 wait stats 스크립트 계열)에서
+     * 이 환경에 실제로 나타난 것을 중심으로 추린 것이다. 각 항목은 "요청을 처리하느라 기다린
+     * 시간"이 아니라 "할 일이 없어 기다린 시간"이라 성능 신호가 아니다.
+     */
+    @Override
+    public List<WaitEvent> waitEvents(int limit) {
+        String sql = """
+                SELECT TOP (?)
+                       wait_type,
+                       waiting_tasks_count,
+                       wait_time_ms
+                FROM sys.dm_os_wait_stats
+                WHERE waiting_tasks_count > 0
+                  AND wait_type NOT IN (
+                      'LAZYWRITER_SLEEP', 'LOGMGR_QUEUE', 'CHECKPOINT_QUEUE', 'CHKPT',
+                      'REQUEST_FOR_DEADLOCK_SEARCH', 'WAITFOR', 'DIRTY_PAGE_POLL',
+                      'SP_SERVER_DIAGNOSTICS_SLEEP', 'SQLTRACE_INCREMENTAL_FLUSH_SLEEP',
+                      'SOS_WORK_DISPATCHER', 'DISPATCHER_QUEUE_SEMAPHORE',
+                      'STARTUP_DEPENDENCY_MANAGER', 'FT_IFTS_SCHEDULER_IDLE_WAIT',
+                      'AZURE_IMDS_VERSIONS', 'WAIT_XTP_HOST_WAIT')
+                  AND wait_type NOT LIKE 'SLEEP[_]%'    -- 스케줄된 잠자기 (SLEEP_TASK, SLEEP_SYSTEMTASK 등)
+                  AND wait_type NOT LIKE 'CLR[_]%'      -- CLR 호스트 백그라운드 이벤트 대기
+                  AND wait_type NOT LIKE 'BROKER%'      -- Service Broker 대기 큐 (미사용 시도 항상 대기)
+                  AND wait_type NOT LIKE 'XE[_]%'       -- Extended Events 세션의 자체 타이머
+                  AND wait_type NOT LIKE 'QDS[_]%'      -- Query Store 백그라운드 플러시 루프
+                  AND wait_type NOT LIKE 'HADR[_]%'     -- AlwaysOn 백그라운드 (AG 미구성이어도 발생)
+                  AND wait_type NOT LIKE 'PWAIT[_]%'    -- 내부 preemptive 백그라운드 태스크
+                  AND wait_type NOT LIKE 'PREEMPTIVE[_]%' -- OS 호출 구간 (쿼리 대기 아님)
+                  AND wait_type NOT LIKE 'PARALLEL_REDO[_]%'
+                ORDER BY wait_time_ms DESC
+                """;
+        List<WaitEvent> result = new ArrayList<>();
+        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String waitType = rs.getString("wait_type");
+                    result.add(new WaitEvent(waitType, msSqlWaitCategory(waitType),
+                            rs.getLong("waiting_tasks_count"), rs.getDouble("wait_time_ms")));
+                }
+            }
+        } catch (SQLException e) {
+            throw new OperatorException("MSSQL 대기 이벤트 조회 실패: " + e.getMessage(), e);
+        }
+        return result;
+    }
+
+    /**
+     * dm_os_wait_stats에는 Oracle의 wait_class 같은 분류 컬럼이 없어서 접두어 관례로 분류한다.
+     * DBA가 화면에서 "이건 IO 문제, 저건 Lock 문제"를 한눈에 가르는 용도 — 정밀 분류가 아니다.
+     */
+    private static String msSqlWaitCategory(String waitType) {
+        if (waitType.startsWith("LCK_")) return "Lock";
+        if (waitType.startsWith("PAGEIOLATCH_") || waitType.startsWith("IO_")
+                || waitType.startsWith("WRITELOG") || waitType.startsWith("ASYNC_IO")
+                || waitType.startsWith("BACKUPIO")) return "IO";
+        if (waitType.startsWith("PAGELATCH_") || waitType.startsWith("LATCH_")) return "Latch";
+        if (waitType.startsWith("SOS_SCHEDULER_YIELD") || waitType.startsWith("CXPACKET")
+                || waitType.startsWith("CXCONSUMER") || waitType.startsWith("THREADPOOL")) return "CPU";
+        if (waitType.startsWith("RESOURCE_SEMAPHORE") || waitType.startsWith("MEMORY_")
+                || waitType.startsWith("CMEMTHREAD")) return "Memory";
+        if (waitType.startsWith("ASYNC_NETWORK_IO")) return "Network";
+        return "Other";
+    }
+
     /** 복제 상태 — AlwaysOn 가용성 그룹의 DMV. AG 미구성 단독 인스턴스면 행이 없다 */
     @Override
     public ReplicationState replicationState() {

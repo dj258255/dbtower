@@ -156,6 +156,49 @@ public class PostgresOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 대기 이벤트 — pg_stat_activity의 활성 세션 스냅샷 집계. 다른 기종의 누적 카운터와 달리
+     * "지금 이 순간" 각 세션이 무엇을 기다리는지다 (count=세션 수, totalMs=0 — 시간 누적 없음).
+     *
+     * 한계: 순간 스냅샷이라 짧은 대기는 잡히지 않는다. 누적 대기 통계를 원하면 pg_wait_sampling
+     * 확장이 정석인데 stock 이미지에는 없다 — 확장 경로는 shared_preload_libraries에
+     * pg_wait_sampling을 추가하고 pg_wait_sampling_profile을 읽는 것. (여기서는 설치를 강제하지
+     * 않고 어떤 환경에서도 동작하는 스냅샷 방식을 쓴다)
+     *
+     * wait_event IS NULL인 활성 세션은 대기가 아니라 실제로 실행 중 — "CPU"로 표기한다.
+     */
+    @Override
+    public List<WaitEvent> waitEvents(int limit) {
+        // 자기 자신(이 조회 세션)은 항상 active라 노이즈 — pg_backend_pid()로 제외
+        String sql = """
+                SELECT COALESCE(wait_event, 'CPU (대기 아님)') AS event,
+                       COALESCE(wait_event_type, 'CPU') AS category,
+                       COUNT(*) AS sessions
+                FROM pg_stat_activity
+                WHERE state = 'active'
+                  AND pid <> pg_backend_pid()
+                GROUP BY 1, 2
+                ORDER BY sessions DESC
+                LIMIT ?
+                """;
+        List<WaitEvent> result = new ArrayList<>();
+        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new WaitEvent(
+                            rs.getString("event"),
+                            rs.getString("category"),
+                            rs.getLong("sessions"),
+                            0)); // 스냅샷 방식이라 대기시간 누적이 없다
+                }
+            }
+        } catch (SQLException e) {
+            throw new OperatorException("PostgreSQL 대기 이벤트 조회 실패: " + e.getMessage(), e);
+        }
+        return result;
+    }
+
+    /**
      * 복제 상태 — pg_is_in_recovery()면 레플리카(재생 지연 = now - 마지막 재생 시각),
      * 아니면 pg_stat_replication의 연결 수로 프라이머리/단독을 구분한다.
      */

@@ -213,6 +213,62 @@ public class MongoOperator implements DbmsOperator {
                 BackupCommands.yamlEntry("password", instance.getPassword()));
     }
 
+    /**
+     * 대기 지표 — MongoDB에는 다른 기종의 wait event에 해당하는 이벤트별 대기 통계가 없다.
+     * 대신 serverStatus가 주는 "지금 얼마나 줄 서 있나"를 WaitEvent 형태로 매핑한다:
+     *
+     * - globalLock.currentQueue.readers/writers: 글로벌 락 큐에서 대기 중인 연산 수 (현재 순간)
+     * - wiredTiger.concurrentTransactions.read/write의 out/available: WiredTiger 동시 실행
+     *   티켓의 사용/잔여 수 (현재 순간). available이 0이면 새 연산이 티켓을 기다린다 — RDBMS의
+     *   커넥션 풀 고갈에 해당하는 병목 신호.
+     *
+     * 즉 "무엇을 얼마나 기다렸나"(누적)가 아니라 "지금 어디에 줄이 생겼나"(게이지)다.
+     * category(QUEUE/TICKET)로 이 차이를 드러내고, totalMs는 시간 정보가 없어 0으로 둔다.
+     * 참고: MongoDB 8.0대에서는 concurrentTransactions가 queues.execution으로 이동했다 —
+     * 필드가 없으면 큐 지표만 돌려준다 (7.0 컨테이너에서는 존재를 실측 확인, 2026-07-04).
+     */
+    @Override
+    public List<WaitEvent> waitEvents(int limit) {
+        try {
+            return withClient(client -> {
+                Document status = client.getDatabase("admin")
+                        .runCommand(new Document("serverStatus", 1));
+                List<WaitEvent> result = new ArrayList<>();
+
+                Document queue = section(section(status, "globalLock"), "currentQueue");
+                result.add(new WaitEvent("globalLock.currentQueue.readers", "QUEUE(현재 대기 수)",
+                        asLong(queue.get("readers")), 0));
+                result.add(new WaitEvent("globalLock.currentQueue.writers", "QUEUE(현재 대기 수)",
+                        asLong(queue.get("writers")), 0));
+
+                Document tickets = section(section(status, "wiredTiger"), "concurrentTransactions");
+                for (String mode : List.of("read", "write")) {
+                    Document t = section(tickets, mode);
+                    if (t.isEmpty()) {
+                        continue;
+                    }
+                    result.add(new WaitEvent("wiredTiger.concurrentTransactions." + mode + ".out",
+                            "TICKET(사용 중)", asLong(t.get("out")), 0));
+                    result.add(new WaitEvent("wiredTiger.concurrentTransactions." + mode + ".available",
+                            "TICKET(잔여)", asLong(t.get("available")), 0));
+                }
+                return result.size() > limit ? result.subList(0, limit) : result;
+            });
+        } catch (Exception e) {
+            throw new OperatorException("MongoDB 대기 지표 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /** 중첩 Document를 null 안전하게 꺼낸다 — 버전에 따라 없는 섹션은 빈 Document로 */
+    private static Document section(Document parent, String key) {
+        Document child = parent == null ? null : parent.get(key, Document.class);
+        return child == null ? new Document() : child;
+    }
+
+    private static long asLong(Object value) {
+        return value instanceof Number n ? n.longValue() : 0L;
+    }
+
     @Override
     public ReplicationState replicationState() {
         try {

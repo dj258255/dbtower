@@ -101,7 +101,7 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
-  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication()]);
+  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents()]);
 }
 
 // ---------- 활동 그래프 (드래그 구간 선택) ----------
@@ -422,6 +422,27 @@ async function loadReplication() {
     $("#replication-box").textContent =
       `role: ${r.role}\nlagSeconds: ${r.lagSeconds}\n${r.detail ?? ""}`;
   } catch (e) { $("#replication-box").textContent = `조회 실패: ${e.message}`; }
+}
+
+// Wait Events — 기종별 의미가 다르다(누적/순간 스냅샷/큐 게이지). 시간 정보가 없는 소스는
+// totalMs=0으로 오므로 "-"로 표시해 "0ms 기다렸다"로 오독되지 않게 한다.
+async function loadWaitEvents() {
+  const table = $("#wait-table");
+  table.querySelector("thead").innerHTML = `
+    <tr><th>Category</th><th>Event</th><th class="num">Count</th><th class="num">Total(ms)</th></tr>`;
+  try {
+    const rows = await api(`/api/instances/${state.instance.id}/wait-events?limit=20`);
+    table.querySelector("tbody").innerHTML = rows.length ? rows.map((w) => `
+      <tr>
+        <td>${esc(w.category)}</td>
+        <td class="qtext" title="${esc(w.event)}">${esc(w.event)}</td>
+        <td class="num">${fmtNum(w.count, 0)}</td>
+        <td class="num">${w.totalMs > 0 ? fmtNum(w.totalMs) : "-"}</td>
+      </tr>`).join("") : '<tr><td colspan="4" class="muted">대기 이벤트가 없습니다.</td></tr>';
+  } catch (e) {
+    table.querySelector("tbody").innerHTML =
+      `<tr><td colspan="4" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+  }
 }
 
 // ---------- 탭/프리셋/초기화 ----------
