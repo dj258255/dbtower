@@ -64,6 +64,7 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         .requestMatchers("/mcp").hasRole("ADMIN")
                         .requestMatchers("/api/security/**").hasRole("ADMIN")
+                        .requestMatchers("/api/audit/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/instances").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/instances/*").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/instances/*/backup").hasRole("ADMIN")
