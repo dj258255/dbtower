@@ -33,4 +33,10 @@ public interface DbmsOperator {
 
     /** 복제 토폴로지 상태 (확장2) */
     ReplicationState replicationState();
+
+    /**
+     * 상위 대기 이벤트 (B1) — "그 시간에 무엇을 기다렸나"(CPU/IO/Lock).
+     * 기종별 의미 차이(누적 vs 순간 스냅샷 vs 큐 지표)는 WaitEvent 주석 참고.
+     */
+    List<WaitEvent> waitEvents(int limit);
 }

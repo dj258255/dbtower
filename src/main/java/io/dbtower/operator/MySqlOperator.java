@@ -151,6 +151,61 @@ public class MySqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * 대기 이벤트 — performance_schema.events_waits_summary_global_by_event_name (서버 기동 이후 누적).
+     *
+     * 보이는 범위는 setup_instruments에 달려 있다: 기본값은 wait/io·wait/lock만 켜져 있고
+     * wait/synch(뮤텍스·rwlock 342종)는 꺼져 있다 — 대상 컨테이너에서 실측 확인(2026-07-04).
+     * 그래서 이 결과는 "IO/Lock 중심의 부분 뷰"이며, 그 사실을 응답에 안내 행으로 정직하게 싣는다.
+     * UPDATE performance_schema.setup_instruments로 동적 활성이 가능하지만 그것은 대상 DB의
+     * 설정 변경이다 — 관제 도구는 읽기만 한다는 원칙(AGENTS.md)에 따라 여기서는 하지 않는다.
+     */
+    @Override
+    public List<WaitEvent> waitEvents(int limit) {
+        // TIMER_WAIT 계열은 피코초 단위 -> 1e9로 나눠 ms. idle은 클라이언트가 안 보내고 노는 시간이라 제외
+        String sql = """
+                SELECT EVENT_NAME, COUNT_STAR,
+                       SUM_TIMER_WAIT / 1000000000 AS total_ms
+                FROM performance_schema.events_waits_summary_global_by_event_name
+                WHERE COUNT_STAR > 0
+                  AND EVENT_NAME <> 'idle'
+                ORDER BY SUM_TIMER_WAIT DESC
+                LIMIT ?
+                """;
+        List<WaitEvent> result = new ArrayList<>();
+        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String name = rs.getString("EVENT_NAME");
+                    result.add(new WaitEvent(name, mysqlWaitCategory(name),
+                            rs.getLong("COUNT_STAR"), rs.getDouble("total_ms")));
+                }
+            }
+            // 꺼진 instrument 계열 수를 세서 "부분 뷰"임을 데이터로 알린다 — 없는 대기를 없다고 오독하지 않게
+            try (PreparedStatement ps2 = conn.prepareStatement(
+                    "SELECT COUNT(*) FROM performance_schema.setup_instruments "
+                            + "WHERE NAME LIKE 'wait/%' AND ENABLED = 'NO'");
+                 ResultSet rs2 = ps2.executeQuery()) {
+                if (rs2.next() && rs2.getLong(1) > 0) {
+                    result.add(new WaitEvent(
+                            "(안내) 비활성 wait instrument " + rs2.getLong(1)
+                                    + "종은 집계에 없음 — setup_instruments 기본값 기준의 부분 뷰",
+                            "INFO", 0, 0));
+                }
+            }
+        } catch (SQLException e) {
+            throw new OperatorException("MySQL 대기 이벤트 조회 실패: " + e.getMessage(), e);
+        }
+        return result;
+    }
+
+    /** 이벤트 이름의 둘째 구획이 곧 분류다 — wait/io/file/... -> io, wait/lock/table/... -> lock */
+    private static String mysqlWaitCategory(String eventName) {
+        String[] parts = eventName.split("/");
+        return parts.length >= 2 ? parts[1] : eventName;
+    }
+
     /** 복제 상태 — 레플리카면 SHOW REPLICA STATUS에 행이 있고, Seconds_Behind_Source가 지연이다 */
     @Override
     public ReplicationState replicationState() {

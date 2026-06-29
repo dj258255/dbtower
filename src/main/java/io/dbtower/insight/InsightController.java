@@ -67,6 +67,16 @@ public class InsightController {
         return operatorFactory.create(registryService.findById(id)).replicationState();
     }
 
+    /**
+     * 대기 이벤트 (B1) — load%가 "누가 시간을 쓰나"라면 이것은 "그 시간에 무엇을 기다렸나".
+     * 기종별 의미 차이(누적/순간 스냅샷/큐 지표)는 WaitEvent record 주석 참고.
+     */
+    @GetMapping("/wait-events")
+    public List<io.dbtower.operator.WaitEvent> waitEvents(@PathVariable Long id,
+                                                          @RequestParam(defaultValue = "20") int limit) {
+        return operatorFactory.create(registryService.findById(id)).waitEvents(limit);
+    }
+
     @GetMapping("/slow-queries")
     public List<SlowQuery> slowQueries(@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
         return operatorFactory.create(registryService.findById(id)).slowQueries(limit);

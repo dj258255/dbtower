@@ -189,6 +189,41 @@ public class OracleOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * 대기 이벤트 — v$system_event (인스턴스 기동 이후 누적). Oracle은 wait_class라는
+     * 공식 분류(User I/O, Concurrency, Scheduler, ...)를 뷰가 직접 제공해서 그대로 category로 쓴다.
+     * 'Idle' 클래스는 세션이 일 없이 기다린 시간(예: SQL*Net message from client)이라 제외 —
+     * 다른 기종에서 idle 계열을 걸러내는 것과 같은 이유다.
+     */
+    @Override
+    public List<WaitEvent> waitEvents(int limit) {
+        // time_waited_micro는 마이크로초 -> 1000으로 나눠 ms
+        String sql = """
+                SELECT event, wait_class, total_waits,
+                       time_waited_micro / 1000 AS total_ms
+                FROM v$system_event
+                WHERE wait_class != 'Idle'
+                ORDER BY time_waited_micro DESC
+                FETCH FIRST ? ROWS ONLY
+                """;
+        List<WaitEvent> result = new ArrayList<>();
+        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new WaitEvent(
+                            rs.getString("event"),
+                            rs.getString("wait_class"),
+                            rs.getLong("total_waits"),
+                            rs.getDouble("total_ms")));
+                }
+            }
+        } catch (SQLException e) {
+            throw new OperatorException("Oracle 대기 이벤트 조회 실패: " + e.getMessage(), e);
+        }
+        return result;
+    }
+
     /** 복제 상태 — Data Guard 기준의 데이터베이스 역할. 미구성 단독 인스턴스도 PRIMARY로 표시된다 */
     @Override
     public ReplicationState replicationState() {
