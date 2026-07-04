@@ -87,8 +87,53 @@
 KDMS가 "DB 생성 자동화"를 본체 기능으로 갖는 이유가 이것이다 — 생성과 관제가 이어져야
 플랫폼이고, 끊어져 있으면 도구 모음이다.
 
+## Phase D — 자율 진단 (사람이 모는 대시보드에서, 스스로 보는 관제탑으로)
+
+> **구현 담당: Opus. 이 절은 착수 명세다.** 아래 각 항목은 (1) 실존 상용 제품 근거, (2) 재활용할
+> 기존 DBTower 자산, (3) 검증 기준을 명시한다. Phase A~C와 같은 원칙: 이기종 5기종 통합,
+> 읽기·진단 중심(정체성 이탈 금지), 모든 완료는 라이브 실측 근거, 새 능력은 DbmsOperator 메서드
+> 1개 추가 또는 기존 재사용, 허위 금지, 이모지·커밋 AI 언급 금지.
+
+### 방향의 근거 (웹서칭 종합)
+
+- 2026 DBA 설문: 알림 피로 75%(절반이 "심각"), 상시 파이어파이팅·번아웃, "50ms→800ms 조용한
+  저하" 미탐지, 통합 모니터링은 40%뿐. → **더 많은 대시보드가 아니라, 스스로 이상을 잡아 묶어주는 자율화**가 고통의 해독제.
+- 실존 제품이 이미 이걸 판다: **AWS DevOps Guru for RDS**(DB Load 베이스라인 학습→이상 감지→wait event
+  조사 방향 제시, proactive/reactive), **Percona PMM Advisors**(Config/Perf/Query/Security 자동 점검을
+  24h 배경 실행, "고치는 법까지"), **pganalyze**(Index/Query Advisor, "AI-assisted but developer-driven").
+- KDMS 원자료(docs/reference/kdms-meetup/ANALYSIS.md)의 자율 AI 사례와 일치: "CPU 100% 알람 10분
+  지속 → AI가 모니터링+Wait Event 동시 조회 → 원인 진단". D3가 이것.
+- 현대오토에버 DBA 우대사항 "문제 근본 원인 발견·해결 경험"에 정면 대응.
+
+### 왜 변경 관리(SQL Review/승인)를 Phase D에 안 넣나 (정직한 범위 결정)
+
+gh-ost·pt-osc·goInception이 전부 MySQL 전용이라 이기종 정체성과 충돌하고, 쓰기 경로 거버넌스는
+읽기·진단이라는 DBTower DNA와 다른 카테고리다. 인상적이지만 초점을 흐린다 → "범위 밖" 유지.
+
+| # | 기능 | 실존 제품 근거 | 재활용 자산 | 구현 명세 (Opus) | 검증 기준 |
+|---|---|---|---|---|---|
+| D1 | **이상 자동 감지 (베이스라인)** | AWS DevOps Guru for RDS (DB Load 이상 감지) | QuerySnapshot 이력, ComparisonService(시점 비교), RegressionDetector(폴러·쿨다운·ShedLock) | 스냅샷 이력으로 인스턴스·쿼리별 **요일×시간대 베이스라인**(평균/표준편차 또는 분위수) 계산 → 폴러가 현재값을 베이스라인과 비교해 z-score/분위수 이탈을 이상으로 판정(고정 임계 +200%를 대체·보완). 신규 인스턴스는 데이터 부족 시 학습 중 표기. `insight` 모듈에 BaselineService + 이상 판정, `alert`가 소비 | 부하 스크립트로 평소→급증 만들고, 고정 임계 없이 "평소 대비 이탈"로 감지되는지 라이브. 단위: 베이스라인 계산·이탈 판정·데이터 부족 처리 |
+| D2 | **Advisors 자동 점검** | Percona PMM Advisors (Config/Perf/Query/Security 24h 스윕) | operations.md·least-privilege.md의 실측 규칙, parameters()(B6)·tableStats·describeSchema()(B7)·slowQueries | 규칙을 코드 Advisor로: digests_size 80% 포화, 스냅샷 보존 미설정, 위험 파라미터값(max_connections 과소 등), 미사용/중복 인덱스 후보, 권한 과다 계정, 통계 미수집 테이블. 5기종별 적용 가능한 것만(기종 무관은 UNSUPPORTED 표기). `advisor` 신규 모듈, 일일 스윕(@Scheduled+@SchedulerLock) + REST/웹 카드(심각도별) | 실 5기종에 스윕 돌려 실제 지적 나오는지(예: 스냅샷 보존 미설정 인스턴스 flag). 각 Advisor 단위 테스트(위반/정상) |
+| D3 | **자연어 근본원인 진단 (AI 에이전트)** | KDMS "CPU 100%→AI가 도구 연쇄 진단", pganalyze AI-assisted | McpProtocolHandler(도구 12종), AiAnalyzer(claude CLI/SDK 백엔드), ai-analysis-rules.md | "왜 느려졌어?" 같은 질문 → AI가 **여러 MCP 도구(compare·wait_events·sessions·explain)를 스스로 연쇄 호출**해 근본원인 서술. 단발 분석(현 AiAnalyzer)을 **도구 사용 루프**로 승격. 판단 기준 문서를 시스템 프롬프트로(허위 금지·근거 없으면 모른다). 웹 콘솔에 질문 입력창, 답변에 사용한 도구·근거 표시 | 실제 부하 상황에서 질문→AI가 도구 2개 이상 엮어 원인(예: 신규 LIKE 풀스캔+wait io) 답하는지 라이브. 근거 없는 질문엔 "모른다" 확인 |
+| D4 | **DB SLO / 에러 버짓** | Google SRE, DBRE(p95/p99·error budget·burn rate) | activity/query-stats(레이턴시), 스냅샷 이력 | 인스턴스·핵심 쿼리별 SLI(p95/p99 레이턴시, 가용성) 정의 → SLO 목표 → **에러 버짓 소진·번인 레이트** 대시보드. "인프라 지표(CPU) 아니라 사용자 경험 지표"(SRE 원칙) | 이력으로 p95 계산·SLO 대비 버짓 소진율 표시 라이브. 단위: SLI 계산·버짓 산식 |
+| D5 | **파티션 조회 (Partition Inventory)** | KDMS MCP 6기능 중 하나 | describeSchema()(B7) 확장, DbmsOperator | 기종별 파티션 목록·범위·크기 조회(MySQL/PG/Oracle 파티셔닝, Mongo는 샤딩/UNSUPPORTED). KDMS 갭 중 마지막 조각. **자동 관리(생성·삭제)는 범위 밖** — 조회만 | 파티션 있는 테이블로 목록 반환 라이브(없으면 빈 결과·UNSUPPORTED 정직) |
+| D6 | **비용/효율 인사이트 (FinOps)** | AWS FinOps agent, Mydbops(미사용 인덱스로 34~43% 절감) | tableStats(크기), describeSchema()(인덱스), parameters() | 미사용/중복 인덱스 후보, 테이블 bloat, 오버프로비저닝 신호(연결 수 대비 max_connections 등)를 "낭비 후보"로. 실제 클라우드 과금 연동은 범위 밖(자격증명), 신호 제시까지 | 실 DB에서 미사용 인덱스 후보 실제 검출 라이브. UNSUPPORTED 정직 |
+
+**구현 순서 권장 (Opus):** D1(이상 감지) → D2(Advisors) 를 먼저 — 둘이 "자율화"의 뼈대이고 기존
+폴러/규칙 문서를 그대로 승격한다. 이어 D3(자연어 진단)로 채널·AI 자산을 루프로 엮으면 "스스로 보고
+설명하는 관제탑"이 완성. D4·D5·D6은 그 위의 선택 확장. 병렬 시 D1·D3(insight/alert·mcp)과
+D2·D5·D6(advisor·operator)로 나누면 파일 충돌이 적다.
+
+**정체성 가드레일:** Phase D의 모든 기능은 **읽고 판단**한다(쓰기·변경·승인 없음). 대상 DB를 바꾸지
+않고, 5기종 통합을 유지하며, 못 하는 기종은 UNSUPPORTED로 정직하게 표기한다. 이 선을 넘으면(예: 자동
+인덱스 생성, SQL 승인 워크플로) 그건 다른 제품이다.
+
 ## 범위 밖 (여전히 의도적으로 안 한다)
 
-- 파티션 자동 관리, DBaaS 수준의 멀티테넌시·과금·셀프서비스 포털 — 플랫폼 엔지니어링의
-  다른 제품 영역. Wait Event·Schema Diff·DB 생성 자동화는 범위 밖에서 로드맵(B·C)으로 승격했다.
-  "무엇을 안 했는지"를 아는 것도 범위 관리의 일부.
+- **SQL 변경 심의·승인 워크플로 (Bytebase/Archery형)** — gh-ost류가 MySQL 전용이라 이기종 정체성과
+  충돌하고, 쓰기 경로 거버넌스는 읽기·진단 DNA와 다른 카테고리. 인상적이지만 초점을 흐린다.
+- **자동 인덱스 생성, 파티션 자동 관리** — Phase D는 "조회·조언"까지만(pganalyze의 "AI-assisted but
+  developer-driven" 원칙). 대상 DB를 스스로 바꾸는 순간 다른 제품이 된다.
+- DBaaS 수준의 멀티테넌시·과금·셀프서비스 포털(IDP) — 플랫폼 엔지니어링의 다른 제품 영역.
+- Wait Event·Schema Diff·DB 생성 자동화는 범위 밖에서 로드맵(B·C)으로 승격했고, 이상 감지·Advisors·
+  자연어 진단·파티션 조회는 Phase D로 승격했다. "무엇을 안 했는지"를 아는 것도 범위 관리의 일부.
