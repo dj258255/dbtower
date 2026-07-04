@@ -289,6 +289,20 @@ input[type="datetime-local"] {
   font-size: 12.5px; padding: 3px 8px; border-radius: 5px; margin: 2px 0;
   border-left: 3px solid transparent; white-space: pre-wrap; word-break: break-word;
 }
+/* 온라인 스키마 변경(gh-ost, B4) — schema-diff 색 규칙을 그대로 재사용(OK=초록, FAILED=주황경고) */
+.online-ddl-controls {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;
+}
+.ddl-input {
+  padding: 7px 10px; border: 1px solid #d4d9df; border-radius: 7px; font-size: 13px;
+  background: #fff; min-width: 160px;
+}
+.ddl-alter { flex: 1; min-width: 280px; font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace; }
+.ddl-result {
+  border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-top: 8px;
+  white-space: pre-wrap; word-break: break-word;
+}
+
 .schema-add { background: #eef9f2; color: #1f7a4d; border-left-color: var(--target); }   /* 추가=초록(right에만) */
 .schema-del { background: #fdeef0; color: #c0392b; border-left-color: var(--up); }        /* 삭제=빨강(left에만) */
 .schema-chg { background: #fff7e6; color: #a15c00; border-left-color: var(--base); }       /* 변경=주황 */

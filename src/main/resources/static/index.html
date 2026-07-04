@@ -154,6 +154,17 @@
         <div id="schema-diff-warning" class="schema-warning" hidden></div>
         <div id="schema-diff-result" class="schema-diff-result muted">좌/우 인스턴스를 고르고 비교를 누르세요.</div>
       </div>
+      <div class="monitor-card online-ddl-card">
+        <h3>온라인 스키마 변경 <span class="hint">(gh-ost · MySQL 전용 — 대형 테이블 ALTER를 락 최소화로)</span></h3>
+        <div class="online-ddl-controls">
+          <input type="text" id="ddl-table" class="ddl-input" placeholder="테이블 (예: orders)">
+          <input type="text" id="ddl-alter" class="ddl-input ddl-alter" placeholder="ALTER 절 (예: ADD COLUMN memo VARCHAR(64) NULL)">
+          <button id="btn-ddl-noop" class="btn btn-primary btn-small">dry-run (noop)</button>
+          <button id="btn-ddl-exec" class="btn btn-small btn-danger">실제 실행</button>
+        </div>
+        <p class="hint">기본은 dry-run — 실제 테이블은 바뀌지 않습니다. "실제 실행"은 ADMIN 확인 후 적용됩니다.</p>
+        <div id="ddl-result" class="ddl-result muted">테이블과 ALTER 절을 입력하고 dry-run으로 먼저 검증하세요.</div>
+      </div>
       <div class="monitor-grid">
         <div class="monitor-card">
           <h3>복제 상태</h3>

@@ -660,6 +660,35 @@ async function runSchemaDiff() {
   box.innerHTML = parts.join("");
 }
 
+// ---------- 온라인 스키마 변경 (B4) — gh-ost, MySQL 전용 ----------
+// 기본은 dry-run(noop). "실제 실행"은 confirm으로 한 번 더 막는다(파괴적 행위).
+// 결과 3-값(OK/FAILED/UNSUPPORTED)을 색으로 구분해 정직하게 보여준다.
+async function runOnlineDdl(execute) {
+  const box = $("#ddl-result");
+  if (!state.instance) { box.className = "ddl-result schema-warning"; box.textContent = "인스턴스를 먼저 선택하세요."; return; }
+  const table = $("#ddl-table").value.trim(), alter = $("#ddl-alter").value.trim();
+  if (!table || !alter) { box.className = "ddl-result schema-warning"; box.textContent = "테이블과 ALTER 절을 모두 입력하세요."; return; }
+  if (execute && !confirm(`실제로 ${esc(table)} 테이블에 ALTER를 적용합니다.\n\n${alter}\n\n계속할까요?`)) return;
+
+  box.className = "ddl-result muted";
+  box.textContent = execute ? "gh-ost 실행 중..." : "gh-ost dry-run(noop) 중...";
+  let d;
+  try {
+    d = await api(`/api/instances/${state.instance.id}/online-ddl`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ table, alter, execute }),
+    });
+  } catch (e) {
+    box.className = "ddl-result schema-warning";
+    box.textContent = `요청 실패: ${e.message}`;
+    return;
+  }
+  const cls = { OK: "schema-same", FAILED: "schema-warning", UNSUPPORTED: "muted" }[d.status] || "muted";
+  box.className = `ddl-result ${cls}`;
+  const ghost = d.ghostTable ? ` · 고스트 테이블: ${esc(d.ghostTable)}` : "";
+  box.innerHTML = `<strong>${esc(d.status)}</strong>${d.mode ? ` (${esc(d.mode)})` : ""}${ghost}<br>${esc(d.detail || "")}`;
+}
+
 // ---------- 감사 로그 검색 (Specification 동적 필터) ----------
 async function loadAudit() {
   const table = $("#audit-table");
@@ -734,6 +763,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#btn-advisor-run").addEventListener("click", runIndexAdvisor);
   $("#btn-inquiry").addEventListener("click", runInquiry);
   $("#btn-schema-diff").addEventListener("click", runSchemaDiff);
+  $("#btn-ddl-noop").addEventListener("click", () => runOnlineDdl(false));
+  $("#btn-ddl-exec").addEventListener("click", () => runOnlineDdl(true));
   $("#audit-search-btn").addEventListener("click", loadAudit);
   $("#audit-reset-btn").addEventListener("click", () => {
     ["audit-principal", "audit-action", "audit-outcome"].forEach((id) => { $(`#${id}`).value = ""; });

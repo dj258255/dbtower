@@ -164,6 +164,10 @@ public final class McpProtocolHandler {
                         "right", intProp("비교 대상 인스턴스 id"))),
                 args -> get("/api/schema-diff?left=" + args.get("left").asLong()
                         + "&right=" + args.get("right").asLong())));
+
+        // 온라인 스키마 변경(gh-ost, B4)은 의도적으로 MCP 도구로 노출하지 않는다.
+        // 실제 테이블 구조를 바꾸는 파괴적 행위를 에이전트가 스스로 실행하는 건 위험하기 때문 —
+        // 사람(ADMIN)이 웹 콘솔에서 dry-run으로 먼저 확인하고 실행하도록 REST로만 연다.
     }
 
     // ---------- JSON-RPC 결과 조립 ----------
