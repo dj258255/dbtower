@@ -292,3 +292,6 @@ input[type="datetime-local"] {
 .schema-add { background: #eef9f2; color: #1f7a4d; border-left-color: var(--target); }   /* 추가=초록(right에만) */
 .schema-del { background: #fdeef0; color: #c0392b; border-left-color: var(--up); }        /* 삭제=빨강(left에만) */
 .schema-chg { background: #fff7e6; color: #a15c00; border-left-color: var(--base); }       /* 변경=주황 */
+/* 파라미터 드리프트(B6) 값 비교표 — 긴 값이 잘리지 않게 줄바꿈 허용 */
+.param-diff-table td { word-break: break-word; }
+.param-diff-table th { text-align: left; }

@@ -600,12 +600,15 @@ function wireKillButtons() {
 // ---------- Schema Diff (B7) — 같은 역할의 두 인스턴스 구조 비교 ----------
 // 드롭다운 두 개는 등록된 인스턴스 전체 목록에서 채운다(현재 선택된 인스턴스와 무관 — 두 대를 자유 비교).
 function populateSchemaSelects(list) {
-  const left = $("#schema-left"), right = $("#schema-right");
-  if (!left || !right) return;
   const opts = list.map((i) => `<option value="${i.id}">${esc(i.name)} · ${esc(i.type)}</option>`).join("");
-  left.innerHTML = opts;
-  right.innerHTML = opts;
-  if (list.length > 1) right.selectedIndex = 1; // 기본값: 서로 다른 두 대
+  // Schema Diff(B7)와 파라미터 드리프트(B6) 두 카드의 좌/우 드롭다운을 같은 목록으로 채운다
+  [["#schema-left", "#schema-right"], ["#param-left", "#param-right"]].forEach(([lSel, rSel]) => {
+    const left = $(lSel), right = $(rSel);
+    if (!left || !right) return;
+    left.innerHTML = opts;
+    right.innerHTML = opts;
+    if (list.length > 1) right.selectedIndex = 1; // 기본값: 서로 다른 두 대
+  });
 }
 
 // 인덱스 한 줄 표기 — (col1, col2) UNIQUE. 값은 전부 esc()로 이스케이프한다(XSS 방지).
@@ -657,6 +660,54 @@ async function runSchemaDiff() {
       `인덱스 ${esc(x.name)}: ${idxText(x.left)} → ${idxText(x.right)}`)));
     parts.push(`<div class="schema-block"><h4>변경된 테이블: ${esc(t.table)}</h4>${lines.join("")}</div>`);
   });
+  box.innerHTML = parts.join("");
+}
+
+// ---------- 파라미터 드리프트 (B6) — 같은 역할 두 인스턴스 설정값 비교 ----------
+async function runParamDiff() {
+  const left = $("#param-left").value, right = $("#param-right").value;
+  const box = $("#param-diff-result"), warnBox = $("#param-diff-warning");
+  if (!left || !right) return;
+  box.classList.remove("muted");
+  box.innerHTML = '<div class="muted">비교 중...</div>';
+  warnBox.hidden = true;
+  let d;
+  try {
+    d = await api(`/api/param-diff?left=${left}&right=${right}`);
+  } catch (e) {
+    box.innerHTML = e.message.startsWith("403")
+      ? '<div class="schema-warning">파라미터 드리프트는 ADMIN 역할만 볼 수 있습니다.</div>'
+      : `<div class="schema-warning">비교 실패: ${esc(e.message)}</div>`;
+    return;
+  }
+  if (d.warning) { warnBox.hidden = false; warnBox.textContent = `주의: ${d.warning}`; }
+  if (d.identical) {
+    box.innerHTML = '<div class="schema-same">두 인스턴스 파라미터가 동일합니다 — 드리프트 없음.</div>';
+    return;
+  }
+  const parts = [];
+  const line = (cls, mark, text) => `<div class="schema-line ${cls}">${mark} ${text}</div>`;
+  if (d.changed.length) {
+    // 값이 다른 항목은 표로 — name / left / right 한눈에 비교
+    const rows = d.changed.map((c) => `
+      <tr>
+        <td class="qtext" title="${esc(c.name)}">${esc(c.name)}</td>
+        <td>${esc(c.leftValue)}</td>
+        <td>${esc(c.rightValue)}</td>
+      </tr>`).join("");
+    parts.push(`<div class="schema-block"><h4>값이 다른 파라미터 <span class="hint">(${d.changed.length})</span></h4>
+      <div class="table-scroll"><table class="qtable param-diff-table">
+        <thead><tr><th>name</th><th>left</th><th>right</th></tr></thead>
+        <tbody>${rows}</tbody></table></div></div>`);
+  }
+  if (d.leftOnly.length) {
+    parts.push('<div class="schema-block"><h4>left에만 있는 파라미터</h4>' +
+      d.leftOnly.map((p) => line("schema-del", "−", `${esc(p.name)} = ${esc(p.value)}`)).join("") + "</div>");
+  }
+  if (d.rightOnly.length) {
+    parts.push('<div class="schema-block"><h4>right에만 있는 파라미터</h4>' +
+      d.rightOnly.map((p) => line("schema-add", "+", `${esc(p.name)} = ${esc(p.value)}`)).join("") + "</div>");
+  }
   box.innerHTML = parts.join("");
 }
 
@@ -734,6 +785,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#btn-advisor-run").addEventListener("click", runIndexAdvisor);
   $("#btn-inquiry").addEventListener("click", runInquiry);
   $("#btn-schema-diff").addEventListener("click", runSchemaDiff);
+  $("#btn-param-diff").addEventListener("click", runParamDiff);
   $("#audit-search-btn").addEventListener("click", loadAudit);
   $("#audit-reset-btn").addEventListener("click", () => {
     ["audit-principal", "audit-action", "audit-outcome"].forEach((id) => { $(`#${id}`).value = ""; });

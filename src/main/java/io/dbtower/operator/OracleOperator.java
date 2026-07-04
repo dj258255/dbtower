@@ -343,6 +343,17 @@ public class OracleOperator extends AbstractJdbcOperator {
         }
     }
 
+    /** 파라미터 — v$parameter(name/value). 접근하려면 계정에 v_$parameter SELECT 권한이 필요하다 */
+    @Override
+    public List<DbParameter> parameters() {
+        try {
+            return jdbc().query("SELECT name, value FROM v$parameter ORDER BY name",
+                    (rs, i) -> ParameterSupport.of(rs.getString("name"), rs.getString("value"), null));
+        } catch (DataAccessException e) {
+            throw new OperatorException("Oracle 파라미터 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
     /** 복제 상태 — Data Guard 기준의 데이터베이스 역할. 미구성 단독 인스턴스도 PRIMARY로 표시된다 */
     @Override
     public ReplicationState replicationState() {
