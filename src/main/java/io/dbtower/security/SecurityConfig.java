@@ -66,6 +66,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/security/**").hasRole("ADMIN")
                         .requestMatchers("/api/audit/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/instances").hasRole("ADMIN")
+                        // 멱등 등록(upsert) — IaC 프로비저닝이 쓰는 경로. 등록/삭제와 같은 ADMIN 경계
+                        .requestMatchers(HttpMethod.PUT, "/api/instances").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/instances/*").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/instances/*/backup").hasRole("ADMIN")
                         // 세션 종료(kill)는 대상 DB의 실행 세션을 끊는 파괴적 행위 — 백업과 같은 ADMIN 경계

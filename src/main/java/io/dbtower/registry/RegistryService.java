@@ -25,6 +25,27 @@ public class RegistryService {
         return repository.save(instance);
     }
 
+    /**
+     * 멱등 등록(upsert) — IaC(Ansible/K8s/Terraform)가 프로비저닝 후 등록을 재실행해도
+     * 중복이 아니라 갱신이 되게 한다. 같은 이름이 있으면 접속 정보를 덮고, 없으면 새로 등록.
+     * 어느 경로든 등록 전에 실제 접속을 검증한다(register와 동일한 fail-closed).
+     */
+    public DatabaseInstance upsert(String name, DbmsType type, String host, int port,
+                                   String dbName, String username, String password) {
+        DatabaseInstance existing = repository.findByName(name).orElse(null);
+        if (existing == null) {
+            return register(new DatabaseInstance(name, type, host, port, dbName, username, password));
+        }
+        existing.updateConnection(type, host, port, dbName, username, password);
+        HealthStatus health = operations.health(existing);
+        if (!health.up()) {
+            throw new IllegalArgumentException("접속 실패로 갱신 거부: " + health.message());
+        }
+        // 접속 정보가 바뀌었으니 기존 커넥션 풀은 정리 — 다음 조회 때 새 정보로 다시 연다
+        operations.release(existing.getId());
+        return repository.save(existing);
+    }
+
     public List<DatabaseInstance> findAll() {
         return repository.findAll();
     }

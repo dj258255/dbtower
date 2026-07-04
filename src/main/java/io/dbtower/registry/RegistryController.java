@@ -50,6 +50,17 @@ public class RegistryController {
         return InstanceResponse.from(saved);
     }
 
+    /**
+     * 멱등 등록(upsert) — IaC 프로비저닝이 "생성하면 관제탑에 등록"을 재실행해도 안전하게.
+     * 같은 이름이면 접속 정보를 갱신, 없으면 새로 등록. Ansible/K8s/Terraform이 이 엔드포인트를 쓴다.
+     */
+    @PutMapping
+    public InstanceResponse upsert(@Valid @RequestBody RegisterRequest req) {
+        DatabaseInstance saved = registryService.upsert(
+                req.name(), req.type(), req.host(), req.port(), req.dbName(), req.username(), req.password());
+        return InstanceResponse.from(saved);
+    }
+
     @GetMapping
     public List<InstanceResponse> list() {
         return registryService.findAll().stream().map(InstanceResponse::from).toList();

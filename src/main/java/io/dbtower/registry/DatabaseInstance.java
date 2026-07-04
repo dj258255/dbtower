@@ -59,4 +59,19 @@ public class DatabaseInstance {
         this.username = username;
         this.password = password;
     }
+
+    /**
+     * 접속 정보 갱신 — 멱등 등록(upsert)용. 이름은 논리 식별자라 바꾸지 않고,
+     * IaC(Ansible/K8s/Terraform)가 같은 이름으로 재등록하면 접속 정보만 최신으로 덮는다.
+     * createdAt은 유지(최초 등록 시각) — "언제부터 관제했나"의 의미를 지킨다.
+     */
+    public void updateConnection(DbmsType type, String host, int port,
+                                 String dbName, String username, String password) {
+        this.type = type;
+        this.host = host;
+        this.port = port;
+        this.dbName = dbName;
+        this.username = username;
+        this.password = password;
+    }
 }
