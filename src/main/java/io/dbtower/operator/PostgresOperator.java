@@ -37,6 +37,56 @@ public class PostgresOperator extends AbstractJdbcOperator {
                 java.util.Map.of("PGPASSWORD", instance.getPassword()), out);
     }
 
+    /**
+     * PostgreSQL 복원 검증 = pg_dump 평문 덤프를 격리된 임시 DB에 psql로 복원.
+     * 단일 DB 평문 덤프는 CREATE DATABASE/\connect가 없어 연결된 DB(= 임시 DB)로만 적재된다 —
+     * 원본은 건드리지 않는다. ON_ERROR_STOP=1로 한 문장이라도 실패하면 종료코드가 비0이 되어 FAILED.
+     * 마지막에 임시 DB를 FORCE로 삭제(잔여 연결이 있어도 정리되게).
+     */
+    @Override
+    public RestoreVerification verifyRestore(String location) {
+        java.nio.file.Path dump = java.nio.file.Path.of(location);
+        if (!java.nio.file.Files.isRegularFile(dump)) {
+            return RestoreVerification.failed("덤프 파일을 찾을 수 없습니다: " + location);
+        }
+        String target = RestoreSupport.verifyTargetName();
+        RestoreSupport.requireSafeName(target);
+        // 컨테이너 로컬 접속은 trust라 비밀번호가 필요 없지만, 다른 환경 대비 PGPASSWORD도 실어 둔다(무해)
+        java.util.Map<String, String> env = java.util.Map.of("PGPASSWORD", instance.getPassword());
+        java.util.List<String> base = renderCommand(backupTools.pgRestoreCommand());
+        boolean created = false;
+        try {
+            RestoreSupport.ExecResult create = RestoreSupport.exec(RestoreSupport.concat(base,
+                    "-d", "postgres", "-c", "CREATE DATABASE \"" + target + "\""), env, null);
+            if (!create.ok()) {
+                return RestoreVerification.failed("임시 DB 생성 실패: " + create.errorTail());
+            }
+            created = true;
+            byte[] sql;
+            try {
+                sql = java.nio.file.Files.readAllBytes(dump);
+            } catch (java.io.IOException e) {
+                return RestoreVerification.failed("덤프 파일 읽기 실패: " + e.getMessage());
+            }
+            RestoreSupport.ExecResult load = RestoreSupport.exec(
+                    RestoreSupport.concat(base, "-d", target), env, sql);
+            if (!load.ok()) {
+                return RestoreVerification.failed("덤프 복원 실패: " + load.errorTail());
+            }
+            RestoreSupport.ExecResult count = RestoreSupport.exec(RestoreSupport.concat(base, "-d", target,
+                    "-tAc", "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'"),
+                    env, null);
+            return RestoreVerification.verified(
+                    "임시 DB로 덤프 복원 성공 (psql, target=" + target + ")",
+                    RestoreSupport.parseCount(count));
+        } finally {
+            if (created) {
+                RestoreSupport.exec(RestoreSupport.concat(base, "-d", "postgres", "-c",
+                        "DROP DATABASE IF EXISTS \"" + target + "\" WITH (FORCE)"), env, null);
+            }
+        }
+    }
+
     @Override
     protected String jdbcUrl() {
         return "jdbc:postgresql://%s:%d/%s?connectTimeout=3&socketTimeout=15"

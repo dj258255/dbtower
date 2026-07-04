@@ -45,6 +45,27 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * SQL Server 복원 검증 = RESTORE VERIFYONLY (서버 사이드 T-SQL).
+     * 백업이 서버 측 파일(.bak)이라 플랫폼이 파일에 직접 접근하지 못한다 — 전체 복원은 범위 밖.
+     * 대신 서버가 백업셋의 완전성/판독성(헤더·페이지·체크섬)을 확인하는 VERIFYONLY까지가
+     * 여기서 정직하게 할 수 있는 최선이다. "복원 가능성의 신호"이지 전체 데이터 재구성은 아니다.
+     */
+    @Override
+    public RestoreVerification verifyRestore(String location) {
+        // backup()이 "(server) <path>"로 돌려주므로 접두사를 떼어 실제 경로만 남긴다
+        String path = location.startsWith("(server) ") ? location.substring("(server) ".length()) : location;
+        try (Connection conn = open();
+             PreparedStatement ps = conn.prepareStatement("RESTORE VERIFYONLY FROM DISK = ?")) {
+            ps.setString(1, path);
+            ps.execute();
+            return RestoreVerification.verified(
+                    "RESTORE VERIFYONLY 통과 — 백업셋 판독/완전성 확인(전체 복원 아님): " + path, null);
+        } catch (SQLException e) {
+            return RestoreVerification.failed("RESTORE VERIFYONLY 실패: " + e.getMessage());
+        }
+    }
+
     @Override
     protected String jdbcUrl() {
         return "jdbc:sqlserver://%s:%d;databaseName=%s;encrypt=false;loginTimeout=3"

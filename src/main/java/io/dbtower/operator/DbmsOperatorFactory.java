@@ -18,10 +18,14 @@ public class DbmsOperatorFactory {
                                @org.springframework.beans.factory.annotation.Value("${dbtower.backup.mysqldump-command:mysqldump}") String mysqldumpCommand,
                                @org.springframework.beans.factory.annotation.Value("${dbtower.backup.pg-dump-command:pg_dump}") String pgDumpCommand,
                                @org.springframework.beans.factory.annotation.Value("${dbtower.backup.mongodump-command:mongodump}") String mongodumpCommand,
+                               @org.springframework.beans.factory.annotation.Value("${dbtower.backup.mysql-restore-command:mysql}") String mysqlRestoreCommand,
+                               @org.springframework.beans.factory.annotation.Value("${dbtower.backup.pg-restore-command:psql}") String pgRestoreCommand,
+                               @org.springframework.beans.factory.annotation.Value("${dbtower.backup.mongo-restore-command:mongorestore}") String mongoRestoreCommand,
                                @org.springframework.beans.factory.annotation.Value("${dbtower.backup.dir:./backups}") String backupDir) {
         this.pools = pools;
         this.mongoClients = mongoClients;
-        this.backupTools = new BackupTools(mysqldumpCommand, pgDumpCommand, mongodumpCommand, backupDir);
+        this.backupTools = new BackupTools(mysqldumpCommand, pgDumpCommand, mongodumpCommand,
+                mysqlRestoreCommand, pgRestoreCommand, mongoRestoreCommand, backupDir);
     }
 
     public DbmsOperator create(DatabaseInstance instance) {

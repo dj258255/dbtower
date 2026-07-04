@@ -54,6 +54,16 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
         throw new UnsupportedOperationException("확장2에서 구현 예정: " + instance.getType());
     }
 
+    /**
+     * 기본값은 UNSUPPORTED — 복원 검증 능력을 실제로 갖춘 기종만 오버라이드한다.
+     * "자동 검증 못 함"을 "통과"로 위장하지 않기 위해, 미구현은 예외가 아니라 명시적 UNSUPPORTED로.
+     */
+    @Override
+    public RestoreVerification verifyRestore(String location) {
+        return RestoreVerification.unsupported(
+                instance.getType() + " 자동 복원 검증 미지원 — location=" + location);
+    }
+
     /** 외부 CLI(mysqldump/pg_dump)로 백업을 수행하고 stdout을 파일로 받는 공통 루틴 */
     protected BackupResult runCliBackup(java.util.List<String> command, java.util.Map<String, String> env,
                                         java.nio.file.Path outFile) {

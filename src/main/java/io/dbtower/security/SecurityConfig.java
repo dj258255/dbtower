@@ -68,6 +68,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/instances").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/instances/*").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/instances/*/backup").hasRole("ADMIN")
+                        // 복원 검증도 대상 DB에 임시 DB를 만들고 지우는 행위라 백업과 같은 ADMIN 경계
+                        .requestMatchers(HttpMethod.POST, "/api/instances/*/backup/verify").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/instances/*/backup-policy").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .formLogin(form -> form
