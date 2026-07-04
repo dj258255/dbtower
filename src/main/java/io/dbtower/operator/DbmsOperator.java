@@ -89,4 +89,13 @@ public interface DbmsOperator {
      * (비밀번호·키류)는 값을 마스킹한다(ParameterSupport). 기종별 소스는 각 구현 주석 참고.
      */
     List<DbParameter> parameters();
+
+    /**
+     * 쿼리별 레이턴시 백분위 p95/p99 (D4a) — "평균은 괜찮은데 꼬리가 아프다"를 드러내는 사용자 경험 지표.
+     * 같은 지표라도 기종마다 원자료 가용성이 달라, 값과 함께 그 값의 출처(source)를 반드시 구분한다:
+     * MySQL은 QUANTILE 컬럼(NATIVE), Mongo는 profile 원샘플 직접 계산(COMPUTED), PostgreSQL은
+     * 평균+표준편차 근사(ESTIMATED), SQL Server/Oracle은 원자료 없음(UNSUPPORTED). 절대 섞지 않는다 —
+     * 추정을 실측인 척, 미지원을 지원인 척하지 않는다. 기종별 소스·한계는 LatencyPercentile record 주석 참고.
+     */
+    List<LatencyPercentile> latencyPercentiles(int limit);
 }

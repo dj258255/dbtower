@@ -115,6 +115,67 @@ public class MongoOperator implements DbmsOperator {
         }
     }
 
+    /**
+     * 레이턴시 백분위 (D4a) — MySQL이 QUANTILE 컬럼을 주고 PG가 못 주는 것과 달리, MongoDB는
+     * system.profile에 op별 <b>원시 millis 샘플</b>을 그대로 남긴다. 그래서 근사가 아니라 우리가
+     * 표본을 모아 직접 계산한다(COMPUTED). queryStats와 같은 queryHash 단위로 millis를 모아,
+     * 오름차순 정렬 후 nearest-rank로 p95/p99를 뽑는다. 프로파일러 레벨 2(모든 연산 기록) 전제.
+     *
+     * system.profile은 capped collection이라 오래된 표본은 덮어써진다 — 즉 이 백분위는 자연히
+     * "최근 표본 위주"다(MySQL QUANTILE의 무한 누적과 반대 성질). 총 소요시간 상위 그룹부터 담는다.
+     */
+    @Override
+    public List<LatencyPercentile> latencyPercentiles(int limit) {
+        List<org.bson.conversions.Bson> pipeline = List.of(
+                Aggregates.match(Filters.and(
+                        Filters.regex("ns", "^" + Pattern.quote(instance.getDbName()) + "\\."),
+                        Filters.not(Filters.regex("ns", "\\.system\\.")))),
+                Aggregates.group(
+                        new Document("$ifNull", List.of("$queryHash",
+                                new Document("$concat", List.of("$op", ":", "$ns")))),
+                        Accumulators.push("samples", new Document("$ifNull", List.of("$millis", 0L))),
+                        Accumulators.sum("totalMs", new Document("$ifNull", List.of("$millis", 0L))),
+                        Accumulators.first("ns", "$ns"),
+                        Accumulators.first("command", "$command")),
+                Aggregates.sort(Sorts.descending("totalMs")),
+                Aggregates.limit(limit));
+        try {
+            return withClient(client -> {
+                List<LatencyPercentile> result = new ArrayList<>();
+                for (Document doc : db(client).getCollection("system.profile").aggregate(pipeline)) {
+                    List<Double> samples = new ArrayList<>();
+                    for (Object m : doc.getList("samples", Object.class, List.of())) {
+                        samples.add(((Number) m).doubleValue());
+                    }
+                    samples.sort(null); // 오름차순 정렬 후 nearest-rank
+                    result.add(new LatencyPercentile(
+                            String.valueOf(doc.get("_id")),
+                            queryText(doc.getString("ns"), doc.get("command", Document.class)),
+                            percentile(samples, 95),
+                            percentile(samples, 99),
+                            LatencyPercentile.COMPUTED));
+                }
+                return result;
+            });
+        } catch (Exception e) {
+            throw new OperatorException("MongoDB 레이턴시 백분위 계산 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * nearest-rank 백분위 — 오름차순 정렬된 표본에서 p(0~100)에 해당하는 값. 표본이 없으면 null.
+     * rank = ceil(p/100 × n), 인덱스는 rank-1을 [0, n-1]로 클램프. (보간 없는 정직한 정의)
+     */
+    static Double percentile(List<Double> ascending, double p) {
+        int n = ascending.size();
+        if (n == 0) {
+            return null;
+        }
+        int rank = (int) Math.ceil(p / 100.0 * n);
+        int idx = Math.min(Math.max(rank, 1), n) - 1;
+        return ascending.get(idx);
+    }
+
     @Override
     public List<SlowQuery> slowQueries(int limit) {
         try {

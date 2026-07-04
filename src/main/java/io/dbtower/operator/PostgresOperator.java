@@ -120,6 +120,56 @@ public class PostgresOperator extends AbstractJdbcOperator {
         }
     }
 
+    /** p95의 표준정규 z값 — 정규분포에서 상위 5% 경계. */
+    static final double Z95 = 1.645;
+
+    /** p99의 표준정규 z값 — 정규분포에서 상위 1% 경계. */
+    static final double Z99 = 2.326;
+
+    /**
+     * 레이턴시 백분위 (D4a) — pg_stat_statements에는 백분위 원자료가 <b>없다</b>. mean_exec_time과
+     * stddev_exec_time만 있으므로, 정규분포를 가정하고 mean + z×stddev로 <b>근사</b>한다(ESTIMATED).
+     * p95는 z=1.645, p99는 z=2.326.
+     *
+     * <b>이것은 진짜 백분위가 아니다.</b> 실제 레이턴시 분포는 오른쪽 꼬리가 두꺼워(락 대기·GC·IO 스파이크)
+     * 정규분포보다 훨씬 치우친다. 그래서 이 근사는 대개 실제 p95/p99를 <b>과소평가</b>한다. 값은 참고용 하한으로만
+     * 읽어야 하며, source=ESTIMATED로 실측(NATIVE/COMPUTED)과 반드시 구분해 표기한다.
+     */
+    @Override
+    public List<LatencyPercentile> latencyPercentiles(int limit) {
+        // stddev_exec_time은 pg_stat_statements가 제공하는 표준편차 — 이걸 근사의 재료로 쓴다
+        String sql = """
+                SELECT queryid::text AS query_id, query,
+                       mean_exec_time, stddev_exec_time
+                FROM pg_stat_statements
+                WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+                ORDER BY total_exec_time DESC
+                LIMIT ?
+                """;
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> {
+                        double mean = rs.getDouble("mean_exec_time");
+                        double stddev = rs.getDouble("stddev_exec_time");
+                        return new LatencyPercentile(
+                                rs.getString("query_id"),
+                                rs.getString("query"),
+                                estimate(mean, stddev, Z95),
+                                estimate(mean, stddev, Z99),
+                                LatencyPercentile.ESTIMATED);
+                    },
+                    limit);
+        } catch (DataAccessException e) {
+            throw new OperatorException("PostgreSQL 레이턴시 백분위 근사 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /** 정규분포 근사 백분위 = mean + z×stddev (음수는 0으로 클램프). 소수 둘째 자리로 반올림. */
+    static double estimate(double mean, double stddev, double z) {
+        double v = Math.max(0, mean + z * stddev);
+        return Math.round(v * 100.0) / 100.0;
+    }
+
     @Override
     public List<SlowQuery> slowQueries(int limit) {
         // PG는 로그 파일 파싱 대신 pg_stat_statements의 평균 수행시간으로 판정한다
