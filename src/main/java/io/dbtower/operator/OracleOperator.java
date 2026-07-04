@@ -1,14 +1,14 @@
 package io.dbtower.operator;
 
 import io.dbtower.registry.DatabaseInstance;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.ConnectionCallback;
 
 import java.sql.CallableStatement;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -56,23 +56,18 @@ public class OracleOperator extends AbstractJdbcOperator {
                 ORDER BY SUM(elapsed_time) DESC
                 FETCH FIRST ? ROWS ONLY
                 """;
-        List<QueryStat> stats = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    stats.add(new QueryStat(
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new QueryStat(
                             rs.getString("sql_id"),
                             rs.getString("query_text"),
                             rs.getLong("calls"),
                             rs.getDouble("total_ms"),
-                            rs.getLong("logical_reads")));
-                }
-            }
-        } catch (SQLException e) {
+                            rs.getLong("logical_reads")),
+                    limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("Oracle 쿼리 통계 수집 실패: " + e.getMessage(), e);
         }
-        return stats;
     }
 
     @Override
@@ -88,39 +83,39 @@ public class OracleOperator extends AbstractJdbcOperator {
                 ORDER BY elapsed_time / executions DESC
                 FETCH FIRST ? ROWS ONLY
                 """;
-        List<SlowQuery> result = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    result.add(new SlowQuery(
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new SlowQuery(
                             rs.getString("query_text"),
                             rs.getDouble("avg_ms"),
                             rs.getLong("avg_reads"),
-                            rs.getString("captured_at")));
-                }
-            }
-        } catch (SQLException e) {
+                            rs.getString("captured_at")),
+                    limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("Oracle 슬로우 쿼리 조회 실패: " + e.getMessage(), e);
         }
-        return result;
     }
 
     @Override
     public String explain(String sql) {
         requireSelect(sql);
-        // EXPLAIN PLAN은 세션별 PLAN_TABLE(글로벌 임시 테이블)에 쓰므로 같은 커넥션에서 이어 읽는다
-        try (Connection conn = open(); Statement stmt = conn.createStatement()) {
-            stmt.execute("EXPLAIN PLAN FOR " + sql);
-            StringBuilder plan = new StringBuilder();
-            try (ResultSet rs = stmt.executeQuery(
-                    "SELECT plan_table_output FROM TABLE(DBMS_XPLAN.DISPLAY())")) {
-                while (rs.next()) {
-                    plan.append(rs.getString(1)).append('\n');
+        // EXPLAIN PLAN은 세션별 PLAN_TABLE(글로벌 임시 테이블)에 쓰므로 같은 커넥션에서 이어 읽어야 한다.
+        // JdbcTemplate.query는 문장마다 커넥션을 새로 얻으니, 두 문장을 ConnectionCallback으로 한 커넥션에 묶는다.
+        try {
+            return jdbc().execute((ConnectionCallback<String>) conn -> {
+                try (Statement stmt = conn.createStatement()) {
+                    stmt.execute("EXPLAIN PLAN FOR " + sql);
+                    StringBuilder plan = new StringBuilder();
+                    try (ResultSet rs = stmt.executeQuery(
+                            "SELECT plan_table_output FROM TABLE(DBMS_XPLAN.DISPLAY())")) {
+                        while (rs.next()) {
+                            plan.append(rs.getString(1)).append('\n');
+                        }
+                    }
+                    return plan.toString();
                 }
-            }
-            return plan.toString();
-        } catch (SQLException e) {
+            });
+        } catch (DataAccessException e) {
             throw new OperatorException("Oracle 실행계획 조회 실패: " + e.getMessage(), e);
         }
     }
@@ -140,22 +135,17 @@ public class OracleOperator extends AbstractJdbcOperator {
                 ORDER BY data_bytes DESC
                 FETCH FIRST ? ROWS ONLY
                 """;
-        List<TableStat> result = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    result.add(new TableStat(
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new TableStat(
                             rs.getString("table_name"),
                             rs.getLong("row_count"),
                             rs.getLong("data_bytes"),
-                            rs.getLong("index_bytes")));
-                }
-            }
-        } catch (SQLException e) {
+                            rs.getLong("index_bytes")),
+                    limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("Oracle 테이블 통계 조회 실패: " + e.getMessage(), e);
         }
-        return result;
     }
 
     /**
@@ -220,40 +210,35 @@ public class OracleOperator extends AbstractJdbcOperator {
                 ORDER BY time_waited_micro DESC
                 FETCH FIRST ? ROWS ONLY
                 """;
-        List<WaitEvent> result = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    result.add(new WaitEvent(
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new WaitEvent(
                             rs.getString("event"),
                             rs.getString("wait_class"),
                             rs.getLong("total_waits"),
-                            rs.getDouble("total_ms")));
-                }
-            }
-        } catch (SQLException e) {
+                            rs.getDouble("total_ms")),
+                    limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("Oracle 대기 이벤트 조회 실패: " + e.getMessage(), e);
         }
-        return result;
     }
 
     /** 복제 상태 — Data Guard 기준의 데이터베이스 역할. 미구성 단독 인스턴스도 PRIMARY로 표시된다 */
     @Override
     public ReplicationState replicationState() {
         String sql = "SELECT database_role, open_mode, protection_mode FROM v$database";
-        try (Connection conn = open();
-             PreparedStatement ps = conn.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-            if (rs.next()) {
-                return new ReplicationState(
-                        rs.getString("database_role"),
-                        -1,
-                        "open_mode=%s protection=%s".formatted(
-                                rs.getString("open_mode"), rs.getString("protection_mode")));
-            }
-            return new ReplicationState("UNKNOWN", -1, "v$database 조회 결과 없음");
-        } catch (SQLException e) {
+        try {
+            return jdbc().query(sql, rs -> {
+                if (rs.next()) {
+                    return new ReplicationState(
+                            rs.getString("database_role"),
+                            -1,
+                            "open_mode=%s protection=%s".formatted(
+                                    rs.getString("open_mode"), rs.getString("protection_mode")));
+                }
+                return new ReplicationState("UNKNOWN", -1, "v$database 조회 결과 없음");
+            });
+        } catch (DataAccessException e) {
             throw new OperatorException("Oracle 복제 상태 조회 실패: " + e.getMessage(), e);
         }
     }

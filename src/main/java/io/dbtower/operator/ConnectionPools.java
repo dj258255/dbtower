@@ -4,8 +4,10 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import io.dbtower.registry.DatabaseInstance;
 import jakarta.annotation.PreDestroy;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.stereotype.Component;
 
+import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -33,6 +35,19 @@ public class ConnectionPools {
         }
         HikariDataSource ds = pools.computeIfAbsent(instance.getId(), id -> newPool(instance, jdbcUrl));
         return ds.getConnection();
+    }
+
+    /**
+     * JdbcTemplate이 쓸 DataSource를 준다 — getConnection과 같은 자원 정책을 그대로 따른다.
+     * id!=null이면 인스턴스별 HikariCP 풀(computeIfAbsent로 재사용), id==null(등록 검증)이면
+     * DriverManagerDataSource로 1회용. DriverManagerDataSource는 풀링 없이 매 getConnection마다
+     * 새 물리 커넥션을 열고 닫아, 기존 DriverManager 1회성 연결과 동작이 동일하다.
+     */
+    public DataSource getDataSource(DatabaseInstance instance, String jdbcUrl) {
+        if (instance.getId() == null) {
+            return new DriverManagerDataSource(jdbcUrl, instance.getUsername(), instance.getPassword());
+        }
+        return pools.computeIfAbsent(instance.getId(), id -> newPool(instance, jdbcUrl));
     }
 
     private HikariDataSource newPool(DatabaseInstance instance, String jdbcUrl) {
