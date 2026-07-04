@@ -52,6 +52,16 @@ dbtower:
     # mongorestore는 --config /dev/stdin(비밀번호)이 stdin을 쓰므로 아카이브는 docker cp로 넣고 파일 경로로 준다
     mongo-restore-command: "docker exec -i dbtower-mongo mongorestore --host localhost --port 27017 -u {user} --authenticationDatabase admin --config /dev/stdin"
     poll-ms: 30000
+  online-ddl:
+    # 온라인 스키마 변경(gh-ost, MySQL 전용, B4). 대형 테이블 ALTER를 락 최소화로 수행한다.
+    # 기본은 dry-run(noop) — 실제 변경은 요청 body의 execute=true를 명시할 때만.
+    ghost-command: "gh-ost"
+    # 환경별 안전 플래그. 로컬 도커는 포트 매핑(13306->3306)이라 gh-ost가 @@port(3306)와
+    # 접속 포트(13306) 불일치를 거부하므로 --azure로 그 포트 검사만 우회한다(포트 매핑 없는 운영에선 제거).
+    # --allow-on-master: 마스터 직결 허용, --assume-rbr: ROW 포맷 가정,
+    # --initially-drop-ghost-table/--ok-to-drop-table: 이전 잔여물/원본 정리 허용.
+    ghost-flags: "--allow-on-master --assume-rbr --initially-drop-ghost-table --ok-to-drop-table --azure"
+    timeout-seconds: 1800   # gh-ost가 이 시간을 넘기면 중단(고스트 테이블 잔여물 확인 안내)
   regression:
     poll-ms: 120000       # 회귀 감지 주기
     recent-minutes: 5     # 문제 후보 구간(최근 N분)

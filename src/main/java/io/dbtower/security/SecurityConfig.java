@@ -72,6 +72,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/instances/*/sessions/*/kill").hasRole("ADMIN")
                         // 복원 검증도 대상 DB에 임시 DB를 만들고 지우는 행위라 백업과 같은 ADMIN 경계
                         .requestMatchers(HttpMethod.POST, "/api/instances/*/backup/verify").hasRole("ADMIN")
+                        // 온라인 스키마 변경(gh-ost, B4)은 실제 테이블 구조를 바꾸는 가장 파괴적 행위 — ADMIN만.
+                        // 기본은 dry-run(noop)이지만 execute=true 실행 경로까지 같은 경계로 묶는다.
+                        .requestMatchers(HttpMethod.POST, "/api/instances/*/online-ddl").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/instances/*/backup-policy").hasRole("ADMIN")
                         // 파라미터 조회·drift(B6)는 읽기지만 값이 인프라 형상·자격증명을 담고, 마스킹이
                         // 이름 기반 휴리스틱이라 완전하지 않아 ADMIN으로 올린다(ParameterController 주석 참고).
