@@ -185,6 +185,117 @@ public class PostgresOperator extends AbstractJdbcOperator {
         }
     }
 
+    /** 후보 인덱스 형식: table(col1, col2) — 식별자만 허용(인젝션 방어). 그룹1=테이블, 그룹2=컬럼목록 */
+    private static final java.util.regex.Pattern CANDIDATE = java.util.regex.Pattern.compile(
+            "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\(\\s*"
+                    + "([A-Za-z_][A-Za-z0-9_]*(?:\\s*,\\s*[A-Za-z_][A-Za-z0-9_]*)*)\\s*\\)\\s*$");
+
+    /** EXPLAIN JSON 파싱용. ObjectMapper는 스레드 안전해 정적 공유해도 된다. */
+    private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /** 이 비율 미만으로 비용이 떨어져야 ADVISED — 부동소수 노이즈를 걸러내는 "유의미한 감소" 문턱(1% 이상). */
+    private static final double COST_IMPROVEMENT_THRESHOLD = 0.99;
+
+    /**
+     * 인덱스 어드바이저 (B3) — HypoPG로 진짜 가상 인덱스를 만들어 플랜 비용을 비교한다.
+     * 대상 DB에는 실제 인덱스를 만들지 않는다(가상 인덱스는 세션 로컬 메모리에만 존재) — 이게 이 기능의
+     * 핵심 가치다. hypopg_create_index → 같은 커넥션에서 EXPLAIN 재실행 → hypopg_reset()까지 반드시
+     * 하나의 Connection에서 해야 한다(다른 커넥션은 그 가상 인덱스를 못 본다) — 그래서 ConnectionCallback.
+     *
+     * columns가 비면 UNSUPPORTED(자동 컬럼 추천은 범위 밖). HypoPG 확장이 없으면 UNSUPPORTED("HypoPG
+     * 확장 필요") — 통과로 위장하지 않는다. columns는 식별자 화이트리스트로만 파싱해 인젝션을 막는다.
+     */
+    @Override
+    public IndexAdvice adviseIndex(String sql, String columns) {
+        requireSelect(sql);
+        if (columns == null || columns.isBlank()) {
+            return IndexAdvice.unsupported(
+                    "후보 인덱스(columns) 미지정 — 자동 컬럼 추천은 범위 밖입니다. 예: users(category)");
+        }
+        String ddl = buildCreateIndexDdl(columns); // 형식/식별자 위반이면 IllegalArgumentException(400)
+        try {
+            return jdbc().execute((org.springframework.jdbc.core.ConnectionCallback<IndexAdvice>) conn -> {
+                // HypoPG 확장 확보 — 없거나 설치 권한이 없으면 UNSUPPORTED로 정직하게 내려간다
+                try (java.sql.Statement st = conn.createStatement()) {
+                    st.execute("CREATE EXTENSION IF NOT EXISTS hypopg");
+                } catch (java.sql.SQLException e) {
+                    return IndexAdvice.unsupported(
+                            "HypoPG 확장 필요 — CREATE EXTENSION hypopg 실패(미설치/권한 없음): " + e.getMessage());
+                }
+                String beforePlan = explainJson(conn, sql);
+                double beforeCost = totalCost(beforePlan);
+                // 가상 인덱스 생성은 파라미터 바인딩(?)으로 — ddl은 이미 검증됐지만 이중 방어
+                String afterPlan;
+                try (java.sql.PreparedStatement ps =
+                             conn.prepareStatement("SELECT hypopg_create_index(?)")) {
+                    ps.setString(1, ddl);
+                    ps.execute();
+                    afterPlan = explainJson(conn, sql);
+                } finally {
+                    // 가상 인덱스는 세션 로컬이라 커넥션 반납만으로도 사라지지만, 풀 재사용을 감안해 명시적으로 정리
+                    try (java.sql.Statement st = conn.createStatement()) {
+                        st.execute("SELECT hypopg_reset()");
+                    }
+                }
+                double afterCost = totalCost(afterPlan);
+                double reductionPct = beforeCost <= 0 ? 0 : (beforeCost - afterCost) / beforeCost * 100.0;
+                if (afterCost < beforeCost * COST_IMPROVEMENT_THRESHOLD) {
+                    return IndexAdvice.advised(
+                            "가상 인덱스로 Total Cost %.2f → %.2f (%.1f%% 감소) — 옵티마이저가 이 인덱스를 채택했습니다"
+                                    .formatted(beforeCost, afterCost, reductionPct),
+                            ddl, beforePlan, afterPlan, beforeCost, afterCost);
+                }
+                return IndexAdvice.noBenefit(
+                        "가상 인덱스를 만들어도 Total Cost %.2f → %.2f (유의미한 감소 없음) — 옵티마이저가 채택하지 않았습니다"
+                                .formatted(beforeCost, afterCost),
+                        ddl, beforePlan, afterPlan, beforeCost, afterCost);
+            });
+        } catch (DataAccessException e) {
+            throw new OperatorException("PostgreSQL 인덱스 어드바이저 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /** 같은 커넥션에서 EXPLAIN (FORMAT JSON)을 돌려 플랜 JSON 문자열을 얻는다(가상 인덱스가 보이도록). */
+    private static String explainJson(java.sql.Connection conn, String sql) throws java.sql.SQLException {
+        try (java.sql.Statement st = conn.createStatement();
+             java.sql.ResultSet rs = st.executeQuery("EXPLAIN (FORMAT JSON) " + sql)) {
+            StringBuilder sb = new StringBuilder();
+            while (rs.next()) {
+                sb.append(rs.getString(1));
+            }
+            return sb.toString();
+        }
+    }
+
+    /** EXPLAIN JSON의 최상위 플랜 Total Cost를 뽑는다. 구조: [{"Plan": {"Total Cost": n, ...}}] */
+    private static double totalCost(String planJson) {
+        try {
+            com.fasterxml.jackson.databind.JsonNode plan = MAPPER.readTree(planJson).get(0).get("Plan");
+            return plan.get("Total Cost").asDouble();
+        } catch (Exception e) {
+            throw new OperatorException("실행계획에서 Total Cost 파싱 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * "table(col1, col2)"을 검증된 CREATE INDEX DDL로 변환한다. 테이블·컬럼은 식별자 화이트리스트
+     * (영문/숫자/밑줄, 첫 글자는 문자·밑줄)만 통과시켜, 사용자 입력이 DDL에 그대로 실려도 인젝션이 불가능하다.
+     */
+    static String buildCreateIndexDdl(String columns) {
+        java.util.regex.Matcher m = CANDIDATE.matcher(columns);
+        if (!m.matches()) {
+            throw new IllegalArgumentException(
+                    "후보 인덱스 형식이 올바르지 않습니다 — table(col1,col2) 형태의 식별자여야 합니다: " + columns);
+        }
+        String table = m.group(1);
+        // 컬럼 목록의 공백을 정규화해 깔끔한 DDL로 재구성 (조각은 모두 식별자 검증을 통과한 값)
+        String cols = java.util.Arrays.stream(m.group(2).split(","))
+                .map(String::trim)
+                .collect(java.util.stream.Collectors.joining(", "));
+        return "CREATE INDEX ON " + table + " (" + cols + ")";
+    }
+
     /**
      * 대기 이벤트 — pg_stat_activity의 활성 세션 스냅샷 집계. 다른 기종의 누적 카운터와 달리
      * "지금 이 순간" 각 세션이 무엇을 기다리는지다 (count=세션 수, totalMs=0 — 시간 누적 없음).

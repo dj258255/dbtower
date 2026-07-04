@@ -294,6 +294,9 @@ function openDetail(query) {
   $("#detail-sql").value = query.queryText ?? "";
   $("#plan-section").hidden = true;
   $("#ai-section").hidden = true;
+  $("#advisor-section").hidden = true;
+  $("#advisor-columns").value = "";
+  $("#advisor-result").innerHTML = "";
   $("#inquiry-section").hidden = true;
   $("#inquiry-note").value = "";
   $("#inquiry-result").innerHTML = "";
@@ -359,6 +362,51 @@ async function runAiAnalysis() {
     state.lastPlan = data.plan;
     state.lastFindings = data.findings ?? [];
     state.lastAi = data.aiAnalysis ?? null;
+  } finally { btn.classList.remove("loading"); }
+}
+
+// 인덱스 어드바이저 — 후보 컬럼으로 가상 인덱스를 만들었을 때 플랜 비용이 어떻게 바뀌는지 시뮬레이션.
+// PostgreSQL은 HypoPG로 실제 인덱스 없이 before/after 비용을 비교하고, 타 기종은 UNSUPPORTED를 그대로 보여준다.
+const ADVISOR_STATUS = {
+  ADVISED: { cls: "advised", label: "제안" },
+  NO_BENEFIT: { cls: "no-benefit", label: "이득 없음" },
+  UNSUPPORTED: { cls: "unsupported", label: "미지원" },
+};
+
+async function runIndexAdvisor() {
+  const sql = $("#detail-sql").value.trim();
+  if (!sql) return;
+  const columns = $("#advisor-columns").value.trim();
+  const btn = $("#btn-advisor-run");
+  btn.classList.add("loading");
+  const result = $("#advisor-result");
+  result.innerHTML = '<div class="muted">가상 인덱스로 시뮬레이션 중...</div>';
+  try {
+    let data;
+    try {
+      data = await api(`/api/instances/${state.instance.id}/index-advisor`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql, columns: columns || null }),
+      });
+    } catch (e) {
+      result.innerHTML = `<div class="finding-item">시뮬레이션 실패: ${esc(e.message)}</div>`;
+      return;
+    }
+    const meta = ADVISOR_STATUS[data.status] || { cls: "unsupported", label: data.status };
+    let html = `<div class="finding-item"><span class="advisor-status ${meta.cls}">${esc(meta.label)}</span>${esc(data.detail)}</div>`;
+    if (data.suggestedIndex) {
+      html += `<div class="finding-item">제안 인덱스: <code>${esc(data.suggestedIndex)}</code></div>`;
+    }
+    if (data.beforeCost != null && data.afterCost != null) {
+      html += `<div class="finding-item">Total Cost: ${esc(data.beforeCost)} → ${esc(data.afterCost)}</div>`;
+    }
+    if (data.beforePlan) {
+      html += `<h3>변경 전 실행계획</h3><pre class="codeblock">${esc(data.beforePlan)}</pre>`;
+    }
+    if (data.afterPlan) {
+      html += `<h3>가상 인덱스 적용 후 실행계획</h3><pre class="codeblock">${esc(data.afterPlan)}</pre>`;
+    }
+    result.innerHTML = html;
   } finally { btn.classList.remove("loading"); }
 }
 
@@ -615,6 +663,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#btn-compare").addEventListener("click", runCompare);
   $("#btn-explain").addEventListener("click", runExplain);
   $("#btn-ai").addEventListener("click", runAiAnalysis);
+  // "인덱스 제안" 버튼은 섹션을 펼치고, 섹션 안의 "시뮬레이션" 버튼이 실제 호출한다(후보 컬럼 입력이 필요해서)
+  $("#btn-advisor").addEventListener("click", () => { $("#advisor-section").hidden = false; $("#advisor-columns").focus(); });
+  $("#btn-advisor-run").addEventListener("click", runIndexAdvisor);
   $("#btn-inquiry").addEventListener("click", runInquiry);
   $("#audit-search-btn").addEventListener("click", loadAudit);
   $("#audit-reset-btn").addEventListener("click", () => {

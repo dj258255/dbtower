@@ -103,4 +103,16 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
             throw new IllegalArgumentException("EXPLAIN은 SELECT 쿼리만 허용합니다");
         }
     }
+
+    /**
+     * 기본값은 UNSUPPORTED (B3) — 가상 인덱스 시뮬레이션 능력을 실제로 갖춘 기종만 오버라이드한다.
+     * verifyRestore와 같은 정직성 원칙: "실제 인덱스 없이 시뮬레이션 못 함"을 "이득 없음"으로
+     * 위장하지 않고 명시적 UNSUPPORTED로 돌려준다.
+     */
+    @Override
+    public IndexAdvice adviseIndex(String sql, String columns) {
+        return IndexAdvice.unsupported(instance.getType()
+                + " 가상 인덱스 시뮬레이션 미지원 — HypoPG(가상 인덱스)는 PostgreSQL 전용. "
+                + "타 기종은 실제 인덱스를 만든 뒤 EXPLAIN을 비교해야 하며 이는 대상 DB를 바꾸는 행위라 범위 밖.");
+    }
 }
