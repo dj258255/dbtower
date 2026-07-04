@@ -150,6 +150,20 @@ public final class McpProtocolHandler {
                         "limit", intProp("최대 개수 (기본 50)"))),
                 args -> get("/api/instances/" + args.get("instanceId").asLong()
                         + "/sessions?limit=" + optInt(args, "limit", 50))));
+
+        tools.put("schema", new Tool(
+                "인스턴스 스키마 구조 요약 (B7) — 테이블·컬럼(타입·nullable)·인덱스(컬럼·유니크). 완벽한 DDL이 아니라 "
+                        + "비교에 필요한 구조만. MongoDB는 스키마리스라 컬렉션·인덱스 구조만.",
+                schema(Map.of("instanceId", intProp("대상 인스턴스 id"))),
+                args -> get("/api/instances/" + args.get("instanceId").asLong() + "/schema")));
+
+        tools.put("schema_diff", new Tool(
+                "두 인스턴스 스키마 비교 (B7) — 같은 역할의 두 장비(스테이징 vs 운영)에서 '왜 저 장비만 다르지'를 추적한다. "
+                        + "추가(right에만)/삭제(left에만)/변경된 테이블·컬럼·인덱스. 기종이 다르면 타입 표기 차이 경고 포함.",
+                schema(Map.of("left", intProp("기준(베이스라인) 인스턴스 id"),
+                        "right", intProp("비교 대상 인스턴스 id"))),
+                args -> get("/api/schema-diff?left=" + args.get("left").asLong()
+                        + "&right=" + args.get("right").asLong())));
     }
 
     // ---------- JSON-RPC 결과 조립 ----------

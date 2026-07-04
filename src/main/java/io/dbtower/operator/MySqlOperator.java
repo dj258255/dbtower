@@ -298,6 +298,49 @@ public class MySqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * 스키마 구조 — information_schema.COLUMNS(구조) + STATISTICS(인덱스). 대상 스키마의 BASE TABLE만.
+     * COLUMN_TYPE은 길이·부호까지 포함한 기종 고유 표기(varchar(255), int unsigned 등)를 그대로 담아
+     * diff가 실제 차이를 보게 한다. STATISTICS는 인덱스 컬럼당 한 행이라 SEQ_IN_INDEX로 순서를 보존한다.
+     */
+    @Override
+    public SchemaSnapshot describeSchema() {
+        String columnsSql = """
+                SELECT c.TABLE_NAME, c.COLUMN_NAME, c.COLUMN_TYPE,
+                       c.IS_NULLABLE, c.ORDINAL_POSITION
+                FROM information_schema.COLUMNS c
+                JOIN information_schema.TABLES t
+                  ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
+                WHERE c.TABLE_SCHEMA = ? AND t.TABLE_TYPE = 'BASE TABLE'
+                ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION
+                """;
+        // NON_UNIQUE=0이 유니크. 인덱스는 컬럼마다 한 행이라 SEQ_IN_INDEX 순서로 복합 인덱스 순서 보존.
+        String indexesSql = """
+                SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME, NON_UNIQUE
+                FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = ?
+                ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
+                """;
+        try {
+            List<SchemaSupport.ColumnRow> columns = jdbc().query(columnsSql,
+                    (rs, i) -> new SchemaSupport.ColumnRow(
+                            rs.getString("TABLE_NAME"),
+                            new ColumnSchema(rs.getString("COLUMN_NAME"), rs.getString("COLUMN_TYPE"),
+                                    "YES".equalsIgnoreCase(rs.getString("IS_NULLABLE")),
+                                    rs.getInt("ORDINAL_POSITION"))),
+                    instance.getDbName());
+            List<SchemaSupport.IndexColumnRow> indexes = jdbc().query(indexesSql,
+                    (rs, i) -> new SchemaSupport.IndexColumnRow(
+                            rs.getString("TABLE_NAME"), rs.getString("INDEX_NAME"),
+                            rs.getString("COLUMN_NAME"), rs.getInt("NON_UNIQUE") == 0),
+                    instance.getDbName());
+            return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
+                    columns, indexes, SchemaSupport.DEFAULT_MAX_TABLES);
+        } catch (DataAccessException e) {
+            throw new OperatorException("MySQL 스키마 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
     /** 복제 상태 — 레플리카면 SHOW REPLICA STATUS에 행이 있고, Seconds_Behind_Source가 지연이다 */
     @Override
     public ReplicationState replicationState() {

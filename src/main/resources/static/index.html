@@ -142,6 +142,18 @@
           </table>
         </div>
       </div>
+      <div class="monitor-card schema-diff-card">
+        <h3>Schema Diff <span class="hint">(같은 역할의 두 인스턴스 구조 비교 — 왜 저 장비만 다르지)</span></h3>
+        <div class="schema-diff-controls">
+          <select id="schema-left" class="schema-select"></select>
+          <span class="schema-arrow">→</span>
+          <select id="schema-right" class="schema-select"></select>
+          <button id="btn-schema-diff" class="btn btn-primary btn-small">비교</button>
+          <span class="hint">추가=초록(right에만) · 삭제=빨강(left에만) · 변경=주황</span>
+        </div>
+        <div id="schema-diff-warning" class="schema-warning" hidden></div>
+        <div id="schema-diff-result" class="schema-diff-result muted">좌/우 인스턴스를 고르고 비교를 누르세요.</div>
+      </div>
       <div class="monitor-grid">
         <div class="monitor-card">
           <h3>복제 상태</h3>

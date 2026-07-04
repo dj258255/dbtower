@@ -298,6 +298,51 @@ public class OracleOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * 스키마 구조 — 컬럼은 user_tab_columns, 인덱스는 user_indexes + user_ind_columns(현재 스키마).
+     * 뷰의 컬럼이 섞이지 않게 user_tables에 있는 것만 남긴다. nullable은 'Y'/'N', uniqueness는
+     * 'UNIQUE'/'NONUNIQUE'로 오므로 각각 boolean으로 환산한다. column_id/column_position이 순서다.
+     * data_type은 길이 없이 VARCHAR2처럼만 와서, data_length를 붙여 기종 표기에 가깝게 만든다.
+     */
+    @Override
+    public SchemaSnapshot describeSchema() {
+        String columnsSql = """
+                SELECT c.table_name,
+                       c.column_name,
+                       CASE WHEN c.data_type IN ('VARCHAR2', 'CHAR', 'NVARCHAR2', 'RAW')
+                            THEN c.data_type || '(' || c.data_length || ')'
+                            ELSE c.data_type END AS column_type,
+                       c.nullable,
+                       c.column_id
+                FROM user_tab_columns c
+                WHERE c.table_name IN (SELECT table_name FROM user_tables)
+                ORDER BY c.table_name, c.column_id
+                """;
+        String indexesSql = """
+                SELECT i.table_name, i.index_name, ic.column_name, i.uniqueness
+                FROM user_indexes i
+                JOIN user_ind_columns ic ON ic.index_name = i.index_name
+                WHERE i.table_name IN (SELECT table_name FROM user_tables)
+                ORDER BY i.table_name, i.index_name, ic.column_position
+                """;
+        try {
+            List<SchemaSupport.ColumnRow> columns = jdbc().query(columnsSql,
+                    (rs, i) -> new SchemaSupport.ColumnRow(
+                            rs.getString("table_name"),
+                            new ColumnSchema(rs.getString("column_name"), rs.getString("column_type"),
+                                    "Y".equalsIgnoreCase(rs.getString("nullable")),
+                                    rs.getInt("column_id"))));
+            List<SchemaSupport.IndexColumnRow> indexes = jdbc().query(indexesSql,
+                    (rs, i) -> new SchemaSupport.IndexColumnRow(
+                            rs.getString("table_name"), rs.getString("index_name"),
+                            rs.getString("column_name"), "UNIQUE".equalsIgnoreCase(rs.getString("uniqueness"))));
+            return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
+                    columns, indexes, SchemaSupport.DEFAULT_MAX_TABLES);
+        } catch (DataAccessException e) {
+            throw new OperatorException("Oracle 스키마 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
     /** 복제 상태 — Data Guard 기준의 데이터베이스 역할. 미구성 단독 인스턴스도 PRIMARY로 표시된다 */
     @Override
     public ReplicationState replicationState() {
