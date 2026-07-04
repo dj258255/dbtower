@@ -30,6 +30,14 @@ public class WebhookNotifier {
         this.webhookUrl = webhookUrl;
     }
 
+    /**
+     * 웹훅이 설정돼 있는지 — 문의(InquiryService)가 "전송됨/미설정"을 응답으로 구분하기 위해 필요하다.
+     * send()는 미설정이면 조용히 로그만 남기고 반환하므로, 호출자가 결과를 알 수 없어 이 질의를 연다.
+     */
+    public boolean isConfigured() {
+        return webhookUrl != null && !webhookUrl.isBlank();
+    }
+
     public void send(String message) {
         if (webhookUrl == null || webhookUrl.isBlank()) {
             log.info("[알림(webhook 미설정)] {}", message);
