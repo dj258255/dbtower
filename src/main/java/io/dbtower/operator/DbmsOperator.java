@@ -55,6 +55,16 @@ public interface DbmsOperator {
     List<SessionInfo> activeSessions(int limit);
 
     /**
+     * 인덱스 어드바이저 (B3) — 후보 인덱스를 실제로 만들지 않고 가상으로 시뮬레이션해
+     * "이 인덱스를 만들면 플랜 비용이 이렇게 바뀐다"를 돌려준다. 읽기 전용(SELECT만).
+     *
+     * columns는 "table(col1,col2)" 형태의 후보 인덱스 컬럼. PostgreSQL은 HypoPG로 진짜 가상
+     * 인덱스를 만들어 EXPLAIN 비용을 비교한다. 타 기종은 실제 인덱스 없이 시뮬레이션할 표준 수단이
+     * 없어 UNSUPPORTED다(통과 위장 금지 — IndexAdvice 주석 참고).
+     */
+    IndexAdvice adviseIndex(String sql, String columns);
+
+    /**
      * 세션 하나를 안전하게 종료한다 (B2) — 반드시 명시적 pid 하나만. 대량/와일드카드 kill은 없다.
      * force=false는 실행 중 문장만 취소(cancel), force=true는 세션 자체를 강제 종료(terminate).
      * SQL Server처럼 취소/강제 구분이 없는 기종은 force를 무시한다(구현 주석에 명시).

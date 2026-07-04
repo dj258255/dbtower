@@ -121,6 +121,21 @@ public class InsightController {
         return new ExplainResponse(plan, analyzer.analyze(instance.getType(), plan));
     }
 
+    public record IndexAdviceRequest(@NotBlank String sql, String columns) {
+    }
+
+    /**
+     * 인덱스 어드바이저 (B3) — 후보 컬럼으로 가상 인덱스를 만들었을 때 플랜 비용이 어떻게 바뀌는지
+     * 시뮬레이션한다. explain과 같은 진단이라 인증 사용자(VIEWER)면 되고, 대상 DB 상태는 바꾸지 않는다
+     * (PostgreSQL은 HypoPG 가상 인덱스 — 실제 인덱스를 만들지 않는 것이 이 기능의 핵심). POST지만
+     * 대상 DB를 변경하지 않으므로 ADMIN 경계에 두지 않는다(SecurityConfig 주석 참고).
+     */
+    @PostMapping("/index-advisor")
+    public io.dbtower.operator.IndexAdvice indexAdvisor(@PathVariable Long id,
+                                                        @RequestBody IndexAdviceRequest req) {
+        return operatorFactory.create(registryService.findById(id)).adviseIndex(req.sql(), req.columns());
+    }
+
     /**
      * 시점 비교 — 평소 구간(base) 대비 문제 구간(target)의 쿼리별 QPS·평균 레이턴시 증감과 신규 쿼리.
      * 예: /api/instances/1/compare?baseFrom=2026-07-02T10:00&baseTo=2026-07-02T10:10&targetFrom=2026-07-02T14:00&targetTo=2026-07-02T14:10

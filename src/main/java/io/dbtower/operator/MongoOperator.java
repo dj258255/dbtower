@@ -292,6 +292,17 @@ public class MongoOperator implements DbmsOperator {
      * 참고: MongoDB 8.0대에서는 concurrentTransactions가 queues.execution으로 이동했다 —
      * 필드가 없으면 큐 지표만 돌려준다 (7.0 컨테이너에서는 존재를 실측 확인, 2026-07-04).
      */
+    /**
+     * 인덱스 어드바이저 (B3) — MongoDB는 UNSUPPORTED. HypoPG 같은 가상 인덱스 개념이 없어
+     * 실제 인덱스 없이 플랜 비용을 시뮬레이션할 표준 수단이 없다. 통과 위장 없이 명시적 미지원.
+     */
+    @Override
+    public IndexAdvice adviseIndex(String sql, String columns) {
+        return IndexAdvice.unsupported(instance.getType()
+                + " 가상 인덱스 시뮬레이션 미지원 — MongoDB는 HypoPG 같은 가상 인덱스가 없고, "
+                + "실제 인덱스를 만든 뒤 explain을 비교해야 하므로 대상 DB를 바꾸지 않는 이 기능의 범위 밖.");
+    }
+
     @Override
     public List<WaitEvent> waitEvents(int limit) {
         try {

@@ -90,6 +90,7 @@
           <span class="detail-actions">
             <button id="btn-explain" class="btn btn-primary btn-small">실행계획 보기</button>
             <button id="btn-ai" class="btn btn-dark btn-small">AI 분석</button>
+            <button id="btn-advisor" class="btn btn-small">인덱스 제안</button>
             <button id="btn-inquiry" class="btn btn-small">DB팀에 문의</button>
           </span>
         </div>
@@ -101,6 +102,14 @@
           <h3>실행계획 결과</h3>
           <pre id="detail-plan" class="codeblock"></pre>
           <div id="detail-findings" class="findings"></div>
+        </div>
+        <div class="detail-section" id="advisor-section" hidden>
+          <h3>인덱스 제안 <span class="hint">(PostgreSQL만 — HypoPG 가상 인덱스로 실제 생성 없이 before/after 비용 비교. 타 기종은 미지원)</span></h3>
+          <div class="advisor-input">
+            <input id="advisor-columns" class="advisor-cols" placeholder="후보 인덱스 컬럼 — 예: users(category)" spellcheck="false" />
+            <button id="btn-advisor-run" class="btn btn-primary btn-small">시뮬레이션</button>
+          </div>
+          <div id="advisor-result" class="findings"></div>
         </div>
         <div class="detail-section" id="ai-section" hidden>
           <h3>AI 1차 분석 <span class="hint">(docs/ai-analysis-rules.md 판단 기준 기반)</span></h3>
