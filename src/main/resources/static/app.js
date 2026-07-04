@@ -445,6 +445,35 @@ async function loadWaitEvents() {
   }
 }
 
+// ---------- 감사 로그 검색 (Specification 동적 필터) ----------
+async function loadAudit() {
+  const table = $("#audit-table");
+  const qs = new URLSearchParams();
+  const p = $("#audit-principal").value.trim();
+  const a = $("#audit-action").value.trim();
+  const o = $("#audit-outcome").value.trim();
+  if (p) qs.set("principal", p);
+  if (a) qs.set("action", a);
+  if (o) qs.set("outcome", o);
+  qs.set("limit", "50");
+  try {
+    const rows = await api(`/api/audit?${qs.toString()}`);
+    table.querySelector("tbody").innerHTML = rows.length ? rows.map((e) => `
+      <tr>
+        <td>${esc((e.occurredAt || "").replace("T", " ").slice(0, 19))}</td>
+        <td>${esc(e.principal)}</td>
+        <td>${esc(e.role ?? "-")}</td>
+        <td class="qtext" title="${esc(e.action)}">${esc(e.action)}</td>
+        <td class="num">${e.outcome}</td>
+        <td class="num">${e.durationMs == null ? "-" : e.durationMs}</td>
+      </tr>`).join("") : '<tr><td colspan="6" class="muted">조건에 맞는 기록이 없습니다.</td></tr>';
+  } catch (e) {
+    table.querySelector("tbody").innerHTML = e.message.startsWith("403")
+      ? '<tr><td colspan="6" class="muted">감사 로그는 ADMIN 역할만 볼 수 있습니다.</td></tr>'
+      : `<tr><td colspan="6" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+  }
+}
+
 // ---------- 탭/프리셋/초기화 ----------
 function setupTabs() {
   document.querySelectorAll(".tab").forEach((tab) => {
@@ -484,4 +513,9 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-compare").addEventListener("click", runCompare);
   $("#btn-explain").addEventListener("click", runExplain);
   $("#btn-ai").addEventListener("click", runAiAnalysis);
+  $("#audit-search-btn").addEventListener("click", loadAudit);
+  $("#audit-reset-btn").addEventListener("click", () => {
+    ["audit-principal", "audit-action", "audit-outcome"].forEach((id) => { $(`#${id}`).value = ""; });
+    loadAudit();
+  });
 });

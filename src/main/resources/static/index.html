@@ -141,6 +141,22 @@
           </p>
         </div>
       </div>
+      <div class="monitor-card audit-card">
+        <h3>감사 로그 <span class="hint">(누가 언제 무엇을 했나 — ADMIN 전용)</span></h3>
+        <div class="audit-filters">
+          <input type="text" id="audit-principal" placeholder="사용자 (예: admin)">
+          <input type="text" id="audit-action" placeholder="action 부분일치 (예: explain)">
+          <input type="number" id="audit-outcome" placeholder="결과코드 (예: 403)">
+          <button class="btn btn-primary btn-small" id="audit-search-btn">검색</button>
+          <button class="btn btn-small" id="audit-reset-btn">초기화</button>
+        </div>
+        <div class="table-scroll">
+          <table class="qtable" id="audit-table">
+            <thead><tr><th>시각</th><th>주체</th><th>역할</th><th>action</th><th>결과</th><th>ms</th></tr></thead>
+            <tbody><tr><td class="muted" colspan="6">검색을 눌러 조회하세요.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
       <div class="monitor-card mcp-card">
         <h3>MCP 연동 — AI 에이전트가 DBTower를 도구로 씁니다</h3>
         <p class="muted">앱이 떠 있으면 준비 완료. 아래 명령 한 줄이면 Claude Code가 시점 비교·실행계획 분석을 직접 수행합니다.</p>

@@ -237,3 +237,11 @@ input[type="datetime-local"] {
 .user-chip .role-badge {
   background: #eef1f5; border-radius: 10px; padding: 2px 8px; font-size: 11px; margin-left: 4px;
 }
+
+/* ---------- 감사 로그 검색 카드 ---------- */
+.audit-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.audit-filters input {
+  padding: 7px 10px; border: 1px solid #d4d9df; border-radius: 7px; font-size: 13px;
+}
+.audit-filters input[type="number"] { width: 130px; }
+#audit-table th { white-space: nowrap; }

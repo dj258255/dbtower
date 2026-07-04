@@ -906,3 +906,36 @@ verify_status를 backup_run에 저장 (V4__backup_run_verify.sql)
 | A7 | 복원 안 되는 백업 | 복원 검증 3값 | 29 |
 
 테스트 81건, 마이그레이션 V1~V4, 이 8개 아크의 상당수를 git worktree 병렬 개발로 진행(24절).
+
+## 31. 감사 로그 검색 — Specification의 제자리 (동적 필터)
+
+앞서 리팩터 검토에서 "정적 쿼리를 커스텀 프래그먼트로 감싸는 건 과설계"라고 판단했다.
+그 판단의 짝이 이것이다 — Specification(또는 프래그먼트)이 정말 값을 하는 건 **필터가
+런타임에 조립되는 동적 쿼리**일 때다. 감사 로그 검색이 정확히 그 경우다.
+
+한계: 감사 로그가 쌓이기 시작하니 "누가 무엇을 했나"를 좁혀 볼 방법이 필요해졌다.
+필터는 사용자·action·인스턴스·결과코드·기간 6종이고, 어느 것이든 있을 수도 없을 수도 있다.
+이걸 파생 메서드나 @Query로 풀면 조합 수만큼 메서드가 폭발한다(findByPrincipal,
+findByPrincipalAndOutcome, findByOutcomeAndInstanceIdBetween... 2^6).
+
+설계:
+- AuditEventRepository가 JpaSpecificationExecutor를 함께 상속
+- AuditSpecifications의 각 빌더는 파라미터가 비면 null 반환("이 필터 없음")
+- 컨트롤러가 null을 걸러 AND로 reduce — 필터가 늘어도 메서드가 아니라 조각이 하나 는다
+- 필터가 하나도 없으면 findAll(무필터 목록)로 폴백, 정렬은 occurredAt desc + id desc
+
+실측 (2026-07-04, 라이브):
+```
+무필터:                    9건 전체
+action=explain (부분일치):  explain 2건만 (POST /api/instances/2·8/explain)
+outcome=200:               200 응답만
+instanceId=8 & action=backup (AND): 인스턴스 8의 백업 계열만
+미인증 -> 401, VIEWER -> 403 (ADMIN 전용 유지)
+```
+단위 테스트 8건(필터 단독·조합·기간·인가)으로 동적 WHERE를 고정. 웹 콘솔 Monitoring 탭에
+검색 카드 추가(사용자·action·결과코드 입력 + 표).
+
+이로써 Spring Data는 세 층위에서 제자리를 지킨다: 파생 메서드(정적 단순), @Query(정적 집계·벌크),
+Specification(동적 필터). "어디에 뭘 쓰나"를 기능이 결정하게 두는 것 — 프레임워크를 과시하지 않는다.
+
+![감사 로그 검색 — 동적 필터(Specification)](images/webui/09-audit.png)
