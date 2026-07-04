@@ -7,6 +7,9 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 /**
  * 플랫폼 사용자. 관리 대상 DB의 계정과는 완전히 별개 —
@@ -14,6 +17,8 @@ import jakarta.persistence.Id;
  * "DBTower가 대상 DB에 어떻게 붙나"를 담당한다.
  */
 @Entity
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class PlatformUser {
 
     public enum Role {
@@ -38,17 +43,9 @@ public class PlatformUser {
     @Column(nullable = false)
     private Role role;
 
-    protected PlatformUser() {
-    }
-
     public PlatformUser(String username, String passwordHash, Role role) {
         this.username = username;
         this.passwordHash = passwordHash;
         this.role = role;
     }
-
-    public Long getId() { return id; }
-    public String getUsername() { return username; }
-    public String getPasswordHash() { return passwordHash; }
-    public Role getRole() { return role; }
 }

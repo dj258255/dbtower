@@ -1,6 +1,9 @@
 package io.dbtower.insight;
 
 import jakarta.persistence.*;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
@@ -10,6 +13,8 @@ import java.time.LocalDateTime;
  * 시점 비교는 "구간 양 끝 배치의 카운터 차분"으로 계산한다.
  */
 @Entity
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(indexes = {
         // 개선 아크 3: 인덱스 없이 시작해 DBTower 자신의 explain으로 Seq Scan을 진단한 뒤 추가했다.
         // 50만 행 기준 21.269ms(Parallel Seq Scan) -> 인덱스 후 실측은 VERIFICATION.md 9절.
@@ -40,9 +45,6 @@ public class QuerySnapshot {
 
     private long rowsExamined;
 
-    protected QuerySnapshot() {
-    }
-
     public QuerySnapshot(Long instanceId, LocalDateTime capturedAt, String queryId,
                          String queryText, long calls, double totalTimeMs, long rowsExamined) {
         this.instanceId = instanceId;
@@ -53,12 +55,4 @@ public class QuerySnapshot {
         this.totalTimeMs = totalTimeMs;
         this.rowsExamined = rowsExamined;
     }
-
-    public Long getInstanceId() { return instanceId; }
-    public LocalDateTime getCapturedAt() { return capturedAt; }
-    public String getQueryId() { return queryId; }
-    public String getQueryText() { return queryText; }
-    public long getCalls() { return calls; }
-    public double getTotalTimeMs() { return totalTimeMs; }
-    public long getRowsExamined() { return rowsExamined; }
 }
