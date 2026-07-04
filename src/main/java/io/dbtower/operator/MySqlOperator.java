@@ -117,6 +117,44 @@ public class MySqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * 레이턴시 백분위 (D4a) — MySQL 8.0+가 events_statements_summary_by_digest에 직접 계산해 두는
+     * QUANTILE_95/QUANTILE_99 컬럼을 그대로 읽는다(NATIVE). 이 컬럼들은 피코초 단위라 1e9로 나눠 ms로 환산한다.
+     *
+     * <b>한계 — 누적 백분위:</b> 이 QUANTILE 값은 통계 리셋(서버 재기동/TRUNCATE) 이후의 <b>누적</b>이라
+     * "최근 N분 윈도우 p95"가 아니다. 오래 뜬 서버일수록 과거 이력에 눌려 최근 급변을 늦게 반영한다.
+     * 진짜 윈도우 백분위는 events_statements_histogram_by_digest 두 스냅샷을 차분해야 하는데(히스토그램 수집 필요),
+     * 1단계인 여기서는 누적 p95/p99를 정직히 NATIVE로 돌려주고 그 한계를 응답 주석·UI 배지로 표기한다.
+     */
+    @Override
+    public List<LatencyPercentile> latencyPercentiles(int limit) {
+        String sql = """
+                SELECT DIGEST, DIGEST_TEXT,
+                       QUANTILE_95 / 1000000000 AS p95_ms,
+                       QUANTILE_99 / 1000000000 AS p99_ms
+                FROM performance_schema.events_statements_summary_by_digest
+                WHERE DIGEST_TEXT IS NOT NULL
+                ORDER BY SUM_TIMER_WAIT DESC
+                LIMIT ?
+                """;
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new LatencyPercentile(
+                            rs.getString("DIGEST"),
+                            rs.getString("DIGEST_TEXT"),
+                            round2(rs.getDouble("p95_ms")),
+                            round2(rs.getDouble("p99_ms")),
+                            LatencyPercentile.NATIVE),
+                    limit);
+        } catch (DataAccessException e) {
+            throw new OperatorException("MySQL 레이턴시 백분위 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    private static double round2(double v) {
+        return Math.round(v * 100.0) / 100.0;
+    }
+
     @Override
     public List<SlowQuery> slowQueries(int limit) {
         // docker-compose에서 slow_query_log=ON, log_output=TABLE로 켜두어 mysql.slow_log에서 직접 조회한다

@@ -108,7 +108,7 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
-  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions()]);
+  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles()]);
 }
 
 // ---------- 활동 그래프 (드래그 구간 선택) ----------
@@ -540,6 +540,38 @@ async function loadWaitEvents() {
         <td class="num">${fmtNum(w.count, 0)}</td>
         <td class="num">${w.totalMs > 0 ? fmtNum(w.totalMs) : "-"}</td>
       </tr>`).join("") : '<tr><td colspan="4" class="muted">대기 이벤트가 없습니다.</td></tr>';
+  } catch (e) {
+    table.querySelector("tbody").innerHTML =
+      `<tr><td colspan="4" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+// 레이턴시 백분위 p95/p99 (D4a) — 같은 지표라도 기종마다 원자료가 달라 source로 출처를 구분한다.
+// 값을 절대 섞지 않는다: 실측(NATIVE)·직접계산(COMPUTED)·추정(ESTIMATED)·미지원(UNSUPPORTED)을
+// 배지로 정직하게 구분해 보여준다. 값이 없으면(null) "-"로, 추정/미지원은 배지 색으로 오독을 막는다.
+const LATENCY_SOURCE = {
+  NATIVE: { cls: "src-native", label: "실측", note: "리셋 이후 누적 — 최근 윈도우 아님" },
+  COMPUTED: { cls: "src-computed", label: "직접계산", note: "profile 원샘플에서 계산" },
+  ESTIMATED: { cls: "src-estimated", label: "추정", note: "평균+표준편차 근사 — 실제 백분위 아님, 과소평가 가능" },
+  UNSUPPORTED: { cls: "src-unsupported", label: "미지원", note: "백분위 원자료 없음" },
+};
+
+async function loadLatencyPercentiles() {
+  const table = $("#latency-table");
+  table.querySelector("thead").innerHTML = `
+    <tr><th>Source</th><th>Query</th><th class="num">p95(ms)</th><th class="num">p99(ms)</th></tr>`;
+  try {
+    const rows = await api(`/api/instances/${state.instance.id}/latency-percentiles?limit=20`);
+    table.querySelector("tbody").innerHTML = rows.length ? rows.map((r) => {
+      const src = LATENCY_SOURCE[r.source] ?? { cls: "src-unsupported", label: esc(r.source), note: "" };
+      return `
+      <tr>
+        <td><span class="src-badge ${src.cls}" title="${esc(src.note)}">${src.label}</span></td>
+        <td class="qtext" title="${esc(r.queryText)}">${esc(r.queryText)}</td>
+        <td class="num">${r.p95Ms != null ? fmtNum(r.p95Ms) : "-"}</td>
+        <td class="num">${r.p99Ms != null ? fmtNum(r.p99Ms) : "-"}</td>
+      </tr>`;
+    }).join("") : '<tr><td colspan="4" class="muted">백분위 데이터가 없습니다.</td></tr>';
   } catch (e) {
     table.querySelector("tbody").innerHTML =
       `<tr><td colspan="4" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;

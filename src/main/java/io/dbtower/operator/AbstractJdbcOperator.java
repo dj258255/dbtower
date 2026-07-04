@@ -115,4 +115,17 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
                 + " 가상 인덱스 시뮬레이션 미지원 — HypoPG(가상 인덱스)는 PostgreSQL 전용. "
                 + "타 기종은 실제 인덱스를 만든 뒤 EXPLAIN을 비교해야 하며 이는 대상 DB를 바꾸는 행위라 범위 밖.");
     }
+
+    /**
+     * 기본값은 UNSUPPORTED (D4a) — 레이턴시 백분위 원자료를 실제로 가진 기종만 오버라이드한다.
+     * SQL Server(sys.dm_exec_query_stats)·Oracle(V$SQL)의 통계 뷰는 min/max/평균/총계만 제공하고
+     * p95/p99 분위수도, 근사에 필요한 표준편차도 주지 않는다. 실측 백분위도 정직한 근사(정규분포 가정)도
+     * 낼 수 없으므로, 없는 능력을 있는 척하지 않고 명시적 UNSUPPORTED로 돌려준다(verifyRestore·adviseIndex와 같은 정직성 원칙).
+     */
+    @Override
+    public java.util.List<LatencyPercentile> latencyPercentiles(int limit) {
+        return java.util.List.of(LatencyPercentile.unsupported(instance.getType()
+                + " 레이턴시 백분위 미지원 — 이 기종의 통계 뷰는 min/max/평균/총계만 제공하고 "
+                + "p95/p99 분위수 원자료도 근사에 필요한 표준편차도 없어, 실측 백분위도 정직한 근사도 낼 수 없다."));
+    }
 }

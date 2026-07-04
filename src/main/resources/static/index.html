@@ -177,6 +177,21 @@
         <p class="hint">기본은 dry-run — 실제 테이블은 바뀌지 않습니다. "실제 실행"은 ADMIN 확인 후 적용됩니다.</p>
         <div id="ddl-result" class="ddl-result muted">테이블과 ALTER 절을 입력하고 dry-run으로 먼저 검증하세요.</div>
       </div>
+      <div class="monitor-card latency-card">
+        <h3>레이턴시 백분위 p95/p99 <span class="hint">(평균은 멀쩡한데 꼬리가 아프다 — 같은 지표라도 기종마다 원자료가 다르다)</span></h3>
+        <p class="hint latency-legend">
+          <span class="src-badge src-native">실측</span> MySQL QUANTILE 컬럼(리셋 이후 누적 — 최근 윈도우 아님) ·
+          <span class="src-badge src-computed">직접계산</span> Mongo profile 원샘플 ·
+          <span class="src-badge src-estimated">추정</span> PostgreSQL 평균+표준편차 근사(정규분포 가정, 꼬리 무거우면 과소평가) ·
+          <span class="src-badge src-unsupported">미지원</span> SQL Server/Oracle(원자료 없음)
+        </p>
+        <div class="table-scroll">
+          <table class="qtable" id="latency-table">
+            <thead></thead>
+            <tbody><tr><td class="muted">조회 중...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
       <div class="monitor-grid">
         <div class="monitor-card">
           <h3>복제 상태</h3>

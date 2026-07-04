@@ -84,6 +84,18 @@ public class InsightController {
     }
 
     /**
+     * 레이턴시 백분위 p95/p99 (D4a) — "평균은 멀쩡한데 꼬리가 아프다"를 보는 사용자 경험 지표. 조회는 인증 사용자(진단).
+     * 같은 지표라도 기종마다 원자료가 달라 source로 출처를 구분한다: MySQL=NATIVE(QUANTILE 컬럼, 리셋 이후 누적),
+     * Mongo=COMPUTED(profile 원샘플 직접 계산), PostgreSQL=ESTIMATED(평균+표준편차 근사 — 실측 아님),
+     * SQL Server/Oracle=UNSUPPORTED. 라벨을 절대 섞지 않는다 — LatencyPercentile record 주석 참고.
+     */
+    @GetMapping("/latency-percentiles")
+    public List<io.dbtower.operator.LatencyPercentile> latencyPercentiles(
+            @PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
+        return operatorFactory.create(registryService.findById(id)).latencyPercentiles(limit);
+    }
+
+    /**
      * 활성 세션 + 블로킹 트리 (B2) — "지금 누가 누구를 막고 있나". 조회는 VIEWER부터.
      * blockedByPid가 채워진 행이 곧 블로킹 관계. 기종별 pid 의미는 SessionInfo 주석 참고.
      */
