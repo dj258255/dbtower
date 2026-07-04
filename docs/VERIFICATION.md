@@ -1122,3 +1122,63 @@ DBA가 장애 시 던지는 질문을 축으로 진단 심화를 채웠다:
 Phase A(운영 안전 8) + Phase B(진단 심화 8) 완료. 새 능력은 전부 "DbmsOperator 메서드 1개 추가"
 또는 "기존 메서드 재사용"으로 5기종 통합 — 아키텍처 주장의 반복 검증. 남은 것: Phase C(프로비저닝
 연동 — K8s Operator·Terraform·Ansible로 생성-등록 자동화).
+
+## 42. Phase C 프로비저닝 연동 — 멱등 등록(upsert): IaC 재실행 안전장치
+
+지금까지는 "이미 존재하는 DB"를 수동 등록했다. 현업에서 DB는 IaC로 태어난다 — 태어나는
+순간 관제탑에 자동 등록되는 것이 Phase C다. 그 전제가 **멱등 등록**: 프로비저닝이 등록을
+재실행해도 중복이 아니라 갱신이어야 한다.
+
+- PUT /api/instances: 같은 이름이면 접속 정보 갱신(풀 정리 후), 없으면 신규. 어느 쪽이든 접속 검증.
+- 이름은 논리 식별자(유지), createdAt 유지("언제부터 관제했나"). ADMIN 경계.
+
+실측: 같은 이름 재 PUT에도 id 유지·중복 0. 단위 3건(신규/갱신/접속실패 거부).
+
+## 43. Phase C — Kubernetes(CloudNativePG): 생성→등록 e2e 완주
+
+한계: DB 생성과 관제가 끊겨 있으면 도구 모음이지 플랫폼이 아니다. K8s에서 Operator가
+Day-1/2를 맡고, 생성된 DB가 관제탑에 자동 등록되게 잇는다.
+
+실측 (2026-07-05, kind 로컬 클러스터에서 실제 e2e 완주):
+```
+kind create cluster (v0.32) -> Docker 노드 기동
+CloudNativePG operator 1.24.1 설치 -> cnpg-controller-manager Available
+kubectl apply cluster.yml -> Operator가 프로비저닝, cluster/dbtower-pg "healthy", pod Running,
+  접속 Secret dbtower-pg-app(username/password/host/port/dbname) 자동 생성
+register-job 로직: -app Secret 읽어 PUT /api/instances -> 등록 id 1
+DBTower가 그 DB에 실제 접속: health up, "PostgreSQL 16.4" (pingMillis 47)
+멱등: 등록 재실행 -> id 1 유지(중복 0)
+kind delete cluster (정리)
+```
+infra/k8s/: Cluster CR + register-job(Secret 마운트 -> PUT) + config Secret 예시. 매니페스트
+YAML 문법 검증 통과. 등록 훅은 CloudNativePG의 -app Secret 규약을 그대로 읽는다.
+
+## 44. Phase C — Ansible(VM) 완주 / Terraform(RDS) validate
+
+**Ansible (온프레미스/VM — 실제 e2e 완주, 2026-07-05):**
+```
+대상 dbtower-postgres(15432)에 register-db.yml 실행:
+  1차: 모니터링 계정 생성 + pg_read_all_stats 부여 + PUT 등록 -> changed=1, "등록 완료 HTTP 200"
+  2차: 멱등 -> changed=0 (중복·에러 없음)
+DBTower에 prod-postgres-01 등록 확인(개수 1), 최소권한 계정으로 health up "PostgreSQL 16.14"
+```
+계정 생성은 community.postgresql(psycopg2), 등록은 uri 모듈 PUT. 비밀은 secrets.yml(gitignore).
+
+**Terraform (클라우드/RDS — validate까지, apply 안 함):**
+```
+OpenTofu v1.12.3, aws provider v5.100:
+  tofu init -> provider 설치, tofu fmt -> 정상, tofu validate -> "configuration is valid"
+```
+aws_db_instance(RDS) + 생성 후 local-exec PUT 등록. **apply는 실행하지 않았다** — 실제 RDS는
+AWS 자격증명·과금이 필요하기 때문(정직성). 같은 등록 흐름의 실제 완주는 K8s·Ansible에서 확인됨.
+
+## 45. Phase C 완결 — 세 층에서 "생성과 관제를 잇는다"
+
+| 환경 | 도구 | 검증 수준 |
+|---|---|---|
+| Kubernetes | CloudNativePG Operator + 등록 Job | **e2e 완주** (kind: 프로비저닝→Secret→등록→health up) |
+| 온프레미스/VM | Ansible 플레이북 | **e2e 완주** (계정 생성→등록, 멱등 changed=0) |
+| 클라우드 | Terraform(OpenTofu) RDS 모듈 | validate 통과 (apply는 자격증명 필요 — 정직하게 미실행) |
+
+셋 다 DBTower의 멱등 등록 PUT을 종점으로 쓴다. "생성과 관제가 이어져야 플랫폼이고, 끊어져
+있으면 도구 모음이다"(ROADMAP Phase C)를 세 판에서 채웠다. 비밀값은 전부 gitignore 분리.

@@ -1,0 +1,33 @@
+# 클러스터가 Ready가 된 뒤 실행. CloudNativePG가 만든 dbtower-pg-app Secret을 읽어
+# DBTower의 멱등 등록 PUT /api/instances 를 호출한다 — 생성과 관제를 잇는 훅.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dbtower-register
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: register
+          image: curlimages/curl:8.10.1
+          env:
+            # CloudNativePG가 생성한 접속 Secret (클러스터명 + -app)
+            - { name: PGHOST,     valueFrom: { secretKeyRef: { name: dbtower-pg-app, key: host } } }
+            - { name: PGPORT,     valueFrom: { secretKeyRef: { name: dbtower-pg-app, key: port } } }
+            - { name: PGDB,       valueFrom: { secretKeyRef: { name: dbtower-pg-app, key: dbname } } }
+            - { name: PGUSER,     valueFrom: { secretKeyRef: { name: dbtower-pg-app, key: username } } }
+            - { name: PGPASS,     valueFrom: { secretKeyRef: { name: dbtower-pg-app, key: password } } }
+            - { name: DBTOWER_URL,   valueFrom: { secretKeyRef: { name: dbtower-config-secret, key: DBTOWER_URL } } }
+            - { name: DBTOWER_TOKEN, valueFrom: { secretKeyRef: { name: dbtower-config-secret, key: DBTOWER_TOKEN } } }
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              # PUT = 멱등 등록(upsert). Job이 재실행돼도 중복이 안 생긴다.
+              curl -sf -X PUT "$DBTOWER_URL/api/instances" \
+                -H "Authorization: Bearer $DBTOWER_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{\"name\":\"dbtower-pg\",\"type\":\"POSTGRESQL\",\"host\":\"$PGHOST\",\"port\":$PGPORT,\"dbName\":\"$PGDB\",\"username\":\"$PGUSER\",\"password\":\"$PGPASS\"}"
+              echo "registered dbtower-pg to DBTower"

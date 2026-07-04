@@ -1,0 +1,10 @@
+# 비밀이 아닌 기본값. 비밀(monitor_password, dbtower_token, target_admin_password)은
+# secrets.yml로 분리(gitignore). -e @inventory/secrets.yml 로 주입한다.
+target_host: "127.0.0.1"
+target_port: 15432
+target_db: "sample"
+target_admin_user: "postgres"
+monitor_user: "dbtower_monitor"
+instance_name: "prod-postgres-01"
+instance_type: "POSTGRESQL"
+dbtower_url: "http://localhost:8080"

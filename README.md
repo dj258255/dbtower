@@ -187,6 +187,7 @@ POST /mcp                                MCP (Streamable HTTP)
 - [ai-analysis-rules.md](docs/ai-analysis-rules.md) — 기종별 실행계획 판단 규칙: 근거와 예외
 - [operations.md](docs/operations.md) — 운영 규칙: 통계 소스의 함정과 대응 (digest 포화·PS 가시성·AAS)
 - [least-privilege.md](docs/least-privilege.md) — 기종별 최소 권한 모니터링 계정 (실측 확정)
+- [infra/](infra/) — 프로비저닝 연동(Phase C): K8s(CloudNativePG)·Ansible·Terraform으로 생성→자동 등록
 - [ROADMAP.md](docs/ROADMAP.md) — 완료 단계와 3단계 구현 로드맵(운영 안전 -> DBA 진단 심화 -> 프로비저닝 연동)
 
 ## 기술 선택 근거 (요약)

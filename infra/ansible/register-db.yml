@@ -1,0 +1,56 @@
+---
+# 대상 DB에 모니터링 계정을 만들고 DBTower에 등록한다. 멱등 — 재실행 안전.
+- name: DBTower에 DB 등록 (모니터링 계정 생성 + 관제탑 등록)
+  hosts: all
+  gather_facts: false
+  vars_files:
+    - inventory/group_vars_all.yml
+  tasks:
+    - name: 모니터링 계정 생성 (없으면 생성, 있으면 보정) — 최소 권한
+      community.postgresql.postgresql_user:
+        login_host: "{{ target_host }}"
+        login_port: "{{ target_port }}"
+        login_user: "{{ target_admin_user }}"
+        login_password: "{{ target_admin_password }}"
+        db: "{{ target_db }}"
+        name: "{{ monitor_user }}"
+        password: "{{ monitor_password }}"
+        role_attr_flags: "LOGIN"
+      no_log: true   # 비밀번호가 로그에 남지 않게
+
+    - name: pg_read_all_stats 롤 부여 (통계 조회 최소 권한 — least-privilege.md)
+      community.postgresql.postgresql_membership:
+        login_host: "{{ target_host }}"
+        login_port: "{{ target_port }}"
+        login_user: "{{ target_admin_user }}"
+        login_password: "{{ target_admin_password }}"
+        db: "{{ target_db }}"
+        group: pg_read_all_stats
+        target_roles:
+          - "{{ monitor_user }}"
+        state: present
+      no_log: true
+
+    - name: DBTower에 인스턴스 등록 (PUT = 멱등 upsert)
+      ansible.builtin.uri:
+        url: "{{ dbtower_url }}/api/instances"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ dbtower_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ instance_name }}"
+          type: "{{ instance_type }}"
+          host: "{{ target_host }}"
+          port: "{{ target_port }}"
+          dbName: "{{ target_db }}"
+          username: "{{ monitor_user }}"
+          password: "{{ monitor_password }}"
+        status_code: [200, 201]
+      register: dbtower_reg
+      no_log: true
+
+    - name: 등록 결과 요약 (비밀 없이)
+      ansible.builtin.debug:
+        msg: "등록 완료 — 인스턴스 '{{ instance_name }}' ({{ instance_type }}) HTTP {{ dbtower_reg.status }}"

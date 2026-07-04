@@ -1,0 +1,15 @@
+# CloudNativePG로 선언하는 PostgreSQL 클러스터. Operator가 이 CR을 보고
+# StatefulSet·PVC·Service·접속 Secret(dbtower-pg-app)을 만들고 생명주기를 관리한다.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: dbtower-pg
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.4
+  storage:
+    size: 1Gi
+  bootstrap:
+    initdb:
+      database: sample
+      owner: appuser

@@ -1,0 +1,4 @@
+# 이 파일을 terraform.tfvars로 복사해 실제 값을 채운다. tfvars는 커밋되지 않는다(.gitignore).
+master_password  = "CHANGE_ME"
+monitor_password = "CHANGE_ME"
+dbtower_token    = "CHANGE_ME"

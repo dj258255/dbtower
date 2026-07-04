@@ -72,17 +72,17 @@
 | B7 | **완료(36절)** Schema Diff | describeSchema() 5기종, 추가/삭제/변경 3분류, 기종혼합·상한 경고, Mongo 스키마리스 처리. MCP 12종 |
 | B8 | **완료(34절)** 문의 채널 | 분석 결과(쿼리·플랜·규칙·AI·비고) 첨부해 웹훅 전송, alert 모듈(순환 회피), 미설정 sent:false. KDMS 1·2·3단계 완성 |
 
-### Phase C — 프로비저닝 연동 (DB의 탄생부터 관제까지)
+### Phase C — 프로비저닝 연동 (완료: VERIFICATION 42~45절)
 
 지금은 "이미 존재하는 DB"를 수동 등록한다. 현업에서 DB는 IaC로 태어난다 —
 태어나는 순간 관제탑에 자동 등록되는 것이 이 층의 목표다.
 
 | # | 환경 | 방식 |
 |---|---|---|
-| C1 | Kubernetes | CloudNativePG(PostgreSQL)·Percona Operator(MySQL/PG/MongoDB) CR로 클러스터 선언 -> Operator가 프로비저닝·복제·백업·failover 자동화 -> 생성 완료 시 접속 Secret을 읽어 DBTower 등록 API 호출. Operator가 Day-1/Day-2 운영을 맡고 DBTower는 그 위의 쿼리 수준 관제를 맡는 분업 ([CloudNativePG](https://cloudnative-pg.io/), [Percona Operators](https://docs.percona.com/percona-operators/)) |
-| C2 | 클라우드 (AWS 등) | Terraform 모듈로 RDS 생성 -> output(엔드포인트·시크릿 ARN)을 등록 API로 전달하는 프로비저닝 파이프라인 |
-| C3 | 온프레미스/VM | Ansible 플레이북 — DBMS 설치·모니터링 계정 생성(Phase A8의 최소 권한 grant 목록을 코드화)·exporter 배치·DBTower 등록까지 한 플레이북으로 |
-| C4 | 자동 발견·해제 | 등록 API의 자동화 훅 + 제거된 인스턴스 정리 — "등록을 잊은 DB"가 관제 사각지대가 되는 것 방지 |
+| C1 | **완료(43절)** Kubernetes | kind+CloudNativePG 1.24로 e2e 완주 — Cluster CR→프로비저닝→-app Secret→등록 Job(PUT)→health up(PostgreSQL 16.4). infra/k8s/ |
+| C2 | **완료(44절)** 클라우드 | Terraform(OpenTofu) RDS 모듈 + local-exec 등록, validate 통과. apply는 AWS 자격증명 필요라 미실행(정직). infra/terraform/ |
+| C3 | **완료(44절)** 온프레미스/VM | Ansible 플레이북 e2e 완주 — 최소권한 계정 생성+등록, 멱등 재실행 changed=0. infra/ansible/ |
+| C4 | **완료(42절)** 멱등 등록 | PUT upsert — IaC 재실행 안전(같은 이름 갱신, 중복 0). 셋 다 이 종점을 공유 |
 
 KDMS가 "DB 생성 자동화"를 본체 기능으로 갖는 이유가 이것이다 — 생성과 관제가 이어져야
 플랫폼이고, 끊어져 있으면 도구 모음이다.

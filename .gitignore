@@ -37,3 +37,10 @@ out/
 .vscode/
 backups/
 docs/reference/kdms-meetup/*.png
+
+# Phase C IaC 비밀값 (절대 커밋 금지)
+infra/ansible/inventory/secrets.yml
+infra/terraform/*.tfvars
+infra/terraform/.terraform/
+infra/terraform/*.tfstate*
+infra/k8s/*-secret.yml
