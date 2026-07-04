@@ -115,14 +115,18 @@ gh-ost·pt-osc·goInception이 전부 MySQL 전용이라 이기종 정체성과 
 | D1 | **이상 자동 감지 (베이스라인)** | AWS DevOps Guru for RDS (DB Load 이상 감지) | QuerySnapshot 이력, ComparisonService(시점 비교), RegressionDetector(폴러·쿨다운·ShedLock) | 스냅샷 이력으로 인스턴스·쿼리별 **요일×시간대 베이스라인**(평균/표준편차 또는 분위수) 계산 → 폴러가 현재값을 베이스라인과 비교해 z-score/분위수 이탈을 이상으로 판정(고정 임계 +200%를 대체·보완). 신규 인스턴스는 데이터 부족 시 학습 중 표기. `insight` 모듈에 BaselineService + 이상 판정, `alert`가 소비 | 부하 스크립트로 평소→급증 만들고, 고정 임계 없이 "평소 대비 이탈"로 감지되는지 라이브. 단위: 베이스라인 계산·이탈 판정·데이터 부족 처리 |
 | D2 | **Advisors 자동 점검** | Percona PMM Advisors (Config/Perf/Query/Security 24h 스윕) | operations.md·least-privilege.md의 실측 규칙, parameters()(B6)·tableStats·describeSchema()(B7)·slowQueries | 규칙을 코드 Advisor로: digests_size 80% 포화, 스냅샷 보존 미설정, 위험 파라미터값(max_connections 과소 등), 미사용/중복 인덱스 후보, 권한 과다 계정, 통계 미수집 테이블. 5기종별 적용 가능한 것만(기종 무관은 UNSUPPORTED 표기). `advisor` 신규 모듈, 일일 스윕(@Scheduled+@SchedulerLock) + REST/웹 카드(심각도별) | 실 5기종에 스윕 돌려 실제 지적 나오는지(예: 스냅샷 보존 미설정 인스턴스 flag). 각 Advisor 단위 테스트(위반/정상) |
 | D3 | **자연어 근본원인 진단 (AI 에이전트)** | KDMS "CPU 100%→AI가 도구 연쇄 진단", pganalyze AI-assisted | McpProtocolHandler(도구 12종), AiAnalyzer(claude CLI/SDK 백엔드), ai-analysis-rules.md | "왜 느려졌어?" 같은 질문 → AI가 **여러 MCP 도구(compare·wait_events·sessions·explain)를 스스로 연쇄 호출**해 근본원인 서술. 단발 분석(현 AiAnalyzer)을 **도구 사용 루프**로 승격. 판단 기준 문서를 시스템 프롬프트로(허위 금지·근거 없으면 모른다). 웹 콘솔에 질문 입력창, 답변에 사용한 도구·근거 표시 | 실제 부하 상황에서 질문→AI가 도구 2개 이상 엮어 원인(예: 신규 LIKE 풀스캔+wait io) 답하는지 라이브. 근거 없는 질문엔 "모른다" 확인 |
-| D4 | **DB SLO / 에러 버짓** | Google SRE, DBRE(p95/p99·error budget·burn rate) | activity/query-stats(레이턴시), 스냅샷 이력 | 인스턴스·핵심 쿼리별 SLI(p95/p99 레이턴시, 가용성) 정의 → SLO 목표 → **에러 버짓 소진·번인 레이트** 대시보드. "인프라 지표(CPU) 아니라 사용자 경험 지표"(SRE 원칙) | 이력으로 p95 계산·SLO 대비 버짓 소진율 표시 라이브. 단위: SLI 계산·버짓 산식 |
+| D4 | **DB SLO / 에러 버짓** | Google SRE, DBRE(error budget·burn rate) | activity/query-stats(평균 레이턴시), health(가용성), 스냅샷 이력 | 인스턴스·핵심 쿼리별 SLI(평균 레이턴시·가용성) 정의 → SLO 목표 → **에러 버짓 소진·번인 레이트** 대시보드. **데이터 한계 정직 명시: 스냅샷이 누적 calls/totalTimeMs라 평균 레이턴시는 되지만 p95/p99는 원자료가 없다** — 평균·가용성 기반 SLI로 하고 p95는 범위 밖(또는 향후 per-query 히스토그램 수집 시). "인프라 지표(CPU) 아니라 사용자 경험 지표"(SRE 원칙) | 이력으로 평균 SLI·SLO 대비 버짓 소진율 표시 라이브. 단위: SLI 계산·버짓 산식 |
 | D5 | **파티션 조회 (Partition Inventory)** | KDMS MCP 6기능 중 하나 | describeSchema()(B7) 확장, DbmsOperator | 기종별 파티션 목록·범위·크기 조회(MySQL/PG/Oracle 파티셔닝, Mongo는 샤딩/UNSUPPORTED). KDMS 갭 중 마지막 조각. **자동 관리(생성·삭제)는 범위 밖** — 조회만 | 파티션 있는 테이블로 목록 반환 라이브(없으면 빈 결과·UNSUPPORTED 정직) |
 | D6 | **비용/효율 인사이트 (FinOps)** | AWS FinOps agent, Mydbops(미사용 인덱스로 34~43% 절감) | tableStats(크기), describeSchema()(인덱스), parameters() | 미사용/중복 인덱스 후보, 테이블 bloat, 오버프로비저닝 신호(연결 수 대비 max_connections 등)를 "낭비 후보"로. 실제 클라우드 과금 연동은 범위 밖(자격증명), 신호 제시까지 | 실 DB에서 미사용 인덱스 후보 실제 검출 라이브. UNSUPPORTED 정직 |
+| D7 | **백업 신선도·커버리지 뷰** | 3-2-1 백업 원칙, DBA 일일 점검(모든 DB가 최근 백업됐나) | BackupRun 이력(확장1)·verifyRestore(A7) | 인스턴스별 마지막 백업 시각·복원 검증 상태·경과 시간을 한 화면에. 임계(예: 24h 초과 미백업) 넘으면 경보(B5 폴러에 규칙 추가). "백업했다"가 아니라 "지금 백업이 최신이고 복원 가능한가"를 상시 가시화 | 인스턴스별 마지막 백업·검증 상태 정확히 표시, 오래된 인스턴스 flag 라이브 |
+| D8 | **통합 헬스 스코어** | 관측성 카테고리(자동 우선순위·클러스터), 설문(40%만 통합) | D1(이상)·D2(advisor)·D4(SLO)·health·D7(백업)을 합산 | 인스턴스마다 흩어진 신호(이상 개수·advisor 심각도·SLO 버짓·백업 신선도·health)를 **하나의 점수/등급**으로. 대시보드 상단에 5기종 전체를 한눈에, 나쁜 순 정렬. "40% 통합" 고통에 직접 대응 — 어디부터 볼지 기계가 우선순위 매김 | 여러 신호가 점수로 합산·정렬되는지, 문제 인스턴스가 상단에 오는지 라이브. 단위: 점수 산식 |
 
 **구현 순서 권장 (Opus):** D1(이상 감지) → D2(Advisors) 를 먼저 — 둘이 "자율화"의 뼈대이고 기존
 폴러/규칙 문서를 그대로 승격한다. 이어 D3(자연어 진단)로 채널·AI 자산을 루프로 엮으면 "스스로 보고
-설명하는 관제탑"이 완성. D4·D5·D6은 그 위의 선택 확장. 병렬 시 D1·D3(insight/alert·mcp)과
-D2·D5·D6(advisor·operator)로 나누면 파일 충돌이 적다.
+설명하는 관제탑"이 완성. **D8(통합 헬스 스코어)은 D1·D2·D4·D7이 신호를 내놓은 뒤 맨 마지막에** —
+흩어진 신호를 합산하는 것이라 앞 항목들에 의존한다. D4·D5·D6·D7은 그 사이 선택 확장.
+병렬 시 D1·D3(insight/alert·mcp)과 D2·D5·D6(advisor·operator), D7(backup)로 나누면 파일 충돌이 적다.
+D8은 단독·마지막.
 
 **정체성 가드레일:** Phase D의 모든 기능은 **읽고 판단**한다(쓰기·변경·승인 없음). 대상 DB를 바꾸지
 않고, 5기종 통합을 유지하며, 못 하는 기종은 UNSUPPORTED로 정직하게 표기한다. 이 선을 넘으면(예: 자동
