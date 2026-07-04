@@ -939,3 +939,27 @@ instanceId=8 & action=backup (AND): 인스턴스 8의 백업 계열만
 Specification(동적 필터). "어디에 뭘 쓰나"를 기능이 결정하게 두는 것 — 프레임워크를 과시하지 않는다.
 
 ![감사 로그 검색 — 동적 필터(Specification)](images/webui/09-audit.png)
+
+## 32. 정리 아크 — Lombok(R1) + JdbcTemplate(R2): "JPA/Native Query 통일"이 아닌 적재적소
+
+계기: "Operator 계층도 JPA + Native Query로 추상화하면 깔끔하지 않냐"는 질문. 분석 결과는
+반대였다 — Operator는 런타임 등록되는 N개의 남의 DB에 붙어 시스템 뷰를 읽고 관리 명령을
+실행하는 곳이라, JPA(부팅 시점 고정 데이터소스·엔티티 매핑)와 근본적으로 안 맞는다. Native
+Query는 "JPA가 실행해주는 raw SQL"일 뿐이라 시스템 뷰에는 매핑할 게 없어 오히려 의식이 는다.
+게다가 MongoDB는 JPA 자체가 없다. 그래서 추상화 경계는 JPA/JDBC보다 위(DbmsOperator 인터페이스,
+이미 Repository+Impl과 같은 모양)에 두고, 안쪽은 각 기술을 제자리에 쓴다:
+
+- **R1 Lombok** — 값 객체는 record(불변) 유지, JPA 엔티티 6묶음에만 @Getter + @NoArgsConstructor(PROTECTED).
+  @Data/@ToString/@EqualsAndHashCode는 엔티티 lazy 연관·hashCode 지뢰라 배제. 손 게터 43개 제거.
+- **R2 JdbcTemplate** — Operator의 raw try-with-resources+ResultSet 루프를 JdbcTemplate으로.
+  SQL은 한 글자도 안 바꾸고(시스템 뷰 통제 유지), 실행 메커니즘만. 순 -53줄(283 삭제/230 추가).
+  세션 지역 PLAN_TABLE(Oracle explain)은 ConnectionCallback로, 서버 사이드 백업은 raw JDBC로
+  정직하게 남김 — 무리한 교체로 정확성을 깨지 않는다.
+
+Spring Data가 지키는 자리(정리 후 최종 지도):
+- 플랫폼 자기 저장소(1층): JPA — 파생 메서드(정적 단순) / @Query(정적 집계·벌크) / Specification(동적 필터, 31절)
+- 대상 DB 조회(2층): JdbcTemplate(JDBC 계열) + Mongo 드라이버(비 JDBC)
+- 추상화 경계: DbmsOperator 인터페이스 — 기종·기술 차이를 그 뒤로 숨긴다
+
+실측: 리팩터 후 실 8080 앱에서 5기종 health·query-stats(RowMapper)·explain(Oracle
+ConnectionCallback: TABLE ACCESS FULL 판정)·replication 전부 리팩터 전과 동일. 테스트 91건 통과.
