@@ -31,6 +31,11 @@ dependencies {
 	// starter가 flyway-core + 자동구성을 묶고, PostgreSQL 지원 모듈은 별도. 버전은 Boot BOM이 관리.
 	implementation 'org.springframework.boot:spring-boot-starter-flyway'
 	implementation 'org.flywaydb:flyway-database-postgresql'
+	// 다중 인스턴스(HA) 스케줄러 분산 락 (Phase A5). Boot BOM이 관리하지 않아 버전 명시.
+	// 6.x는 최신이나 Spring 6 타깃이라 Boot 4(Spring 7)와의 궁합이 미검증 — 검증된 5.16.0(5.x 최신)을 택하고 빌드로 확인.
+	// JdbcTemplate 프로바이더: 이미 쓰는 메타 DB(PostgreSQL)에 락 테이블 하나만 추가하면 되어 별도 인프라(Redis/ZK)가 불필요.
+	implementation 'net.javacrumbs.shedlock:shedlock-spring:5.16.0'
+	implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:5.16.0'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.springframework.boot:spring-boot-starter-security'

@@ -5,6 +5,7 @@ import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.QueryDiff;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DatabaseInstanceRepository;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -59,7 +60,23 @@ public class RegressionDetector {
         this.cooldownMinutes = cooldownMinutes;
     }
 
+    // HA 분산 락(Phase A5): 한 시점에 한 노드만 회귀 감지를 돌린다.
+    // lockAtLeastFor=PT110S — 120초 주기의 대부분 동안 락을 붙잡아 노드 간 드리프트로 인한 중복 감지를 막고,
+    //   더 중요하게는 "같은 노드가 계속 락을 이기게" 만들어 아래 쿨다운 맵이 그 노드에서 계속 채워지도록 한다.
+    // lockAtMostFor=PT4M — detect는 인스턴스별 비교(DB 조회) + AI 1차 분석(외부 호출) + 웹훅 전송이라
+    //   느려질 수 있어, 정상 실행 중 다른 노드가 끼어들지 않도록 실제 소요보다 넉넉한 크래시 상한을 둔다.
+    //
+    // [쿨다운의 HA 잔여 한계 — 정직한 명시]
+    // lastAlerted 쿨다운 맵은 여전히 "노드별 인메모리"라 노드 간 공유되지 않는다. 분산 락은 detect의
+    // 동시 실행을 막을 뿐, 쿨다운 상태를 공유해 주지는 않는다. 접근 (a)를 택한 이유와 잔여 리스크:
+    //   - 정상 운영에선 위 lockAtLeastFor(110s)와 fixedDelay 특성상 한 노드가 락을 연속으로 이겨
+    //     그 노드의 쿨다운 맵이 계속 유지되므로, 실질 중복 알림은 크게 준다.
+    //   - 그러나 락 보유 노드가 바뀌면(장애 조치·재시작·틱 타이밍 역전) 새 승자의 맵에는 쿨다운
+    //     기록이 없어, 이미 알린 회귀를 쿨다운 창 안에서 한 번 더 알릴 수 있다(쿨다운 누수).
+    //   - 완전 해소는 쿨다운을 메타 DB 테이블로 외부화하는 접근 (b)가 필요하다(추가 마이그레이션). 여기서는
+    //     시간 대비 (a)+한계 명시를 택했고, 이 잔여 리스크는 "중복 알림 1회" 수준이라 수용 가능하다고 판단했다.
     @Scheduled(fixedDelayString = "${dbtower.regression.poll-ms:120000}")
+    @SchedulerLock(name = "regression-detect", lockAtLeastFor = "PT110S", lockAtMostFor = "PT4M")
     public void detect() {
         LocalDateTime now = LocalDateTime.now();
         for (DatabaseInstance instance : instanceRepository.findAll()) {

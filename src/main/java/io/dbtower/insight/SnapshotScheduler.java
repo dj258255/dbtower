@@ -4,6 +4,7 @@ import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.QueryStat;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DatabaseInstanceRepository;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -37,7 +38,15 @@ public class SnapshotScheduler {
         this.operatorFactory = operatorFactory;
     }
 
+    // HA 분산 락(Phase A5): 여러 노드가 동시에 같은 대상 DB를 수집하지 않게 한 시점에 한 노드만 실행한다.
+    // lockAtLeastFor=PT50S — 60초 주기의 대부분 동안 락을 붙잡아, 노드 간 타이머가 어긋나도(fixedDelay는
+    //   노드마다 독립적으로 흐른다) 다른 노드의 틱이 같은 분(minute) 안에서 재수집하지 못하게 막는다.
+    //   짧게 두면(예: 0) 시계 드리프트로 두 노드가 한 주기에 중복 수집한다 — 그래서 주기에 가깝게 잡는다.
+    // lockAtMostFor=PT2M — 락 보유자가 크래시했을 때의 해제 상한(안전망)이자, 인스턴스가 많아 수집이
+    //   길어질 때 다른 노드가 끼어들지 않도록 실제 수집 시간보다 넉넉히 둔 값. 정상 완료 시엔
+    //   lockAtLeastFor(50s)까지만 붙잡으므로 이 상한은 크래시/이상 지연 때만 작동한다.
     @Scheduled(fixedDelayString = "${dbtower.snapshot.interval-ms:60000}")
+    @SchedulerLock(name = "snapshot-collect", lockAtLeastFor = "PT50S", lockAtMostFor = "PT2M")
     public void collect() {
         for (DatabaseInstance instance : instanceRepository.findAll()) {
             long start = System.currentTimeMillis();
