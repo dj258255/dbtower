@@ -90,6 +90,7 @@
           <span class="detail-actions">
             <button id="btn-explain" class="btn btn-primary btn-small">실행계획 보기</button>
             <button id="btn-ai" class="btn btn-dark btn-small">AI 분석</button>
+            <button id="btn-inquiry" class="btn btn-small">DB팀에 문의</button>
           </span>
         </div>
         <div class="detail-section">
@@ -104,6 +105,11 @@
         <div class="detail-section" id="ai-section" hidden>
           <h3>AI 1차 분석 <span class="hint">(docs/ai-analysis-rules.md 판단 기준 기반)</span></h3>
           <pre id="detail-ai" class="codeblock ai"></pre>
+        </div>
+        <div class="detail-section" id="inquiry-section" hidden>
+          <h3>DB팀 문의 <span class="hint">(현재 패널의 쿼리·실행계획·규칙 지적·AI 분석을 함께 첨부합니다)</span></h3>
+          <textarea id="inquiry-note" class="codeblock" rows="3" placeholder="비고 (선택): 상황·요청 사항을 적어주세요"></textarea>
+          <div id="inquiry-result" class="findings"></div>
         </div>
       </div>
     </div>

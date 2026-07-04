@@ -28,6 +28,9 @@ const state = {
   selections: {},      // {target: {from: Date, to: Date}, base: {...}}
   compareMode: false,  // 마지막 조회가 비교 조회였는지
   currentQuery: null,  // 상세 패널에 열린 쿼리
+  lastPlan: null,      // 마지막 EXPLAIN 실행계획 (문의 첨부용)
+  lastFindings: [],    // 마지막 규칙 기반 지적
+  lastAi: null,        // 마지막 AI 분석
 };
 
 // ---------- 유틸 ----------
@@ -290,6 +293,13 @@ function openDetail(query) {
   $("#detail-sql").value = query.queryText ?? "";
   $("#plan-section").hidden = true;
   $("#ai-section").hidden = true;
+  $("#inquiry-section").hidden = true;
+  $("#inquiry-note").value = "";
+  $("#inquiry-result").innerHTML = "";
+  // 쿼리를 새로 열면 직전 쿼리의 분석 결과는 첨부 대상이 아니다 — 비운다
+  state.lastPlan = null;
+  state.lastFindings = [];
+  state.lastAi = null;
   $("#query-detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
@@ -319,6 +329,8 @@ async function runExplain() {
     $("#detail-findings").innerHTML = (data.findings ?? []).map((f) =>
       `<div class="finding-item">${esc(f)}</div>`).join("") ||
       '<div class="muted">규칙 기반 지적 없음 — 비효율 신호가 발견되지 않았습니다.</div>';
+    state.lastPlan = data.plan;
+    state.lastFindings = data.findings ?? [];
   } finally { btn.classList.remove("loading"); }
 }
 
@@ -343,6 +355,42 @@ async function runAiAnalysis() {
       `<div class="finding-item">${esc(f)}</div>`).join("");
     $("#detail-ai").textContent = data.aiAnalysis ??
       "AI 분석 비활성화 상태입니다 (ANTHROPIC_API_KEY도 claude CLI도 없음) — 규칙 기반 지적까지만 표시합니다.";
+    state.lastPlan = data.plan;
+    state.lastFindings = data.findings ?? [];
+    state.lastAi = data.aiAnalysis ?? null;
+  } finally { btn.classList.remove("loading"); }
+}
+
+// 현재 상세 패널의 쿼리·실행계획·규칙 지적·AI 분석을 모아 DB팀에 문의(웹훅 push).
+// 실행계획/AI를 안 돌렸어도 쿼리만으로 문의할 수 있게 plan/findings/ai는 있으면 첨부한다.
+async function runInquiry() {
+  const sql = $("#detail-sql").value.trim();
+  if (!sql) return;
+  const btn = $("#btn-inquiry");
+  btn.classList.add("loading");
+  $("#inquiry-section").hidden = false;
+  const result = $("#inquiry-result");
+  result.innerHTML = '<div class="muted">전송 중...</div>';
+  try {
+    const body = {
+      sql,
+      plan: state.lastPlan,
+      findings: state.lastFindings,
+      aiAnalysis: state.lastAi,
+      note: $("#inquiry-note").value.trim() || null,
+    };
+    let data;
+    try {
+      data = await api(`/api/instances/${state.instance.id}/inquiry`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+    } catch (e) {
+      result.innerHTML = `<div class="finding-item">문의 실패: ${esc(e.message)}</div>`;
+      return;
+    }
+    result.innerHTML = data.sent
+      ? '<div class="finding-item">DB팀에 전송되었습니다.</div>'
+      : `<div class="finding-item">전송되지 않음 — ${esc(data.reason ?? "웹훅 미설정")}</div>`;
   } finally { btn.classList.remove("loading"); }
 }
 
@@ -513,6 +561,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-compare").addEventListener("click", runCompare);
   $("#btn-explain").addEventListener("click", runExplain);
   $("#btn-ai").addEventListener("click", runAiAnalysis);
+  $("#btn-inquiry").addEventListener("click", runInquiry);
   $("#audit-search-btn").addEventListener("click", loadAudit);
   $("#audit-reset-btn").addEventListener("click", () => {
     ["audit-principal", "audit-action", "audit-outcome"].forEach((id) => { $(`#${id}`).value = ""; });
