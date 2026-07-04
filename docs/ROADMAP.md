@@ -64,13 +64,13 @@
 | # | 기능 | 내용 / 업계 근거 |
 |---|---|---|
 | B1 | **완료(26절)** Wait Event 분석 | DbmsOperator.waitEvents() 5기종 통합 — MySQL/MSSQL/Oracle 누적, PG 현재 스냅샷, Mongo 대기 큐. MySQL 비활성 instrument·MSSQL idle 필터를 정직하게 표기. REST+MCP(9종)+웹 카드 ([GitLab ASH](https://runbooks.gitlab.com/patroni/wait-events-analisys/)) |
-| B2 | 블로킹 트리 + 세션 관리 | "지금 누가 누구를 막고 있나"를 트리로 — PG는 pg_stat_activity + pg_blocking_pids(), 종료는 pg_cancel_backend(정상 롤백 유도) -> pg_terminate_backend(강제) 2단계. 킬 버튼은 위험 기능이라 Phase A의 인증·감사 로그가 전제 ([pg_stat_activity·pg_locks 모니터링](https://www.mssqltips.com/sqlservertip/8222/postgresql-monitoring-with-pg-stat-activity-and-pg-locks/)) |
+| B2 | **완료(33절)** 블로킹 트리 + 세션 관리 | 5기종 activeSessions/killSession, PG cancel->terminate 2단계 라이브 완주, 블로킹 트리 blockedBy. kill은 ADMIN+감사, MCP 미노출. Mongo blockedBy N/A 정직 표기 |
 | B3 | 인덱스 어드바이저 | explain 규칙이 "인덱스가 없다"까지 지적하니, 다음은 "이 인덱스를 만들면 플랜이 이렇게 바뀐다" — PG의 HypoPG로 가상 인덱스를 만들어 실제 생성 없이 플랜 변화를 시뮬레이션, 결과를 AI 1차 분석의 근거로 주입 |
 | B4 | 온라인 스키마 변경 연동 | 대형 테이블 ALTER를 락 없이 — gh-ost/pt-online-schema-change 실행·진행률·스로틀을 플랫폼에서 관리. 두 도구 모두 원자적 cut-over와 실행 중 재설정을 지원 ([온라인 스키마 변경 도구 비교](https://planetscale.com/docs/vitess/schema-changes/online-schema-change-tools-comparison)) |
 | B5 | 장기 트랜잭션·복제 지연·디스크 증가 알림 | 회귀 감지 폴러의 규칙 확장 — idle-in-transaction 방치(VACUUM 차단), 복제 lag 임계, 디스크 사용 추세 기반 소진 예측(용량 계획) |
 | B6 | 파라미터 드리프트 감지 | 같은 역할의 인스턴스 간 설정 diff(max_connections, work_mem 등) — "왜 저 장비만 느리지"의 단골 원인 |
 | B7 | Schema Diff | 환경 간(스테이징 vs 운영) 테이블·인덱스 구조 비교 — B3·B4와 묶여 스키마 관리 축 완성. 원인 분석 화면에 인덱스 목록·DDL 표시(KDMS 2단계 갭)부터 시작 |
-| B8 | 문의 채널 (KDMS 3단계) | 분석 결과를 첨부해 Slack 쓰레드를 여는 버튼 — 웹훅 인프라 재사용, KDMS 흐름의 마지막 조각 |
+| B8 | **완료(34절)** 문의 채널 | 분석 결과(쿼리·플랜·규칙·AI·비고) 첨부해 웹훅 전송, alert 모듈(순환 회피), 미설정 sent:false. KDMS 1·2·3단계 완성 |
 
 ### Phase C — 프로비저닝 연동 (DB의 탄생부터 관제까지)
 

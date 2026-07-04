@@ -963,3 +963,47 @@ Spring Data가 지키는 자리(정리 후 최종 지도):
 
 실측: 리팩터 후 실 8080 앱에서 5기종 health·query-stats(RowMapper)·explain(Oracle
 ConnectionCallback: TABLE ACCESS FULL 판정)·replication 전부 리팩터 전과 동일. 테스트 91건 통과.
+
+## 33. Phase B2 — 블로킹 트리 + 세션 관리: "지금 누가 누구를 막고 있나"
+
+Wait Event(26절)가 "무엇을 기다렸나"라면, 이건 "누가 막고 있나"와 "어떻게 푸나"다.
+DbmsOperator에 activeSessions()·killSession() 2메서드 추가로 5기종 통합.
+
+기종별 세션 소스·kill:
+| 기종 | 소스 | blockedBy | kill (cancel / terminate) |
+|---|---|---|---|
+| PostgreSQL | pg_stat_activity | pg_blocking_pids(pid)[1] | pg_cancel_backend / pg_terminate_backend |
+| MySQL | information_schema.PROCESSLIST + sys.innodb_lock_waits | blocking_pid | KILL QUERY id / KILL id |
+| SQL Server | dm_exec_requests + dm_exec_sessions | blocking_session_id | KILL (구분 없음) |
+| Oracle | v$session(+v$sql) | blocking_session | ALTER SYSTEM KILL SESSION 'sid,serial#' |
+| MongoDB | currentOp inprog | null(N/A — 락 모델상 특정 불가, 정직 표기) | killOp(협조적) |
+
+안전장치: killSession은 명시적 pid 하나만(대량·와일드카드 없음), 5기종 모두 자기 수집 커넥션
+kill 방지. kill은 MCP 도구로 미노출(에이전트가 세션 죽이는 위험 회피) — 읽기 도구 sessions만(9→10종).
+POST kill은 ADMIN만 + A6 자동 감사.
+
+실측 (2026-07-04, PostgreSQL 완주):
+```
+GET sessions -> pg_sleep(60) 세션 pid 4742, waitEvent=PgSleep 잡힘
+POST .../kill?force=false -> pg_cancel_backend true, 재조회 [], sleeper "canceling statement"
+블로킹 트리: 2트랜잭션 락 충돌 -> blocked pid가 blockedByPid=blocker로 정확히 채움
+POST .../kill?force=true -> pg_terminate_backend true, 막혔던 트랜잭션 즉시 진행
+MCP tools/list -> 10종(sessions 포함), 실 8080에서 PgSleep 세션 조회 확인
+```
+라이브 검증이 버그 2개를 잡았다: (1) rs.wasNull()을 다른 컬럼 read 뒤 호출해 blocked_by null이
+0으로 샘 -> getLong 직후 캡처로 수정, (2) pg_cancel_backend가 int4 인자라 Java long 바인딩 실패
+-> (?)::int 캐스팅. "동작한다"를 라이브로 증명하지 않았으면 못 잡을 것들이다.
+
+## 34. Phase B8 — DB팀 문의 채널: KDMS 3단계 완성
+
+한계: KDMS 흐름은 1.식별 2.분석 3.DB팀 문의인데, 3단계(분석 결과를 첨부해 DBA에게 문의)가
+비어 있었다. 회귀 감지 웹훅이 "플랫폼이 미는 push"라면, 문의는 "사람이 분석을 첨부해 보내는 push".
+
+- InquiryService/Controller를 alert 모듈에 배치 — insight에 두면 WebhookNotifier(alert) 참조로
+  insight<->alert 순환이 되므로(RegressionDetector가 이미 alert->insight). ModularityTests로 확인
+- 쿼리·실행계획·규칙 지적·AI 분석·비고를 플레인 텍스트로 포맷해 WebhookNotifier로 전송
+- 웹훅 미설정이면 sent:false + 이유(외부 전송 안 함), 인증 사용자면 VIEWER도 문의 가능(협업)
+- 웹 콘솔 쿼리 상세 패널에 "DB팀에 문의" 버튼 — explain/AI 결과를 캐시해 함께 첨부
+
+실측: 웹훅 미설정 경로 sent:false 확인(외부 전송 0건), 전송 경로는 WebhookNotifier mock 단위
+테스트로 증명. POST라 A6 자동 감사. 이로써 KDMS 1·2·3단계가 전부 채워졌다.
