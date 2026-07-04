@@ -56,7 +56,7 @@
 | 8 | **완료(27절)** 최소 권한 계정 | docs/least-privilege.md — 권한 0에서 에러 원문 수집으로 5기종 최소 집합 확정. Mongo clusterMonitor·PG 조용한 저하 등 실측 발견 ([Datadog DBM](https://docs.datadoghq.com/database_monitoring/setup_mysql/selfhosted/)) |
 | 9 | 분석 보호장치 | explain에 statement timeout, 대상 DB 과부하 시 수집 백오프 — 진단 도구가 부하 유발자가 되지 않게 |
 
-### Phase B — DBA 진단 심화 (현업 DBA가 매일 쓰는 것들)
+### Phase B — DBA 진단 심화 (완료: B1~B8, VERIFICATION 41절)
 
 시점 비교가 "무엇이 변했나"를 답한다면, B는 "지금 무엇이 막고 있나"와 "어떻게 고치나"를 답한다.
 이전에 범위 밖이던 KDMS 본체 기능(Wait Event, Schema Diff)도 여기로 승격.
@@ -66,9 +66,9 @@
 | B1 | **완료(26절)** Wait Event 분석 | DbmsOperator.waitEvents() 5기종 통합 — MySQL/MSSQL/Oracle 누적, PG 현재 스냅샷, Mongo 대기 큐. MySQL 비활성 instrument·MSSQL idle 필터를 정직하게 표기. REST+MCP(9종)+웹 카드 ([GitLab ASH](https://runbooks.gitlab.com/patroni/wait-events-analisys/)) |
 | B2 | **완료(33절)** 블로킹 트리 + 세션 관리 | 5기종 activeSessions/killSession, PG cancel->terminate 2단계 라이브 완주, 블로킹 트리 blockedBy. kill은 ADMIN+감사, MCP 미노출. Mongo blockedBy N/A 정직 표기 |
 | B3 | **완료(35절)** 인덱스 어드바이저 | PG HypoPG 가상 인덱스로 Cost 320->122 실측(ADVISED), 실제 인덱스 미생성. 타 기종 UNSUPPORTED 정직. SELECT 전용+식별자 방어 |
-| B4 | 온라인 스키마 변경 연동 | 대형 테이블 ALTER를 락 없이 — gh-ost/pt-online-schema-change 실행·진행률·스로틀을 플랫폼에서 관리. 두 도구 모두 원자적 cut-over와 실행 중 재설정을 지원 ([온라인 스키마 변경 도구 비교](https://planetscale.com/docs/vitess/schema-changes/online-schema-change-tools-comparison)) |
-| B5 | 장기 트랜잭션·복제 지연·디스크 증가 알림 | 회귀 감지 폴러의 규칙 확장 — idle-in-transaction 방치(VACUUM 차단), 복제 lag 임계, 디스크 사용 추세 기반 소진 예측(용량 계획) |
-| B6 | 파라미터 드리프트 감지 | 같은 역할의 인스턴스 간 설정 diff(max_connections, work_mem 등) — "왜 저 장비만 느리지"의 단골 원인 |
+| B4 | **완료(38절)** 온라인 스키마 변경 | gh-ost 오케스트레이션(MySQL), 기본 dry-run·실행은 ADMIN confirm, 비밀번호 0600 conf. 라이브 noop+execute 완주. 비 MySQL UNSUPPORTED |
+| B5 | **완료(39절)** 운영 알림 확장 | OpsAlertDetector(HA): 장기 idle-in-transaction·복제 지연·수집 정지. operator 변경 0(기존 메서드 재사용), 라이브 감지 확인 |
+| B6 | **완료(40절)** 파라미터 드리프트 | parameters() 5기종+diff, 민감값 마스킹, ADMIN 제한. 라이브 PG 368·MySQL 623개 |
 | B7 | **완료(36절)** Schema Diff | describeSchema() 5기종, 추가/삭제/변경 3분류, 기종혼합·상한 경고, Mongo 스키마리스 처리. MCP 12종 |
 | B8 | **완료(34절)** 문의 채널 | 분석 결과(쿼리·플랜·규칙·AI·비고) 첨부해 웹훅 전송, alert 모듈(순환 회피), 미설정 sent:false. KDMS 1·2·3단계 완성 |
 
