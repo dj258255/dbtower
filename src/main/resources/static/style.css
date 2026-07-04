@@ -189,6 +189,16 @@ input[type="datetime-local"] {
 .monitor-card h3 { margin: 0 0 8px; font-size: 13.5px; }
 @media (max-width: 800px) { .monitor-grid { grid-template-columns: 1fr; } }
 
+/* 세션 / 블로킹 (B2) — 막힌 세션 행 강조 + kill 버튼 */
+.session-card { margin-bottom: 14px; }
+.qtable tbody tr.blocked-row { background: #fff1f2; }
+.qtable tbody tr.blocked-row:hover { background: #ffe4e6; }
+.blocked-by { color: var(--up); font-weight: 700; }
+.session-actions { white-space: nowrap; display: flex; gap: 6px; }
+.btn-danger { border-color: var(--up); color: var(--up); }
+.btn-danger:hover { background: var(--up); color: #fff; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
 /* MCP 카드 */
 .mcp-card { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 16px; }
 .mcp-cmd-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }

@@ -224,6 +224,75 @@ public class PostgresOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 활성 세션 + 블로킹 관계 — pg_stat_activity에서 실제로 일하거나 락에 막힌 세션만 추린다.
+     * blockedByPid는 pg_blocking_pids(pid)의 첫 값(배열이 비면 NULL). 이 함수는 "누가 나를 막나"를
+     * 잠금 그래프에서 직접 계산해 줘서, 우리가 락 뷰를 조인할 필요가 없다.
+     *
+     * idle(트랜잭션 밖에서 노는) 커넥션은 제외 — 노이즈이고 블로킹과 무관하다. 단 'idle in
+     * transaction'은 락을 쥔 채 남 여럿을 막을 수 있어 남긴다(state <> 'idle'). 자기 조회 세션은
+     * pg_backend_pid()로 제외한다.
+     */
+    @Override
+    public List<SessionInfo> activeSessions(int limit) {
+        String sql = """
+                SELECT pid, usename, state, wait_event,
+                       (pg_blocking_pids(pid))[1] AS blocked_by,
+                       query,
+                       COALESCE(EXTRACT(EPOCH FROM (now() - query_start)) * 1000, 0) AS elapsed_ms
+                FROM pg_stat_activity
+                WHERE backend_type = 'client backend'
+                  AND pid <> pg_backend_pid()
+                  AND state IS DISTINCT FROM 'idle'
+                ORDER BY elapsed_ms DESC
+                LIMIT ?
+                """;
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> {
+                        // wasNull()은 반드시 getLong 직후에 읽는다 — 다른 컬럼을 먼저 읽으면
+                        // wasNull()이 그 컬럼 기준이 되어 blocked_by의 null이 0으로 새어 나온다.
+                        long blockedBy = rs.getLong("blocked_by");
+                        Long blockedByOrNull = rs.wasNull() ? null : blockedBy;
+                        return new SessionInfo(
+                                rs.getLong("pid"),
+                                rs.getString("usename"),
+                                rs.getString("state"),
+                                rs.getString("wait_event"),
+                                blockedByOrNull,
+                                rs.getString("query"),
+                                rs.getDouble("elapsed_ms"));
+                    },
+                    limit);
+        } catch (DataAccessException e) {
+            throw new OperatorException("PostgreSQL 세션 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 세션 종료 — force면 pg_terminate_backend(백엔드 강제 종료), 아니면 pg_cancel_backend(실행 문장만 취소).
+     * pid는 파라미터로 바인딩(숫자)해 인젝션 여지가 없다. 함수명은 사용자 입력이 아니라 고정 2택이다.
+     * WHERE ? <> pg_backend_pid()로 자기 수집 커넥션은 종료를 거부한다 — 관제 도구가 제 발을 쏘지 않게.
+     */
+    @Override
+    public String killSession(long pid, boolean force) {
+        String fn = force ? "pg_terminate_backend" : "pg_cancel_backend";
+        try {
+            // pid는 int4 컬럼이라 (?)::int로 캐스팅한다 — Java long은 bigint로 바인딩돼
+            // pg_cancel_backend(bigint) 같은 없는 시그니처가 되어 "bad grammar"로 실패한다.
+            Boolean ok = jdbc().query(
+                    "SELECT " + fn + "((?)::int) AS ok WHERE (?)::int <> pg_backend_pid()",
+                    rs -> rs.next() ? (Boolean) rs.getObject("ok") : null,
+                    pid, pid);
+            if (ok == null) {
+                throw new OperatorException("자기 수집 커넥션은 종료할 수 없습니다 (pid=" + pid + ")");
+            }
+            return "%s(pid=%d) → %s".formatted(fn, pid, ok);
+        } catch (DataAccessException e) {
+            throw new OperatorException("PostgreSQL 세션 종료 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * 복제 상태 — pg_is_in_recovery()면 레플리카(재생 지연 = now - 마지막 재생 시각),
      * 아니면 pg_stat_replication의 연결 수로 프라이머리/단독을 구분한다.
      */

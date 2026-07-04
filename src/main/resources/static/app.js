@@ -31,6 +31,7 @@ const state = {
   lastPlan: null,      // 마지막 EXPLAIN 실행계획 (문의 첨부용)
   lastFindings: [],    // 마지막 규칙 기반 지적
   lastAi: null,        // 마지막 AI 분석
+  role: null,          // 로그인 주체의 역할 (ADMIN이면 세션 kill 버튼 노출)
 };
 
 // ---------- 유틸 ----------
@@ -104,7 +105,7 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
-  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents()]);
+  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions()]);
 }
 
 // ---------- 활동 그래프 (드래그 구간 선택) ----------
@@ -441,6 +442,7 @@ async function loadMcpCommand() {
 async function loadMe() {
   try {
     const me = await api("/api/me");
+    state.role = me.role;
     $("#user-chip").innerHTML =
       `${esc(me.username)}<span class="role-badge">${esc(me.role)}</span>`;
   } catch { /* 401이면 api()가 로그인으로 보낸다 */ }
@@ -491,6 +493,57 @@ async function loadWaitEvents() {
     table.querySelector("tbody").innerHTML =
       `<tr><td colspan="4" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
   }
+}
+
+// 세션 / 블로킹 (B2) — "지금 누가 누구를 막고 있나". blockedByPid가 있으면 행을 강조한다.
+// ADMIN이면 행마다 취소(force=false)/강제종료(force=true) 버튼을 붙인다. VIEWER면 버튼 없음.
+async function loadSessions() {
+  const table = $("#session-table");
+  const isAdmin = state.role === "ADMIN";
+  const cols = isAdmin ? 8 : 7;
+  table.querySelector("thead").innerHTML = `
+    <tr><th class="num">PID</th><th>User</th><th>State</th><th>Wait</th>
+        <th class="num">BlockedBy</th><th class="num">Elapsed(ms)</th><th>Query</th>${isAdmin ? "<th>Action</th>" : ""}</tr>`;
+  try {
+    const rows = await api(`/api/instances/${state.instance.id}/sessions?limit=50`);
+    table.querySelector("tbody").innerHTML = rows.length ? rows.map((s) => `
+      <tr class="${s.blockedByPid != null ? "blocked-row" : ""}">
+        <td class="num">${esc(s.pid)}</td>
+        <td>${esc(s.user ?? "-")}</td>
+        <td>${esc(s.state ?? "-")}</td>
+        <td>${esc(s.waitEvent ?? "-")}</td>
+        <td class="num">${s.blockedByPid != null ? `<span class="blocked-by">${esc(s.blockedByPid)}</span>` : "-"}</td>
+        <td class="num">${fmtNum(s.elapsedMs)}</td>
+        <td class="qtext" title="${esc(s.query)}">${esc(s.query ?? "-")}</td>
+        ${isAdmin ? `<td class="session-actions">
+          <button class="btn btn-small" data-kill="${esc(s.pid)}" data-force="false">취소</button>
+          <button class="btn btn-small btn-danger" data-kill="${esc(s.pid)}" data-force="true">강제종료</button>
+        </td>` : ""}
+      </tr>`).join("") : `<tr><td colspan="${cols}" class="muted">활성 세션이 없습니다.</td></tr>`;
+    if (isAdmin) wireKillButtons();
+  } catch (e) {
+    table.querySelector("tbody").innerHTML =
+      `<tr><td colspan="${cols}" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+// kill은 confirm 없이 바로 POST한다(장애 시 빠른 처치가 목적) — 대신 버튼 자체가 ADMIN에게만 보인다.
+// 성공하면 목록을 다시 불러 사라졌는지 확인시킨다.
+function wireKillButtons() {
+  document.querySelectorAll("#session-table [data-kill]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const pid = btn.dataset.kill;
+      const force = btn.dataset.force === "true";
+      btn.disabled = true;
+      try {
+        await api(`/api/instances/${state.instance.id}/sessions/${pid}/kill?force=${force}`, { method: "POST" });
+        await loadSessions();
+      } catch (e) {
+        btn.disabled = false;
+        alert(`세션 종료 실패: ${e.message}`);
+      }
+    });
+  });
 }
 
 // ---------- 감사 로그 검색 (Specification 동적 필터) ----------
@@ -548,8 +601,9 @@ function setupPresets() {
   });
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  loadMe();
+document.addEventListener("DOMContentLoaded", async () => {
+  // 세션 kill 버튼 노출 여부가 역할에 달려 있어, 인스턴스 로딩(→세션 표) 전에 역할을 먼저 확정한다
+  await loadMe();
   loadMcpCommand();
   loadInstances();
   setupTabs();

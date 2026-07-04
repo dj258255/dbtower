@@ -139,6 +139,17 @@ public final class McpProtocolHandler {
                 "복제 상태 통합 뷰 — role, 지연 초, 상세. SHOW REPLICA STATUS / pg_stat_replication / AlwaysOn DMV를 하나의 모델로.",
                 schema(Map.of("instanceId", intProp("대상 인스턴스 id"))),
                 args -> get("/api/instances/" + args.get("instanceId").asLong() + "/replication")));
+
+        // 세션 조회는 읽기라 에이전트에게 노출한다. 그러나 세션 종료(kill)는 의도적으로 MCP 도구로
+        // 만들지 않는다 — 에이전트가 스스로 운영 세션을 끊는 것은 위험이 너무 크다. kill은 사람이
+        // 웹 콘솔에서 ADMIN 권한으로만 실행한다(REST POST /sessions/{pid}/kill).
+        tools.put("sessions", new Tool(
+                "현재 활성 세션과 블로킹 관계 — pid, user, state, 대기 이벤트, blockedByPid(누가 나를 막나), 쿼리, 경과(ms). "
+                        + "장애 시 '지금 누가 누구를 막고 있나'를 본다. (세션 종료는 위험이 커서 MCP로 노출하지 않는다 — 웹 콘솔 ADMIN 전용)",
+                schema(Map.of("instanceId", intProp("대상 인스턴스 id"),
+                        "limit", intProp("최대 개수 (기본 50)"))),
+                args -> get("/api/instances/" + args.get("instanceId").asLong()
+                        + "/sessions?limit=" + optInt(args, "limit", 50))));
     }
 
     // ---------- JSON-RPC 결과 조립 ----------
