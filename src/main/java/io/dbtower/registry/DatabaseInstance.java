@@ -2,11 +2,16 @@ package io.dbtower.registry;
 
 import io.dbtower.security.EncryptedStringConverter;
 import jakarta.persistence.*;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
 /** 관제 대상으로 등록된 DB 인스턴스. 등록 이후 모든 기능은 DbmsOperator 인터페이스로만 다룬다. */
 @Entity
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class DatabaseInstance {
 
     @Id
@@ -44,9 +49,6 @@ public class DatabaseInstance {
     @Column(nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
-    protected DatabaseInstance() {
-    }
-
     public DatabaseInstance(String name, DbmsType type, String host, int port,
                             String dbName, String username, String password) {
         this.name = name;
@@ -57,14 +59,4 @@ public class DatabaseInstance {
         this.username = username;
         this.password = password;
     }
-
-    public Long getId() { return id; }
-    public String getName() { return name; }
-    public DbmsType getType() { return type; }
-    public String getHost() { return host; }
-    public int getPort() { return port; }
-    public String getDbName() { return dbName; }
-    public String getUsername() { return username; }
-    public String getPassword() { return password; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
 }

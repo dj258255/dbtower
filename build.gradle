@@ -18,6 +18,11 @@ repositories {
 }
 
 dependencies {
+	// JPA 엔티티의 손으로 쓴 게터·무인자 생성자 보일러플레이트 제거용 (버전은 Boot BOM이 관리).
+	compileOnly 'org.projectlombok:lombok'
+	annotationProcessor 'org.projectlombok:lombok'
+	testCompileOnly 'org.projectlombok:lombok'
+	testAnnotationProcessor 'org.projectlombok:lombok'
 	testImplementation platform('org.springframework.modulith:spring-modulith-bom:2.1.0')
 	testImplementation 'org.springframework.modulith:spring-modulith-starter-test'
 	implementation 'org.springframework.boot:spring-boot-h2console'

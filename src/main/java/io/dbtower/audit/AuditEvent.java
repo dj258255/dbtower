@@ -5,6 +5,9 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
@@ -13,6 +16,8 @@ import java.time.LocalDateTime;
  * 스키마의 단일 권위는 마이그레이션(V2__audit_event.sql) — 이 엔티티는 validate 대상이다.
  */
 @Entity
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AuditEvent {
 
     @Id
@@ -43,9 +48,6 @@ public class AuditEvent {
     /** 요청 처리 시간(ms). 요청 단위가 아닌 이벤트(로그인·인가 거부)는 null */
     private Long durationMs;
 
-    protected AuditEvent() {
-    }
-
     public AuditEvent(LocalDateTime occurredAt, String principal, String role, String action,
                       Long instanceId, int outcome, Long durationMs) {
         this.occurredAt = occurredAt;
@@ -56,13 +58,4 @@ public class AuditEvent {
         this.outcome = outcome;
         this.durationMs = durationMs;
     }
-
-    public Long getId() { return id; }
-    public LocalDateTime getOccurredAt() { return occurredAt; }
-    public String getPrincipal() { return principal; }
-    public String getRole() { return role; }
-    public String getAction() { return action; }
-    public Long getInstanceId() { return instanceId; }
-    public int getOutcome() { return outcome; }
-    public Long getDurationMs() { return durationMs; }
 }

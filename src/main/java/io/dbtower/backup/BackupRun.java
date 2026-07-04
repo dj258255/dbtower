@@ -1,11 +1,16 @@
 package io.dbtower.backup;
 
 import jakarta.persistence.*;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
 /** 백업 실행 이력 한 건 — 성공/실패와 산출물 위치를 남긴다 */
 @Entity
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class BackupRun {
 
     public enum Status { SUCCESS, FAILED }
@@ -39,9 +44,6 @@ public class BackupRun {
 
     private LocalDateTime verifiedAt;
 
-    protected BackupRun() {
-    }
-
     public BackupRun(Long instanceId, LocalDateTime startedAt, long durationMs, Status status, String detail) {
         this(instanceId, startedAt, durationMs, status, detail, null);
     }
@@ -61,14 +63,4 @@ public class BackupRun {
         this.verifyStatus = verifyStatus;
         this.verifiedAt = verifiedAt;
     }
-
-    public Long getId() { return id; }
-    public Long getInstanceId() { return instanceId; }
-    public LocalDateTime getStartedAt() { return startedAt; }
-    public long getDurationMs() { return durationMs; }
-    public Status getStatus() { return status; }
-    public String getDetail() { return detail; }
-    public String getLocation() { return location; }
-    public String getVerifyStatus() { return verifyStatus; }
-    public LocalDateTime getVerifiedAt() { return verifiedAt; }
 }

@@ -2,6 +2,9 @@ package io.dbtower.backup;
 
 import io.dbtower.operator.BackupPolicy;
 import jakarta.persistence.*;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
@@ -10,6 +13,8 @@ import java.time.LocalDateTime;
  * 실제 실행 방식(mysqldump/pg_dump/BACKUP DATABASE)은 각 Operator가 기종에 맞게 결정한다.
  */
 @Entity
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class BackupPolicyEntity {
 
     @Id
@@ -31,9 +36,6 @@ public class BackupPolicyEntity {
 
     private LocalDateTime lastRunAt;
 
-    protected BackupPolicyEntity() {
-    }
-
     public BackupPolicyEntity(Long instanceId, int intervalMinutes, BackupPolicy.BackupType type) {
         this.instanceId = instanceId;
         this.intervalMinutes = intervalMinutes;
@@ -53,11 +55,4 @@ public class BackupPolicyEntity {
         this.type = type;
         this.enabled = enabled;
     }
-
-    public Long getId() { return id; }
-    public Long getInstanceId() { return instanceId; }
-    public int getIntervalMinutes() { return intervalMinutes; }
-    public BackupPolicy.BackupType getType() { return type; }
-    public boolean isEnabled() { return enabled; }
-    public LocalDateTime getLastRunAt() { return lastRunAt; }
 }
