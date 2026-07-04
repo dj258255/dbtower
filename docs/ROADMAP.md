@@ -40,7 +40,7 @@
 핵심 메커니즘의 증명(추상화·시점 비교·회귀 감지·채널·5기종)은 완료. 여기부터는
 실제 운영 투입을 향해 계속 구현한다. 세 단계 — A(운영 안전) -> B(DBA 진단 심화) -> C(프로비저닝 연동).
 
-### Phase A — 운영 안전 (프로덕션 전제조건)
+### Phase A — 운영 안전 (완료: 8/8, VERIFICATION 30절)
 
 우선순위·이유·업계 근거. B의 세션 킬 같은 위험 기능이 A의 인증·감사에 의존하므로 A가 먼저다.
 
@@ -50,9 +50,9 @@
 | 2 | **완료(21절)** 비밀번호 암호화 | AES-256-GCM + enc:v1: 접두사(평문 행 하위 호환), 키 미설정 WARN·오류 키 기동 거부. 다음 단계는 Vault 동적 계정. 이전엔 평문 저장. 최소 애플리케이션 레벨 암호화(AES-GCM + KMS 키), 정석은 Vault database secrets engine — 저장된 정적 비밀번호 대신 짧은 TTL의 동적 계정을 발급·자동 회수하고 접근 주체별 감사가 된다 ([Vault Database Secrets](https://developer.hashicorp.com/vault/docs/secrets/databases)) |
 | 3 | **완료(22절)** 스키마 마이그레이션 | Flyway V1 baseline + ddl-auto=validate. Boot 4의 starter 분리 함정 실측. 원래 한계: ddl-auto=update가 기존 CHECK 제약을 갱신하지 않아 기종 추가가 수동 ALTER가 됐다(VERIFICATION 18-3, 직접 밟은 근거). 커뮤니티 표준은 운영에서 ddl-auto=validate + Flyway가 스키마의 단일 권위 ([Flyway + Hibernate Best Practices](https://rieckpil.de/howto-best-practices-for-flyway-and-hibernate-with-spring-boot/)) |
 | 4 | **완료(23절)** 스냅샷 보존 | 기본 7일(PI 선례)·1시간 sweep·JPQL 벌크 DELETE·무제한 스위치. 원래 한계: 무한 적재. 선례: AWS Performance Insights의 기본 보존이 7일이고 그 이상은 명시적 선택·과금이다 — 보존기간 + 삭제 배치(또는 시간 파티셔닝)가 기본값이어야 한다 ([PI Pricing & Retention](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PerfInsights.Overview.cost.html)) |
-| 5 | 다중 인스턴스(HA) | 폴러·회귀 감지 쿨다운이 인메모리라 단일 프로세스 전제. 스케일아웃 시 리더 선출(ShedLock 등) + 쿨다운 상태 외부화(메타 DB/Redis) 필요 |
+| 5 | **완료(28절)** HA 안전 | ShedLock 분산 락 — 폴러 4종 한 노드만 실행(2노드 실측), usingDbTime 클럭스큐 방어. 쿨다운 외부화는 잔여(정직 명시) |
 | 6 | **완료(25절)** 감사 로그 | audit 모듈 — /api 상태변경·로그인·403 월권 기록(인터셉터+인가거부 리스너), Flyway V2. Vault 감사 이점과 짝 |
-| 7 | 백업 복원 검증 | "테스트해 본 적 없는 백업은 백업이 아니다" — 주기적 복원 리허설과 검증 0-에러 원칙(3-2-1-1-0), 덤프 원격 보관·암호화 ([Veeam 3-2-1](https://www.veeam.com/blog/321-backup-rule.html), [Datto 3-2-1-1-0](https://www.datto.com/blog/3-2-1-1-0-backup-rule/)) |
+| 7 | **완료(29절)** 백업 복원 검증 | 3값(VERIFIED/FAILED/UNSUPPORTED), MySQL/PG/Mongo 임시 DB 실복원, MSSQL VERIFYONLY, Oracle UNSUPPORTED 정직 표기. 원격 보관·암호화는 잔여 ([3-2-1-1-0](https://www.datto.com/blog/3-2-1-1-0-backup-rule/)) |
 | 8 | **완료(27절)** 최소 권한 계정 | docs/least-privilege.md — 권한 0에서 에러 원문 수집으로 5기종 최소 집합 확정. Mongo clusterMonitor·PG 조용한 저하 등 실측 발견 ([Datadog DBM](https://docs.datadoghq.com/database_monitoring/setup_mysql/selfhosted/)) |
 | 9 | 분석 보호장치 | explain에 statement timeout, 대상 DB 과부하 시 수집 백오프 — 진단 도구가 부하 유발자가 되지 않게 |
 

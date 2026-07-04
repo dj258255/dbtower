@@ -835,3 +835,74 @@ MCP:    도구 9종(wait_events 포함), 웹 콘솔 Monitoring 탭에 카드 렌
 - PostgreSQL은 권한이 없어도 query-stats가 HTTP 200으로 성공하되 전 행이
   <insufficient privilege>로 조용히 저하된다 — 에러가 아니라 빈 데이터라 더 위험한 형태
 - 백업은 관리 작업이라 이 계정 범위 밖 — ADMIN 권한 계정을 별도로 둔다는 경계도 문서화
+
+## 28. Phase A5 — HA 안전: 스케줄러 분산 락 (ShedLock)
+
+한계: @Scheduled 폴러 4종(통계 수집·회귀 감지·보존 삭제·백업)이 단일 프로세스 전제였다.
+앱을 2개 이상 띄우면 모든 노드가 동시에 같은 대상 DB를 수집하고, 회귀 감지 쿨다운이
+인메모리라 노드마다 따로 놀아 같은 회귀를 중복 알림한다.
+
+설계:
+- ShedLock(JdbcTemplate 프로바이더) — 폴러마다 고정 이름 락, 한 시점에 한 노드만 실행
+- LockProvider 빈은 루트 패키지(공유 인프라)에 둬 Modulith 순환 회피, usingDbTime으로
+  노드 JVM 클럭이 아니라 메타 DB 시계로 만료 판정(HA 클럭 스큐 방어)
+- lockAtLeastFor를 주기 근처로 둬 드리프트하는 2번째 노드의 중복 실행 차단,
+  lockAtMostFor는 크래시 복구 상한(실제 실행시간보다 넉넉히)
+- V3__shedlock.sql (공식 PostgreSQL 스키마)
+
+정직한 잔여 한계: RegressionDetector 쿨다운 Map은 노드별 인메모리로 남겼다. 락 stickiness로
+정상 시엔 한 노드가 계속 이겨 중복이 급감하지만, 락 핸드오프(failover/재기동) 직후엔
+새 승자의 Map이 비어 이미 보낸 회귀를 1회 재알림할 수 있다. 완전 해결은 쿨다운을 메타 DB로
+외부화하는 것(추가 마이그레이션)이며, 잔여 리스크를 "중복 1회"로 판단해 수용했다.
+
+실측:
+```
+2노드(18081+18082, 공유 메타DB, 15초 주기, 약 90초):
+  NODE A: 스냅샷 수집 완료 = 54건 / NODE B: = 0건
+  NODE B: "Not executing 'snapshot-collect'. It's locked." (매 틱)
+8080 단일 노드: shedlock 테이블에 4종 락 레코드 확인(진행 중 lock_until > now)
+```
+
+## 29. Phase A7 — 백업 복원 검증: "테스트 안 한 백업은 백업이 아니다"
+
+한계: 지금까지 "백업했다"까지만 있고 "그 백업이 복원 가능한가"는 검증하지 않았다
+(3-2-1-1-0의 "0 errors"가 요구하는 지점).
+
+설계 원칙: 기종마다 검증 가능한 수준이 다르다는 현실을 그대로 반영하고, 못 하는 것을
+통과로 위장하지 않는다. 3값 상태 RestoreVerification(VERIFIED/FAILED/UNSUPPORTED).
+복원은 반드시 격리된 임시 대상(dbtower_verify_<타임스탬프>)에만 — 원본은 절대 안 건드린다.
+
+| 기종 | 수준 | 방법 |
+|---|---|---|
+| MySQL | VERIFIED | .sql 덤프를 임시 DB에 실제 복원(CREATE DATABASE/USE 제거로 원본 격리), 테이블 수 확인 후 drop |
+| PostgreSQL | VERIFIED | pg_dump를 임시 DB에 psql -v ON_ERROR_STOP=1로 복원, public 테이블 수, drop FORCE |
+| MongoDB | VERIFIED | 아카이브를 임시 DB로 mongorestore(ns 리맵), 컬렉션 수, drop + 임시 아카이브 제거 |
+| SQL Server | VERIFIED(VERIFYONLY) | 서버 측 .bak라 파일 접근 불가 — RESTORE VERIFYONLY로 백업셋 무결성만(전체 복원 아님) |
+| Oracle | UNSUPPORTED | Data Pump 서버 측 산출물 — IMPDP+정리 필요, 자동 검증 범위 밖. 통과로 위장 안 함 |
+
+실측 (2026-07-04, 라이브):
+```
+PostgreSQL: VERIFIED — 임시 DB로 덤프 복원 성공, 복원 테이블 3개, 임시 DB 정리 확인
+Oracle:     UNSUPPORTED — "서버 측 산출물이라 IMPDP 필요, 범위 밖" (정직 표기)
+임시 검증 DB 잔여물: 0 (정리 확인), 원본 sample DB 불변
+FAILED 분기 증명: 없는 덤프 verify -> FAILED (러버스탬프 아님)
+verify_status를 backup_run에 저장 (V4__backup_run_verify.sql)
+```
+
+## 30. Phase A 완결 (A1~A8)
+
+인증 없는 관제탑에서 시작해 운영 안전 8개 축을 전부 닫았다. 각 절은 "한계 인지 -> 개선 ->
+실측 -> 잔여 한계 정직 명시" 아크로 기록됐다:
+
+| # | 한계였던 것 | 개선 | 절 |
+|---|---|---|---|
+| A1 | 누구나 들어오는 관제탑 | 세션+토큰 인증, 역할 분리 | 19 |
+| A2 | 비밀번호 평문 저장 | AES-256-GCM + 접두사 하위호환 | 21 |
+| A3 | ddl-auto=update 스키마 드리프트 | Flyway baseline + validate | 22 |
+| A4 | 스냅샷 무한 적재 | 보존 7일 벌크 삭제 | 23 |
+| A6 | 누가 뭘 했는지 모름 | 감사 로그 | 25 |
+| A8 | root/sa급 접속 | 최소 권한 계정 실측 확정 | 27 |
+| A5 | 단일 프로세스 전제 | ShedLock 분산 락 | 28 |
+| A7 | 복원 안 되는 백업 | 복원 검증 3값 | 29 |
+
+테스트 81건, 마이그레이션 V1~V4, 이 8개 아크의 상당수를 git worktree 병렬 개발로 진행(24절).
