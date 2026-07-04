@@ -43,4 +43,22 @@ public interface QuerySnapshotRepository extends JpaRepository<QuerySnapshot, Lo
     @Modifying(clearAutomatically = true)
     @Query("delete from QuerySnapshot s where s.capturedAt < :cutoff")
     int deleteByCapturedAtBefore(@Param("cutoff") LocalDateTime cutoff);
+
+    /**
+     * D1 베이스라인 학습용 — 특정 "시간대(hour) 버킷"의 이력만 뽑는다.
+     *
+     * 베이스라인은 (요일×시간대)별 통계라, 지금이 14시대면 과거의 14시대 관측만 필요하다.
+     * 시간대 필터를 DB(hour 함수)로 내려 14일 이력 전체 대신 1/24만 메모리로 올린다 —
+     * 요일 필터는 표준 JPQL 함수가 없어 호출부(BaselineService)에서 메모리로 거른다.
+     * (정직한 한계: 운영 규모의 장기 이력에선 요일까지 SQL로 내리거나 사전 집계가 낫다.
+     *  현재는 top-N×분당 수집이라 시간당 관측이 제한적이고, 이 필터로 충분히 가볍다.)
+     */
+    @Query("""
+            select s from QuerySnapshot s
+            where s.instanceId = :instanceId and s.capturedAt between :from and :to
+              and hour(s.capturedAt) = :hour
+            order by s.capturedAt""")
+    List<QuerySnapshot> findForHourBucket(@Param("instanceId") Long instanceId,
+                                          @Param("from") LocalDateTime from, @Param("to") LocalDateTime to,
+                                          @Param("hour") int hour);
 }

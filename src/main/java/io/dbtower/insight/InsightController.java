@@ -26,16 +26,19 @@ public class InsightController {
     private final RuleBasedAnalyzer analyzer;
     private final AiAnalyzer aiAnalyzer;
     private final QuerySnapshotRepository snapshotRepository;
+    private final BaselineService baselineService;
 
     public InsightController(RegistryService registryService, DbmsOperatorFactory operatorFactory,
                              ComparisonService comparisonService, RuleBasedAnalyzer analyzer,
-                             AiAnalyzer aiAnalyzer, QuerySnapshotRepository snapshotRepository) {
+                             AiAnalyzer aiAnalyzer, QuerySnapshotRepository snapshotRepository,
+                             BaselineService baselineService) {
         this.registryService = registryService;
         this.operatorFactory = operatorFactory;
         this.comparisonService = comparisonService;
         this.analyzer = analyzer;
         this.aiAnalyzer = aiAnalyzer;
         this.snapshotRepository = snapshotRepository;
+        this.baselineService = baselineService;
     }
 
     /**
@@ -181,6 +184,18 @@ public class InsightController {
                     calls == 0 ? 0 : Math.round(timeMs * 100.0 / calls) / 100.0));
         }
         return points;
+    }
+
+    /**
+     * 이상 자동 감지 현재 목록 (Phase D1) — "평소(이 요일·시간대) 대비" z-score로 벗어난 쿼리를 돌려준다.
+     * 시점 비교(compare)가 사람이 두 구간을 고르는 것이라면, 이건 학습된 베이스라인과 현재 구간을
+     * 자동 대조한 결과다. 폴러(AnomalyDetector)가 웹훅으로 미는 것과 같은 판정을 화면에서 즉시 조회한다.
+     * 이력이 부족한 쿼리는 learningCount로만 집계하고 이상 판정은 보류한다(오탐 방지). 읽기 전용이라 VIEWER 가능.
+     */
+    @GetMapping("/anomalies")
+    public BaselineService.AnomalyScan anomalies(@PathVariable Long id) {
+        registryService.findById(id); // 존재하지 않는 인스턴스면 여기서 실패(일관된 404)
+        return baselineService.detectAnomalies(id, LocalDateTime.now());
     }
 
     public record AiAnalysisResponse(String plan, List<String> findings, String aiAnalysis) {
