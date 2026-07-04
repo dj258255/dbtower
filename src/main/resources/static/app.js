@@ -23,6 +23,7 @@ const api = (path, opts = {}) => {
 
 const state = {
   instance: null,      // 선택된 인스턴스 {id, name, type, ...}
+  instances: [],       // 등록된 인스턴스 전체 목록 (Schema Diff 드롭다운용)
   activity: [],        // [{time, qps, avgLatencyMs}]
   dragMode: null,      // 'target' | 'base'
   selections: {},      // {target: {from: Date, to: Date}, base: {...}}
@@ -58,6 +59,8 @@ function deltaCell(base, target, changePct, digits = 2) {
 // ---------- 인스턴스 ----------
 async function loadInstances() {
   const list = await api("/api/instances");
+  state.instances = list;
+  populateSchemaSelects(list); // Schema Diff 좌/우 드롭다운 채우기
   const box = $("#instance-list");
   if (!list.length) {
     box.innerHTML = '<div class="muted">등록된 인스턴스가 없습니다 — POST /api/instances 로 등록하세요.</div>';
@@ -546,6 +549,69 @@ function wireKillButtons() {
   });
 }
 
+// ---------- Schema Diff (B7) — 같은 역할의 두 인스턴스 구조 비교 ----------
+// 드롭다운 두 개는 등록된 인스턴스 전체 목록에서 채운다(현재 선택된 인스턴스와 무관 — 두 대를 자유 비교).
+function populateSchemaSelects(list) {
+  const left = $("#schema-left"), right = $("#schema-right");
+  if (!left || !right) return;
+  const opts = list.map((i) => `<option value="${i.id}">${esc(i.name)} · ${esc(i.type)}</option>`).join("");
+  left.innerHTML = opts;
+  right.innerHTML = opts;
+  if (list.length > 1) right.selectedIndex = 1; // 기본값: 서로 다른 두 대
+}
+
+// 인덱스 한 줄 표기 — (col1, col2) UNIQUE. 값은 전부 esc()로 이스케이프한다(XSS 방지).
+function idxText(x) {
+  return `(${(x.columns || []).map(esc).join(", ")})${x.unique ? " UNIQUE" : ""}`;
+}
+const notNull = (nullable) => (nullable ? "" : " NOT NULL");
+
+async function runSchemaDiff() {
+  const left = $("#schema-left").value, right = $("#schema-right").value;
+  const box = $("#schema-diff-result"), warnBox = $("#schema-diff-warning");
+  if (!left || !right) return;
+  box.classList.remove("muted");
+  box.innerHTML = '<div class="muted">비교 중...</div>';
+  warnBox.hidden = true;
+  let d;
+  try {
+    d = await api(`/api/schema-diff?left=${left}&right=${right}`);
+  } catch (e) {
+    box.innerHTML = `<div class="schema-warning">비교 실패: ${esc(e.message)}</div>`;
+    return;
+  }
+  if (d.warning) { warnBox.hidden = false; warnBox.textContent = `주의: ${d.warning}`; }
+  if (d.identical) {
+    box.innerHTML = '<div class="schema-same">두 스키마가 동일합니다 — 구조 차이 없음.</div>';
+    return;
+  }
+  const parts = [];
+  const line = (cls, mark, text) => `<div class="schema-line ${cls}">${mark} ${text}</div>`;
+  const tableMeta = (t) => `<span class="muted">(${t.columns.length} cols · ${t.indexes.length} idx)</span>`;
+
+  if (d.addedTables.length) {
+    parts.push('<div class="schema-block"><h4>추가된 테이블 <span class="hint">(right에만)</span></h4>' +
+      d.addedTables.map((t) => line("schema-add", "+", `${esc(t.name)} ${tableMeta(t)}`)).join("") + "</div>");
+  }
+  if (d.removedTables.length) {
+    parts.push('<div class="schema-block"><h4>삭제된 테이블 <span class="hint">(left에만)</span></h4>' +
+      d.removedTables.map((t) => line("schema-del", "−", `${esc(t.name)} ${tableMeta(t)}`)).join("") + "</div>");
+  }
+  d.changedTables.forEach((t) => {
+    const lines = [];
+    t.addedColumns.forEach((c) => lines.push(line("schema-add", "+", `컬럼 ${esc(c.name)} ${esc(c.type)}${notNull(c.nullable)}`)));
+    t.removedColumns.forEach((c) => lines.push(line("schema-del", "−", `컬럼 ${esc(c.name)} ${esc(c.type)}`)));
+    t.changedColumns.forEach((c) => lines.push(line("schema-chg", "~",
+      `컬럼 ${esc(c.name)}: ${esc(c.leftType)}${notNull(c.leftNullable)} → ${esc(c.rightType)}${notNull(c.rightNullable)}`)));
+    t.addedIndexes.forEach((x) => lines.push(line("schema-add", "+", `인덱스 ${esc(x.name)} ${idxText(x)}`)));
+    t.removedIndexes.forEach((x) => lines.push(line("schema-del", "−", `인덱스 ${esc(x.name)} ${idxText(x)}`)));
+    t.changedIndexes.forEach((x) => lines.push(line("schema-chg", "~",
+      `인덱스 ${esc(x.name)}: ${idxText(x.left)} → ${idxText(x.right)}`)));
+    parts.push(`<div class="schema-block"><h4>변경된 테이블: ${esc(t.table)}</h4>${lines.join("")}</div>`);
+  });
+  box.innerHTML = parts.join("");
+}
+
 // ---------- 감사 로그 검색 (Specification 동적 필터) ----------
 async function loadAudit() {
   const table = $("#audit-table");
@@ -616,6 +682,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#btn-explain").addEventListener("click", runExplain);
   $("#btn-ai").addEventListener("click", runAiAnalysis);
   $("#btn-inquiry").addEventListener("click", runInquiry);
+  $("#btn-schema-diff").addEventListener("click", runSchemaDiff);
   $("#audit-search-btn").addEventListener("click", loadAudit);
   $("#audit-reset-btn").addEventListener("click", () => {
     ["audit-principal", "audit-action", "audit-outcome"].forEach((id) => { $(`#${id}`).value = ""; });

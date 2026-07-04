@@ -61,4 +61,12 @@ public interface DbmsOperator {
      * 자기 수집 커넥션은 종료 대상에서 제외한다. 결과 문자열은 어떤 방식으로 무엇을 했는지 기술한다.
      */
     String killSession(long pid, boolean force);
+
+    /**
+     * 스키마 구조 스냅샷 (B7) — "왜 저 장비만 다르지"를 컬럼·인덱스 수준에서 추적하는 원천.
+     * 읽기 전용(information_schema/카탈로그 조회만). 시스템 스키마는 제외하고 대상 dbName/스키마의
+     * 사용자 테이블만, 대량 스키마 방어를 위해 상위 N개(하드 상한)까지만 담는다.
+     * 완벽한 DDL 재현이 아니라 diff에 필요한 구조 요약임은 SchemaSnapshot 주석 참고.
+     */
+    SchemaSnapshot describeSchema();
 }

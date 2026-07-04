@@ -293,6 +293,52 @@ public class PostgresOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 스키마 구조 — 컬럼은 information_schema.columns(권한 있는 테이블만 보임), 인덱스는 pg_index를
+     * unnest해 컬럼 순서(indkey 순)와 유니크(indisunique)를 정확히 뽑는다. pg_indexes의 indexdef는
+     * DDL 텍스트라 컬럼 리스트·유니크를 파싱해야 해서, 대신 카탈로그를 직접 조인했다.
+     * 시스템 스키마(pg_catalog, information_schema)는 제외. 표현식 인덱스의 attnum=0 요소는
+     * pg_attribute 조인에서 빠진다(컬럼으로 환원 불가) — diff 요약에서는 그 부분만 비는 것을 허용한다.
+     */
+    @Override
+    public SchemaSnapshot describeSchema() {
+        String columnsSql = """
+                SELECT table_name, column_name, data_type, is_nullable, ordinal_position
+                FROM information_schema.columns
+                WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+                ORDER BY table_name, ordinal_position
+                """;
+        String indexesSql = """
+                SELECT t.relname AS table_name, i.relname AS index_name,
+                       a.attname AS column_name, ix.indisunique AS is_unique
+                FROM pg_index ix
+                JOIN pg_class i ON i.oid = ix.indexrelid
+                JOIN pg_class t ON t.oid = ix.indrelid
+                JOIN pg_namespace n ON n.oid = t.relnamespace
+                JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
+                JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+                WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+                  AND t.relkind = 'r'
+                ORDER BY t.relname, i.relname, k.ord
+                """;
+        try {
+            List<SchemaSupport.ColumnRow> columns = jdbc().query(columnsSql,
+                    (rs, i) -> new SchemaSupport.ColumnRow(
+                            rs.getString("table_name"),
+                            new ColumnSchema(rs.getString("column_name"), rs.getString("data_type"),
+                                    "YES".equalsIgnoreCase(rs.getString("is_nullable")),
+                                    rs.getInt("ordinal_position"))));
+            List<SchemaSupport.IndexColumnRow> indexes = jdbc().query(indexesSql,
+                    (rs, i) -> new SchemaSupport.IndexColumnRow(
+                            rs.getString("table_name"), rs.getString("index_name"),
+                            rs.getString("column_name"), rs.getBoolean("is_unique")));
+            return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
+                    columns, indexes, SchemaSupport.DEFAULT_MAX_TABLES);
+        } catch (DataAccessException e) {
+            throw new OperatorException("PostgreSQL 스키마 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * 복제 상태 — pg_is_in_recovery()면 레플리카(재생 지연 = now - 마지막 재생 시각),
      * 아니면 pg_stat_replication의 연결 수로 프라이머리/단독을 구분한다.
      */

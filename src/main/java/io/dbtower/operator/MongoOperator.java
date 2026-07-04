@@ -429,6 +429,47 @@ public class MongoOperator implements DbmsOperator {
         }
     }
 
+    /**
+     * 스키마 구조 — MongoDB는 스키마리스라 "컬럼" 개념이 없다. 그래서 컬럼은 항상 비우고
+     * 컬렉션 목록과 각 컬렉션의 인덱스(listIndexes)만 담는다 — "왜 저 장비만 다르지"를 인덱스 관점에서
+     * 추적하는 용도(예: 운영에만 있는 복합 인덱스). 문서 필드는 문서마다 달라 구조로 확정할 수 없으니
+     * 굳이 표본 스캔으로 흉내 내지 않고 정직하게 컬렉션·인덱스 구조만 비교한다.
+     *
+     * 인덱스의 컬럼은 key 문서의 필드 순서(복합 인덱스 순서 = 삽입 순서)로, unique는 인덱스 옵션에서 읽는다.
+     * _id 기본 인덱스도 포함한다(다른 기종의 PK 인덱스와 같은 취급). 시스템 컬렉션은 제외.
+     */
+    @Override
+    public SchemaSnapshot describeSchema() {
+        try {
+            return withClient(client -> {
+                List<TableSchema> tables = new ArrayList<>();
+                boolean truncated = false;
+                for (String name : db(client).listCollectionNames()) {
+                    if (name.startsWith("system.")) {
+                        continue;
+                    }
+                    if (tables.size() >= SchemaSupport.DEFAULT_MAX_TABLES) {
+                        truncated = true;
+                        break;
+                    }
+                    List<IndexSchema> indexes = new ArrayList<>();
+                    for (Document idx : db(client).getCollection(name).listIndexes()) {
+                        Document key = idx.get("key", new Document());
+                        boolean unique = Boolean.TRUE.equals(idx.getBoolean("unique"));
+                        indexes.add(new IndexSchema(idx.getString("name"),
+                                new ArrayList<>(key.keySet()), unique));
+                    }
+                    // 스키마리스: columns는 빈 리스트(TableSchema 주석 참고)
+                    tables.add(new TableSchema(name, List.of(), indexes));
+                }
+                return new SchemaSnapshot(instance.getType().name(), instance.getDbName(),
+                        tables, truncated, SchemaSupport.DEFAULT_MAX_TABLES);
+            });
+        } catch (Exception e) {
+            throw new OperatorException("MongoDB 스키마 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
     private String queryText(String ns, Document command) {
         String text = ns + " " + (command == null ? "{}" : command.toJson());
         return text.length() > 2000 ? text.substring(0, 2000) : text;

@@ -315,6 +315,58 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * 스키마 구조 — 컬럼은 INFORMATION_SCHEMA.COLUMNS(연결된 DB 기준), 인덱스는 sys.indexes에
+     * index_columns·columns를 조인해 컬럼 순서(key_ordinal)와 유니크(is_unique)를 뽑는다.
+     * 시스템 테이블(is_ms_shipped=1)과 INCLUDE 컬럼(is_included_column=1)은 제외 —
+     * 후자는 인덱스 키가 아니라 커버링용 부록이라 구조 diff 신호가 아니다. 힙(인덱스 없는 테이블)은
+     * ind.name IS NULL이라 인덱스 목록이 빈 채로 컬럼만 잡힌다.
+     */
+    @Override
+    public SchemaSnapshot describeSchema() {
+        // DATA_TYPE만으로는 varchar(255)의 길이가 안 보여서, 길이/정밀도를 붙여 기종 표기에 가깝게 만든다
+        String columnsSql = """
+                SELECT TABLE_NAME, COLUMN_NAME,
+                       DATA_TYPE + COALESCE('(' + CASE
+                           WHEN CHARACTER_MAXIMUM_LENGTH = -1 THEN 'max'
+                           WHEN CHARACTER_MAXIMUM_LENGTH IS NOT NULL
+                               THEN CONVERT(varchar, CHARACTER_MAXIMUM_LENGTH)
+                           WHEN DATA_TYPE IN ('decimal','numeric')
+                               THEN CONVERT(varchar, NUMERIC_PRECISION) + ',' + CONVERT(varchar, NUMERIC_SCALE)
+                           ELSE NULL END + ')', '') AS COLUMN_TYPE,
+                       IS_NULLABLE, ORDINAL_POSITION
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA NOT IN ('sys', 'INFORMATION_SCHEMA')
+                ORDER BY TABLE_NAME, ORDINAL_POSITION
+                """;
+        String indexesSql = """
+                SELECT t.name AS table_name, ind.name AS index_name,
+                       col.name AS column_name, ind.is_unique
+                FROM sys.indexes ind
+                JOIN sys.tables t ON t.object_id = ind.object_id
+                JOIN sys.index_columns ic ON ic.object_id = ind.object_id AND ic.index_id = ind.index_id
+                JOIN sys.columns col ON col.object_id = ic.object_id AND col.column_id = ic.column_id
+                WHERE ind.name IS NOT NULL AND t.is_ms_shipped = 0 AND ic.is_included_column = 0
+                ORDER BY t.name, ind.name, ic.key_ordinal
+                """;
+        try {
+            List<SchemaSupport.ColumnRow> columns = jdbc().query(columnsSql,
+                    (rs, i) -> new SchemaSupport.ColumnRow(
+                            rs.getString("TABLE_NAME"),
+                            new ColumnSchema(rs.getString("COLUMN_NAME"), rs.getString("COLUMN_TYPE"),
+                                    "YES".equalsIgnoreCase(rs.getString("IS_NULLABLE")),
+                                    rs.getInt("ORDINAL_POSITION"))));
+            List<SchemaSupport.IndexColumnRow> indexes = jdbc().query(indexesSql,
+                    (rs, i) -> new SchemaSupport.IndexColumnRow(
+                            rs.getString("table_name"), rs.getString("index_name"),
+                            rs.getString("column_name"), rs.getBoolean("is_unique")));
+            return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
+                    columns, indexes, SchemaSupport.DEFAULT_MAX_TABLES);
+        } catch (DataAccessException e) {
+            throw new OperatorException("MSSQL 스키마 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
     @Override
     public String explain(String sql) {
         requireSelect(sql);
