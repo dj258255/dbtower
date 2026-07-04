@@ -108,7 +108,59 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
-  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions()]);
+  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadAdvisors()]);
+}
+
+// ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
+// 읽고 조언만 하는 진단이라 VIEWER도 조회 가능. 각 Advisor는 OK/위반/미지원/오류로 정직하게 표기한다.
+const SEV_LABEL = { CRITICAL: "치명", WARNING: "경고", INFO: "정보" };
+const STATUS_LABEL = { OK: "통과", VIOLATIONS: "지적", UNSUPPORTED: "미지원", ERROR: "오류" };
+
+async function loadAdvisors() {
+  const summary = $("#advisors-summary");
+  const box = $("#advisors-result");
+  summary.innerHTML = "";
+  box.classList.add("muted");
+  box.textContent = "점검 중...";
+  let report;
+  try {
+    report = await api(`/api/instances/${state.instance.id}/advisors`);
+  } catch (e) {
+    box.textContent = `점검 실패: ${e.message}`;
+    return;
+  }
+  box.classList.remove("muted");
+  summary.innerHTML = `
+    <span class="sev-badge sev-CRITICAL">치명 ${report.critical}</span>
+    <span class="sev-badge sev-WARNING">경고 ${report.warning}</span>
+    <span class="sev-badge sev-INFO">정보 ${report.info}</span>
+    <span class="advisors-time muted">점검 ${esc(String(report.checkedAt).replace("T", " ").slice(0, 19))}</span>`;
+
+  // 지적이 있는 Advisor를 먼저(나쁜 순), 그다음 통과/미지원 순으로 정렬한다.
+  const order = { VIOLATIONS: 0, ERROR: 1, OK: 2, UNSUPPORTED: 3 };
+  const checks = [...report.checks].sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9));
+
+  box.innerHTML = checks.map((c) => {
+    const findings = (c.findings || []).map((f) => `
+      <div class="advisor-finding sev-border-${esc(f.severity)}">
+        <div class="advisor-finding-head">
+          <span class="sev-badge sev-${esc(f.severity)}">${esc(SEV_LABEL[f.severity] ?? f.severity)}</span>
+          <span class="advisor-finding-title">${esc(f.title)}</span>
+        </div>
+        <div class="advisor-finding-detail">${esc(f.detail)}</div>
+        <div class="advisor-finding-reco"><strong>권고:</strong> ${esc(f.recommendation)}</div>
+      </div>`).join("");
+    const note = c.note && c.status !== "VIOLATIONS"
+      ? `<div class="advisor-note muted">${esc(c.note)}</div>` : "";
+    return `
+      <div class="advisor-check status-${esc(c.status)}">
+        <div class="advisor-check-head">
+          <span class="advisor-status advisor-status-${esc(c.status)}">${esc(STATUS_LABEL[c.status] ?? c.status)}</span>
+          <span class="advisor-check-title">${esc(c.title)}</span>
+        </div>
+        ${findings}${note}
+      </div>`;
+  }).join("");
 }
 
 // ---------- 활동 그래프 (드래그 구간 선택) ----------

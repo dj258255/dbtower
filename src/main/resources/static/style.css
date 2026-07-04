@@ -309,3 +309,29 @@ input[type="datetime-local"] {
 /* 파라미터 드리프트(B6) 값 비교표 — 긴 값이 잘리지 않게 줄바꿈 허용 */
 .param-diff-table td { word-break: break-word; }
 .param-diff-table th { text-align: left; }
+
+/* Advisors (D2) — 자동 점검 결과 카드 */
+.advisors-summary { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.advisors-time { font-size: 11.5px; margin-left: auto; }
+.sev-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 700; color: #fff; }
+.sev-CRITICAL { background: #d6404f; }
+.sev-WARNING { background: #f08c2d; }
+.sev-INFO { background: #4f5ef7; }
+.advisor-check { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+.advisor-check.status-OK { opacity: 0.72; }
+.advisor-check.status-UNSUPPORTED { opacity: 0.55; }
+.advisor-check-head { display: flex; align-items: center; gap: 8px; }
+.advisor-check-title { font-weight: 600; font-size: 13px; }
+.advisor-status-OK { color: var(--target); }
+.advisor-status-VIOLATIONS { color: var(--up); }
+.advisor-status-UNSUPPORTED { color: var(--base); }
+.advisor-status-ERROR { color: var(--muted); }
+.advisor-finding { border-left: 3px solid var(--line); background: #fafbfc; border-radius: 4px; padding: 7px 10px; margin-top: 8px; }
+.advisor-finding.sev-border-CRITICAL { border-left-color: #d6404f; }
+.advisor-finding.sev-border-WARNING { border-left-color: #f08c2d; }
+.advisor-finding.sev-border-INFO { border-left-color: #4f5ef7; }
+.advisor-finding-head { display: flex; align-items: center; gap: 8px; }
+.advisor-finding-title { font-weight: 600; font-size: 12.5px; }
+.advisor-finding-detail { color: var(--text); font-size: 12.5px; margin-top: 4px; }
+.advisor-finding-reco { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.advisor-note { font-size: 12px; margin-top: 6px; }
