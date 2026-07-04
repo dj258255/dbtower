@@ -1,5 +1,6 @@
 package io.dbtower.insight;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,7 +37,15 @@ public class SnapshotRetentionJob {
 
     // 벌크 DELETE(@Modifying)는 트랜잭션 안에서만 실행 가능 — 스케줄 스레드에는
     // 열린 트랜잭션이 없으므로 여기서 경계를 연다.
+    // HA 분산 락(Phase A5): 여러 노드가 동시에 같은 벌크 DELETE를 돌리지 않게 한 노드만 정리한다.
+    // 삭제 자체는 멱등하지만(이미 지운 행을 또 지우면 0건), 동시 실행은 불필요한 DB 부하와 로그 중복이라 막는다.
+    // lockAtLeastFor=PT30S — 1시간 주기라 드리프트로 인한 같은 주기 중복 가능성은 낮지만, 두 노드가
+    //   거의 동시에 틱했을 때의 중복만 잠깐 눌러주면 충분하다(멱등하므로 길게 붙잡을 이유는 없다).
+    // lockAtMostFor=PT10M — 대량 삭제가 오래 걸려도 다른 노드가 끼어들지 않도록 넉넉한 크래시 상한.
+    // 주의: @Transactional과 함께 쓸 때 락 획득은 프록시 바깥(스케줄러 진입)에서 일어나므로,
+    //   ShedLock이 스킵하면 트랜잭션 자체가 열리지 않는다 — 열린 빈 트랜잭션이 남는 문제는 없다.
     @Scheduled(fixedDelayString = "${dbtower.snapshot.retention-sweep-ms:3600000}")
+    @SchedulerLock(name = "snapshot-retention-sweep", lockAtLeastFor = "PT30S", lockAtMostFor = "PT10M")
     @Transactional
     public void sweep() {
         if (retentionDays <= 0) {
