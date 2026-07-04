@@ -51,9 +51,9 @@
 | 3 | **완료(22절)** 스키마 마이그레이션 | Flyway V1 baseline + ddl-auto=validate. Boot 4의 starter 분리 함정 실측. 원래 한계: ddl-auto=update가 기존 CHECK 제약을 갱신하지 않아 기종 추가가 수동 ALTER가 됐다(VERIFICATION 18-3, 직접 밟은 근거). 커뮤니티 표준은 운영에서 ddl-auto=validate + Flyway가 스키마의 단일 권위 ([Flyway + Hibernate Best Practices](https://rieckpil.de/howto-best-practices-for-flyway-and-hibernate-with-spring-boot/)) |
 | 4 | **완료(23절)** 스냅샷 보존 | 기본 7일(PI 선례)·1시간 sweep·JPQL 벌크 DELETE·무제한 스위치. 원래 한계: 무한 적재. 선례: AWS Performance Insights의 기본 보존이 7일이고 그 이상은 명시적 선택·과금이다 — 보존기간 + 삭제 배치(또는 시간 파티셔닝)가 기본값이어야 한다 ([PI Pricing & Retention](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PerfInsights.Overview.cost.html)) |
 | 5 | 다중 인스턴스(HA) | 폴러·회귀 감지 쿨다운이 인메모리라 단일 프로세스 전제. 스케일아웃 시 리더 선출(ShedLock 등) + 쿨다운 상태 외부화(메타 DB/Redis) 필요 |
-| 6 | 감사 로그 | 누가 언제 어떤 인스턴스에 explain·백업을 실행했는지 기록. 관리 도구의 기본 요건이자 Vault 동적 계정의 감사 이점과 짝을 이룬다 |
+| 6 | **완료(25절)** 감사 로그 | audit 모듈 — /api 상태변경·로그인·403 월권 기록(인터셉터+인가거부 리스너), Flyway V2. Vault 감사 이점과 짝 |
 | 7 | 백업 복원 검증 | "테스트해 본 적 없는 백업은 백업이 아니다" — 주기적 복원 리허설과 검증 0-에러 원칙(3-2-1-1-0), 덤프 원격 보관·암호화 ([Veeam 3-2-1](https://www.veeam.com/blog/321-backup-rule.html), [Datto 3-2-1-1-0](https://www.datto.com/blog/3-2-1-1-0-backup-rule/)) |
-| 8 | 대상 DB 최소 권한 계정 | 현재 root/sa/system급으로 접속. Datadog DBM도 기종별 전용 읽기 계정과 필요한 grant 목록만 부여하는 방식을 문서화한다 — 기종별 권한 목록 가이드 필요 ([Datadog DBM MySQL Setup](https://docs.datadoghq.com/database_monitoring/setup_mysql/selfhosted/)) |
+| 8 | **완료(27절)** 최소 권한 계정 | docs/least-privilege.md — 권한 0에서 에러 원문 수집으로 5기종 최소 집합 확정. Mongo clusterMonitor·PG 조용한 저하 등 실측 발견 ([Datadog DBM](https://docs.datadoghq.com/database_monitoring/setup_mysql/selfhosted/)) |
 | 9 | 분석 보호장치 | explain에 statement timeout, 대상 DB 과부하 시 수집 백오프 — 진단 도구가 부하 유발자가 되지 않게 |
 
 ### Phase B — DBA 진단 심화 (현업 DBA가 매일 쓰는 것들)
@@ -63,7 +63,7 @@
 
 | # | 기능 | 내용 / 업계 근거 |
 |---|---|---|
-| B1 | Wait Event 분석 (AAS 분해) | load%가 "누가 시간을 쓰나"라면 Wait Event는 "그 시간에 무엇을 기다렸나"(CPU/IO/Lock/LWLock). PostgreSQL은 pg_wait_sampling 확장(기본 10ms 샘플링)으로 ASH 스타일 히스토그램, MySQL은 performance_schema events_waits, MSSQL은 sys.dm_os_wait_stats, Oracle은 v$session 샘플링 — DbmsOperator에 waitProfile() 메서드 1개 추가로 5기종 통합 ([GitLab ASH 대시보드 운영 사례](https://runbooks.gitlab.com/patroni/wait-events-analisys/), [PostgreSQL Wait Events 가이드](https://stormatics.tech/blogs/understanding-wait-events-in-postgresql)) |
+| B1 | **완료(26절)** Wait Event 분석 | DbmsOperator.waitEvents() 5기종 통합 — MySQL/MSSQL/Oracle 누적, PG 현재 스냅샷, Mongo 대기 큐. MySQL 비활성 instrument·MSSQL idle 필터를 정직하게 표기. REST+MCP(9종)+웹 카드 ([GitLab ASH](https://runbooks.gitlab.com/patroni/wait-events-analisys/)) |
 | B2 | 블로킹 트리 + 세션 관리 | "지금 누가 누구를 막고 있나"를 트리로 — PG는 pg_stat_activity + pg_blocking_pids(), 종료는 pg_cancel_backend(정상 롤백 유도) -> pg_terminate_backend(강제) 2단계. 킬 버튼은 위험 기능이라 Phase A의 인증·감사 로그가 전제 ([pg_stat_activity·pg_locks 모니터링](https://www.mssqltips.com/sqlservertip/8222/postgresql-monitoring-with-pg-stat-activity-and-pg-locks/)) |
 | B3 | 인덱스 어드바이저 | explain 규칙이 "인덱스가 없다"까지 지적하니, 다음은 "이 인덱스를 만들면 플랜이 이렇게 바뀐다" — PG의 HypoPG로 가상 인덱스를 만들어 실제 생성 없이 플랜 변화를 시뮬레이션, 결과를 AI 1차 분석의 근거로 주입 |
 | B4 | 온라인 스키마 변경 연동 | 대형 테이블 ALTER를 락 없이 — gh-ost/pt-online-schema-change 실행·진행률·스로틀을 플랫폼에서 관리. 두 도구 모두 원자적 cut-over와 실행 중 재설정을 지원 ([온라인 스키마 변경 도구 비교](https://planetscale.com/docs/vitess/schema-changes/online-schema-change-tools-comparison)) |
