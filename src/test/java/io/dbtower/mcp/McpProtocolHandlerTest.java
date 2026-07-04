@@ -44,7 +44,7 @@ class McpProtocolHandlerTest {
     }
 
     @Test
-    void 도구_9종이_이름과_입력_스키마를_갖고_노출된다() throws Exception {
+    void 도구_10종이_이름과_입력_스키마를_갖고_노출된다() throws Exception {
         ObjectNode response = handler.handle(parse(
                 "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}"));
 
@@ -57,8 +57,10 @@ class McpProtocolHandlerTest {
         });
         assertTrue(names.containsAll(List.of(
                 "list_instances", "health", "query_stats", "slow_queries",
-                "compare", "activity", "explain", "wait_events", "replication")));
-        assertEquals(9, names.size());
+                "compare", "activity", "explain", "wait_events", "replication", "sessions")));
+        // 세션 조회(sessions)는 읽기라 노출하지만, 세션 종료(kill)는 위험해 MCP 도구로 만들지 않는다
+        assertFalse(names.contains("kill_session"), "kill은 MCP로 노출하지 않는다");
+        assertEquals(10, names.size());
     }
 
     @Test

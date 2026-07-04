@@ -224,6 +224,77 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         return "Other";
     }
 
+    /**
+     * 활성 세션 + 블로킹 관계 — sys.dm_exec_sessions(세션)에 dm_exec_requests(현재 요청)를 붙이고,
+     * blocked = blocking_session_id(0이면 막힘 없음 → NULLIF로 null). 쿼리 텍스트는 dm_exec_sql_text.
+     * 지금 요청을 실행 중인 세션과, 요청이 없어도 남을 막고 있는 세션만 보인다(트랜잭션을 쥔 채 노는
+     * 세션도 블로킹 원인이라 포함). is_user_process=1로 시스템 세션은 빼고, @@SPID로 자기 자신 제외.
+     * total_elapsed_time은 ms 단위다.
+     */
+    @Override
+    public List<SessionInfo> activeSessions(int limit) {
+        String sql = """
+                SELECT TOP (?)
+                       s.session_id AS pid, s.login_name AS usr,
+                       COALESCE(r.status, 'sleeping') AS state, r.wait_type AS wait_event,
+                       NULLIF(r.blocking_session_id, 0) AS blocked_by,
+                       SUBSTRING(t.text, 1, 2000) AS query,
+                       COALESCE(r.total_elapsed_time, 0) AS elapsed_ms
+                FROM sys.dm_exec_sessions s
+                LEFT JOIN sys.dm_exec_requests r ON r.session_id = s.session_id
+                OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t
+                WHERE s.is_user_process = 1
+                  AND s.session_id <> @@SPID
+                  AND (r.session_id IS NOT NULL
+                       OR EXISTS (SELECT 1 FROM sys.dm_exec_requests b
+                                   WHERE b.blocking_session_id = s.session_id))
+                ORDER BY elapsed_ms DESC
+                """;
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> {
+                        // wasNull()은 getLong 직후에 — 다른 컬럼을 먼저 읽으면 null 판정이 그 컬럼 기준이 된다
+                        long blockedBy = rs.getLong("blocked_by");
+                        Long blockedByOrNull = rs.wasNull() ? null : blockedBy;
+                        return new SessionInfo(
+                                rs.getLong("pid"),
+                                rs.getString("usr"),
+                                rs.getString("state"),
+                                rs.getString("wait_event"),
+                                blockedByOrNull,
+                                rs.getString("query"),
+                                rs.getDouble("elapsed_ms"));
+                    },
+                    limit);
+        } catch (DataAccessException e) {
+            throw new OperatorException("MSSQL 세션 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 세션 종료 — SQL Server의 KILL은 취소/강제 구분이 없다. 실행 중 문장을 롤백하고 세션을 끊는
+     * 단일 동작뿐이라 force 인자는 무시한다(항상 KILL). KILL은 바인딩을 받지 않는 문장이지만
+     * session_id는 long이라 값 자체로 인젝션이 불가능하다. 같은 커넥션의 @@SPID로 자기 세션은 거부.
+     */
+    @Override
+    public String killSession(long pid, boolean force) {
+        try (Connection conn = open()) {
+            try (PreparedStatement ps = conn.prepareStatement("SELECT @@SPID")) {
+                try (java.sql.ResultSet rs = ps.executeQuery()) {
+                    if (rs.next() && rs.getLong(1) == pid) {
+                        throw new OperatorException("자기 수집 커넥션은 종료할 수 없습니다 (SPID=" + pid + ")");
+                    }
+                }
+            }
+            try (java.sql.Statement st = conn.createStatement()) {
+                st.execute("KILL " + pid); // force 무시 — SQL Server는 취소/강제 구분 없음
+            }
+            return "KILL " + pid + " 실행됨 (force 무시 — SQL Server는 취소/강제 구분 없음)";
+        } catch (SQLException e) {
+            throw new OperatorException("MSSQL 세션 종료 실패: " + e.getMessage(), e);
+        }
+    }
+
     /** 복제 상태 — AlwaysOn 가용성 그룹의 DMV. AG 미구성 단독 인스턴스면 행이 없다 */
     @Override
     public ReplicationState replicationState() {

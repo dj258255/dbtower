@@ -334,6 +334,73 @@ public class MongoOperator implements DbmsOperator {
         return value instanceof Number n ? n.longValue() : 0L;
     }
 
+    /**
+     * 활성 세션 — db.currentOp()의 inprog(active:true). RDBMS의 세션 목록에 대응한다.
+     * blockedByPid는 null로 둔다 — MongoDB는 문서/의도 락(intent lock) 모델이라 "A 세션이 B 세션을
+     * 막는다"는 관계를 currentOp가 직접 알려주지 않는다. waitingForLock 플래그로 "락을 기다리는 중"은
+     * 알 수 있어 waitEvent로 노출하지만, 그 락을 쥔 상대 opid를 표준 명령으로 특정할 수 없어
+     * blockedByPid는 정직하게 N/A(null)로 남긴다.
+     *
+     * pid = opid. 자기 자신(이 currentOp 명령)은 command에 currentOp 키가 있어 걸러낸다.
+     * elapsedMs = microsecs_running/1000(없으면 secs_running*1000).
+     */
+    @Override
+    public List<SessionInfo> activeSessions(int limit) {
+        try {
+            return withClient(client -> {
+                Document result = client.getDatabase("admin")
+                        .runCommand(new Document("currentOp", 1).append("active", true));
+                List<SessionInfo> sessions = new ArrayList<>();
+                for (Document op : result.getList("inprog", Document.class, List.of())) {
+                    Document command = op.get("command", Document.class);
+                    if (command != null && command.containsKey("currentOp")) {
+                        continue; // 이 조회 자신은 제외
+                    }
+                    long opid = asLong(op.get("opid"));
+                    double elapsedMs = op.containsKey("microsecs_running")
+                            ? asLong(op.get("microsecs_running")) / 1000.0
+                            : asLong(op.get("secs_running")) * 1000.0;
+                    sessions.add(new SessionInfo(
+                            opid,
+                            currentOpUser(op),
+                            op.getString("op"),
+                            Boolean.TRUE.equals(op.getBoolean("waitingForLock")) ? "waitingForLock" : null,
+                            null, // 문서 락 모델 — 블로킹 상대 opid를 표준 명령으로 특정 불가
+                            queryText(op.getString("ns"), command),
+                            elapsedMs));
+                    if (sessions.size() >= limit) {
+                        break;
+                    }
+                }
+                return sessions;
+            });
+        } catch (Exception e) {
+            throw new OperatorException("MongoDB 세션 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 세션 종료 — killOp(opid). MongoDB의 killOp에는 취소/강제 구분이 없어(항상 협조적 종료) force는
+     * 무시한다. opid는 조회에서 받은 숫자를 그대로 명령 인자로 넣는다(문자열 조립 없음 → 인젝션 무관).
+     */
+    @Override
+    public String killSession(long pid, boolean force) {
+        try {
+            return withClient(client -> {
+                client.getDatabase("admin").runCommand(new Document("killOp", 1).append("op", pid));
+                return "killOp(opid=" + pid + ") 실행됨 (force 무시 — MongoDB killOp는 협조적 종료만)";
+            });
+        } catch (Exception e) {
+            throw new OperatorException("MongoDB 세션 종료 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /** currentOp의 실행 주체 — 인증이 켜져 있으면 effectiveUsers[0].user, 없으면 null */
+    private static String currentOpUser(Document op) {
+        List<Document> users = op.getList("effectiveUsers", Document.class, List.of());
+        return users.isEmpty() ? null : users.get(0).getString("user");
+    }
+
     @Override
     public ReplicationState replicationState() {
         try {

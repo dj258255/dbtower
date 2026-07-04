@@ -2,7 +2,10 @@ package io.dbtower.operator;
 
 import io.dbtower.registry.DatabaseInstance;
 import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.ConnectionCallback;
 
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -223,6 +226,76 @@ public class MySqlOperator extends AbstractJdbcOperator {
     private static String mysqlWaitCategory(String eventName) {
         String[] parts = eventName.split("/");
         return parts.length >= 2 ? parts[1] : eventName;
+    }
+
+    /**
+     * 활성 세션 + 블로킹 관계 — information_schema.PROCESSLIST가 세션 목록이고, 블로킹은
+     * sys.innodb_lock_waits(성능 스키마 data_lock_waits를 사람이 읽기 좋게 감싼 뷰)에서 온다.
+     * 실측 확인: sys.innodb_lock_waits는 MySQL 8.4 컨테이너에 존재(2026-07-04).
+     *
+     * blocked_by는 상관 서브쿼리로 waiting_pid=이 세션인 첫 blocking_pid만 뽑는다 — 한 세션이 여러
+     * 락을 기다리면 lock_waits에 여러 행이 생기는데, 조인하면 세션이 중복되므로 LIMIT 1로 눌렀다.
+     * COMMAND='Sleep'(놀고 있는 커넥션)은 제외한다. state=COMMAND(Query/Execute…),
+     * waitEvent=STATE(예: 'Waiting for table metadata lock')로 매핑한다.
+     */
+    @Override
+    public List<SessionInfo> activeSessions(int limit) {
+        String sql = """
+                SELECT p.ID AS pid, p.USER AS usr, p.COMMAND AS command, p.STATE AS state,
+                       p.TIME AS time_sec, p.INFO AS query,
+                       (SELECT w.blocking_pid FROM sys.innodb_lock_waits w
+                         WHERE w.waiting_pid = p.ID LIMIT 1) AS blocked_by
+                FROM information_schema.PROCESSLIST p
+                WHERE p.COMMAND <> 'Sleep'
+                  AND p.ID <> CONNECTION_ID()
+                ORDER BY p.TIME DESC
+                LIMIT ?
+                """;
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> {
+                        // wasNull()은 getLong 직후에 — 다른 컬럼을 먼저 읽으면 null 판정이 그 컬럼 기준이 된다
+                        long blockedBy = rs.getLong("blocked_by");
+                        Long blockedByOrNull = rs.wasNull() ? null : blockedBy;
+                        return new SessionInfo(
+                                rs.getLong("pid"),
+                                rs.getString("usr"),
+                                rs.getString("command"),
+                                rs.getString("state"),
+                                blockedByOrNull,
+                                rs.getString("query"),
+                                rs.getDouble("time_sec") * 1000);
+                    },
+                    limit);
+        } catch (DataAccessException e) {
+            throw new OperatorException("MySQL 세션 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 세션 종료 — KILL QUERY <id>는 실행 중 문장만 취소(force=false), KILL <id>는 세션 자체를 끊는다.
+     * KILL은 바인딩 파라미터를 받지 않는 문장이라 id를 문자열로 이어 붙이지만, pid는 long이라
+     * 값 자체로 인젝션이 불가능하다. 같은 커넥션에서 CONNECTION_ID()로 자기 자신인지 먼저 확인해
+     * 수집 커넥션을 실수로 끊는 일을 막는다.
+     */
+    @Override
+    public String killSession(long pid, boolean force) {
+        String stmt = force ? "KILL " + pid : "KILL QUERY " + pid;
+        try {
+            return jdbc().execute((ConnectionCallback<String>) conn -> {
+                try (Statement s = conn.createStatement()) {
+                    try (ResultSet rs = s.executeQuery("SELECT CONNECTION_ID()")) {
+                        if (rs.next() && rs.getLong(1) == pid) {
+                            throw new OperatorException("자기 수집 커넥션은 종료할 수 없습니다 (pid=" + pid + ")");
+                        }
+                    }
+                    s.execute(stmt);
+                    return stmt + " 실행됨";
+                }
+            });
+        } catch (DataAccessException e) {
+            throw new OperatorException("MySQL 세션 종료 실패: " + e.getMessage(), e);
+        }
     }
 
     /** 복제 상태 — 레플리카면 SHOW REPLICA STATUS에 행이 있고, Seconds_Behind_Source가 지연이다 */

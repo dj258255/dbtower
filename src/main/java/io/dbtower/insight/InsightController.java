@@ -4,6 +4,7 @@ import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.RuleBasedAnalyzer;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.QueryStat;
+import io.dbtower.operator.SessionInfo;
 import io.dbtower.operator.SlowQuery;
 import io.dbtower.operator.TableStat;
 import io.dbtower.registry.DatabaseInstance;
@@ -80,6 +81,30 @@ public class InsightController {
     @GetMapping("/slow-queries")
     public List<SlowQuery> slowQueries(@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
         return operatorFactory.create(registryService.findById(id)).slowQueries(limit);
+    }
+
+    /**
+     * 활성 세션 + 블로킹 트리 (B2) — "지금 누가 누구를 막고 있나". 조회는 VIEWER부터.
+     * blockedByPid가 채워진 행이 곧 블로킹 관계. 기종별 pid 의미는 SessionInfo 주석 참고.
+     */
+    @GetMapping("/sessions")
+    public List<SessionInfo> sessions(@PathVariable Long id, @RequestParam(defaultValue = "50") int limit) {
+        return operatorFactory.create(registryService.findById(id)).activeSessions(limit);
+    }
+
+    /** kill 결과 — 어떤 pid를 어떤 방식으로 처리했는지 그대로 돌려준다(감사와 화면 피드백용) */
+    public record KillResult(long pid, boolean force, String result) {
+    }
+
+    /**
+     * 세션 종료 (B2) — ADMIN만(SecurityConfig). 반드시 명시적 pid 하나만 받는다(대량 kill 없음).
+     * force=false는 실행 문장 취소, force=true는 세션 강제 종료. POST라 A6 감사에 자동 기록된다.
+     */
+    @PostMapping("/sessions/{pid}/kill")
+    public KillResult killSession(@PathVariable Long id, @PathVariable long pid,
+                                  @RequestParam(defaultValue = "false") boolean force) {
+        String result = operatorFactory.create(registryService.findById(id)).killSession(pid, force);
+        return new KillResult(pid, force, result);
     }
 
     public record ExplainRequest(@NotBlank String sql) {

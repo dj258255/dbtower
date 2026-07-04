@@ -223,6 +223,81 @@ public class OracleOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * 활성 세션 + 블로킹 관계 — v$session에서 지금 일하거나(status='ACTIVE') 남에게 막힌 세션만.
+     * blocking_session이 곧 나를 막는 세션의 sid(막힘 없으면 null)라 락 뷰를 조인할 필요가 없다.
+     * 쿼리는 v$sql을 sql_id로 조인해 가져온다(현재/직전 문장). last_call_et는 초 → ms로 환산.
+     * pid는 sid로 다룬다 — kill 때 필요한 serial#은 그 시점에 재조회한다(SessionInfo.pid=sid).
+     * 자기 조회 세션은 SYS_CONTEXT SID로 제외.
+     */
+    @Override
+    public List<SessionInfo> activeSessions(int limit) {
+        String sql = """
+                SELECT s.sid AS pid, s.username AS usr, s.status AS state,
+                       s.event AS wait_event, s.blocking_session AS blocked_by,
+                       SUBSTR(q.sql_text, 1, 2000) AS query,
+                       s.last_call_et * 1000 AS elapsed_ms
+                FROM v$session s
+                LEFT JOIN v$sql q ON q.sql_id = s.sql_id AND q.child_number = s.sql_child_number
+                WHERE s.type = 'USER'
+                  AND s.username IS NOT NULL
+                  AND s.sid <> SYS_CONTEXT('USERENV', 'SID')
+                  AND (s.status = 'ACTIVE' OR s.blocking_session IS NOT NULL)
+                ORDER BY s.last_call_et DESC
+                FETCH FIRST ? ROWS ONLY
+                """;
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> {
+                        // wasNull()은 getLong 직후에 — 다른 컬럼을 먼저 읽으면 null 판정이 그 컬럼 기준이 된다
+                        long blockedBy = rs.getLong("blocked_by");
+                        Long blockedByOrNull = rs.wasNull() ? null : blockedBy;
+                        return new SessionInfo(
+                                rs.getLong("pid"),
+                                rs.getString("usr"),
+                                rs.getString("state"),
+                                rs.getString("wait_event"),
+                                blockedByOrNull,
+                                rs.getString("query"),
+                                rs.getDouble("elapsed_ms"));
+                    },
+                    limit);
+        } catch (DataAccessException e) {
+            throw new OperatorException("Oracle 세션 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 세션 종료 — ALTER SYSTEM KILL SESSION 'sid,serial#' [IMMEDIATE]. Oracle의 kill 대상은
+     * sid만으로 부족하고 serial#이 함께 필요해(그 사이 sid 재사용 방지), 넘어온 sid로 serial#을
+     * 지금 재조회한다. force=true면 IMMEDIATE(즉시 롤백·정리), 아니면 표준 종료.
+     * sid/serial#은 재조회한 숫자라 값으로 인젝션이 불가능하다. ALTER SYSTEM 권한이 없으면
+     * 그 사실이 드러나는 명확한 에러로 감싼다. 자기 세션(SYS_CONTEXT SID)은 거부한다.
+     */
+    @Override
+    public String killSession(long pid, boolean force) {
+        try {
+            Long mySid = jdbc().queryForObject(
+                    "SELECT TO_NUMBER(SYS_CONTEXT('USERENV', 'SID')) FROM dual", Long.class);
+            if (mySid != null && mySid == pid) {
+                throw new OperatorException("자기 수집 세션은 종료할 수 없습니다 (sid=" + pid + ")");
+            }
+            List<Long> serials = jdbc().query(
+                    "SELECT serial# AS serial_no FROM v$session WHERE sid = ?",
+                    (rs, i) -> rs.getLong("serial_no"), pid);
+            if (serials.isEmpty()) {
+                throw new OperatorException("종료할 세션을 찾을 수 없습니다 (sid=" + pid + ")");
+            }
+            String stmt = "ALTER SYSTEM KILL SESSION '%d,%d'%s"
+                    .formatted(pid, serials.get(0), force ? " IMMEDIATE" : "");
+            jdbc().execute(stmt);
+            return stmt + " 실행됨";
+        } catch (DataAccessException e) {
+            throw new OperatorException(
+                    "Oracle 세션 종료 실패(ALTER SYSTEM 권한 필요): " + e.getMessage(), e);
+        }
+    }
+
     /** 복제 상태 — Data Guard 기준의 데이터베이스 역할. 미구성 단독 인스턴스도 PRIMARY로 표시된다 */
     @Override
     public ReplicationState replicationState() {

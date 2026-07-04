@@ -118,6 +118,15 @@
     </div>
 
     <div id="tab-monitor" class="tab-body" hidden>
+      <div class="monitor-card session-card">
+        <h3>세션 / 블로킹 <span class="hint">(지금 누가 누구를 막고 있나 — blockedBy가 있으면 강조)</span></h3>
+        <div class="table-scroll">
+          <table class="qtable" id="session-table">
+            <thead></thead>
+            <tbody><tr><td class="muted">조회 중...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
       <div class="monitor-grid">
         <div class="monitor-card">
           <h3>복제 상태</h3>
