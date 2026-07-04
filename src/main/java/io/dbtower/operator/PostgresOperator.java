@@ -1,13 +1,9 @@
 package io.dbtower.operator;
 
 import io.dbtower.registry.DatabaseInstance;
+import org.springframework.dao.DataAccessException;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -110,23 +106,18 @@ public class PostgresOperator extends AbstractJdbcOperator {
                 ORDER BY total_exec_time DESC
                 LIMIT ?
                 """;
-        List<QueryStat> stats = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    stats.add(new QueryStat(
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new QueryStat(
                             rs.getString("query_id"),
                             rs.getString("query"),
                             rs.getLong("calls"),
                             rs.getDouble("total_ms"),
-                            rs.getLong("rows")));
-                }
-            }
-        } catch (SQLException e) {
+                            rs.getLong("rows")),
+                    limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 쿼리 통계 수집 실패: " + e.getMessage(), e);
         }
-        return stats;
     }
 
     @Override
@@ -140,23 +131,17 @@ public class PostgresOperator extends AbstractJdbcOperator {
                 ORDER BY mean_exec_time DESC
                 LIMIT ?
                 """;
-        List<SlowQuery> result = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setDouble(1, SLOW_MEAN_MS);
-            ps.setInt(2, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    result.add(new SlowQuery(
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new SlowQuery(
                             rs.getString("query"),
                             rs.getDouble("mean_exec_time"),
                             rs.getLong("rows"),
-                            LocalDateTime.now().toString()));
-                }
-            }
-        } catch (SQLException e) {
+                            LocalDateTime.now().toString()),
+                    SLOW_MEAN_MS, limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 슬로우 쿼리 조회 실패: " + e.getMessage(), e);
         }
-        return result;
     }
 
     @Override
@@ -171,36 +156,31 @@ public class PostgresOperator extends AbstractJdbcOperator {
                 ORDER BY pg_total_relation_size(relid) DESC
                 LIMIT ?
                 """;
-        List<TableStat> result = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    result.add(new TableStat(
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new TableStat(
                             rs.getString("relname"),
                             rs.getLong("n_live_tup"),
                             rs.getLong("data_bytes"),
-                            rs.getLong("index_bytes")));
-                }
-            }
-        } catch (SQLException e) {
+                            rs.getLong("index_bytes")),
+                    limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 테이블 통계 조회 실패: " + e.getMessage(), e);
         }
-        return result;
     }
 
     @Override
     public String explain(String sql) {
         requireSelect(sql);
-        try (Connection conn = open();
-             PreparedStatement ps = conn.prepareStatement("EXPLAIN (FORMAT JSON) " + sql);
-             ResultSet rs = ps.executeQuery()) {
-            StringBuilder sb = new StringBuilder();
-            while (rs.next()) {
-                sb.append(rs.getString(1));
-            }
-            return sb.toString();
-        } catch (SQLException e) {
+        try {
+            return jdbc().query("EXPLAIN (FORMAT JSON) " + sql, rs -> {
+                StringBuilder sb = new StringBuilder();
+                while (rs.next()) {
+                    sb.append(rs.getString(1));
+                }
+                return sb.toString();
+            });
+        } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL EXPLAIN 실패: " + e.getMessage(), e);
         }
     }
@@ -230,22 +210,17 @@ public class PostgresOperator extends AbstractJdbcOperator {
                 ORDER BY sessions DESC
                 LIMIT ?
                 """;
-        List<WaitEvent> result = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    result.add(new WaitEvent(
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new WaitEvent(
                             rs.getString("event"),
                             rs.getString("category"),
                             rs.getLong("sessions"),
-                            0)); // 스냅샷 방식이라 대기시간 누적이 없다
-                }
-            }
-        } catch (SQLException e) {
+                            0), // 스냅샷 방식이라 대기시간 누적이 없다
+                    limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 대기 이벤트 조회 실패: " + e.getMessage(), e);
         }
-        return result;
     }
 
     /**
@@ -254,24 +229,26 @@ public class PostgresOperator extends AbstractJdbcOperator {
      */
     @Override
     public ReplicationState replicationState() {
-        try (Connection conn = open()) {
-            try (ResultSet rs = conn.createStatement().executeQuery(
+        // 두 조회는 세션 지역 상태를 공유하지 않아 각각 실행해도 결과가 같다
+        try {
+            ReplicationState asReplica = jdbc().query(
                     "SELECT pg_is_in_recovery() AS in_recovery, " +
-                    "COALESCE(EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp())), 0) AS lag_sec")) {
-                rs.next();
-                if (rs.getBoolean("in_recovery")) {
-                    return new ReplicationState("REPLICA", rs.getDouble("lag_sec"), "recovery 모드");
-                }
+                    "COALESCE(EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp())), 0) AS lag_sec",
+                    rs -> {
+                        rs.next();
+                        return rs.getBoolean("in_recovery")
+                                ? new ReplicationState("REPLICA", rs.getDouble("lag_sec"), "recovery 모드")
+                                : null;
+                    });
+            if (asReplica != null) {
+                return asReplica;
             }
-            try (ResultSet rs = conn.createStatement().executeQuery(
-                    "SELECT COUNT(*) AS replicas FROM pg_stat_replication")) {
-                rs.next();
-                int replicas = rs.getInt("replicas");
-                return replicas > 0
-                        ? new ReplicationState("PRIMARY", 0, "replicas=" + replicas)
-                        : new ReplicationState("STANDALONE", 0, "복제 구성 없음");
-            }
-        } catch (SQLException e) {
+            Integer replicas = jdbc().queryForObject(
+                    "SELECT COUNT(*) AS replicas FROM pg_stat_replication", Integer.class);
+            return replicas != null && replicas > 0
+                    ? new ReplicationState("PRIMARY", 0, "replicas=" + replicas)
+                    : new ReplicationState("STANDALONE", 0, "복제 구성 없음");
+        } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 복제 상태 조회 실패: " + e.getMessage(), e);
         }
     }

@@ -1,13 +1,12 @@
 package io.dbtower.operator;
 
 import io.dbtower.registry.DatabaseInstance;
+import org.springframework.dao.DataAccessException;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -91,23 +90,18 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
                 ORDER BY qs.total_elapsed_time DESC
                 """;
-        List<QueryStat> stats = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    stats.add(new QueryStat(
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new QueryStat(
                             rs.getString("query_id"),
                             rs.getString("query_text"),
                             rs.getLong("execution_count"),
                             rs.getDouble("total_ms"),
-                            rs.getLong("total_logical_reads")));
-                }
-            }
-        } catch (SQLException e) {
+                            rs.getLong("total_logical_reads")),
+                    limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 쿼리 통계 수집 실패: " + e.getMessage(), e);
         }
-        return stats;
     }
 
     @Override
@@ -122,22 +116,17 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 WHERE qs.execution_count > 0
                 ORDER BY avg_ms DESC
                 """;
-        List<SlowQuery> result = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    result.add(new SlowQuery(
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new SlowQuery(
                             rs.getString("query_text"),
                             rs.getDouble("avg_ms"),
                             rs.getLong("avg_reads"),
-                            LocalDateTime.now().toString()));
-                }
-            }
-        } catch (SQLException e) {
+                            LocalDateTime.now().toString()),
+                    limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 슬로우 쿼리 조회 실패: " + e.getMessage(), e);
         }
-        return result;
     }
 
     @Override
@@ -154,22 +143,17 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 GROUP BY t.name
                 ORDER BY SUM(ps.used_page_count) DESC
                 """;
-        List<TableStat> result = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    result.add(new TableStat(
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new TableStat(
                             rs.getString("table_name"),
                             rs.getLong("row_count"),
                             rs.getLong("data_bytes"),
-                            rs.getLong("index_bytes")));
-                }
-            }
-        } catch (SQLException e) {
+                            rs.getLong("index_bytes")),
+                    limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 테이블 통계 조회 실패: " + e.getMessage(), e);
         }
-        return result;
     }
 
     /**
@@ -209,20 +193,17 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                   AND wait_type NOT LIKE 'PARALLEL_REDO[_]%'
                 ORDER BY wait_time_ms DESC
                 """;
-        List<WaitEvent> result = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    String waitType = rs.getString("wait_type");
-                    result.add(new WaitEvent(waitType, msSqlWaitCategory(waitType),
-                            rs.getLong("waiting_tasks_count"), rs.getDouble("wait_time_ms")));
-                }
-            }
-        } catch (SQLException e) {
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> {
+                        String waitType = rs.getString("wait_type");
+                        return new WaitEvent(waitType, msSqlWaitCategory(waitType),
+                                rs.getLong("waiting_tasks_count"), rs.getDouble("wait_time_ms"));
+                    },
+                    limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 대기 이벤트 조회 실패: " + e.getMessage(), e);
         }
-        return result;
     }
 
     /**
@@ -250,15 +231,15 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 SELECT rs.is_primary_replica, COUNT(*) OVER () AS replica_count
                 FROM sys.dm_hadr_database_replica_states rs
                 """;
-        try (Connection conn = open();
-             PreparedStatement ps = conn.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-            if (rs.next()) {
-                String role = rs.getBoolean("is_primary_replica") ? "PRIMARY" : "REPLICA";
-                return new ReplicationState(role, -1, "AlwaysOn replicas=" + rs.getInt("replica_count"));
-            }
-            return new ReplicationState("STANDALONE", 0, "AlwaysOn 가용성 그룹 미구성");
-        } catch (SQLException e) {
+        try {
+            return jdbc().query(sql, rs -> {
+                if (rs.next()) {
+                    String role = rs.getBoolean("is_primary_replica") ? "PRIMARY" : "REPLICA";
+                    return new ReplicationState(role, -1, "AlwaysOn replicas=" + rs.getInt("replica_count"));
+                }
+                return new ReplicationState("STANDALONE", 0, "AlwaysOn 가용성 그룹 미구성");
+            });
+        } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 복제 상태 조회 실패: " + e.getMessage(), e);
         }
     }
@@ -275,16 +256,15 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 WHERE st.text LIKE ?
                 ORDER BY qs.last_execution_time DESC
                 """;
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(planSql)) {
-            String prefix = sql.length() > 100 ? sql.substring(0, 100) : sql;
-            ps.setString(1, "%" + prefix + "%");
-            try (ResultSet rs = ps.executeQuery()) {
+        String prefix = sql.length() > 100 ? sql.substring(0, 100) : sql;
+        try {
+            return jdbc().query(planSql, rs -> {
                 if (rs.next()) {
                     return rs.getString(1);
                 }
                 return "플랜 캐시에서 해당 쿼리를 찾지 못했습니다. 쿼리가 한 번 이상 실행된 뒤 다시 시도하세요.";
-            }
-        } catch (SQLException e) {
+            }, "%" + prefix + "%");
+        } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 실행계획 조회 실패: " + e.getMessage(), e);
         }
     }

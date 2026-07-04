@@ -2,11 +2,11 @@ package io.dbtower.operator;
 
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.HealthStatus;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.sql.Connection;
-import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 
 /**
  * JDBC 기반 Operator 공통 골격.
@@ -36,15 +36,23 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
         return pools.getConnection(instance, jdbcUrl());
     }
 
+    /**
+     * 인스턴스+jdbcUrl에 매인 JdbcTemplate. DataSource는 ConnectionPools가 관리(풀 재사용)하므로
+     * 매 호출 새로 만들어도 가볍다 — JdbcTemplate 자체는 상태 없는 얇은 래퍼다.
+     */
+    protected JdbcTemplate jdbc() {
+        return new JdbcTemplate(pools.getDataSource(instance, jdbcUrl()));
+    }
+
     @Override
     public HealthStatus health() {
         long start = System.currentTimeMillis();
-        try (Connection conn = open();
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery(versionSql())) {
-            String version = rs.next() ? rs.getString(1) : "unknown";
-            return HealthStatus.up(version, System.currentTimeMillis() - start);
-        } catch (SQLException e) {
+        try {
+            // 등록 검증(id==null)도 이 경로 — DriverManagerDataSource 1회용 커넥션으로 붙어본다.
+            // 접속 실패는 JDBC의 SQLException이 아니라 Spring의 DataAccessException으로 올라온다.
+            String version = jdbc().queryForObject(versionSql(), String.class);
+            return HealthStatus.up(version != null ? version : "unknown", System.currentTimeMillis() - start);
+        } catch (DataAccessException e) {
             return HealthStatus.down(e.getMessage());
         }
     }

@@ -1,11 +1,8 @@
 package io.dbtower.operator;
 
 import io.dbtower.registry.DatabaseInstance;
+import org.springframework.dao.DataAccessException;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -103,23 +100,18 @@ public class MySqlOperator extends AbstractJdbcOperator {
                 ORDER BY SUM_TIMER_WAIT DESC
                 LIMIT ?
                 """;
-        List<QueryStat> stats = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    stats.add(new QueryStat(
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new QueryStat(
                             rs.getString("DIGEST"),
                             rs.getString("DIGEST_TEXT"),
                             rs.getLong("COUNT_STAR"),
                             rs.getDouble("total_ms"),
-                            rs.getLong("SUM_ROWS_EXAMINED")));
-                }
-            }
-        } catch (SQLException e) {
+                            rs.getLong("SUM_ROWS_EXAMINED")),
+                    limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("MySQL 쿼리 통계 수집 실패: " + e.getMessage(), e);
         }
-        return stats;
     }
 
     @Override
@@ -134,22 +126,17 @@ public class MySqlOperator extends AbstractJdbcOperator {
                 ORDER BY start_time DESC
                 LIMIT ?
                 """;
-        List<SlowQuery> result = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    result.add(new SlowQuery(
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new SlowQuery(
                             rs.getString("sql_text"),
                             rs.getDouble("elapsed_ms"),
                             rs.getLong("rows_examined"),
-                            rs.getString("start_time")));
-                }
-            }
-        } catch (SQLException e) {
+                            rs.getString("start_time")),
+                    limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("MySQL 슬로우 쿼리 조회 실패: " + e.getMessage(), e);
         }
-        return result;
     }
 
     @Override
@@ -162,33 +149,26 @@ public class MySqlOperator extends AbstractJdbcOperator {
                 ORDER BY DATA_LENGTH + INDEX_LENGTH DESC
                 LIMIT ?
                 """;
-        List<TableStat> result = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, instance.getDbName());
-            ps.setInt(2, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    result.add(new TableStat(
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new TableStat(
                             rs.getString("TABLE_NAME"),
                             rs.getLong("TABLE_ROWS"),
                             rs.getLong("DATA_LENGTH"),
-                            rs.getLong("INDEX_LENGTH")));
-                }
-            }
-        } catch (SQLException e) {
+                            rs.getLong("INDEX_LENGTH")),
+                    instance.getDbName(), limit);
+        } catch (DataAccessException e) {
             throw new OperatorException("MySQL 테이블 통계 조회 실패: " + e.getMessage(), e);
         }
-        return result;
     }
 
     @Override
     public String explain(String sql) {
         requireSelect(sql);
-        try (Connection conn = open();
-             PreparedStatement ps = conn.prepareStatement("EXPLAIN FORMAT=JSON " + sql);
-             ResultSet rs = ps.executeQuery()) {
-            return rs.next() ? rs.getString(1) : "{}";
-        } catch (SQLException e) {
+        try {
+            return jdbc().query("EXPLAIN FORMAT=JSON " + sql,
+                    rs -> rs.next() ? rs.getString(1) : "{}");
+        } catch (DataAccessException e) {
             throw new OperatorException("MySQL EXPLAIN 실패: " + e.getMessage(), e);
         }
     }
@@ -214,32 +194,29 @@ public class MySqlOperator extends AbstractJdbcOperator {
                 ORDER BY SUM_TIMER_WAIT DESC
                 LIMIT ?
                 """;
-        List<WaitEvent> result = new ArrayList<>();
-        try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    String name = rs.getString("EVENT_NAME");
-                    result.add(new WaitEvent(name, mysqlWaitCategory(name),
-                            rs.getLong("COUNT_STAR"), rs.getDouble("total_ms")));
-                }
-            }
+        // 두 문장(대기 집계 + 비활성 instrument 수)은 세션 지역 상태를 공유하지 않으므로 각각 JdbcTemplate으로 실행한다
+        try {
+            List<WaitEvent> result = new ArrayList<>(jdbc().query(sql,
+                    (rs, i) -> {
+                        String name = rs.getString("EVENT_NAME");
+                        return new WaitEvent(name, mysqlWaitCategory(name),
+                                rs.getLong("COUNT_STAR"), rs.getDouble("total_ms"));
+                    },
+                    limit));
             // 꺼진 instrument 계열 수를 세서 "부분 뷰"임을 데이터로 알린다 — 없는 대기를 없다고 오독하지 않게
-            try (PreparedStatement ps2 = conn.prepareStatement(
+            Long disabled = jdbc().queryForObject(
                     "SELECT COUNT(*) FROM performance_schema.setup_instruments "
-                            + "WHERE NAME LIKE 'wait/%' AND ENABLED = 'NO'");
-                 ResultSet rs2 = ps2.executeQuery()) {
-                if (rs2.next() && rs2.getLong(1) > 0) {
-                    result.add(new WaitEvent(
-                            "(안내) 비활성 wait instrument " + rs2.getLong(1)
-                                    + "종은 집계에 없음 — setup_instruments 기본값 기준의 부분 뷰",
-                            "INFO", 0, 0));
-                }
+                            + "WHERE NAME LIKE 'wait/%' AND ENABLED = 'NO'", Long.class);
+            if (disabled != null && disabled > 0) {
+                result.add(new WaitEvent(
+                        "(안내) 비활성 wait instrument " + disabled
+                                + "종은 집계에 없음 — setup_instruments 기본값 기준의 부분 뷰",
+                        "INFO", 0, 0));
             }
-        } catch (SQLException e) {
+            return result;
+        } catch (DataAccessException e) {
             throw new OperatorException("MySQL 대기 이벤트 조회 실패: " + e.getMessage(), e);
         }
-        return result;
     }
 
     /** 이벤트 이름의 둘째 구획이 곧 분류다 — wait/io/file/... -> io, wait/lock/table/... -> lock */
@@ -251,16 +228,21 @@ public class MySqlOperator extends AbstractJdbcOperator {
     /** 복제 상태 — 레플리카면 SHOW REPLICA STATUS에 행이 있고, Seconds_Behind_Source가 지연이다 */
     @Override
     public ReplicationState replicationState() {
-        try (Connection conn = open()) {
-            try (ResultSet rs = conn.createStatement().executeQuery("SHOW REPLICA STATUS")) {
+        // 두 SHOW 문은 세션 지역 상태를 공유하지 않아 각각 실행해도 결과가 같다
+        try {
+            ReplicationState asReplica = jdbc().query("SHOW REPLICA STATUS", rs -> {
                 if (rs.next()) {
                     double lag = rs.getObject("Seconds_Behind_Source") == null
                             ? -1 : rs.getDouble("Seconds_Behind_Source");
                     return new ReplicationState("REPLICA", lag,
                             "source=" + rs.getString("Source_Host") + ":" + rs.getInt("Source_Port"));
                 }
+                return null;
+            });
+            if (asReplica != null) {
+                return asReplica;
             }
-            try (ResultSet rs = conn.createStatement().executeQuery("SHOW REPLICAS")) {
+            return jdbc().query("SHOW REPLICAS", rs -> {
                 int replicas = 0;
                 while (rs.next()) {
                     replicas++;
@@ -268,8 +250,8 @@ public class MySqlOperator extends AbstractJdbcOperator {
                 return replicas > 0
                         ? new ReplicationState("PRIMARY", 0, "replicas=" + replicas)
                         : new ReplicationState("STANDALONE", 0, "복제 구성 없음");
-            }
-        } catch (SQLException e) {
+            });
+        } catch (DataAccessException e) {
             throw new OperatorException("MySQL 복제 상태 조회 실패: " + e.getMessage(), e);
         }
     }
