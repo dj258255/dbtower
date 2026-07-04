@@ -79,4 +79,14 @@ public interface DbmsOperator {
      * 완벽한 DDL 재현이 아니라 diff에 필요한 구조 요약임은 SchemaSnapshot 주석 참고.
      */
     SchemaSnapshot describeSchema();
+
+    /**
+     * 인스턴스 설정 파라미터 전량 (B6 파라미터 드리프트) — "왜 저 장비만 느리지"의 단골 원인인
+     * 설정값 차이(max_connections·work_mem 등)를 같은 역할의 두 장비 사이에서 추적하는 원천.
+     * 읽기 전용(설정 카탈로그 조회만 — 설정을 바꾸지 않는다).
+     *
+     * 수백 개를 전량 반환하고, 차이만 보여주는 일은 ParameterDiffService가 한다. 민감 파라미터
+     * (비밀번호·키류)는 값을 마스킹한다(ParameterSupport). 기종별 소스는 각 구현 주석 참고.
+     */
+    List<DbParameter> parameters();
 }

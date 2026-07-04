@@ -481,6 +481,40 @@ public class MongoOperator implements DbmsOperator {
         }
     }
 
+    /**
+     * 파라미터 — db.adminCommand({getParameter:'*'})가 서버 파라미터 전량을 준다.
+     * 스칼라(수/문자/불리언)는 그대로 평탄화하고, 중첩(Document/List)은 diff 대상이 아니라
+     * 문자열화만 한다(값이 크면 잘라 노이즈 방지). 명령 결과 메타('ok')는 파라미터가 아니라 제외.
+     */
+    @Override
+    public List<DbParameter> parameters() {
+        try {
+            return withClient(client -> {
+                Document params = client.getDatabase("admin")
+                        .runCommand(new Document("getParameter", "*"));
+                List<DbParameter> result = new ArrayList<>();
+                for (java.util.Map.Entry<String, Object> e : params.entrySet()) {
+                    if ("ok".equals(e.getKey())) {
+                        continue;
+                    }
+                    Object v = e.getValue();
+                    String value;
+                    if (v instanceof Document || v instanceof List) {
+                        String s = String.valueOf(v);
+                        value = s.length() > 500 ? s.substring(0, 500) : s; // 중첩은 문자열화(요약)
+                    } else {
+                        value = String.valueOf(v);
+                    }
+                    result.add(ParameterSupport.of(e.getKey(), value, null));
+                }
+                result.sort(java.util.Comparator.comparing(DbParameter::name));
+                return result;
+            });
+        } catch (Exception e) {
+            throw new OperatorException("MongoDB 파라미터 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
     private String queryText(String ns, Document command) {
         String text = ns + " " + (command == null ? "{}" : command.toJson());
         return text.length() > 2000 ? text.substring(0, 2000) : text;

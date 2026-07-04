@@ -73,6 +73,10 @@ public class SecurityConfig {
                         // 복원 검증도 대상 DB에 임시 DB를 만들고 지우는 행위라 백업과 같은 ADMIN 경계
                         .requestMatchers(HttpMethod.POST, "/api/instances/*/backup/verify").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/instances/*/backup-policy").hasRole("ADMIN")
+                        // 파라미터 조회·drift(B6)는 읽기지만 값이 인프라 형상·자격증명을 담고, 마스킹이
+                        // 이름 기반 휴리스틱이라 완전하지 않아 ADMIN으로 올린다(ParameterController 주석 참고).
+                        .requestMatchers(HttpMethod.GET, "/api/instances/*/parameters").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/param-diff").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage("/login.html")

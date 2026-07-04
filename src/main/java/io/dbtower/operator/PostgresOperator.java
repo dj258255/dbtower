@@ -449,6 +449,18 @@ public class PostgresOperator extends AbstractJdbcOperator {
         }
     }
 
+    /** 파라미터 — pg_settings가 이름·값·단위를 함께 준다(단위는 8kB/ms 등, 없으면 null) */
+    @Override
+    public List<DbParameter> parameters() {
+        try {
+            return jdbc().query("SELECT name, setting, unit FROM pg_settings ORDER BY name",
+                    (rs, i) -> ParameterSupport.of(rs.getString("name"),
+                            rs.getString("setting"), rs.getString("unit")));
+        } catch (DataAccessException e) {
+            throw new OperatorException("PostgreSQL 파라미터 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
     /**
      * 복제 상태 — pg_is_in_recovery()면 레플리카(재생 지연 = now - 마지막 재생 시각),
      * 아니면 pg_stat_replication의 연결 수로 프라이머리/단독을 구분한다.

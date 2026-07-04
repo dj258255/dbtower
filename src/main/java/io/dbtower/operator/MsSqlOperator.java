@@ -367,6 +367,18 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /** 파라미터 — sys.configurations(name/value_in_use). 실제 적용값 기준. 단위 없어 unit=null */
+    @Override
+    public List<DbParameter> parameters() {
+        try {
+            return jdbc().query(
+                    "SELECT name, CONVERT(varchar, value_in_use) AS value FROM sys.configurations ORDER BY name",
+                    (rs, i) -> ParameterSupport.of(rs.getString("name"), rs.getString("value"), null));
+        } catch (DataAccessException e) {
+            throw new OperatorException("MSSQL 파라미터 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
     @Override
     public String explain(String sql) {
         requireSelect(sql);

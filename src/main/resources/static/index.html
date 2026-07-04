@@ -154,6 +154,18 @@
         <div id="schema-diff-warning" class="schema-warning" hidden></div>
         <div id="schema-diff-result" class="schema-diff-result muted">좌/우 인스턴스를 고르고 비교를 누르세요.</div>
       </div>
+      <div class="monitor-card param-diff-card">
+        <h3>파라미터 드리프트 <span class="hint">(같은 역할 두 인스턴스 설정값 비교 — 왜 저 장비만 느리지)</span></h3>
+        <div class="schema-diff-controls">
+          <select id="param-left" class="schema-select"></select>
+          <span class="schema-arrow">→</span>
+          <select id="param-right" class="schema-select"></select>
+          <button id="btn-param-diff" class="btn btn-primary btn-small">비교</button>
+          <span class="hint">값이 다른 항목 + 한쪽에만 있는 항목만 표시 · ADMIN 전용</span>
+        </div>
+        <div id="param-diff-warning" class="schema-warning" hidden></div>
+        <div id="param-diff-result" class="schema-diff-result muted">좌/우 인스턴스를 고르고 비교를 누르세요.</div>
+      </div>
       <div class="monitor-grid">
         <div class="monitor-card">
           <h3>복제 상태</h3>

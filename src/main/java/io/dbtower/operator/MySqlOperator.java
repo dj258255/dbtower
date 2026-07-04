@@ -341,6 +341,19 @@ public class MySqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /** 파라미터 — SHOW GLOBAL VARIABLES(Variable_name/Value). 단위 개념이 없어 unit=null */
+    @Override
+    public List<DbParameter> parameters() {
+        try {
+            List<DbParameter> params = jdbc().query("SHOW GLOBAL VARIABLES",
+                    (rs, i) -> ParameterSupport.of(rs.getString(1), rs.getString(2), null));
+            params.sort(java.util.Comparator.comparing(DbParameter::name));
+            return params;
+        } catch (DataAccessException e) {
+            throw new OperatorException("MySQL 파라미터 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
     /** 복제 상태 — 레플리카면 SHOW REPLICA STATUS에 행이 있고, Seconds_Behind_Source가 지연이다 */
     @Override
     public ReplicationState replicationState() {
