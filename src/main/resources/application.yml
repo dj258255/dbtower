@@ -57,6 +57,14 @@ dbtower:
     recent-minutes: 5     # 문제 후보 구간(최근 N분)
     baseline-minutes: 15  # 베이스라인 구간(그 직전 N분)
     cooldown-minutes: 30  # 같은 쿼리 재알림 쿨다운
+  ops-alert:
+    # 운영 신호 감지(B5) — 쿼리 회귀 밖의 이상 징후(장기 유휴 트랜잭션·복제 지연·수집 정지)를
+    # 기존 진단(activeSessions·replicationState)과 메타 DB로 잡아 웹훅으로 알린다.
+    poll-ms: 120000              # 운영 감지 주기
+    idle-txn-seconds: 300        # idle in transaction 세션이 이 시간을 넘으면 경보(락·VACUUM 차단 위험)
+    replication-lag-seconds: 30  # 복제 지연이 이 초를 넘으면 경보(STANDALONE·음수 lag은 스킵)
+    snapshot-stall-minutes: 10   # 이 시간 동안 신규 스냅샷 배치가 0이면 수집 정지로 판단(선택 규칙)
+    cooldown-minutes: 30         # 같은 신호 재알림 쿨다운
   ai:
     model: claude-opus-4-8
   security:
