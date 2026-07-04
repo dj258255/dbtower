@@ -50,10 +50,29 @@ public class BackupController {
         return backupService.history(id).stream().map(BackupRunView::from).toList();
     }
 
-    public record BackupRunView(String startedAt, long durationMs, String status, String detail) {
+    /**
+     * 백업 복원 검증 (A7) — 가장 최근 성공 백업을, location을 주면 그 산출물을 검증한다.
+     * status는 VERIFIED/FAILED/UNSUPPORTED, restoredObjectCount는 실제 복원까지 한 경우에만 채워진다.
+     */
+    @PostMapping("/backup/verify")
+    public VerifyResponse verify(@PathVariable Long id,
+                                 @RequestParam(required = false) String location) {
+        BackupService.VerifyOutcome outcome = backupService.verifyLatest(id, location);
+        return VerifyResponse.from(outcome);
+    }
+
+    public record VerifyResponse(String status, String detail, Integer restoredObjectCount, String location) {
+        static VerifyResponse from(BackupService.VerifyOutcome o) {
+            return new VerifyResponse(o.verification().status().name(), o.verification().detail(),
+                    o.verification().restoredObjectCount(), o.location());
+        }
+    }
+
+    public record BackupRunView(String startedAt, long durationMs, String status, String detail,
+                                String verifyStatus) {
         static BackupRunView from(BackupRun r) {
             return new BackupRunView(r.getStartedAt().toString(), r.getDurationMs(),
-                    r.getStatus().name(), r.getDetail());
+                    r.getStatus().name(), r.getDetail(), r.getVerifyStatus());
         }
     }
 }

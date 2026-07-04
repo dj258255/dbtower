@@ -214,6 +214,71 @@ public class MongoOperator implements DbmsOperator {
     }
 
     /**
+     * MongoDB 복원 검증 = 아카이브를 격리된 임시 DB로 실제 복원 후 컬렉션 수 확인.
+     *
+     * mongorestore는 --config /dev/stdin(비밀번호)이 stdin을 쓰므로 아카이브를 stdin으로 줄 수 없다.
+     * 그래서 아카이브를 docker cp로 컨테이너에 넣고 --archive=<파일>로 지정한다(비밀번호는 여전히
+     * argv 밖). --nsFrom/--nsTo로 원본 네임스페이스를 임시 DB로 리매핑해 원본 컬렉션은 건드리지 않고,
+     * 끝나면 임시 DB drop + 컨테이너 임시 파일 rm. 정리 실패해도 원본은 무해.
+     */
+    @Override
+    public RestoreVerification verifyRestore(String location) {
+        java.nio.file.Path archive = java.nio.file.Path.of(location);
+        if (!java.nio.file.Files.isRegularFile(archive)) {
+            return RestoreVerification.failed("아카이브 파일을 찾을 수 없습니다: " + location);
+        }
+        String target = RestoreSupport.verifyTargetName();
+        RestoreSupport.requireSafeName(target);
+        List<String> base = BackupCommands.render(backupTools.mongoRestoreCommand(), instance);
+        String container = RestoreSupport.dockerContainer(base);
+        String inContainerArchive = "/tmp/" + target + ".archive";
+        boolean copied = false;
+        try {
+            RestoreSupport.ExecResult cp = RestoreSupport.exec(
+                    List.of("docker", "cp", location, container + ":" + inContainerArchive),
+                    java.util.Map.of(), null);
+            if (!cp.ok()) {
+                return RestoreVerification.failed("아카이브 컨테이너 복사 실패: " + cp.errorTail());
+            }
+            copied = true;
+            byte[] config = BackupCommands.yamlEntry("password", instance.getPassword())
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            RestoreSupport.ExecResult restore = RestoreSupport.exec(RestoreSupport.concat(base,
+                    "--archive=" + inContainerArchive,
+                    "--nsFrom=" + instance.getDbName() + ".*",
+                    "--nsTo=" + target + ".*"), java.util.Map.of(), config);
+            if (!restore.ok()) {
+                return RestoreVerification.failed("mongorestore 실패: " + restore.errorTail());
+            }
+            int collections = withClient(client -> {
+                int n = 0;
+                for (String name : client.getDatabase(target).listCollectionNames()) {
+                    if (!name.startsWith("system.")) {
+                        n++;
+                    }
+                }
+                return n;
+            });
+            return RestoreVerification.verified(
+                    "임시 DB로 아카이브 복원 성공 (mongorestore, nsTo=" + target + ")", collections);
+        } finally {
+            // 임시 DB 삭제 — 성공/실패 어느 경로든 격리 대상만 정리(원본 무해)
+            try {
+                withClient(client -> {
+                    client.getDatabase(target).drop();
+                    return null;
+                });
+            } catch (Exception ignored) {
+                // 정리 실패는 검증 결과를 뒤집지 않는다 — 임시 대상이라 방치돼도 원본과 무관
+            }
+            if (copied) {
+                RestoreSupport.exec(List.of("docker", "exec", container, "rm", "-f", inContainerArchive),
+                        java.util.Map.of(), null);
+            }
+        }
+    }
+
+    /**
      * 대기 지표 — MongoDB에는 다른 기종의 wait event에 해당하는 이벤트별 대기 통계가 없다.
      * 대신 serverStatus가 주는 "지금 얼마나 줄 서 있나"를 WaitEvent 형태로 매핑한다:
      *

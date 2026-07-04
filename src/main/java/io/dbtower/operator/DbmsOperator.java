@@ -31,6 +31,14 @@ public interface DbmsOperator {
     /** 추상 정책을 기종별 백업 방식으로 실행 (확장1) — mysqldump / pg_dump / BACKUP DATABASE */
     BackupResult backup(BackupPolicy policy);
 
+    /**
+     * 백업 산출물이 실제로 복원 가능한지 검증한다 (A7 — "0 errors"의 자동화).
+     * location은 backup()이 돌려준 산출물 위치. 기종·모드에 따라 확인 가능한 수준이 달라
+     * 결과는 VERIFIED/FAILED/UNSUPPORTED 3-값이다(RestoreVerification 참고).
+     * 복원은 반드시 임시/격리 대상에만 한다 — 원본 스키마·데이터는 절대 건드리지 않는다.
+     */
+    RestoreVerification verifyRestore(String location);
+
     /** 복제 토폴로지 상태 (확장2) */
     ReplicationState replicationState();
 

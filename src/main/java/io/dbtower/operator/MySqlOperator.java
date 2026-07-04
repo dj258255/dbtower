@@ -38,6 +38,48 @@ public class MySqlOperator extends AbstractJdbcOperator {
                 java.util.Map.of("MYSQL_PWD", instance.getPassword()), out);
     }
 
+    /**
+     * MySQL 복원 검증 = 덤프를 격리된 임시 DB에 실제로 복원해 보는 진짜 restore test.
+     * 덤프의 CREATE DATABASE/USE 행을 제거해 원본이 아니라 임시 DB로만 적재하고(핵심 안전장치),
+     * 성공 시 복원된 테이블 수로 sanity check, 마지막에 임시 DB를 삭제한다. 정리가 실패해도 원본은 무해.
+     */
+    @Override
+    public RestoreVerification verifyRestore(String location) {
+        java.nio.file.Path dump = java.nio.file.Path.of(location);
+        if (!java.nio.file.Files.isRegularFile(dump)) {
+            return RestoreVerification.failed("덤프 파일을 찾을 수 없습니다: " + location);
+        }
+        String target = RestoreSupport.verifyTargetName();
+        RestoreSupport.requireSafeName(target);
+        java.util.Map<String, String> env = java.util.Map.of("MYSQL_PWD", instance.getPassword());
+        java.util.List<String> base = renderCommand(backupTools.mysqlRestoreCommand());
+        boolean created = false;
+        try {
+            RestoreSupport.ExecResult create = RestoreSupport.exec(
+                    RestoreSupport.concat(base, "-e", "CREATE DATABASE `" + target + "`"), env, null);
+            if (!create.ok()) {
+                return RestoreVerification.failed("임시 DB 생성 실패: " + create.errorTail());
+            }
+            created = true;
+            RestoreSupport.ExecResult load = RestoreSupport.exec(
+                    RestoreSupport.concat(base, target), env, RestoreSupport.stripDatabaseSelection(dump));
+            if (!load.ok()) {
+                return RestoreVerification.failed("덤프 복원 실패: " + load.errorTail());
+            }
+            RestoreSupport.ExecResult count = RestoreSupport.exec(RestoreSupport.concat(base, "-N", "-B", "-e",
+                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='" + target + "'"), env, null);
+            return RestoreVerification.verified(
+                    "임시 DB로 덤프 복원 성공 (mysql 클라이언트, target=" + target + ")",
+                    RestoreSupport.parseCount(count));
+        } finally {
+            if (created) {
+                // 정리 실패해도 원본과 무관 — best effort로 임시 DB만 삭제
+                RestoreSupport.exec(RestoreSupport.concat(base, "-e",
+                        "DROP DATABASE IF EXISTS `" + target + "`"), env, null);
+            }
+        }
+    }
+
     @Override
     protected String jdbcUrl() {
         return "jdbc:mysql://%s:%d/%s?connectTimeout=3000&socketTimeout=15000"
