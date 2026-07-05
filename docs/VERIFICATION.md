@@ -1230,3 +1230,30 @@ BackupRun 이력에서 인스턴스별 최신 SUCCESS 백업 → FRESH/STALE/NO_
 메타 DB만 읽어 판정(대상 접속 실패와 무관 — 대상이 죽었을 때가 백업 신선도가 가장 중요), 나쁜 순 정렬.
 OpsAlertDetector에 신선도 경보(STALE 항상·NO_BACKUP은 등록 후 임계 창 지난 것만). 실측(실 8080):
 6개 인스턴스를 FRESH 1·STALE 2·NO_BACKUP 3으로 분류, NO_BACKUP 상단 정렬 확인.
+
+## 48. Phase D 배치3 — SLO·FinOps (D4·D6)
+
+### 48-1. D4 DB SLO / 에러 버짓 (Google SRE·DBRE)
+"인프라 지표(CPU) 아니라 사용자 경험 지표" 원칙. 레이턴시 SLI는 D4a latencyPercentiles(p95/p99)
+재사용, UNSUPPORTED 기종(MSSQL/Oracle)은 평균 레이턴시로 폴백하고 source=AVG_FALLBACK 정직 표기.
+가용성 SLI는 HealthSample 이력(SloHealthPoller가 적재)의 up 비율. 에러 버짓=허용 다운타임 대비
+소진율+번인 레이트, EXHAUSTED/WARNING/OK. V5__health_sample.sql(실 DB 적용 확인).
+실측(실 8080): MySQL 레이턴시 source=NATIVE·BREACHING, Oracle source=AVG_FALLBACK, 가용성 MEETING.
+단위 12건(최악 p95·폴백·버짓 산식·번인·데이터 부족).
+
+### 48-2. D6 비용/효율 인사이트 (AWS FinOps·Mydbops)
+낭비 후보를 "신호"까지만 — 절감액(달러)·자동 실행 없음. DbmsOperator.indexUsage()로 미사용
+인덱스를 실제 사용 카운터(PG idx_scan·MySQL COUNT_STAR·MSSQL·Mongo NATIVE, Oracle UNSUPPORTED)로,
+중복 인덱스는 D2 Advisor 재사용(판정 단일 출처), 큰 테이블·오버프로비저닝 신호. 유니크/PK 인덱스는
+미사용이어도 제외(오탐 방지). 실측(실 8080): 직접 만든 미사용 인덱스 PG·MySQL 검출 후 정리,
+오버프로비저닝 후보 2건. 단위 5건.
+
+## 49. 심층 원인 진단(D9) 명세 확정 — 프롬프트 문서 강화
+
+사용자 지적("기종별로 왜 인덱스를 못 타는지 디테일하게 분석해야")을 반영해 D9를 웹서칭으로 검증·명세화.
+docs/ai-analysis-rules.md에 "심층 원인 규칙(D9)" 절 추가: (1) 추정 vs 실제 행수 괴리를 기종별로 보는
+법(MySQL EXPLAIN ANALYZE FORMAT=JSON, PG (ANALYZE,BUFFERS), Oracle gather_plan_statistics+
+DISPLAY_CURSOR ALLSTATS LAST, MSSQL SET STATISTICS XML 별도 결과셋, Mongo executionStats),
+(2) 인덱스 무력화 근본원인 5종(암시적 형변환·컬럼 함수·통계 노후·낮은 선택도·복합 선두 누락),
+(3) 실행 안전(SELECT 전용+타임아웃). 검증된 함정 명시: MySQL/PG actual rows는 loops당 평균(총량=loops 곱),
+Oracle 권한은 SELECT_CATALOG_ROLE로 충분, MSSQL은 plain Statement+getMoreResults. 구현은 Phase D9(미착수).
