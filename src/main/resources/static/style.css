@@ -366,8 +366,11 @@ input[type="datetime-local"] {
 .advisor-check-title { font-weight: 600; font-size: 13px; }
 .advisor-status-OK { color: var(--target); }
 .advisor-status-VIOLATIONS { color: var(--up); }
+.advisor-status-CANDIDATES { color: var(--up); }
 .advisor-status-UNSUPPORTED { color: var(--base); }
 .advisor-status-ERROR { color: var(--muted); }
+/* FinOps 낭비 종류 배지 — 후보 한 줄에서 종류(미사용 인덱스 등)를 작은 알약으로 */
+.finops-kind { font-size: 11px; font-weight: 600; color: var(--muted); background: #eef0f3; border-radius: 4px; padding: 1px 6px; }
 .advisor-finding { border-left: 3px solid var(--line); background: #fafbfc; border-radius: 4px; padding: 7px 10px; margin-top: 8px; }
 .advisor-finding.sev-border-CRITICAL { border-left-color: #d6404f; }
 .advisor-finding.sev-border-WARNING { border-left-color: #f08c2d; }

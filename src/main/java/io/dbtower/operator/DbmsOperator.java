@@ -110,4 +110,15 @@ public interface DbmsOperator {
      * 개념이 없어 UNSUPPORTED로 정직하게 표기한다(샤딩은 다른 축이라 여기 섞지 않는다).
      */
     List<PartitionInfo> partitions(int limit);
+
+    /**
+     * 인덱스 사용 통계 (D6 FinOps) — "이 인덱스가 실제로 쓰이나"를 기종별 사용 카운터로 읽는다.
+     * 미사용 인덱스는 쓰기 비용·저장공간만 잡아먹는 대표적 낭비 후보인데, 구조만 보는 describeSchema로는
+     * "안 쓰였는지"를 알 수 없어 이 사용 통계가 필요하다. 읽기 전용(카탈로그·성능 뷰 조회만).
+     *
+     * scanCount는 통계 리셋 이후 <b>누적</b> 사용 횟수라 0회가 곧 미사용인지는 서버 가동 기간을 함께 봐야
+     * 한다(IndexUsage 주석 참고). 사용 통계를 신뢰성 있게 얻을 수 없는 기종(Oracle: 인덱스 사용 추적이
+     * 기본·권한 보장 아님)은 UNSUPPORTED 안내 행으로 정직하게 표기한다(지원 위장 금지). limit로 상한.
+     */
+    List<IndexUsage> indexUsage(int limit);
 }

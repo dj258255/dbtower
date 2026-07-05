@@ -156,6 +156,12 @@
         <div id="advisors-summary" class="advisors-summary"></div>
         <div id="advisors-result" class="advisors-result muted">점검 중...</div>
       </div>
+      <div class="monitor-card finops-card">
+        <h3>비용/효율 (FinOps) <span class="hint">(낭비 후보를 신호로 — 절감액은 산출하지 않고 검토 지점까지, 대상 DB는 바꾸지 않습니다)</span></h3>
+        <p class="hint">미사용 인덱스(사용 통계) · 중복·잉여 인덱스(D2 재사용) · 큰 테이블·과다 인덱싱 · 오버프로비저닝(연결·메모리) · 사용 통계 없는 기종은 미지원으로 정직 표기</p>
+        <div id="finops-summary" class="advisors-summary"></div>
+        <div id="finops-result" class="advisors-result muted">분석 중...</div>
+      </div>
       <div class="monitor-card session-card">
         <h3>세션 / 블로킹 <span class="hint">(지금 누가 누구를 막고 있나 — blockedBy가 있으면 강조)</span></h3>
         <div class="table-scroll">

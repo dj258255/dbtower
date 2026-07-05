@@ -118,7 +118,7 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
-  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadPartitions(), loadAdvisors(), loadAnomalies()]);
+  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies()]);
 }
 
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
@@ -169,6 +169,61 @@ async function loadAdvisors() {
           <span class="advisor-check-title">${esc(c.title)}</span>
         </div>
         ${findings}${note}
+      </div>`;
+  }).join("");
+}
+
+// ---------- 비용/효율 FinOps (D6) — 낭비 후보를 종류별로, 신호까지만(절감액 산출 없음) ----------
+// 미사용/중복 인덱스·큰 테이블·오버프로비저닝을 "낭비 후보"로 모은다. 대상 DB는 바꾸지 않는다(읽고 조언만).
+// 사용 통계를 신뢰성 있게 못 얻는 기종(Oracle 미사용 인덱스 등)은 UNSUPPORTED로 정직하게 표기한다.
+const FINOPS_STATUS_LABEL = { OK: "후보 없음", CANDIDATES: "후보", UNSUPPORTED: "미지원", ERROR: "오류" };
+const WASTE_KIND_LABEL = {
+  UNUSED_INDEX: "미사용 인덱스", REDUNDANT_INDEX: "중복·잉여 인덱스", LARGE_TABLE: "큰 테이블",
+  OVER_INDEXED: "과다 인덱싱", CONNECTION_HEADROOM: "연결 여유", MEMORY_HEADROOM: "메모리 여유",
+};
+
+async function loadFinOps() {
+  const summary = $("#finops-summary");
+  const box = $("#finops-result");
+  summary.innerHTML = "";
+  box.classList.add("muted");
+  box.textContent = "분석 중...";
+  let report;
+  try {
+    report = await api(`/api/instances/${state.instance.id}/finops`);
+  } catch (e) {
+    box.textContent = `분석 실패: ${e.message}`;
+    return;
+  }
+  box.classList.remove("muted");
+  summary.innerHTML = `
+    <span class="sev-badge sev-WARNING">낭비 후보 ${report.candidateCount}</span>
+    <span class="advisors-time muted">신호까지만(절감액 산출 없음) · 분석 ${esc(String(report.generatedAt).replace("T", " ").slice(0, 19))}</span>`;
+
+  // 후보가 있는 분석기를 먼저, 그다음 오류/후보없음/미지원 순으로 정렬한다.
+  const order = { CANDIDATES: 0, ERROR: 1, OK: 2, UNSUPPORTED: 3 };
+  const checks = [...report.checks].sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9));
+
+  box.innerHTML = checks.map((c) => {
+    const cands = (c.candidates || []).map((w) => `
+      <div class="advisor-finding sev-border-${esc(w.severity)}">
+        <div class="advisor-finding-head">
+          <span class="sev-badge sev-${esc(w.severity)}">${esc(SEV_LABEL[w.severity] ?? w.severity)}</span>
+          <span class="finops-kind">${esc(WASTE_KIND_LABEL[w.kind] ?? w.kind)}</span>
+          <span class="advisor-finding-title">${esc(w.target)}</span>
+        </div>
+        <div class="advisor-finding-detail">${esc(w.evidence)}</div>
+        <div class="advisor-finding-reco"><strong>검토:</strong> ${esc(w.recommendation)}</div>
+      </div>`).join("");
+    const note = c.note && c.status !== "CANDIDATES"
+      ? `<div class="advisor-note muted">${esc(c.note)}</div>` : "";
+    return `
+      <div class="advisor-check status-${esc(c.status)}">
+        <div class="advisor-check-head">
+          <span class="advisor-status advisor-status-${esc(c.status)}">${esc(FINOPS_STATUS_LABEL[c.status] ?? c.status)}</span>
+          <span class="advisor-check-title">${esc(c.title)}</span>
+        </div>
+        ${cands}${note}
       </div>`;
   }).join("");
 }

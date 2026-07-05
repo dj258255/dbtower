@@ -189,6 +189,20 @@ public class OracleOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 인덱스 사용 통계 (D6) — Oracle은 인덱스 사용 추적을 신뢰성 있게 얻기 어렵다. 12.1까지는
+     * ALTER INDEX ... MONITORING USAGE를 인덱스마다 켠 뒤 v$object_usage를 봐야 하고, 12.2+의 자동
+     * 추적(dba_index_usage / v$index_usage_info)도 표본 기반에 주기적 플러시라 즉시성이 없고 조회 권한도
+     * 보장되지 않는다. 그래서 "미사용 인덱스 후보"를 실측 통계로 정직하게 낼 수 없어 UNSUPPORTED로 표기한다
+     * (지원 위장 금지). 구조 기반 중복·잉여 인덱스 후보(D2 describeSchema)는 Oracle에서도 여전히 유효하다.
+     */
+    @Override
+    public List<IndexUsage> indexUsage(int limit) {
+        return List.of(IndexUsage.unsupported(instance.getType()
+                + " 인덱스 사용 통계 미지원 — 인덱스 사용 추적(MONITORING USAGE / 자동 추적)이 기본 활성도, "
+                + "조회 권한 보장도 아니라 미사용 판정을 실측으로 낼 수 없다. 구조 기반 중복·잉여 인덱스 후보는 유효."));
+    }
+
+    /**
      * Oracle 백업 = 서버 사이드 API 실행 모델(DBMS_DATAPUMP 스키마 익스포트).
      * 파일은 서버(컨테이너)의 DATA_PUMP_DIR에 생기고, WAIT_FOR_JOB으로 완료까지 대기한다.
      */

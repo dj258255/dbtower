@@ -211,6 +211,39 @@ public class PostgresOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * 인덱스 사용 통계 (D6) — pg_stat_user_indexes.idx_scan이 이 인덱스로 시작된 스캔 누적 횟수다.
+     * idx_scan=0이면 통계 리셋 이후 한 번도 안 쓰인 미사용 후보. pg_index.indisunique로 유니크/PK
+     * 뒷받침 인덱스를 구분해(제약 유지에 필요할 수 있어 후보에서 제외되도록) 표시한다. 크기는
+     * pg_relation_size(indexrelid). 사용 적은 순으로 정렬해 미사용 후보가 앞에 오게 한다. 읽기 전용.
+     */
+    @Override
+    public List<IndexUsage> indexUsage(int limit) {
+        String sql = """
+                SELECT s.relname AS table_name, s.indexrelname AS index_name,
+                       s.idx_scan AS scan_count,
+                       pg_relation_size(s.indexrelid) AS size_bytes,
+                       ix.indisunique AS is_unique
+                FROM pg_stat_user_indexes s
+                JOIN pg_index ix ON ix.indexrelid = s.indexrelid
+                ORDER BY s.idx_scan ASC, pg_relation_size(s.indexrelid) DESC
+                LIMIT ?
+                """;
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new IndexUsage(
+                            rs.getString("table_name"),
+                            rs.getString("index_name"),
+                            rs.getObject("scan_count", Long.class),
+                            rs.getObject("size_bytes", Long.class),
+                            rs.getBoolean("is_unique"),
+                            IndexUsage.NATIVE),
+                    limit);
+        } catch (DataAccessException e) {
+            throw new OperatorException("PostgreSQL 인덱스 사용 통계 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
     /** pg_partitioned_table.partstrat 한 글자 코드를 사람이 읽을 이름으로 (r=RANGE, l=LIST, h=HASH). */
     private static String partStrat(String code) {
         return switch (code == null ? "" : code) {
