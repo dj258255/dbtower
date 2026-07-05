@@ -86,6 +86,21 @@ dbtower:
     replication-lag-seconds: 30  # 복제 지연이 이 초를 넘으면 경보(STANDALONE·음수 lag은 스킵)
     snapshot-stall-minutes: 10   # 이 시간 동안 신규 스냅샷 배치가 0이면 수집 정지로 판단(선택 규칙)
     cooldown-minutes: 30         # 같은 신호 재알림 쿨다운
+  slo:
+    # DB SLO / 에러 버짓 (D4) — Google SRE·DBRE 모델. "인프라 지표(CPU)가 아니라 사용자 경험 지표".
+    # 목표는 우선 전역 기본값 하나만 둔다 — 인스턴스별 목표(per-instance target)는 향후 확장 여지로 남긴다
+    # (테이블/컬럼을 추가해 인스턴스마다 target을 오버라이드하는 식). 지금은 전역 기본값이 모든 인스턴스에 적용된다.
+    availability:
+      target: 0.995            # 가용성 SLO 목표(99.5% → 월 3.6h 다운 허용). 향후 per-instance 오버라이드 여지.
+      poll-ms: 60000           # 헬스 샘플 수집 주기 = 버짓 산식의 샘플 간격(다운 샘플 1개 ≈ 이 시간의 다운타임)
+      window-days: 30          # 에러 버짓 회계 기간(이 기간 누적으로 소진율 계산)
+      burn-window-minutes: 60  # 번인 레이트 최근 창(이 창의 소진 속도)
+      retention-days: 35       # 헬스 샘플 보존(회계 기간보다 약간 길게 — 버짓이 회계 기간 전체를 훑을 수 있게). 0 이하면 무제한
+      retention-sweep-ms: 3600000  # 헬스 샘플 보존 정리 주기(1시간)
+      min-samples: 5           # 이보다 표본이 적으면 "데이터 부족"으로 판정 보류(짧은 이력의 과대 판정 방지)
+    latency:
+      p95-threshold-ms: 100    # 레이턴시 SLO — 핵심 쿼리 p95 임계(ms). 향후 per-instance 오버라이드 여지.
+      sample-limit: 20         # 핵심 쿼리 상위 N(부하 순) — D4a latencyPercentiles에 넘길 limit
   ai:
     model: claude-opus-4-8
   security:

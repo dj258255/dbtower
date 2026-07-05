@@ -118,7 +118,7 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
-  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies()]);
+  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies()]);
 }
 
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
@@ -778,6 +778,80 @@ async function loadLatencyPercentiles() {
     table.querySelector("tbody").innerHTML =
       `<tr><td colspan="4" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
   }
+}
+
+// ---------- SLO / 에러 버짓 (D4) — 사용자 경험 지표(레이턴시·가용성)로 SLO 대비 버짓 소진을 본다 ----------
+// 레이턴시 SLI가 어느 source(p95 실측/직접계산/추정/평균 폴백)인지 배지로 정직하게 표기한다.
+const SLO_VERDICT_LABEL = {
+  MEETING: "충족", AT_RISK: "임박", BREACHING: "위반", INSUFFICIENT_DATA: "데이터 부족",
+  OK: "여유", WARNING: "임박", EXHAUSTED: "소진",
+};
+// 레이턴시 SLI source 배지 — D4a 4종에 D4의 평균 폴백/데이터 부족을 더한다(라벨을 절대 섞지 않는다)
+const SLO_LATENCY_SOURCE = {
+  ...LATENCY_SOURCE,
+  AVG_FALLBACK: { cls: "src-estimated", label: "평균폴백", note: "백분위 미지원 기종 — 평균 레이턴시로 폴백(꼬리 못 봄)" },
+  INSUFFICIENT_DATA: { cls: "src-unsupported", label: "데이터부족", note: "쿼리 통계 없음" },
+};
+
+async function loadSloReport() {
+  const box = $("#slo-result");
+  box.classList.remove("muted");
+  let r;
+  try {
+    r = await api(`/api/instances/${state.instance.id}/slo`);
+  } catch (e) {
+    box.classList.add("muted");
+    box.textContent = `조회 실패: ${e.message}`;
+    return;
+  }
+  const lat = r.latency, av = r.availability, eb = r.errorBudget;
+  const src = SLO_LATENCY_SOURCE[lat.source] ?? { cls: "src-unsupported", label: esc(lat.source), note: "" };
+  const vlabel = (v) => esc(SLO_VERDICT_LABEL[v] ?? v);
+
+  // 버짓 소진 게이지 — 소진율(%)을 폭으로. 80%↑ 주황, 100%↑ 빨강
+  const consumed = eb.budgetConsumedRatio;
+  const pctConsumed = consumed == null ? null : Math.min(100, consumed * 100);
+  const gaugeCls = consumed == null ? "slo-gauge-ok"
+    : consumed >= 1 ? "slo-gauge-over" : consumed >= 0.8 ? "slo-gauge-warn" : "slo-gauge-ok";
+  const gauge = consumed == null ? '<div class="slo-sub">데이터 부족 — 게이지 없음</div>'
+    : `<div class="slo-gauge"><div class="slo-gauge-fill ${gaugeCls}" style="width:${pctConsumed.toFixed(1)}%"></div></div>
+       <div class="slo-sub">소진 ${(consumed * 100).toFixed(1)}% · 잔여 ${(eb.budgetRemainingRatio * 100).toFixed(1)}%</div>`;
+
+  const latValue = lat.observedMs == null ? "—" : `${fmtNum(lat.observedMs)} ms`;
+  const latP99 = lat.p99Ms != null ? ` · p99 ${fmtNum(lat.p99Ms)}ms` : "";
+  const upValue = av.upRatio == null ? "—" : `${(av.upRatio * 100).toFixed(2)}%`;
+  const burn = eb.burnRate == null ? "—" : `${fmtNum(eb.burnRate)}×`;
+
+  box.innerHTML = `
+    <div style="margin-bottom:6px">
+      <span class="slo-verdict slo-verdict-${esc(r.verdict)}">${vlabel(r.verdict)}</span>
+      <span class="slo-sub" style="margin-left:8px">평가 ${esc(String(r.evaluatedAt).replace("T", " ").slice(0, 19))}</span>
+    </div>
+    <div class="slo-grid">
+      <div class="slo-block">
+        <h4>레이턴시 SLI <span class="src-badge ${src.cls}" title="${esc(src.note)}">${src.label}</span></h4>
+        <div class="slo-metric">${latValue}</div>
+        <div class="slo-sub">${lat.source === "AVG_FALLBACK" ? "평균 레이턴시" : "최악 핵심쿼리 p95"}${latP99} · 목표 &lt; ${fmtNum(lat.thresholdMs)}ms
+          <span class="slo-badge slo-badge-${esc(lat.verdict)}">${vlabel(lat.verdict)}</span></div>
+        ${lat.totalCoreQueries > 0 ? `<div class="slo-sub">임계 초과 핵심쿼리 ${lat.breachingCoreQueries}/${lat.totalCoreQueries}${lat.coreQueryText ? ` · 최악: ${esc(lat.coreQueryText)}` : ""}</div>` : ""}
+        <div class="slo-note">${esc(lat.note)}</div>
+      </div>
+      <div class="slo-block">
+        <h4>가용성 SLI</h4>
+        <div class="slo-metric">${upValue}</div>
+        <div class="slo-sub">목표 ${(av.targetRatio * 100).toFixed(2)}% · 표본 ${av.upSamples}/${av.totalSamples} (${av.windowDays}일)
+          <span class="slo-badge slo-badge-${esc(av.verdict)}">${vlabel(av.verdict)}</span></div>
+        <div class="slo-note">${esc(av.note)}</div>
+      </div>
+      <div class="slo-block" style="grid-column:1/-1">
+        <h4>에러 버짓 · 번인 레이트
+          <span class="slo-badge slo-badge-${esc(eb.verdict)}">${vlabel(eb.verdict)}</span></h4>
+        ${gauge}
+        <div class="slo-sub" style="margin-top:6px">번인 레이트 ${burn} <span class="hint">(지속가능 속도 대비 배수 · 최근 ${eb.burnWindowMinutes}분)</span>
+          · 허용 ${fmtNum(eb.allowedDowntimeMinutes)}분 / 관측 ${fmtNum(eb.observedDowntimeMinutes)}분</div>
+        <div class="slo-note">${esc(eb.note)}</div>
+      </div>
+    </div>`;
 }
 
 // 파티션 조회 (D5) — 테이블별 파티션 목록·방식·경계·행수·크기. 조회 전용(생성·삭제 없음).

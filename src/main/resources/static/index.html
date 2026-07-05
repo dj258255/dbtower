@@ -225,6 +225,11 @@
           </table>
         </div>
       </div>
+      <div class="monitor-card slo-card">
+        <h3>SLO / 에러 버짓 <span class="hint">(사용자 경험 지표 — 인프라 지표(CPU)가 아니라 레이턴시·가용성 · Google SRE)</span></h3>
+        <p class="hint">레이턴시 SLI는 D4a 백분위(source 표기) 우선, 미지원 기종은 평균 레이턴시로 폴백 · 가용성 SLI는 헬스 샘플 이력 · 버짓 산식은 응답 note에 명시</p>
+        <div id="slo-result" class="slo-result muted">조회 중...</div>
+      </div>
       <div class="monitor-card partition-card">
         <h3>파티션 <span class="hint">(테이블이 어떻게 쪼개져 있고 각 조각이 얼마나 큰가 — 조회 전용)</span></h3>
         <p class="hint">MySQL/PostgreSQL/Oracle/SQL Server는 각 카탈로그를 통합한 뷰 · MongoDB는 파티션 개념이 없어 미지원 · 파티션 없는 테이블/DB는 빈 결과</p>
