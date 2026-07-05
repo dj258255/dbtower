@@ -19,7 +19,7 @@ MySQL / PostgreSQL / SQL Server / Oracle / MongoDB를 하나의 인터페이스(
 
 DBTower는 이 차이를 인터페이스 뒤로 숨겨, 플랫폼 코드와 사용자는 추상화된 정책만 다룹니다.
 
-![대시보드 — 이기종 등록과 활동 그래프](docs/images/webui/01-dashboard.png)
+![대시보드 — 이기종 등록, 통합 헬스 스코어(나쁜 순), 백업 신선도, 활동 그래프](docs/images/webui/01-dashboard.png)
 
 ## 왜 만들었나
 
@@ -90,6 +90,23 @@ Seq Scan, Clustered Index Scan, TABLE ACCESS FULL, COLLSCAN 등)으로 비효율
 같은 입력에 일관된 판정이 나오게 하고, 근거가 없으면 모른다고 답하게 합니다.
 
 ![AI 1차 분석 — 판단 기준 문서 기반 판정](docs/images/webui/04-ai.png)
+
+### 자율 진단 — 사람이 보기 전에 플랫폼이 먼저 본다
+
+흩어진 신호(헬스·이상 감지·Advisors·SLO·백업 신선도)를 인스턴스별 0~100점으로 합산해
+나쁜 순으로 정렬합니다 — 대시보드가 아니라 "어디부터 볼지"를 알려주는 분류(triage) 큐입니다.
+
+![통합 헬스 스코어 — 감점 사유 분해, 나쁜 순 정렬](docs/images/webui/10-health-score.png)
+
+운영 규칙 자동 점검(Advisors)은 operations.md의 실측 규칙을 코드로 옮긴 것입니다.
+기종에 적용 불가한 점검은 "미지원"으로 정직하게 표기합니다.
+
+![Advisors — digest 포화 위험 지적과 권고, 무관 항목은 미지원 표기](docs/images/webui/11-advisors.png)
+
+심층 원인 진단은 EXPLAIN(추정)이 아니라 실제 실행 계획으로 "왜 인덱스를 못 탔나"를 짚습니다 —
+아래는 숫자 리터럴 하나가 암시적 형변환으로 인덱스를 무력화한 사례를 정확히 지목한 화면입니다.
+
+![심층 원인 진단 — 추정 300행 vs 실제 1행 괴리, 암시적 형변환 지목과 처방](docs/images/webui/13-deep-diagnose.png)
 
 ### MCP — AI 에이전트의 채널
 
