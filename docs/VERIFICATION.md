@@ -1182,3 +1182,29 @@ AWS 자격증명·과금이 필요하기 때문(정직성). 같은 등록 흐름
 
 셋 다 DBTower의 멱등 등록 PUT을 종점으로 쓴다. "생성과 관제가 이어져야 플랫폼이고, 끊어져
 있으면 도구 모음이다"(ROADMAP Phase C)를 세 판에서 채웠다. 비밀값은 전부 gitignore 분리.
+
+## 46. Phase D 배치1 — 자율 진단 3종 (D1 이상감지·D2 Advisors·D4a 백분위)
+
+방향 근거: 2026 DBA 설문(알림 피로 75%·조용한 저하 미탐지)과 실존 제품(AWS DevOps Guru·Percona
+PMM Advisors·pganalyze). "사람이 모는 대시보드"에서 "스스로 보는 관제탑"으로. 전부 읽기·진단만,
+5기종 유지, 정체성 이탈 없음.
+
+### 46-1. D1 이상 자동 감지 (AWS DevOps Guru 모델)
+스냅샷 이력으로 인스턴스·쿼리별 요일×시간대 베이스라인(평균·표준편차) 학습 → z-score 이탈 감지.
+고정 임계(RegressionDetector +200%)를 "평소 대비"로 승격, 둘이 공존. 데이터 부족은 "학습 중"으로 보류.
+실측: COUNT digest qps 25.0 vs 베이스라인 0.17±0.07 → z=378, 고정 임계 없이 감지. 폴러 end-to-end
+발화 확인(qps 55.0, 평소 5.17±12.22, z=4.1). 실 8080: /anomalies 스키마 정상(learningCount로 학습 상태).
+
+### 46-2. D2 Advisors 자동 점검 (Percona PMM 모델)
+operations.md·least-privilege.md의 실측 규칙을 코드 Advisor 6종으로. **operator 인터페이스 변경 0** —
+기존 parameters()/describeSchema()/tableStats()/queryStats()를 재사용해 판정. 일일 스윕(@SchedulerLock HA).
+실측(실 8080 MySQL): "digest 테이블 포화 위험" VIOLATIONS, "위험 파라미터값" VIOLATIONS, 중복 인덱스 OK,
+모니터링 권한 UNSUPPORTED. 기종별 적용 가능한 것만, 무관은 UNSUPPORTED 정직.
+
+### 46-3. D4a 레이턴시 백분위 (이기종 정직)
+`latencyPercentiles()` — 같은 p95인데 기종마다 소스가 다르다:
+- MySQL NATIVE: events_statements_summary_by_digest의 QUANTILE_95/99 컬럼(실 8080 p95=19.95ms)
+- MongoDB COMPUTED: system.profile 원샘플 계산 / PostgreSQL ESTIMATED: mean+1.645×stddev(추정 라벨)
+- MSSQL/Oracle UNSUPPORTED(실 8080 Oracle 확인). 네 source 라벨 안 섞음, MySQL 누적 한계 표기.
+
+배치1 병합 후 실 8080 재검증 완료(Docker 데몬 재기동 포함), 전체 테스트 통과.
