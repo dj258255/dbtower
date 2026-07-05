@@ -155,6 +155,37 @@ public class MySqlOperator extends AbstractJdbcOperator {
         return Math.round(v * 100.0) / 100.0;
     }
 
+    /**
+     * 파티션 조회 (D5) — information_schema.PARTITIONS. 파티션이 있는 행만(PARTITION_NAME NOT NULL —
+     * 비파티션 테이블은 이 뷰에 파티션명 NULL인 한 행으로 나타나므로 걸러낸다). 읽기 전용.
+     * boundary는 PARTITION_DESCRIPTION(RANGE면 "VALUES LESS THAN (...)", LIST면 값 목록, HASH/KEY면 없음).
+     */
+    @Override
+    public List<PartitionInfo> partitions(int limit) {
+        String sql = """
+                SELECT TABLE_NAME, PARTITION_NAME, PARTITION_METHOD, PARTITION_EXPRESSION,
+                       PARTITION_DESCRIPTION, TABLE_ROWS, DATA_LENGTH
+                FROM information_schema.PARTITIONS
+                WHERE TABLE_SCHEMA = ? AND PARTITION_NAME IS NOT NULL
+                ORDER BY TABLE_NAME, PARTITION_ORDINAL_POSITION
+                LIMIT ?
+                """;
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new PartitionInfo(
+                            rs.getString("TABLE_NAME"),
+                            rs.getString("PARTITION_NAME"),
+                            rs.getString("PARTITION_METHOD"),
+                            rs.getString("PARTITION_EXPRESSION"),
+                            rs.getString("PARTITION_DESCRIPTION"),
+                            rs.getObject("TABLE_ROWS", Long.class),
+                            rs.getObject("DATA_LENGTH", Long.class)),
+                    instance.getDbName(), limit);
+        } catch (DataAccessException e) {
+            throw new OperatorException("MySQL 파티션 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
     @Override
     public List<SlowQuery> slowQueries(int limit) {
         // docker-compose에서 slow_query_log=ON, log_output=TABLE로 켜두어 mysql.slow_log에서 직접 조회한다

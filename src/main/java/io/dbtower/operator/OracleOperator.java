@@ -149,6 +149,46 @@ public class OracleOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 파티션 조회 (D5) — user_tab_partitions(파티션별 경계·행수)에 user_part_tables(파티션 방식)를 붙인다.
+     * partitioning_type이 RANGE/LIST/HASH, high_value가 이 파티션의 상한 경계(LONG 컬럼 — 문자열로 읽는다).
+     * 파티션 키 컬럼은 user_part_key_columns에서, 크기는 user_segments의 파티션별 바이트 합에서 얻는다.
+     * 현재 접속 스키마(USER_*) 소유 객체만 본다. 읽기 전용.
+     */
+    @Override
+    public List<PartitionInfo> partitions(int limit) {
+        String sql = """
+                SELECT tp.table_name,
+                       tp.partition_name,
+                       pt.partitioning_type AS method,
+                       (SELECT LISTAGG(kc.column_name, ',') WITHIN GROUP (ORDER BY kc.column_position)
+                          FROM user_part_key_columns kc WHERE kc.name = tp.table_name) AS part_expr,
+                       tp.high_value AS boundary,
+                       tp.num_rows AS row_count,
+                       (SELECT SUM(s.bytes) FROM user_segments s
+                         WHERE s.segment_name = tp.table_name
+                           AND s.partition_name = tp.partition_name) AS size_bytes
+                FROM user_tab_partitions tp
+                JOIN user_part_tables pt ON pt.table_name = tp.table_name
+                ORDER BY tp.table_name, tp.partition_position
+                FETCH FIRST ? ROWS ONLY
+                """;
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new PartitionInfo(
+                            rs.getString("table_name"),
+                            rs.getString("partition_name"),
+                            rs.getString("method"),
+                            rs.getString("part_expr"),
+                            rs.getString("boundary"),
+                            rs.getObject("row_count", Long.class),
+                            rs.getObject("size_bytes", Long.class)),
+                    limit);
+        } catch (DataAccessException e) {
+            throw new OperatorException("Oracle 파티션 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * Oracle 백업 = 서버 사이드 API 실행 모델(DBMS_DATAPUMP 스키마 익스포트).
      * 파일은 서버(컨테이너)의 DATA_PUMP_DIR에 생기고, WAIT_FOR_JOB으로 완료까지 대기한다.
      */

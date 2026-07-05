@@ -201,6 +201,16 @@
           </table>
         </div>
       </div>
+      <div class="monitor-card partition-card">
+        <h3>파티션 <span class="hint">(테이블이 어떻게 쪼개져 있고 각 조각이 얼마나 큰가 — 조회 전용)</span></h3>
+        <p class="hint">MySQL/PostgreSQL/Oracle/SQL Server는 각 카탈로그를 통합한 뷰 · MongoDB는 파티션 개념이 없어 미지원 · 파티션 없는 테이블/DB는 빈 결과</p>
+        <div class="table-scroll">
+          <table class="qtable" id="partition-table">
+            <thead></thead>
+            <tbody><tr><td class="muted">조회 중...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
       <div class="monitor-grid">
         <div class="monitor-card">
           <h3>복제 상태</h3>

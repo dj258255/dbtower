@@ -98,4 +98,16 @@ public interface DbmsOperator {
      * 추정을 실측인 척, 미지원을 지원인 척하지 않는다. 기종별 소스·한계는 LatencyPercentile record 주석 참고.
      */
     List<LatencyPercentile> latencyPercentiles(int limit);
+
+    /**
+     * 파티션 목록 조회 (D5 파티션 조회) — "이 인스턴스의 어떤 테이블이 어떻게 쪼개져 있고, 각 조각이
+     * 얼마나 큰가"를 이기종 통합으로 본다. <b>조회만</b> 한다 — 파티션 생성·삭제·자동 관리는 범위 밖이고
+     * 대상 DB를 바꾸지 않는다(읽기 전용 카탈로그 조회). KDMS가 MCP로 제공한 6기능 중 마지막 조각.
+     *
+     * 기종별 소스(MySQL=information_schema.PARTITIONS, PostgreSQL=선언적 파티셔닝 카탈로그,
+     * Oracle=user_tab_partitions, SQL Server=sys.partitions+파티션 스킴/함수)와 필드 의미는
+     * PartitionInfo record 주석 참고. 파티션 없는 테이블/DB는 빈 결과(에러 아님), MongoDB는 파티션
+     * 개념이 없어 UNSUPPORTED로 정직하게 표기한다(샤딩은 다른 축이라 여기 섞지 않는다).
+     */
+    List<PartitionInfo> partitions(int limit);
 }

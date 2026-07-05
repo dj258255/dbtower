@@ -176,6 +176,18 @@ public class MongoOperator implements DbmsOperator {
         return ascending.get(idx);
     }
 
+    /**
+     * 파티션 조회 (D5) — MongoDB는 UNSUPPORTED. 관계형 파티셔닝(테이블을 경계로 쪼개는 것) 개념이 없다.
+     * 데이터 분산은 샤딩(청크·샤드 키)이라는 다른 축이라 여기 섞지 않는다 — 파티션인 척 위장하지 않고
+     * 명시적 미지원으로 돌려준다(adviseIndex와 같은 정직성 원칙). 빈 목록이 아니라 사유를 담은 안내 행 하나.
+     */
+    @Override
+    public List<PartitionInfo> partitions(int limit) {
+        return List.of(PartitionInfo.unsupported(instance.getType()
+                + " 파티션 미지원 — MongoDB에는 관계형 파티셔닝 개념이 없다. "
+                + "데이터 분산은 샤딩(청크·샤드 키)이라는 다른 축이며 파티션 조회의 범위 밖."));
+    }
+
     @Override
     public List<SlowQuery> slowQueries(int limit) {
         try {

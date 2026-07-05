@@ -99,6 +99,18 @@ public class InsightController {
     }
 
     /**
+     * 파티션 조회 (D5) — 테이블별 파티션 목록·방식·경계·행수·크기. 조회는 인증 사용자(진단). 읽기 전용이라
+     * 대상 DB를 바꾸지 않는다(생성·삭제·자동 관리는 범위 밖). 기종별 소스와 필드 의미는 PartitionInfo 주석 참고:
+     * MySQL/PostgreSQL/Oracle/SQL Server는 각 카탈로그, MongoDB는 파티션 개념이 없어 UNSUPPORTED.
+     * 파티션이 없는 테이블/DB는 빈 결과(에러 아님).
+     */
+    @GetMapping("/partitions")
+    public List<io.dbtower.operator.PartitionInfo> partitions(
+            @PathVariable Long id, @RequestParam(defaultValue = "50") int limit) {
+        return operatorFactory.create(registryService.findById(id)).partitions(limit);
+    }
+
+    /**
      * 활성 세션 + 블로킹 트리 (B2) — "지금 누가 누구를 막고 있나". 조회는 VIEWER부터.
      * blockedByPid가 채워진 행이 곧 블로킹 관계. 기종별 pid 의미는 SessionInfo 주석 참고.
      */
