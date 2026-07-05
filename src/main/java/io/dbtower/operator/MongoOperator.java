@@ -238,6 +238,54 @@ public class MongoOperator implements DbmsOperator {
         }
     }
 
+    /**
+     * 인덱스 사용 통계 (D6) — 컬렉션마다 $indexStats를 돌려 인덱스별 accesses.ops(사용 누적)를 읽는다.
+     * ops=0이면 통계 리셋(서버 재기동) 이후 미사용 후보. _id_ 기본 인덱스는 PK에 해당하므로 unique로
+     * 표시해 후보에서 제외되게 한다. 크기는 $collStats storageStats.indexSizes에서 인덱스명으로 찾는다.
+     * 시스템 컬렉션은 제외. 읽기 전용(aggregate 조회만).
+     */
+    @Override
+    public List<IndexUsage> indexUsage(int limit) {
+        try {
+            return withClient(client -> {
+                List<IndexUsage> result = new ArrayList<>();
+                for (String name : db(client).listCollectionNames()) {
+                    if (name.startsWith("system.")) {
+                        continue;
+                    }
+                    // 인덱스별 크기(bytes) — $collStats storageStats.indexSizes는 인덱스명→크기 맵
+                    Document collStats = db(client).getCollection(name)
+                            .aggregate(List.of(new Document("$collStats",
+                                    new Document("storageStats", new Document()))))
+                            .first();
+                    Document indexSizes = collStats == null ? new Document()
+                            : collStats.get("storageStats", new Document())
+                                    .get("indexSizes", new Document());
+                    for (Document idx : db(client).getCollection(name)
+                            .aggregate(List.of(new Document("$indexStats", new Document())))) {
+                        Document accesses = idx.get("accesses", new Document());
+                        long ops = ((Number) accesses.getOrDefault("ops", 0L)).longValue();
+                        String indexName = idx.getString("name");
+                        Number size = (Number) indexSizes.get(indexName);
+                        result.add(new IndexUsage(name, indexName, ops,
+                                size == null ? null : size.longValue(),
+                                "_id_".equals(indexName), // _id_ 기본 인덱스는 PK 취급(후보 제외)
+                                IndexUsage.NATIVE));
+                    }
+                    if (result.size() >= limit) {
+                        break;
+                    }
+                }
+                result.sort((a, b) -> Long.compare(
+                        a.scanCount() == null ? 0 : a.scanCount(),
+                        b.scanCount() == null ? 0 : b.scanCount()));
+                return result.size() > limit ? result.subList(0, limit) : result;
+            });
+        } catch (Exception e) {
+            throw new OperatorException("MongoDB 인덱스 사용 통계 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
     @Override
     public List<TableStat> tableStats(int limit) {
         try {

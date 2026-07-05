@@ -186,6 +186,45 @@ public class MySqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * 인덱스 사용 통계 (D6) — performance_schema.table_io_waits_summary_by_index_usage의 COUNT_STAR가
+     * 인덱스별 I/O 사용 누적 횟수다(sys.schema_unused_indexes 뷰의 근거와 동일). COUNT_STAR=0이면 통계
+     * 리셋(서버 재기동) 이후 미사용 후보. INDEX_NAME IS NULL 행은 인덱스가 아니라 "테이블 풀스캔" 버킷이라
+     * 제외한다. 유니크 여부는 information_schema.STATISTICS.NON_UNIQUE로 판정(PRIMARY 등 제약 인덱스 제외용).
+     * performance_schema가 꺼져 있으면 조회가 실패하고 상위에서 ERROR로 격리된다. 읽기 전용.
+     */
+    @Override
+    public List<IndexUsage> indexUsage(int limit) {
+        String sql = """
+                SELECT t.OBJECT_NAME AS table_name, t.INDEX_NAME AS index_name,
+                       t.COUNT_STAR AS scan_count,
+                       MAX(CASE WHEN s.NON_UNIQUE = 0 THEN 1 ELSE 0 END) AS is_unique
+                FROM performance_schema.table_io_waits_summary_by_index_usage t
+                LEFT JOIN information_schema.STATISTICS s
+                       ON s.TABLE_SCHEMA = t.OBJECT_SCHEMA
+                      AND s.TABLE_NAME = t.OBJECT_NAME
+                      AND s.INDEX_NAME = t.INDEX_NAME
+                WHERE t.OBJECT_SCHEMA = ? AND t.INDEX_NAME IS NOT NULL
+                GROUP BY t.OBJECT_NAME, t.INDEX_NAME, t.COUNT_STAR
+                ORDER BY t.COUNT_STAR ASC
+                LIMIT ?
+                """;
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new IndexUsage(
+                            rs.getString("table_name"),
+                            rs.getString("index_name"),
+                            rs.getObject("scan_count", Long.class),
+                            // MySQL은 인덱스별 크기를 간단히 주지 않아 크기는 담지 않는다(미사용 판정에는 불필요)
+                            null,
+                            rs.getInt("is_unique") == 1,
+                            IndexUsage.NATIVE),
+                    instance.getDbName(), limit);
+        } catch (DataAccessException e) {
+            throw new OperatorException("MySQL 인덱스 사용 통계 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
     @Override
     public List<SlowQuery> slowQueries(int limit) {
         // docker-compose에서 slow_query_log=ON, log_output=TABLE로 켜두어 mysql.slow_log에서 직접 조회한다

@@ -157,6 +157,44 @@ public class MsSqlOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 인덱스 사용 통계 (D6) — sys.dm_db_index_usage_stats의 user_seeks+user_scans+user_lookups 합이
+     * 인덱스별 사용 누적이다. 이 DMV는 사용된 적 있는 인덱스만 행을 가지므로 sys.indexes에 LEFT JOIN해
+     * 한 번도 안 쓰인 인덱스는 scan_count=0으로 채운다(미사용 후보). index_id>0으로 힙(0)은 제외하고,
+     * is_unique로 유니크/PK 인덱스를 구분한다. <b>한계:</b> 이 DMV는 서버 재기동 시 초기화되므로 0회가
+     * 미사용인지 판정하려면 가동 기간을 함께 봐야 한다. 읽기 전용.
+     */
+    @Override
+    public List<IndexUsage> indexUsage(int limit) {
+        String sql = """
+                SELECT TOP (?)
+                       OBJECT_NAME(i.object_id) AS table_name,
+                       i.name AS index_name,
+                       ISNULL(u.user_seeks, 0) + ISNULL(u.user_scans, 0) + ISNULL(u.user_lookups, 0) AS scan_count,
+                       i.is_unique
+                FROM sys.indexes i
+                JOIN sys.tables t ON t.object_id = i.object_id
+                LEFT JOIN sys.dm_db_index_usage_stats u
+                       ON u.object_id = i.object_id AND u.index_id = i.index_id AND u.database_id = DB_ID()
+                WHERE i.index_id > 0 AND i.name IS NOT NULL
+                ORDER BY scan_count ASC
+                """;
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new IndexUsage(
+                            rs.getString("table_name"),
+                            rs.getString("index_name"),
+                            rs.getObject("scan_count", Long.class),
+                            // 인덱스별 크기는 미사용 판정에 불필요해 담지 않는다(테이블 크기는 tableStats)
+                            null,
+                            rs.getBoolean("is_unique"),
+                            IndexUsage.NATIVE),
+                    limit);
+        } catch (DataAccessException e) {
+            throw new OperatorException("MSSQL 인덱스 사용 통계 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * 파티션 조회 (D5) — SQL Server는 파티션 함수(RANGE LEFT/RIGHT)와 파티션 스킴 기반이다.
      * sys.partitions는 모든 테이블에 최소 1행이 있으므로, 파티션 스킴(data_space type='PS')에 올라탄
      * 인덱스만 골라 진짜 파티션 테이블만 남긴다. 파티션은 이름이 아니라 번호라 partitionName은 "partition N".
