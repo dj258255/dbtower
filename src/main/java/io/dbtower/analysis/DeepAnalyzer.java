@@ -80,14 +80,8 @@ public class DeepAnalyzer {
             notes.add("스키마 스냅샷 미가용 — 타입·인덱스 기반 근본원인(형변환·복합 선두 누락) 판정은 생략됨.");
         }
         CardinalityGap gap = switch (type) {
-            case POSTGRESQL -> {
-                notes.add(LOOPS_NOTE);
-                yield parsePostgres(plan, notes);
-            }
-            case MYSQL -> {
-                notes.add(LOOPS_NOTE);
-                yield parseMysql(plan, notes);
-            }
+            case POSTGRESQL -> parsePostgres(plan, notes);
+            case MYSQL -> parseMysql(plan, notes);
             case ORACLE -> parseOracle(plan, notes);
             case MSSQL -> parseMssql(plan, notes);
             case MONGODB -> parseMongo(plan, notes);
@@ -104,6 +98,8 @@ public class DeepAnalyzer {
     private static final class GapPick {
         CardinalityGap gap;
         int depth = -1;
+        /** loops>1인 노드를 봤는가 — 환산 안내 노트는 이때만 붙인다(loops=1이면 노이즈, 외부 리뷰 반영) */
+        boolean multiLoops;
 
         void offer(int d, CardinalityGap g) {
             if (d > depth || (d == depth && gap != null && g.ratio() > gap.ratio())) {
@@ -122,6 +118,9 @@ public class DeepAnalyzer {
             }
             GapPick pick = new GapPick();
             walkPg(planNode, 0, pick);
+            if (pick.multiLoops) {
+                notes.add(LOOPS_NOTE);
+            }
             return pick.gap;
         } catch (Exception e) {
             notes.add("PostgreSQL 실행계획 파싱 실패 — 카디널리티 괴리 판정 생략: " + e.getMessage());
@@ -134,6 +133,9 @@ public class DeepAnalyzer {
             double estPerLoop = node.get("Plan Rows").asDouble();
             double actPerLoop = node.get("Actual Rows").asDouble();
             long loops = node.path("Actual Loops").asLong(1);
+            if (loops > 1) {
+                pick.multiLoops = true;
+            }
             double ratio = ratio(estPerLoop, actPerLoop);
             if (ratio >= GAP_THRESHOLD) {
                 String label = node.path("Node Type").asText("?");
@@ -171,6 +173,9 @@ public class DeepAnalyzer {
             double estPerLoop = Double.parseDouble(est.group(1));
             double actPerLoop = Double.parseDouble(act.group(1));
             long loops = Long.parseLong(act.group(2));
+            if (loops > 1) {
+                pick.multiLoops = true;
+            }
             double ratio = ratio(estPerLoop, actPerLoop);
             if (ratio >= GAP_THRESHOLD) {
                 pick.offer(indent(line), new CardinalityGap(mysqlLabel(line),
@@ -179,6 +184,9 @@ public class DeepAnalyzer {
         }
         if (!parsedAny) {
             notes.add("MySQL 실행계획에서 actual rows/loops를 파싱하지 못함 — EXPLAIN ANALYZE(TREE) 출력인지 확인.");
+        }
+        if (pick.multiLoops) {
+            notes.add(LOOPS_NOTE);
         }
         return pick.gap;
     }
@@ -349,7 +357,8 @@ public class DeepAnalyzer {
         if (plan != null && plan.contains("CONVERT_IMPLICIT")) {
             causes.add(new RootCause("암시적 형변환",
                     "실행 계획에 CONVERT_IMPLICIT 경고",
-                    "컬럼 값을 실행 시점에 변환하느라 인덱스 seek이 scan이 된다 — 비교값 타입을 컬럼과 맞춰라."));
+                    "컬럼 값을 실행 시점에 변환하느라 인덱스 seek이 scan이 된다. 변환 규칙에 따라 의도치 않은 "
+                            + "값까지 매칭될 수 있어(정합성 위험) 성능 문제만이 아니다 — 비교값 타입을 컬럼과 맞춰라."));
         }
 
         Set<String> eqCols = new LinkedHashSet<>();
@@ -381,10 +390,17 @@ public class DeepAnalyzer {
             if (NUMERIC.matcher(rhs).matches()) {
                 String colType = columnType(schema, col);
                 if (isStringType(colType)) {
+                    // 기계적으로 안전한 수정안: 숫자 리터럴에 따옴표만 추가(의미 보존) — 원클릭 재진단용
+                    String fixedPred = pred.replace(rhs, "'" + rhs + "'");
+                    String suggested = sql.contains(pred) ? sql.replace(pred, fixedPred) : null;
                     causes.add(new RootCause("암시적 형변환",
                             "문자열 컬럼(" + col + " " + colType + ")을 숫자 리터럴(" + rhs + ")과 비교",
-                            "문자열=숫자 비교 시 '1'·' 1'·'1a'가 모두 1로 변환돼 컬럼 전체를 변환해야 하므로 인덱스 순서를 못 쓴다 — "
-                                    + "비교값을 문자열('" + rhs + "')로 주거나 컬럼 타입을 맞춰라."));
+                            "비교 규칙상 문자열 쪽이 숫자로 캐스팅된다(CAST(" + col + " AS DOUBLE) = " + rhs
+                                    + " 꼴) — 인덱스 컬럼에 함수를 씌운 것과 같아 B-Tree 정렬을 못 쓴다. "
+                                    + "더 위험한 건 정합성: '0" + rhs + "'·' " + rhs + "'·'" + rhs + "abc' 같은 다른 문자열도 "
+                                    + "전부 숫자 " + rhs + "로 캐스팅돼 매칭된다 — 조회면 오답, UPDATE/DELETE면 데이터 사고다. "
+                                    + "비교값을 문자열('" + rhs + "')로 주거나 컬럼 타입을 맞춰라.",
+                            suggested));
                     continue;
                 }
             }

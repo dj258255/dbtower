@@ -679,21 +679,46 @@ async function runDeepDiagnose() {
       result.innerHTML = `<div class="finding-item">진단 실패: ${esc(e.message)}</div>`;
       return;
     }
+    // 표시 순서 원칙(외부 리뷰 반영): 근본원인이 있으면 "원인 -> 증상" 순으로.
+    // 괴리(증상)가 첫 카드면 사용자가 "통계 갱신(ANALYZE)"이라는 엉뚱한 처방으로 빠질 수 있다.
+    // 원인을 못 찾았을 때만 괴리가 헤드라인이 된다 — 그때는 그게 유일한 단서라서다.
+    const causes = data.rootCauses ?? [];
     let html = "";
-    if (data.worstGap) {
-      const g = data.worstGap;
-      html += `<div class="finding-item"><strong>카디널리티 오추정</strong> — ${esc(g.node)}: `
-        + `추정 ${fmtNum(g.estimatedRows, 0)}행 vs 실제 ${fmtNum(g.actualRows, 0)}행 `
-        + `(약 ${fmtNum(g.ratio)}배 괴리, loops=${fmtNum(g.loops, 0)})</div>`;
-    } else {
-      html += `<div class="muted">추정·실제 행수 괴리(10배+) 지점 없음 — 카디널리티는 대체로 맞음.</div>`;
+
+    // before/after 검증 루프: 수정안 재진단이면 이전 결과와의 비교 스트립을 먼저 보여준다
+    if (state.deepBefore && state.deepBefore.sql !== sql) {
+      const b = state.deepBefore;
+      const now = data.worstGap ? `괴리 ${fmtNum(data.worstGap.ratio)}배` : "괴리 없음";
+      html += `<div class="finding-item"><strong>수정 전 -> 후</strong> — `
+        + `${esc(b.summary)} -> ${esc(now)}, 근본원인 ${b.causeCount}건 -> ${causes.length}건</div>`;
     }
-    if ((data.rootCauses ?? []).length) {
-      html += (data.rootCauses).map((c) =>
-        `<div class="finding-item"><span class="advisor-status unsupported">${esc(c.cause)}</span>`
-        + `<div class="advisor-finding-detail">신호: ${esc(c.signal)}</div>`
-        + `<div class="advisor-finding-reco">${esc(c.detail)}</div></div>`).join("");
+    state.deepBefore = null;
+
+    if (causes.length) {
+      html += causes.map((c) => {
+        let card = `<div class="finding-item"><span class="advisor-status unsupported">근본 원인 — ${esc(c.cause)}</span>`
+          + `<div class="advisor-finding-detail">신호: ${esc(c.signal)}</div>`
+          + `<div class="advisor-finding-reco">${esc(c.detail)}</div>`;
+        if (c.suggestedSql) {
+          card += `<button class="btn btn-small deep-retry" data-sql="${esc(c.suggestedSql)}">수정안으로 재진단 (before/after)</button>`;
+        }
+        return card + `</div>`;
+      }).join("");
+      if (data.worstGap) {
+        const g = data.worstGap;
+        html += `<div class="finding-item"><strong>증상 — 카디널리티 오추정</strong> (위 원인의 부산물: 변형된 술어에는 `
+          + `인덱스 통계를 못 써 추정이 어긋남 — 통계 갱신으로는 안 풀린다) — ${esc(g.node)}: `
+          + `추정 ${fmtNum(g.estimatedRows, 0)}행 vs 실제 ${fmtNum(g.actualRows, 0)}행 (약 ${fmtNum(g.ratio)}배 괴리)</div>`;
+      }
     } else {
+      if (data.worstGap) {
+        const g = data.worstGap;
+        html += `<div class="finding-item"><strong>카디널리티 오추정</strong> — ${esc(g.node)}: `
+          + `추정 ${fmtNum(g.estimatedRows, 0)}행 vs 실제 ${fmtNum(g.actualRows, 0)}행 `
+          + `(약 ${fmtNum(g.ratio)}배 괴리)</div>`;
+      } else {
+        html += `<div class="muted">추정·실제 행수 괴리(10배+) 지점 없음 — 카디널리티는 대체로 맞음.</div>`;
+      }
       html += `<div class="muted">근본원인 규칙 매칭 없음 — 형변환·컬럼함수·선두 누락 신호가 발견되지 않음.</div>`;
     }
     if ((data.notes ?? []).length) {
@@ -701,6 +726,16 @@ async function runDeepDiagnose() {
     }
     html += `<h3>실제 실행 계획</h3><pre class="codeblock">${esc(data.plan)}</pre>`;
     result.innerHTML = html;
+    // 수정안 원클릭 재진단 — 이전 결과 요약을 담아두고 SQL을 바꿔 다시 돌린다
+    result.querySelectorAll(".deep-retry").forEach((b) => b.addEventListener("click", () => {
+      state.deepBefore = {
+        sql,
+        summary: data.worstGap ? `괴리 ${fmtNum(data.worstGap.ratio)}배` : "괴리 없음",
+        causeCount: causes.length,
+      };
+      $("#detail-sql").value = b.dataset.sql;
+      runDeepDiagnose();
+    }));
   } finally { btn.classList.remove("loading"); }
 }
 

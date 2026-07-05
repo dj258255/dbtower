@@ -155,4 +155,41 @@ class DeepAnalyzerTest {
         assertThat(d.worstGap()).isNull();
         assertThat(d.rootCauses()).isEmpty();
     }
+
+    // ---------- 외부 리뷰 반영분 (표현·검증 루프) ----------
+
+    @Test
+    void 형변환_판정은_정합성_위험까지_말한다() {
+        // 성능(인덱스 무력화)만이 아니라 "다른 문자열도 같은 숫자로 매칭 = 오답 위험"을 명시해야 한다
+        DeepDiagnosis d = analyzer.diagnose(DbmsType.MYSQL,
+                "SELECT * FROM d9_demo WHERE code = 12345", "{}", demoSchema());
+        RootCause cause = d.rootCauses().stream()
+                .filter(c -> c.cause().equals("암시적 형변환")).findFirst().orElseThrow();
+        assertThat(cause.detail()).contains("정합성").contains("캐스팅");
+    }
+
+    @Test
+    void 형변환_판정은_기계적으로_안전한_수정안을_함께_준다() {
+        // 숫자 리터럴에 따옴표만 추가한 SQL — 원클릭 before/after 재진단용
+        DeepDiagnosis d = analyzer.diagnose(DbmsType.MYSQL,
+                "SELECT * FROM d9_demo WHERE code = 12345", "{}", demoSchema());
+        RootCause cause = d.rootCauses().stream()
+                .filter(c -> c.cause().equals("암시적 형변환")).findFirst().orElseThrow();
+        assertThat(cause.suggestedSql()).isEqualTo("SELECT * FROM d9_demo WHERE code = '12345'");
+    }
+
+    @Test
+    void loops_환산_노트는_loops가_1을_넘는_노드가_있을_때만_붙는다() {
+        // loops=1뿐인 계획: 환산 얘기는 노이즈라 생략 (외부 리뷰 반영)
+        String single = "-> Table scan on t  (cost=303 rows=300) (actual time=0.2..1.0 rows=1 loops=1)";
+        DeepDiagnosis d1 = analyzer.diagnose(DbmsType.MYSQL, "SELECT * FROM t", single, null);
+        assertThat(d1.notes()).noneMatch(n -> n.contains("loops"));
+
+        // loops=10 노드가 있으면 오독 방지 노트가 붙는다
+        String multi = String.join("\n",
+                "-> Nested loop inner join  (cost=10 rows=100) (actual time=0.1..1.0 rows=200 loops=1)",
+                "    -> Index lookup on b  (cost=1 rows=1) (actual time=0.01..0.02 rows=20 loops=10)");
+        DeepDiagnosis d2 = analyzer.diagnose(DbmsType.MYSQL, "SELECT * FROM a JOIN b ON a.id=b.aid", multi, null);
+        assertThat(d2.notes()).anyMatch(n -> n.contains("loops"));
+    }
 }
