@@ -87,7 +87,10 @@
 | 4 | max_digest_length 1024 | 4096 상향 | 완료 — 기본값에선 다른 쿼리 2개가 digest 1개로 병합됨을 side-by-side 재현 (VERIFICATION.md 10절) |
 | 5 | API 전체 | k6 부하 | 완료 — 10VU 30s, 2,832 req/s, P95 5.86ms, 실패 0% (VERIFICATION.md 11절) |
 
-## 5. 로드맵 (완성 기준: 확장3까지)
+## 5. 로드맵 (이 문서의 완성 기준: 확장3까지 — 이후는 ROADMAP.md)
+
+확장3 이후(확장4~6 채널·5기종, Phase A 운영 안전 ~ Phase E 셀프호스트 제품화)는
+[ROADMAP.md](ROADMAP.md)로 이관해 관리했고 전부 완료됐다. 아래는 초기 설계 시점의 기록이다.
 
 - [x] MVP1: 이기종 등록 + Operator 추상화 (MySQL/PG/MSSQL)
 - [x] MVP2: 시점 비교 검증 — 신규 쿼리/급증/rows-call 폭증 검출 (VERIFICATION.md 3절)
