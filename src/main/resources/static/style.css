@@ -420,3 +420,37 @@ input[type="datetime-local"] {
 .slo-gauge-ok { background: #22a06b; }
 .slo-gauge-warn { background: #f08c2d; }
 .slo-gauge-over { background: #d6404f; }
+
+/* 통합 헬스 스코어 (D8) — 5기종 전체를 점수·등급으로, 나쁜 순으로 */
+.score-summary { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.score-time { font-size: 11.5px; margin-left: auto; }
+.grade-badge { display: inline-block; min-width: 18px; text-align: center; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 800; color: #fff; }
+.grade-A { background: #22a06b; }
+.grade-B { background: #6bbf59; }
+.grade-C { background: #f0b429; }
+.grade-D { background: #f08c2d; }
+.grade-F { background: #d6404f; }
+.score-partial { background: #eef0f4; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 1px 8px; font-size: 11.5px; font-weight: 700; }
+.score-table td { vertical-align: middle; }
+.score-row { cursor: pointer; }
+.score-row:hover { background: #f7f8fa; }
+.score-row-open { background: #f2f4f8; }
+.score-num { font-weight: 800; font-size: 15px; }
+.score-outof { color: var(--muted); font-weight: 500; font-size: 11px; }
+.score-reasons { color: var(--muted); font-size: 12.5px; }
+.score-down { background: #d6404f; color: #fff; border-radius: 4px; padding: 0 5px; font-size: 10.5px; font-weight: 800; margin-left: 4px; }
+.score-partial-dot { background: #eef0f4; color: var(--muted); border-radius: 4px; padding: 0 5px; font-size: 10.5px; font-weight: 700; margin-left: 4px; }
+/* 문제 행은 왼쪽 색 띠로 — 등급이 낮을수록 진하게 */
+.score-grade-D td:first-child { box-shadow: inset 3px 0 0 #f08c2d; }
+.score-grade-F td:first-child { box-shadow: inset 3px 0 0 #d6404f; }
+/* 신호별 기여 분해(행 클릭 시) */
+.score-detail { display: flex; flex-direction: column; gap: 4px; padding: 6px 4px; }
+.score-contrib { display: grid; grid-template-columns: 90px 78px 44px 1fr; align-items: center; gap: 8px; font-size: 12.5px; }
+.score-contrib-signal { font-weight: 700; }
+.score-contrib-penalty { color: #d6404f; font-weight: 700; text-align: right; }
+.score-contrib-summary { color: var(--muted); }
+.score-contrib-state { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 9px; text-align: center; color: #fff; }
+.score-state-badge-OK { background: #22a06b; }
+.score-state-badge-PENALIZED { background: #f08c2d; }
+.score-state-badge-INSUFFICIENT_DATA { background: #7b8494; }
+.score-state-badge-ERROR { background: #b0563a; }

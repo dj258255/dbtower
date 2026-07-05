@@ -101,6 +101,19 @@ dbtower:
     latency:
       p95-threshold-ms: 100    # 레이턴시 SLO — 핵심 쿼리 p95 임계(ms). 향후 per-instance 오버라이드 여지.
       sample-limit: 20         # 핵심 쿼리 상위 N(부하 순) — D4a latencyPercentiles에 넘길 limit
+  score:
+    # 통합 헬스 스코어(D8) 감점 가중치 — 100점에서 신호별 감점을 뺀다. 데이터 부족은 감점이 아니라 부분 데이터로 격리.
+    weights:
+      health-down: 45          # health가 down이면(치명) 단독으로 F에 근접시키도록 크게 잡는다
+      anomaly-per-hit: 4       # 이상 쿼리 1건당 감점
+      anomaly-cap: 16          # 이상 감지 신호의 감점 상한(한 신호가 점수를 독식하지 않게)
+      advisor-critical: 8      # Advisor CRITICAL 1건당 감점
+      advisor-warning: 3       # Advisor WARNING 1건당 감점
+      advisor-cap: 30          # Advisor 신호의 감점 상한
+      slo-breaching: 25        # SLO 위반(BREACHING) 감점
+      slo-at-risk: 10          # SLO 위험(AT_RISK) 감점
+      backup-no-backup: 20     # 백업 없음(사각지대) 감점 — 데이터 부족이 아니라 실제 위험
+      backup-stale: 12         # 백업 오래됨(STALE) 감점
   ai:
     model: claude-opus-4-8
   security:

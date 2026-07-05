@@ -30,6 +30,15 @@
     </div>
   </section>
 
+  <!-- 통합 헬스 스코어 (D8) — 5기종 전체를 한 점수·등급으로, 나쁜 순으로. 어디부터 볼지 기계가 정렬 -->
+  <section class="panel health-score-panel">
+    <h2 class="panel-title">헬스 스코어
+      <span class="hint">(흩어진 신호를 인스턴스별 한 점수로 — 나쁜 순 정렬 · 읽고 종합만, 대상 DB 변경 없음)</span>
+    </h2>
+    <div id="score-summary" class="score-summary"></div>
+    <div id="score-result" class="score-result muted">불러오는 중...</div>
+  </section>
+
   <!-- 백업 신선도 (D7) — 전 인스턴스를 한 표로, 오래된 것·백업 없는 것을 위로 -->
   <section class="panel backup-freshness-panel">
     <h2 class="panel-title">백업 신선도
