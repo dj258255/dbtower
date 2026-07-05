@@ -39,9 +39,15 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
     /**
      * 인스턴스+jdbcUrl에 매인 JdbcTemplate. DataSource는 ConnectionPools가 관리(풀 재사용)하므로
      * 매 호출 새로 만들어도 가볍다 — JdbcTemplate 자체는 상태 없는 얇은 래퍼다.
+     *
+     * A9: 모든 JDBC 조회에 기본 쿼리 타임아웃을 건다(setQueryTimeout=JDBC Statement.setQueryTimeout).
+     * 진단 도구가 실수로 무거운 쿼리를 던져도 대상 DB를 오래 붙잡지 않게 — "진단이 부하 유발자가
+     * 되면 안 된다"는 원칙. 개별 메서드(explainAnalyze 등)가 더 짧게 덮어쓸 수 있다.
      */
     protected JdbcTemplate jdbc() {
-        return new JdbcTemplate(pools.getDataSource(instance, jdbcUrl()));
+        JdbcTemplate t = new JdbcTemplate(pools.getDataSource(instance, jdbcUrl()));
+        t.setQueryTimeout(pools.queryTimeoutSeconds());
+        return t;
     }
 
     @Override

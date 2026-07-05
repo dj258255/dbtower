@@ -26,6 +26,20 @@ public class MongoClientCache {
 
     private final Map<Long, MongoClient> clients = new ConcurrentHashMap<>();
 
+    /**
+     * A9: Mongo 조회의 소켓 read 상한(초). JDBC의 setQueryTimeout과 같은 목적 —
+     * 진단이 대상 DB를 오래 붙잡지 않게. 같은 dbtower.query-timeout-seconds 설정을 공유한다.
+     * 주: 이건 클라이언트측 소켓 상한이다. 서버가 실제로 실행을 오래 도는 무거운 경로(explain
+     *   executionStats)는 이와 별개로 명령에 maxTimeMS를 실어 서버측에서 끊는다(MongoOperator 참고).
+     *   여기서 CSOT(.timeout())를 쓰지 않는 이유: 클라이언트 레벨 CSOT는 그 명시적 maxTimeMS와
+     *   간섭한다(CSOT가 켜지면 드라이버가 수동 maxTimeMS를 무시하고 잔여 예산으로 재계산).
+     */
+    private final int socketReadTimeoutSeconds;
+
+    public MongoClientCache(ConnectionPools pools) {
+        this.socketReadTimeoutSeconds = pools.queryTimeoutSeconds();
+    }
+
     /** id가 있으면 캐시에서, 없으면(등록 전 검증) 1회용으로 생성 — 1회용은 호출자가 닫는다 */
     public MongoClient get(DatabaseInstance instance) {
         if (instance.getId() == null) {
@@ -47,7 +61,7 @@ public class MongoClientCache {
                         .serverSelectionTimeout(3, TimeUnit.SECONDS))
                 .applyToSocketSettings(b -> b
                         .connectTimeout(3, TimeUnit.SECONDS)
-                        .readTimeout(15, TimeUnit.SECONDS))
+                        .readTimeout(socketReadTimeoutSeconds, TimeUnit.SECONDS))
                 .credential(MongoCredential.createCredential(
                         instance.getUsername(), "admin", instance.getPassword().toCharArray()))
                 .applicationName("dbtower")

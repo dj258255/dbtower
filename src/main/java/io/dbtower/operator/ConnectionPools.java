@@ -28,6 +28,18 @@ public class ConnectionPools {
 
     private final Map<Long, HikariDataSource> pools = new ConcurrentHashMap<>();
 
+    /** A9: 모든 JDBC 조회의 기본 쿼리 타임아웃(초). 진단이 대상 DB를 오래 붙잡지 않게. */
+    private final int queryTimeoutSeconds;
+
+    public ConnectionPools(
+            @org.springframework.beans.factory.annotation.Value("${dbtower.query-timeout-seconds:15}") int queryTimeoutSeconds) {
+        this.queryTimeoutSeconds = queryTimeoutSeconds;
+    }
+
+    public int queryTimeoutSeconds() {
+        return queryTimeoutSeconds;
+    }
+
     public Connection getConnection(DatabaseInstance instance, String jdbcUrl) throws SQLException {
         // 등록 전 접속 검증(id 없음)은 풀을 만들지 않고 1회성 연결로 처리한다
         if (instance.getId() == null) {

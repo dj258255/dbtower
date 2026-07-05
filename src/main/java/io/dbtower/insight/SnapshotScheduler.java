@@ -12,6 +12,8 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 등록된 모든 인스턴스의 쿼리 통계를 주기 수집한다.
@@ -25,6 +27,12 @@ public class SnapshotScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(SnapshotScheduler.class);
     private static final int TOP_N = 100;
+
+    // A9 백오프: 연속 실패한 인스턴스는 수집을 지수적으로 건너뛴다. 죽었거나 힘든 대상 DB를
+    // 매 주기 계속 두드리면(재접속 시도 자체가 부하) 진단이 부하 유발자가 된다. 실패가 이어지면
+    // 건너뛸 주기 수를 2배씩 늘리고(상한 MAX_SKIP), 한 번 성공하면 즉시 정상 복귀한다.
+    private static final int MAX_SKIP = 16;
+    private final Map<Long, int[]> backoff = new ConcurrentHashMap<>(); // id -> [남은 skip, 실패 연속 횟수]
 
     private final DatabaseInstanceRepository instanceRepository;
     private final SnapshotWriter snapshotWriter;
@@ -49,6 +57,11 @@ public class SnapshotScheduler {
     @SchedulerLock(name = "snapshot-collect", lockAtLeastFor = "PT50S", lockAtMostFor = "PT2M")
     public void collect() {
         for (DatabaseInstance instance : instanceRepository.findAll()) {
+            if (shouldSkip(instance.getId())) {
+                log.debug("스냅샷 수집 건너뜀(백오프) instance={} 남은틱={}",
+                        instance.getName(), backoff.get(instance.getId())[0]);
+                continue;
+            }
             long start = System.currentTimeMillis();
             try {
                 List<QueryStat> stats = operatorFactory.create(instance).queryStats(TOP_N);
@@ -64,13 +77,46 @@ public class SnapshotScheduler {
                 snapshotWriter.saveBatch(rows);
                 long saveMs = System.currentTimeMillis() - saveStart;
 
+                onSuccess(instance.getId());
                 // collect(대상 DB 조회)와 save(플랫폼 DB 저장)를 분리 측정 — 개선 아크 1, 2의 근거 데이터
                 log.info("스냅샷 수집 완료 instance={} rows={} collectMs={} saveMs={}",
                         instance.getName(), rows.size(), collectMs, saveMs);
             } catch (Exception e) {
                 // 한 인스턴스 실패가 나머지 수집을 막으면 안 된다
-                log.warn("스냅샷 수집 실패 instance={} cause={}", instance.getName(), e.getMessage());
+                int skip = onFailure(instance.getId());
+                log.warn("스냅샷 수집 실패 instance={} cause={} 다음_건너뛸틱={}",
+                        instance.getName(), e.getMessage(), skip);
             }
         }
+    }
+
+    /**
+     * A9 백오프 판정: 이 틱에서 이 인스턴스를 건너뛸지. 남은 skip 카운트를 1 소진한다.
+     * 카운트가 0이 되는 틱엔 다시 실제 수집을 시도한다(성공하면 회복, 실패하면 더 크게 백오프).
+     */
+    boolean shouldSkip(Long id) {
+        int[] state = backoff.get(id);
+        if (state == null || state[0] <= 0) {
+            return false;
+        }
+        state[0]--;
+        return true;
+    }
+
+    /** 성공하면 백오프 상태를 즉시 제거 — 회복한 인스턴스는 다음 틱부터 정상 주기로 돌아온다. */
+    void onSuccess(Long id) {
+        backoff.remove(id);
+    }
+
+    /**
+     * 실패하면 연속 실패 횟수를 늘리고, 건너뛸 틱 수를 2^(연속실패-1)로 지수 증가시킨다(상한 MAX_SKIP).
+     * 죽은 대상 DB를 매 틱 두드리는 것 자체가 부하(재접속·인증 시도)라, 실패가 이어질수록 간격을 벌린다.
+     */
+    int onFailure(Long id) {
+        int[] state = backoff.computeIfAbsent(id, k -> new int[]{0, 0});
+        state[1]++;
+        int skip = Math.min(1 << Math.min(state[1] - 1, 30), MAX_SKIP);
+        state[0] = skip;
+        return skip;
     }
 }

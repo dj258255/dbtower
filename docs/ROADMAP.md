@@ -54,7 +54,7 @@
 | 6 | **완료(25절)** 감사 로그 | audit 모듈 — /api 상태변경·로그인·403 월권 기록(인터셉터+인가거부 리스너), Flyway V2. Vault 감사 이점과 짝 |
 | 7 | **완료(29절)** 백업 복원 검증 | 3값(VERIFIED/FAILED/UNSUPPORTED), MySQL/PG/Mongo 임시 DB 실복원, MSSQL VERIFYONLY, Oracle UNSUPPORTED 정직 표기. 원격 보관·암호화는 잔여 ([3-2-1-1-0](https://www.datto.com/blog/3-2-1-1-0-backup-rule/)) |
 | 8 | **완료(27절)** 최소 권한 계정 | docs/least-privilege.md — 권한 0에서 에러 원문 수집으로 5기종 최소 집합 확정. Mongo clusterMonitor·PG 조용한 저하 등 실측 발견 ([Datadog DBM](https://docs.datadoghq.com/database_monitoring/setup_mysql/selfhosted/)) |
-| 9 | 분석 보호장치 | explain에 statement timeout, 대상 DB 과부하 시 수집 백오프 — 진단 도구가 부하 유발자가 되지 않게 |
+| 9 | **완료(51절)** 분석 보호장치 | 모든 JDBC 조회에 기본 쿼리 타임아웃(`jdbc()` 헬퍼 단일 지점, `dbtower.query-timeout-seconds`), Mongo 소켓 read 상한도 같은 설정 공유, 심층진단(explain 실행)은 별도 더 짧은 타임아웃. 수집 폴러는 인스턴스별 지수 백오프(연속 실패 시 1→2→4→8→16틱 건너뜀, 1회 성공 즉시 복귀) — 죽은 대상 DB를 매 틱 두드리는 재접속 부하를 막는다. "진단이 부하 유발자가 되면 안 된다"는 원칙. Datadog DBM도 수집 쿼리에 statement timeout을 걸어 모니터링이 대상 부하가 되지 않게 한다 ([Datadog DBM](https://docs.datadoghq.com/database_monitoring/)) |
 
 ### Phase B — DBA 진단 심화 (완료: B1~B8, VERIFICATION 41절)
 
