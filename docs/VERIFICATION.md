@@ -1208,3 +1208,25 @@ operations.md·least-privilege.md의 실측 규칙을 코드 Advisor 6종으로.
 - MSSQL/Oracle UNSUPPORTED(실 8080 Oracle 확인). 네 source 라벨 안 섞음, MySQL 누적 한계 표기.
 
 배치1 병합 후 실 8080 재검증 완료(Docker 데몬 재기동 포함), 전체 테스트 통과.
+
+## 47. Phase D 배치2 — 자율 진단 심화 (D3 자연어 진단·D5 파티션·D7 백업 신선도)
+
+### 47-1. D3 자연어 근본원인 진단 (KDMS 자율 AI·pganalyze 모델)
+단발 AI 분석(AiAnalyzer)을 **도구 사용 루프**로 승격. 질문 → AI가 어떤 MCP 도구를 부를지 스스로
+정하면 서버가 McpProtocolHandler로 실행 → 결과를 누적해 다시 AI 호출(최대 5스텝) → 근본원인 종합.
+read-only 12종 화이트리스트로 쓰기 도구(kill·backup·online-ddl) 이중 차단 — 대상 DB 변경 0.
+실측(claude CLI 백엔드): LIKE 풀스캔 부하에 query_stats→explain을 실제 연쇄해 access_type=ALL 원인을
+판단 기준 문서(앞 와일드카드 LIKE→B+Tree 시작점 불가)로 서술, confidence=high. 실 8080에서도
+backend=cli로 도구 호출·high 확인. 근거 없는 질문("작년 크리스마스 접속자")은 수치 안 지어내고 low.
+
+### 47-2. D5 파티션 조회 (KDMS 6기능 마지막 조각)
+partitions() 5기종 — MySQL information_schema.PARTITIONS, PG pg_partitioned_table+relpartbound,
+Oracle user_tab_partitions, MSSQL sys.partitions+scheme/function, Mongo UNSUPPORTED(관계형 파티셔닝
+없음). 조회 전용(생성·삭제·자동관리는 범위 밖). MCP 13종. 실측: 직접 만든 파티션 테이블로 4기종
+실조회+정리(대상 데이터 무손상), 파티션 없으면 빈 결과 200. BigInteger/BigDecimal 캐스팅 버그 수정.
+
+### 47-3. D7 백업 신선도·커버리지 (3-2-1 원칙)
+BackupRun 이력에서 인스턴스별 최신 SUCCESS 백업 → FRESH/STALE/NO_BACKUP + A7 복원 검증 상태.
+메타 DB만 읽어 판정(대상 접속 실패와 무관 — 대상이 죽었을 때가 백업 신선도가 가장 중요), 나쁜 순 정렬.
+OpsAlertDetector에 신선도 경보(STALE 항상·NO_BACKUP은 등록 후 임계 창 지난 것만). 실측(실 8080):
+6개 인스턴스를 FRESH 1·STALE 2·NO_BACKUP 3으로 분류, NO_BACKUP 상단 정렬 확인.
