@@ -108,7 +108,7 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
-  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadAdvisors()]);
+  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadAdvisors(), loadAnomalies()]);
 }
 
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
@@ -575,6 +575,40 @@ async function loadReplication() {
     $("#replication-box").textContent =
       `role: ${r.role}\nlagSeconds: ${r.lagSeconds}\n${r.detail ?? ""}`;
   } catch (e) { $("#replication-box").textContent = `조회 실패: ${e.message}`; }
+}
+
+// 이상 감지 (D1) — 평소(이 요일·시간대 베이스라인) 대비 z-score 이탈 쿼리 목록.
+// 이력이 부족하면 판정을 보류하고 "학습 중"으로만 알린다(신규 오탐 방지) — 그 사실을 화면에 정직하게 표기한다.
+async function loadAnomalies() {
+  const box = $("#anomaly-result");
+  try {
+    const scan = await api(`/api/instances/${state.instance.id}/anomalies`);
+    const parts = [];
+    if (scan.anomalies.length === 0) {
+      parts.push('<p class="muted">현재 이상 없음 (평소 범위 내).</p>');
+    } else {
+      parts.push(scan.anomalies.map((q) => {
+        const metrics = q.anomalies.map((m) =>
+          `<span class="anomaly-metric">${esc(m.metric)}: <b>${fmtNum(m.current)}</b> ` +
+          `(평소 ${fmtNum(m.baselineMean)}±${fmtNum(m.baselineStddev)}, z=${fmtNum(m.zScore, 1)})</span>`
+        ).join(" ");
+        return `<div class="anomaly-item">
+          <div class="anomaly-q qtext" title="${esc(q.queryText)}">${esc(q.queryText)}</div>
+          <div class="anomaly-metrics">${metrics}</div>
+          <div class="hint">${q.dayOfWeek}요일 ${q.hour}시대 기준 · 관측 ${q.observations}회</div>
+        </div>`;
+      }).join(""));
+    }
+    // 학습 중(이력 부족) 쿼리 수를 정직하게 노출 — "아직 판정 못 한다"를 숨기지 않는다.
+    if (scan.learningCount > 0) {
+      parts.push(`<p class="hint">학습 중(baseline unavailable) 쿼리 ${scan.learningCount}건 — 관측 ${scan.minObservations}회 미만이라 판정 보류.</p>`);
+    }
+    box.className = "anomaly-result";
+    box.innerHTML = parts.join("");
+  } catch (e) {
+    box.className = "anomaly-result muted";
+    box.textContent = `조회 실패: ${e.message}`;
+  }
 }
 
 // Wait Events — 기종별 의미가 다르다(누적/순간 스냅샷/큐 게이지). 시간 정보가 없는 소스는

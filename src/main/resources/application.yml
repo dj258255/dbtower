@@ -67,6 +67,14 @@ dbtower:
     recent-minutes: 5     # 문제 후보 구간(최근 N분)
     baseline-minutes: 15  # 베이스라인 구간(그 직전 N분)
     cooldown-minutes: 30  # 같은 쿼리 재알림 쿨다운
+  baseline:
+    # 이상 자동 감지(D1) — 고정 임계(regression)를 (요일×시간대) 동적 베이스라인으로 보완한다.
+    poll-ms: 120000        # 베이스라인 이상 감지 주기
+    history-days: 14       # 학습에 쓸 과거 이력 길이(이 안의 같은 요일·시간대 관측만 베이스라인)
+    recent-minutes: 5      # 베이스라인과 비교할 현재 구간 길이
+    z-threshold: 3.0       # 이상 판정 임계(표준편차 몇 배 이탈) — AWS 계열 관례인 3σ
+    min-observations: 8    # 버킷당 최소 관측 수 — 미만이면 "학습 중"으로 판정 보류(신규 오탐 방지)
+    cooldown-minutes: 30   # 같은 쿼리 재알림 쿨다운
   ops-alert:
     # 운영 신호 감지(B5) — 쿼리 회귀 밖의 이상 징후(장기 유휴 트랜잭션·복제 지연·수집 정지)를
     # 기존 진단(activeSessions·replicationState)과 메타 DB로 잡아 웹훅으로 알린다.

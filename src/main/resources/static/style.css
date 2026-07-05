@@ -300,6 +300,15 @@ input[type="datetime-local"] {
   font-size: 12.5px; padding: 3px 8px; border-radius: 5px; margin: 2px 0;
   border-left: 3px solid transparent; white-space: pre-wrap; word-break: break-word;
 }
+/* 이상 감지(D1) — 평소 대비 이탈 쿼리 카드. 회귀 알림과 달리 "이 요일·시간대의 평소"가 기준이다 */
+.anomaly-item {
+  border-left: 3px solid var(--up); background: #fff6f5;
+  border-radius: 6px; padding: 8px 10px; margin-bottom: 8px;
+}
+.anomaly-q { font-size: 12.5px; font-weight: 600; margin-bottom: 4px; }
+.anomaly-metrics { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 3px; }
+.anomaly-metric { font-size: 12px; }
+
 /* 온라인 스키마 변경(gh-ost, B4) — schema-diff 색 규칙을 그대로 재사용(OK=초록, FAILED=주황경고) */
 .online-ddl-controls {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;
