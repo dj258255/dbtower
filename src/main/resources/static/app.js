@@ -228,6 +228,82 @@ async function loadFinOps() {
   }).join("");
 }
 
+// ---------- 통합 헬스 스코어 (D8) — 흩어진 신호를 인스턴스별 한 점수로, 나쁜 순으로 ----------
+// 인스턴스 선택과 무관한 함대 전체 뷰. "어디부터 볼지"를 서버가 정렬해 내려주고, 행 클릭 시 감점 사유를 분해한다.
+const SCORE_SIGNAL_LABEL = {
+  HEALTH: "가용성", ANOMALY: "이상 감지", ADVISOR: "Advisors", SLO: "SLO / 버짓", BACKUP: "백업 신선도",
+};
+const SCORE_STATE_LABEL = {
+  OK: "정상", PENALIZED: "감점", INSUFFICIENT_DATA: "데이터 부족", ERROR: "수집 실패",
+};
+
+async function loadHealthScore() {
+  const summary = $("#score-summary");
+  const box = $("#score-result");
+  let report;
+  try {
+    report = await api("/api/health-score");
+  } catch (e) {
+    box.classList.add("muted");
+    box.textContent = `조회 실패: ${e.message}`;
+    return;
+  }
+  box.classList.remove("muted");
+  const g = report.gradeCounts || {};
+  summary.innerHTML = `
+    ${["A", "B", "C", "D", "F"].map((k) => `<span class="grade-badge grade-${k}">${k} ${g[k] ?? 0}</span>`).join("")}
+    ${report.partialCount ? `<span class="score-partial">부분 데이터 ${report.partialCount}</span>` : ""}
+    <span class="score-time muted">집계 ${esc(String(report.generatedAt).replace("T", " ").slice(0, 19))}</span>`;
+
+  if (!report.instances.length) {
+    box.innerHTML = '<div class="muted">등록된 인스턴스가 없습니다.</div>';
+    return;
+  }
+  // 이미 서버가 나쁜 순으로 정렬해 내려준다 — 죽은 것·백업 없는 것이 위로 온다
+  const rows = report.instances.map((s) => {
+    // 주요 감점 사유: 감점 있는 신호만, 큰 순(서버가 이미 정렬). 없으면 정상 표기.
+    const penalized = s.contributions.filter((c) => c.state === "PENALIZED");
+    const reasons = penalized.length
+      ? penalized.map((c) => `${SCORE_SIGNAL_LABEL[c.signal] ?? c.signal} −${fmtNum(c.penalty, 0)}`).join(" · ")
+      : '<span class="muted">감점 없음</span>';
+    // 행 클릭 시 펼칠 신호별 기여 분해(투명성) — 데이터 부족·수집 실패도 그대로 노출
+    const detail = s.contributions.map((c) => `
+      <div class="score-contrib score-state-${esc(c.state)}">
+        <span class="score-contrib-signal">${esc(SCORE_SIGNAL_LABEL[c.signal] ?? c.signal)}</span>
+        <span class="score-contrib-state score-state-badge-${esc(c.state)}">${esc(SCORE_STATE_LABEL[c.state] ?? c.state)}</span>
+        <span class="score-contrib-penalty">${c.penalty > 0 ? `−${fmtNum(c.penalty, 0)}` : ""}</span>
+        <span class="score-contrib-summary">${esc(c.summary)}</span>
+      </div>`).join("");
+    return `
+      <tbody class="score-group" data-id="${s.instanceId}">
+        <tr class="score-row score-grade-${esc(s.grade)}">
+          <td><span class="type-badge type-${esc(s.type)}">${esc(s.type)}</span> ${esc(s.instanceName)}
+            ${s.down ? '<span class="score-down">DOWN</span>' : ""}
+            ${s.partial ? '<span class="score-partial-dot" title="일부 신호가 데이터 부족·수집 실패">부분</span>' : ""}</td>
+          <td class="num score-num">${s.score}<span class="score-outof">/100</span></td>
+          <td><span class="grade-badge grade-${esc(s.grade)}">${esc(s.grade)}</span></td>
+          <td class="score-reasons">${reasons}</td>
+        </tr>
+        <tr class="score-detail-row" hidden><td colspan="4"><div class="score-detail">${detail}</div></td></tr>
+      </tbody>`;
+  }).join("");
+  box.innerHTML = `
+    <div class="table-scroll">
+      <table class="qtable score-table">
+        <thead><tr><th>인스턴스</th><th>점수</th><th>등급</th><th>주요 감점 사유 (클릭 시 분해)</th></tr></thead>
+        ${rows}
+      </table>
+    </div>`;
+  // 행 클릭 → 신호별 기여 분해 토글
+  box.querySelectorAll(".score-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      const detailRow = row.parentElement.querySelector(".score-detail-row");
+      detailRow.hidden = !detailRow.hidden;
+      row.classList.toggle("score-row-open", !detailRow.hidden);
+    });
+  });
+}
+
 // ---------- 백업 신선도 (D7) — 전 인스턴스를 한 표로, 오래된 것/백업 없는 것을 강조 ----------
 // 인스턴스 선택과 무관한 함대 전체 뷰. "백업했다"가 아니라 "지금 최신이고 복원되는가"를 상시 비춘다.
 const FRESHNESS_LABEL = { FRESH: "신선", STALE: "오래됨", NO_BACKUP: "백업 없음" };
@@ -1196,6 +1272,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadMe();
   loadMcpCommand();
   loadInstances();
+  loadHealthScore();     // 함대 전체 통합 헬스 스코어 (D8) — 나쁜 순 정렬, 대시보드 상단 상시 뷰
   loadBackupFreshness(); // 함대 전체 백업 신선도 (D7) — 인스턴스 선택과 무관한 상시 뷰
   setupTabs();
   setupPresets();
