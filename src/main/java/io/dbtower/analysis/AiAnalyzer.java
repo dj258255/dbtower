@@ -79,32 +79,63 @@ public class AiAnalyzer {
         }
     }
 
+    /** AI 백엔드가 하나라도 있는지 — D3 자연어 진단이 켜지는지 판단에 쓴다. */
+    public boolean isEnabled() {
+        return mode != Mode.OFF;
+    }
+
+    /** 활성 백엔드 이름(api/cli/off) — 응답 투명성용. */
+    public String backend() {
+        return switch (mode) {
+            case API -> "api";
+            case CLI -> "cli";
+            case OFF -> "off";
+        };
+    }
+
     public Optional<String> analyze(String findingContext) {
+        return complete(SYSTEM_PROMPT + loadRules(), findingContext);
+    }
+
+    /**
+     * 임의의 시스템 프롬프트 + 사용자 메시지로 1회 완성 호출 — 백엔드(API/CLI)를 추상화한다.
+     * D3 도구 사용 루프가 한 스텝(다음에 어떤 도구를 부를지 결정)마다 이걸 부른다.
+     * 실패·시간초과는 예외를 던지지 않고 빈 값으로 정직하게 내려간다.
+     */
+    public Optional<String> complete(String systemPrompt, String userMessage) {
         if (mode == Mode.OFF) {
             return Optional.empty();
         }
         try {
-            String rules = Files.exists(rulesPath) ? Files.readString(rulesPath) : "";
             String text = switch (mode) {
-                case API -> analyzeViaApi(rules, findingContext);
-                case CLI -> analyzeViaCli(rules, findingContext);
+                case API -> callApi(systemPrompt, userMessage);
+                case CLI -> callCli(systemPrompt, userMessage);
                 case OFF -> "";
             };
             return text == null || text.isBlank() ? Optional.empty() : Optional.of(text.trim());
         } catch (Exception e) {
-            // 분석 실패는 알림을 막지 않는다
-            log.warn("AI 1차 분석 실패: {}", e.getMessage());
+            // 분석 실패는 알림·진단을 막지 않는다
+            log.warn("AI 호출 실패: {}", e.getMessage());
             return Optional.empty();
         }
     }
 
-    private String analyzeViaApi(String rules, String findingContext) {
+    private String loadRules() {
+        try {
+            return Files.exists(rulesPath) ? Files.readString(rulesPath) : "";
+        } catch (Exception e) {
+            log.warn("판단 기준 문서 로드 실패: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    private String callApi(String system, String user) {
         MessageCreateParams params = MessageCreateParams.builder()
                 .model(model)
                 .maxTokens(2048L)
                 .thinking(ThinkingConfigAdaptive.builder().build())
-                .system(SYSTEM_PROMPT + rules)
-                .addUserMessage(findingContext)
+                .system(system)
+                .addUserMessage(user)
                 .build();
         return client().messages().create(params).content().stream()
                 .flatMap(block -> block.text().stream())
@@ -116,14 +147,14 @@ public class AiAnalyzer {
      * claude CLI headless 호출 — 프롬프트는 argv가 아니라 stdin으로 전달한다
      * (SQL·실행계획에 어떤 문자가 와도 인자 파싱과 무관하게 안전).
      */
-    private String analyzeViaCli(String rules, String findingContext) throws Exception {
+    private String callCli(String system, String user) throws Exception {
         // --setting-sources "": 사용자/프로젝트 설정(출력 스타일 등)을 배제해
-        // 어떤 로컬 환경에서도 같은 형식의 순수 분석 텍스트가 나오게 한다
+        // 어떤 로컬 환경에서도 같은 형식의 순수 텍스트가 나오게 한다
         Process p = new ProcessBuilder("claude", "-p", "--setting-sources", "",
-                "--append-system-prompt", SYSTEM_PROMPT + rules)
+                "--append-system-prompt", system)
                 .redirectErrorStream(false).start();
         try (var stdin = p.getOutputStream()) {
-            stdin.write(findingContext.getBytes(StandardCharsets.UTF_8));
+            stdin.write(user.getBytes(StandardCharsets.UTF_8));
         }
         String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         if (!p.waitFor(180, TimeUnit.SECONDS)) {

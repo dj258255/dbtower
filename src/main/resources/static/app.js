@@ -949,6 +949,64 @@ async function runOnlineDdl(execute) {
   box.innerHTML = `<strong>${esc(d.status)}</strong>${d.mode ? ` (${esc(d.mode)})` : ""}${ghost}<br>${esc(d.detail || "")}`;
 }
 
+// ---------- 자연어 근본원인 진단 (D3) ----------
+async function runDiagnose() {
+  const box = $("#diagnose-result");
+  if (!state.instance) { box.className = "diagnose-result schema-warning"; box.textContent = "인스턴스를 먼저 선택하세요."; return; }
+  const question = $("#diagnose-question").value.trim();
+  if (!question) { box.className = "diagnose-result schema-warning"; box.textContent = "질문을 입력하세요."; return; }
+
+  box.className = "diagnose-result muted";
+  box.textContent = "AI가 도구를 연쇄 호출하며 진단 중... (수 초~수십 초 걸릴 수 있습니다)";
+  let d;
+  try {
+    d = await api(`/api/instances/${state.instance.id}/diagnose`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    });
+  } catch (e) {
+    box.className = "diagnose-result schema-warning";
+    box.textContent = `진단 실패: ${e.message}`;
+    return;
+  }
+
+  box.className = "diagnose-result";
+  if (!d.aiEnabled) {
+    box.innerHTML = `<div class="diagnose-note muted">${esc(d.note || "AI 진단 비활성")}</div>`;
+    return;
+  }
+
+  // 사용한 도구(투명성) — 어떤 도구를 왜 불렀나, 거부된 요청도 표시
+  const calls = (d.toolCalls || []).map((c, i) => {
+    const badge = c.rejected
+      ? `<span class="sev-badge sev-CRITICAL">거부</span>`
+      : `<span class="src-badge src-native">${i + 1}</span>`;
+    return `
+      <div class="diagnose-step">
+        <div class="diagnose-step-head">${badge} <code>${esc(c.tool)}</code>
+          <span class="muted diagnose-step-args">${esc(c.arguments || "")}</span></div>
+        <div class="diagnose-step-reason">${esc(c.reason || "")}</div>
+      </div>`;
+  }).join("");
+
+  const conf = esc(d.confidence || "");
+  box.innerHTML = `
+    <div class="diagnose-answer">
+      <div class="diagnose-answer-head">
+        <strong>근본원인</strong>
+        <span class="src-badge conf-${conf}">확신도 ${conf}</span>
+        <span class="muted">${esc(d.backend || "")} · 사용 도구 ${d.toolCallCount}개</span>
+      </div>
+      ${d.rootCause ? `<div class="diagnose-rootcause">${esc(d.rootCause)}</div>` : ""}
+      <div class="diagnose-text">${esc(d.answer || "(답변 없음)")}</div>
+    </div>
+    <div class="diagnose-steps">
+      <div class="diagnose-steps-head muted">AI가 부른 도구 (근거·투명성)</div>
+      ${calls || '<div class="muted">호출한 도구 없음</div>'}
+    </div>
+    ${d.note ? `<div class="diagnose-note muted">${esc(d.note)}</div>` : ""}`;
+}
+
 // ---------- 감사 로그 검색 (Specification 동적 필터) ----------
 async function loadAudit() {
   const table = $("#audit-table");
@@ -1027,6 +1085,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#btn-param-diff").addEventListener("click", runParamDiff);
   $("#btn-ddl-noop").addEventListener("click", () => runOnlineDdl(false));
   $("#btn-ddl-exec").addEventListener("click", () => runOnlineDdl(true));
+  $("#btn-diagnose").addEventListener("click", runDiagnose);
+  $("#diagnose-question").addEventListener("keydown", (e) => { if (e.key === "Enter") runDiagnose(); });
   $("#audit-search-btn").addEventListener("click", loadAudit);
   $("#audit-reset-btn").addEventListener("click", () => {
     ["audit-principal", "audit-action", "audit-outcome"].forEach((id) => { $(`#${id}`).value = ""; });

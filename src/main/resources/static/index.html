@@ -142,6 +142,15 @@
     </div>
 
     <div id="tab-monitor" class="tab-body" hidden>
+      <div class="monitor-card diagnose-card">
+        <h3>자연어 근본원인 진단 <span class="hint">(AI가 읽기 도구를 스스로 연쇄 호출해 원인을 서술 — 대상 DB는 바꾸지 않습니다)</span></h3>
+        <div class="diagnose-input">
+          <input type="text" id="diagnose-question" class="diagnose-q" placeholder="예: 어제 오후에 왜 느려졌어? / 어떤 쿼리가 부하를 일으키고 왜 느린가?" spellcheck="false">
+          <button id="btn-diagnose" class="btn btn-primary btn-small">진단</button>
+        </div>
+        <p class="hint">AI가 compare·explain·wait_events 같은 읽기 도구를 필요한 만큼 호출해 근거를 모읍니다. 근거가 없으면 "모른다"고 답합니다. (ANTHROPIC_API_KEY 또는 claude CLI 필요)</p>
+        <div id="diagnose-result" class="diagnose-result muted">질문을 입력하고 진단을 누르세요.</div>
+      </div>
       <div class="monitor-card advisors-card">
         <h3>Advisors <span class="hint">(자동 점검 — 읽고 조언만, 대상 DB는 바꾸지 않습니다 / 심각도별)</span></h3>
         <div id="advisors-summary" class="advisors-summary"></div>
