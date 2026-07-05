@@ -323,6 +323,28 @@ input[type="datetime-local"] {
   white-space: pre-wrap; word-break: break-word;
 }
 
+/* 자연어 근본원인 진단 (D3) */
+.diagnose-card { margin-bottom: 14px; }
+.diagnose-input { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.diagnose-q {
+  flex: 1; min-width: 280px; padding: 7px 10px; border: 1px solid #d4d9df;
+  border-radius: 7px; font-size: 13px; background: #fff;
+}
+.diagnose-result { border-radius: 8px; padding: 4px 2px; font-size: 13px; margin-top: 8px; }
+.diagnose-answer { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.diagnose-answer-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.diagnose-rootcause { font-weight: 700; margin-bottom: 6px; }
+.diagnose-text { white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
+.diagnose-steps-head { font-size: 11.5px; margin-bottom: 6px; }
+.diagnose-step { border-left: 3px solid var(--line); padding: 4px 0 4px 10px; margin-bottom: 6px; }
+.diagnose-step-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.diagnose-step-args { font-size: 11px; word-break: break-all; }
+.diagnose-step-reason { font-size: 12px; color: #555; margin-top: 2px; }
+.diagnose-note { font-size: 12px; margin-top: 8px; }
+.conf-high { background: #1f7a4d; }
+.conf-medium { background: #a15c00; }
+.conf-low { background: #6b7280; }
+
 .schema-add { background: #eef9f2; color: #1f7a4d; border-left-color: var(--target); }   /* 추가=초록(right에만) */
 .schema-del { background: #fdeef0; color: #c0392b; border-left-color: var(--up); }        /* 삭제=빨강(left에만) */
 .schema-chg { background: #fff7e6; color: #a15c00; border-left-color: var(--base); }       /* 변경=주황 */
