@@ -26,6 +26,10 @@ jobs:
       - name: Test (게시 전 게이트)
         run: ./gradlew test
 
+      # arm64 크로스 빌드용 QEMU (ARM 서버·Apple Silicon 사용자가 에뮬레이션 없이 돌게)
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       # gha 캐시(cache-to type=gha)는 기본 docker 드라이버가 지원하지 않는다 —
       # docker-container 드라이버를 쓰는 buildx 셋업이 필요 (첫 릴리스에서 실측한 실패)
       - name: Set up Docker Buildx
@@ -53,6 +57,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          # jar는 플랫폼 무관(Java)이지만 빌드 스테이지가 플랫폼별로 돌아 arm64는 QEMU 에뮬레이션으로
+          # 느리다 — 빌드 시간 ~2배를 받아들이고 단순함을 유지한다(러너에서 jar 선빌드로 최적화 가능하나
+          # 파이프라인 복잡도 증가라 보류)
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
