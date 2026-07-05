@@ -1,5 +1,7 @@
 package io.dbtower.alert;
 
+import io.dbtower.backup.BackupFreshness;
+import io.dbtower.backup.BackupFreshnessService;
 import io.dbtower.insight.QuerySnapshotRepository;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
@@ -31,24 +33,34 @@ class OpsAlertDetectorTest {
     private final DatabaseInstanceRepository instanceRepository = Mockito.mock(DatabaseInstanceRepository.class);
     private final DbmsOperatorFactory operatorFactory = Mockito.mock(DbmsOperatorFactory.class);
     private final QuerySnapshotRepository snapshotRepository = Mockito.mock(QuerySnapshotRepository.class);
+    private final BackupFreshnessService backupFreshnessService = Mockito.mock(BackupFreshnessService.class);
     private final WebhookNotifier notifier = Mockito.mock(WebhookNotifier.class);
     private final DbmsOperator operator = Mockito.mock(DbmsOperator.class);
 
+    private DatabaseInstance instance;
     private OpsAlertDetector detector;
 
     @BeforeEach
     void setUp() {
         // idle-txn 5s, replication-lag 30s, snapshot-stall 10m, cooldown 30m
-        detector = new OpsAlertDetector(instanceRepository, operatorFactory, snapshotRepository, notifier,
-                5, 30, 10, 30);
-        DatabaseInstance instance = new DatabaseInstance(
+        detector = new OpsAlertDetector(instanceRepository, operatorFactory, snapshotRepository,
+                backupFreshnessService, notifier, 5, 30, 10, 30);
+        instance = new DatabaseInstance(
                 "test-db", DbmsType.POSTGRESQL, "127.0.0.1", 5432, "sample", "postgres", "pw");
         when(instanceRepository.findAll()).thenReturn(List.of(instance));
         when(operatorFactory.create(any())).thenReturn(operator);
         // 기본은 조용한 상태 — 각 테스트가 필요한 신호만 켠다
         when(operator.activeSessions(anyInt())).thenReturn(List.of());
         when(operator.replicationState()).thenReturn(new ReplicationState("STANDALONE", 0, "복제 구성 없음"));
+        // 백업은 기본으로 신선(FRESH) — 백업 신선도 규칙은 조용. 각 테스트가 필요할 때만 STALE/NO_BACKUP으로 켠다
+        when(backupFreshnessService.freshnessFor(any(DatabaseInstance.class))).thenReturn(fresh());
         // createdAt이 지금(스냅샷 창 안)이라 스냅샷 정지 판정은 기본 보류 → 오탐 없음
+    }
+
+    private BackupFreshness fresh() {
+        return new BackupFreshness(1L, "test-db", DbmsType.POSTGRESQL,
+                java.time.LocalDateTime.now().minusHours(1), "VERIFIED", 1.0, true,
+                BackupFreshness.Status.FRESH, 24);
     }
 
     private SessionInfo idleTxn(long pid, double elapsedMs) {
@@ -121,5 +133,83 @@ class OpsAlertDetectorTest {
         when(operator.activeSessions(anyInt())).thenThrow(new RuntimeException("접속 실패"));
         assertDoesNotThrow(detector::detect);
         verify(notifier, never()).send(anyString());
+    }
+
+    // ---------- 백업 신선도 (D7) ----------
+
+    private BackupFreshness stale(double elapsedHours, String verifyStatus) {
+        return new BackupFreshness(1L, "test-db", DbmsType.POSTGRESQL,
+                java.time.LocalDateTime.now().minusHours((long) elapsedHours), verifyStatus,
+                elapsedHours, false, BackupFreshness.Status.STALE, 24);
+    }
+
+    private BackupFreshness noBackup() {
+        return new BackupFreshness(1L, "test-db", DbmsType.POSTGRESQL, null, null, null, false,
+                BackupFreshness.Status.NO_BACKUP, 24);
+    }
+
+    @Test
+    void 백업이_신선하면_조용하다() {
+        // 기본 스텁이 FRESH — 다른 신호도 없음
+        detector.detect();
+        verify(notifier, never()).send(anyString());
+    }
+
+    @Test
+    void 마지막_백업이_임계를_넘으면_알린다() {
+        when(backupFreshnessService.freshnessFor(any(DatabaseInstance.class)))
+                .thenReturn(stale(48, "VERIFIED"));
+        detector.detect();
+        String message = notifiedMessage();
+        assertTrue(message.contains("백업 신선도 초과"));
+        assertTrue(message.contains("임계 24h"));
+    }
+
+    @Test
+    void 복원_검증_실패한_STALE_백업은_근거에_FAILED를_덧붙인다() {
+        when(backupFreshnessService.freshnessFor(any(DatabaseInstance.class)))
+                .thenReturn(stale(30, "FAILED"));
+        detector.detect();
+        assertTrue(notifiedMessage().contains("복원 검증 FAILED"));
+    }
+
+    @Test
+    void 등록_직후_백업_없음은_아직_판단_보류한다() {
+        // 기본 instance의 createdAt이 now(임계 창 안) — 첫 백업 전이라 오탐 방지로 조용
+        when(backupFreshnessService.freshnessFor(any(DatabaseInstance.class))).thenReturn(noBackup());
+        detector.detect();
+        verify(notifier, never()).send(anyString());
+    }
+
+    @Test
+    void 오래_등록됐는데_백업_없음이면_사각지대로_알린다() {
+        // createdAt을 임계 창보다 오래되게 하려면 엔티티에 setter가 없어 mock으로 제어한다
+        DatabaseInstance old = Mockito.mock(DatabaseInstance.class);
+        when(old.getId()).thenReturn(1L);
+        when(old.getName()).thenReturn("test-db");
+        when(old.getCreatedAt()).thenReturn(java.time.LocalDateTime.now().minusDays(3));
+        when(instanceRepository.findAll()).thenReturn(List.of(old));
+        when(backupFreshnessService.freshnessFor(any(DatabaseInstance.class))).thenReturn(noBackup());
+        detector.detect();
+        assertTrue(notifiedMessage().contains("백업 없음"));
+    }
+
+    @Test
+    void 백업_신선도_경보도_쿨다운_동안_다시_알리지_않는다() {
+        when(backupFreshnessService.freshnessFor(any(DatabaseInstance.class)))
+                .thenReturn(stale(48, "VERIFIED"));
+        detector.detect();
+        detector.detect(); // 쿨다운 30분 안의 재감지
+        verify(notifier, times(1)).send(anyString());
+    }
+
+    @Test
+    void 대상_접속이_죽어도_백업_신선도_경보는_계속_울린다() {
+        // operator 기반 감지가 접속 실패로 죽어도(별도 try) 백업 경보는 살아 있어야 한다
+        when(operator.activeSessions(anyInt())).thenThrow(new RuntimeException("접속 실패"));
+        when(backupFreshnessService.freshnessFor(any(DatabaseInstance.class)))
+                .thenReturn(stale(48, "VERIFIED"));
+        detector.detect();
+        assertTrue(notifiedMessage().contains("백업 신선도 초과"));
     }
 }

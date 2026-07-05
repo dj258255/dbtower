@@ -355,3 +355,19 @@ input[type="datetime-local"] {
 .advisor-finding-detail { color: var(--text); font-size: 12.5px; margin-top: 4px; }
 .advisor-finding-reco { color: var(--muted); font-size: 12px; margin-top: 4px; }
 .advisor-note { font-size: 12px; margin-top: 6px; }
+
+/* 백업 신선도 (D7) — 함대 전체 표, 오래된 것/백업 없는 것을 강조 */
+.freshness-summary { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.freshness-time { font-size: 11.5px; margin-left: auto; }
+.fresh-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 700; color: #fff; }
+.fresh-FRESH { background: #22a06b; }
+.fresh-STALE { background: #f08c2d; }
+.fresh-NO_BACKUP { background: #d6404f; }
+.freshness-table td { vertical-align: middle; }
+/* 문제 행은 왼쪽 색 띠로 눈에 띄게 — 오래됨=주황, 백업 없음=빨강 */
+.fresh-row-STALE td:first-child { box-shadow: inset 3px 0 0 #f08c2d; }
+.fresh-row-NO_BACKUP td:first-child { box-shadow: inset 3px 0 0 #d6404f; }
+.verify-badge { display: inline-block; padding: 1px 7px; border-radius: 8px; font-size: 11px; font-weight: 700; }
+.verify-VERIFIED { background: #e3f5ec; color: #1a7a52; }
+.verify-FAILED { background: #fbe4e6; color: #b02a37; }
+.verify-UNSUPPORTED { background: #eef0f3; color: #6b7280; }

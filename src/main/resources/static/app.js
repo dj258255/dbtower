@@ -163,6 +163,57 @@ async function loadAdvisors() {
   }).join("");
 }
 
+// ---------- 백업 신선도 (D7) — 전 인스턴스를 한 표로, 오래된 것/백업 없는 것을 강조 ----------
+// 인스턴스 선택과 무관한 함대 전체 뷰. "백업했다"가 아니라 "지금 최신이고 복원되는가"를 상시 비춘다.
+const FRESHNESS_LABEL = { FRESH: "신선", STALE: "오래됨", NO_BACKUP: "백업 없음" };
+
+async function loadBackupFreshness() {
+  const summary = $("#freshness-summary");
+  const box = $("#freshness-result");
+  let report;
+  try {
+    report = await api("/api/backup-freshness");
+  } catch (e) {
+    box.classList.add("muted");
+    box.textContent = `조회 실패: ${e.message}`;
+    return;
+  }
+  box.classList.remove("muted");
+  summary.innerHTML = `
+    <span class="fresh-badge fresh-FRESH">신선 ${report.freshCount}</span>
+    <span class="fresh-badge fresh-STALE">오래됨 ${report.staleCount}</span>
+    <span class="fresh-badge fresh-NO_BACKUP">백업 없음 ${report.noBackupCount}</span>
+    <span class="freshness-time muted">임계 ${report.thresholdHours}h · 집계 ${esc(String(report.checkedAt).replace("T", " ").slice(0, 19))}</span>`;
+
+  if (!report.instances.length) {
+    box.innerHTML = '<div class="muted">등록된 인스턴스가 없습니다.</div>';
+    return;
+  }
+  // 이미 서버가 나쁜 순으로 정렬해 내려준다 — 오래된 것/백업 없는 것이 위로 온다
+  const rows = report.instances.map((f) => {
+    const last = f.lastBackupAt ? esc(String(f.lastBackupAt).replace("T", " ").slice(0, 19)) : "—";
+    const elapsed = f.elapsedHours == null ? "—" : `${fmtNum(f.elapsedHours, 1)}h`;
+    const verify = f.verifyStatus
+      ? `<span class="verify-badge verify-${esc(f.verifyStatus)}">${esc(f.verifyStatus)}</span>`
+      : '<span class="muted">미검증</span>';
+    return `
+      <tr class="fresh-row fresh-row-${esc(f.status)}">
+        <td><span class="type-badge type-${esc(f.type)}">${esc(f.type)}</span> ${esc(f.instanceName)}</td>
+        <td><span class="fresh-badge fresh-${esc(f.status)}">${esc(FRESHNESS_LABEL[f.status] ?? f.status)}</span></td>
+        <td>${last}</td>
+        <td class="num">${elapsed}</td>
+        <td>${verify}</td>
+      </tr>`;
+  }).join("");
+  box.innerHTML = `
+    <div class="table-scroll">
+      <table class="qtable freshness-table">
+        <thead><tr><th>인스턴스</th><th>신선도</th><th>마지막 백업</th><th>경과</th><th>복원 검증</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
 // ---------- 활동 그래프 (드래그 구간 선택) ----------
 async function loadActivity() {
   const now = new Date();
@@ -918,6 +969,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadMe();
   loadMcpCommand();
   loadInstances();
+  loadBackupFreshness(); // 함대 전체 백업 신선도 (D7) — 인스턴스 선택과 무관한 상시 뷰
   setupTabs();
   setupPresets();
   setupChartDrag();

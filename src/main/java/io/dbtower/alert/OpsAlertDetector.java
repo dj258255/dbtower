@@ -1,5 +1,7 @@
 package io.dbtower.alert;
 
+import io.dbtower.backup.BackupFreshness;
+import io.dbtower.backup.BackupFreshnessService;
 import io.dbtower.insight.QuerySnapshotRepository;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
@@ -26,8 +28,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * RegressionDetector가 "쿼리가 느려졌나"라면, 이쪽은 "DB가 위험한 상태에 있나"를 본다:
  * 장기 유휴 트랜잭션(락·VACUUM 차단), 복제 지연(읽기 정합성·페일오버 위험), 스냅샷 수집 정지
- * (관제 자체가 눈이 먼 상태). 새 operator 메서드를 만들지 않고 기존 진단 메서드
- * (activeSessions·replicationState)와 메타 DB(QuerySnapshotRepository)만 재사용한다.
+ * (관제 자체가 눈이 먼 상태), 백업 신선도 초과(D7 — 마지막 백업이 임계보다 오래됨). 새 operator
+ * 메서드를 만들지 않고 기존 진단 메서드(activeSessions·replicationState)와 메타 DB
+ * (QuerySnapshotRepository·BackupFreshnessService)만 재사용한다.
  *
  * 같은 신호로 알림이 반복되지 않게 신호별 쿨다운을 둔다(RegressionDetector와 동일 방식).
  */
@@ -42,6 +45,7 @@ public class OpsAlertDetector {
     private final DatabaseInstanceRepository instanceRepository;
     private final DbmsOperatorFactory operatorFactory;
     private final QuerySnapshotRepository snapshotRepository;
+    private final BackupFreshnessService backupFreshnessService;
     private final WebhookNotifier notifier;
 
     private final int idleTxnSeconds;
@@ -55,6 +59,7 @@ public class OpsAlertDetector {
     public OpsAlertDetector(DatabaseInstanceRepository instanceRepository,
                             DbmsOperatorFactory operatorFactory,
                             QuerySnapshotRepository snapshotRepository,
+                            BackupFreshnessService backupFreshnessService,
                             WebhookNotifier notifier,
                             @Value("${dbtower.ops-alert.idle-txn-seconds:300}") int idleTxnSeconds,
                             @Value("${dbtower.ops-alert.replication-lag-seconds:30}") int replicationLagSeconds,
@@ -63,6 +68,7 @@ public class OpsAlertDetector {
         this.instanceRepository = instanceRepository;
         this.operatorFactory = operatorFactory;
         this.snapshotRepository = snapshotRepository;
+        this.backupFreshnessService = backupFreshnessService;
         this.notifier = notifier;
         this.idleTxnSeconds = idleTxnSeconds;
         this.replicationLagSeconds = replicationLagSeconds;
@@ -88,6 +94,14 @@ public class OpsAlertDetector {
             } catch (Exception e) {
                 // 폴러가 죽으면 안 된다 — 감지 실패는 로그로만 남기고 넘어간다
                 log.warn("운영 감지 실패 instance={} cause={}", instance.getName(), e.getMessage());
+            }
+            // 백업 신선도(D7)는 대상 접속과 무관한 메타 DB 판정이라 별도 try로 분리한다.
+            // 위의 operator 기반 감지가 접속 실패로 죽어도 백업 경보는 계속 울려야 한다
+            // (대상이 죽어 있을 때가 "백업이 최신인가"가 가장 중요한 순간이다).
+            try {
+                findings.addAll(detectStaleBackup(instance, now));
+            } catch (Exception e) {
+                log.warn("백업 신선도 감지 실패 instance={} cause={}", instance.getName(), e.getMessage());
             }
             if (!findings.isEmpty()) {
                 notify(instance, findings);
@@ -158,6 +172,41 @@ public class OpsAlertDetector {
         }
         return List.of("스냅샷 수집 정지 — 최근 %d분간 신규 배치 0 (수집기 중단·접속 실패 의심, 회귀 감지 무력화)"
                 .formatted(snapshotStallMinutes));
+    }
+
+    /**
+     * 백업 신선도 초과 (Phase D7) — 마지막 성공 백업이 임계(freshness-hours)보다 오래됐으면 알린다.
+     * "백업했다"가 아니라 "지금 백업이 최신인가"를 상시 감시하는 DBA 일일 점검을 폴러로 옮긴 것.
+     *
+     * 판정 자체는 BackupFreshnessService(읽기·집계)에 있고, 여기서는 알림 정책만 정한다:
+     * - STALE(임계 초과): 항상 알린다. 마지막 백업의 복원 검증이 FAILED면 근거에 덧붙인다(복원 못 하는 백업은 백업이 아니다).
+     * - NO_BACKUP(성공 이력 없음): 사각지대라 알리되, 등록 직후라 아직 첫 백업 전인 인스턴스는 오탐이므로
+     *   createdAt이 임계 창보다 오래된 경우에만(스냅샷 정지 규칙과 같은 신규 오탐 방지).
+     * FRESH는 조용하다. 쿨다운 키는 신호 단위(backup-freshness) — 다른 운영 신호와 독립.
+     */
+    private List<String> detectStaleBackup(DatabaseInstance instance, LocalDateTime now) {
+        BackupFreshness f = backupFreshnessService.freshnessFor(instance);
+        if (f.status() == BackupFreshness.Status.FRESH) {
+            return List.of();
+        }
+        if (f.status() == BackupFreshness.Status.NO_BACKUP) {
+            LocalDateTime windowStart = now.minusHours(f.thresholdHours());
+            if (instance.getCreatedAt() != null && instance.getCreatedAt().isAfter(windowStart)) {
+                return List.of(); // 등록 직후 — 아직 첫 백업 전이라 판단 보류
+            }
+            if (!passCooldown("backup-freshness", instance, now)) {
+                return List.of();
+            }
+            return List.of("백업 없음 — 성공한 백업 이력이 없습니다 (임계 %dh, 3-2-1 사각지대)"
+                    .formatted(f.thresholdHours()));
+        }
+        // STALE
+        if (!passCooldown("backup-freshness", instance, now)) {
+            return List.of();
+        }
+        String verifyNote = "FAILED".equalsIgnoreCase(f.verifyStatus()) ? ", 복원 검증 FAILED" : "";
+        return List.of("백업 신선도 초과 — 마지막 성공 백업 %.1fh 전 (임계 %dh 초과%s)"
+                .formatted(f.elapsedHours(), f.thresholdHours(), verifyNote));
     }
 
     /** RegressionDetector와 동일한 쿨다운 — 같은 신호는 cooldownMinutes 안에 한 번만 알린다 */
