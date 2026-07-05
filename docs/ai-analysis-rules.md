@@ -109,7 +109,7 @@ db-hobby 8편에서 EXPLAIN을 직접 구현할 때, 어떤 접근 경로를 고
 
 | 기종 | 방법 | 추정 vs 실제 신호 | 주의 |
 |---|---|---|---|
-| MySQL 8.4 | `EXPLAIN ANALYZE FORMAT=JSON` (8.3+에서 JSON 지원 — actual_* 필드 파싱, 정규식 불필요) | estimated_rows vs actual_rows, filtered | actual_rows는 **loops당 평균** — 총량은 loops를 곱해야 한다 |
+| MySQL 8.4 | `EXPLAIN ANALYZE`(TREE 포맷) — **8.4는 EXPLAIN ANALYZE에 FORMAT=JSON을 아직 거부(ERROR 1235)하므로 TREE 실측**. `(actual time=.. rows=<actual_rows> loops=<loops>)` 파싱 | estimated_rows vs actual_rows, filtered | actual_rows는 **loops당 평균** — 총량은 loops를 곱해야 한다 |
 | PostgreSQL | `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` | Plan Rows vs Actual Rows, Rows Removed by Filter, Shared Hit/Read Blocks | Actual Rows·시간은 **loops당 평균**(공식 문서 명시) — Nested Loop 안쪽에서 특히 오독 주의 |
 | Oracle | 쿼리에 `/*+ gather_plan_statistics */` 힌트 후 같은 세션에서 `DBMS_XPLAN.DISPLAY_CURSOR(format=>'ALLSTATS LAST')` | E-Rows vs A-Rows | 같은 커넥션 필수(기존 explain의 ConnectionCallback 패턴). 필요한 V$ 권한은 SELECT_CATALOG_ROLE에 포함(모니터링 계정 이미 보유) |
 | SQL Server | `SET STATISTICS XML ON` 후 실행 — 플랜이 **별도 결과셋**(XML)으로 옴 | EstimateRows vs RunTimeInformation/ActualRows, 플랜 안의 missing index·경고(spill·implicit conversion) | JDBC에선 PreparedStatement가 아니라 plain Statement + getMoreResults()로 결과셋 순회 |

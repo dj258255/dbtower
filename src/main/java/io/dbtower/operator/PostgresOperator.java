@@ -319,6 +319,44 @@ public class PostgresOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * 실제 실행 계획 (D9) — EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON). 쿼리를 진짜 실행해
+     * Plan Rows(추정) vs Actual Rows(실측)·Rows Removed by Filter·버퍼 히트를 준다.
+     * Actual Rows·시간은 loops당 평균(공식 문서 명시) — 총량 환산(loops 곱)은 DeepAnalyzer가 한다.
+     *
+     * 안전: 트랜잭션을 열어 SET LOCAL statement_timeout으로 실행을 상한하고, 진단이 대상에 흔적을
+     * 남기지 않도록 마지막에 롤백한다(ANALYZE는 SELECT라 롤백해도 데이터 변화는 없지만 원칙적 정리).
+     * 한 커넥션에서 SET LOCAL → EXPLAIN을 이어야 하므로 ConnectionCallback을 쓴다.
+     */
+    @Override
+    public String explainAnalyze(String sql) {
+        requireSelect(sql);
+        try {
+            return jdbc().execute((org.springframework.jdbc.core.ConnectionCallback<String>) conn -> {
+                boolean autoCommit = conn.getAutoCommit();
+                conn.setAutoCommit(false);
+                try (java.sql.Statement st = conn.createStatement()) {
+                    // SET LOCAL은 트랜잭션 범위에서만 유효 — 진단이 끝나면 자동 소멸한다
+                    st.execute("SET LOCAL statement_timeout = " + DEEP_DIAGNOSIS_TIMEOUT_MS);
+                    StringBuilder sb = new StringBuilder();
+                    try (java.sql.ResultSet rs = st.executeQuery(
+                            "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + sql)) {
+                        while (rs.next()) {
+                            sb.append(rs.getString(1));
+                        }
+                    }
+                    return sb.toString();
+                } finally {
+                    conn.rollback();
+                    conn.setAutoCommit(autoCommit);
+                }
+            });
+        } catch (DataAccessException e) {
+            throw new OperatorException("PostgreSQL EXPLAIN ANALYZE 실패(타임아웃/권한 확인): "
+                    + e.getMessage(), e);
+        }
+    }
+
     /** 후보 인덱스 형식: table(col1, col2) — 식별자만 허용(인젝션 방어). 그룹1=테이블, 그룹2=컬럼목록 */
     private static final java.util.regex.Pattern CANDIDATE = java.util.regex.Pattern.compile(
             "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\(\\s*"

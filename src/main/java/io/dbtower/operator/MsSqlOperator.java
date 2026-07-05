@@ -3,9 +3,13 @@ package io.dbtower.operator;
 import io.dbtower.registry.DatabaseInstance;
 import org.springframework.dao.DataAccessException;
 
+import org.springframework.jdbc.core.ConnectionCallback;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -493,6 +497,54 @@ public class MsSqlOperator extends AbstractJdbcOperator {
             }, "%" + prefix + "%");
         } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 실행계획 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 실제 실행 계획 (D9) — SET STATISTICS XML ON 후 쿼리를 실행하면, 실행 계획이 쿼리 결과와는
+     * <b>별도 결과셋</b>(XML)으로 따라온다. 그래서 PreparedStatement가 아니라 plain Statement로 실행하고
+     * getMoreResults()로 결과셋을 순회해 ShowPlanXML을 찾는다(PreparedStatement는 이 부가 결과셋을 놓치는 함정).
+     * XML 안에 EstimateRows(추정) vs RunTimeInformation ActualRows(실측), missing index·경고(CONVERT_IMPLICIT 등)가 담긴다.
+     *
+     * 안전: setQueryTimeout으로 실행을 상한하고, 마지막에 SET STATISTICS XML OFF로 세션 상태를 되돌린다. SELECT 전용.
+     */
+    @Override
+    public String explainAnalyze(String sql) {
+        requireSelect(sql);
+        try {
+            return jdbc().execute((ConnectionCallback<String>) conn -> {
+                try (Statement st = conn.createStatement()) {
+                    st.setQueryTimeout((int) (DEEP_DIAGNOSIS_TIMEOUT_MS / 1000));
+                    st.execute("SET STATISTICS XML ON");
+                    StringBuilder xml = new StringBuilder();
+                    try {
+                        boolean hasResult = st.execute(sql);
+                        while (true) {
+                            if (hasResult) {
+                                try (ResultSet rs = st.getResultSet()) {
+                                    while (rs.next()) {
+                                        String val = rs.getString(1);
+                                        // 실행 계획 결과셋은 ShowPlanXML을 담은 단일 컬럼으로 온다
+                                        if (val != null && val.contains("ShowPlanXML")) {
+                                            xml.append(val);
+                                        }
+                                    }
+                                }
+                            } else if (st.getUpdateCount() == -1) {
+                                break; // 결과셋도 갱신카운트도 없으면 끝
+                            }
+                            hasResult = st.getMoreResults();
+                        }
+                    } finally {
+                        st.execute("SET STATISTICS XML OFF");
+                    }
+                    return xml.length() > 0 ? xml.toString()
+                            : "실제 실행 계획(ShowPlanXML)을 결과셋에서 찾지 못했습니다";
+                }
+            });
+        } catch (DataAccessException e) {
+            throw new OperatorException("MSSQL 실제 실행계획(STATISTICS XML) 실패(타임아웃/권한 확인): "
+                    + e.getMessage(), e);
         }
     }
 }

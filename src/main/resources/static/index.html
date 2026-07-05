@@ -109,6 +109,7 @@
             <button id="btn-explain" class="btn btn-primary btn-small">실행계획 보기</button>
             <button id="btn-ai" class="btn btn-dark btn-small">AI 분석</button>
             <button id="btn-advisor" class="btn btn-small">인덱스 제안</button>
+            <button id="btn-deep" class="btn btn-small">심층 진단</button>
             <button id="btn-inquiry" class="btn btn-small">DB팀에 문의</button>
           </span>
         </div>
@@ -132,6 +133,10 @@
         <div class="detail-section" id="ai-section" hidden>
           <h3>AI 1차 분석 <span class="hint">(docs/ai-analysis-rules.md 판단 기준 기반)</span></h3>
           <pre id="detail-ai" class="codeblock ai"></pre>
+        </div>
+        <div class="detail-section" id="deep-section" hidden>
+          <h3>심층 원인 진단 <span class="hint">(실제 실행 계획으로 "왜 인덱스를 못 타나"를 짚습니다 — 쿼리를 실제 실행하므로 ADMIN·타임아웃 적용. 파라미터 자리는 실제 값으로 채우세요)</span></h3>
+          <div id="deep-result" class="findings"></div>
         </div>
         <div class="detail-section" id="inquiry-section" hidden>
           <h3>DB팀 문의 <span class="hint">(현재 패널의 쿼리·실행계획·규칙 지적·AI 분석을 함께 첨부합니다)</span></h3>

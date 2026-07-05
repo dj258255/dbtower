@@ -218,6 +218,23 @@ public class MongoOperator implements DbmsOperator {
      */
     @Override
     public String explain(String commandJson) {
+        return runExplain(commandJson, "queryPlanner");
+    }
+
+    /**
+     * 실제 실행 계획 (D9) — verbosity를 executionStats로 올려 explain을 돌린다. queryPlanner(추정)와 달리
+     * executionStats는 후보 플랜을 <b>실제로 실행</b>해 totalDocsExamined·totalKeysExamined·nReturned를 준다.
+     * docsExamined ÷ nReturned(스캔 낭비 비율)로 "인덱스를 못 타 훑는 정도"를 정량화한다(DeepAnalyzer가 판정).
+     *
+     * 안전: 실제 실행이므로 maxTimeMS를 명령에 실어 실행을 상한한다. 읽기 명령만 허용(EXPLAINABLE — requireSelect와 같은 원칙).
+     */
+    @Override
+    public String explainAnalyze(String commandJson) {
+        return runExplain(commandJson, "executionStats");
+    }
+
+    /** explain 공통 — 명령 JSON 검증 후 지정 verbosity로 runCommand. executionStats는 실제 실행이라 maxTimeMS로 상한. */
+    private String runExplain(String commandJson, String verbosity) {
         Document command;
         try {
             command = Document.parse(commandJson);
@@ -229,10 +246,12 @@ public class MongoOperator implements DbmsOperator {
         if (!EXPLAINABLE.contains(first)) {
             throw new IllegalArgumentException("explain은 읽기 명령만 허용합니다: " + EXPLAINABLE);
         }
+        Document explainCmd = new Document("explain", command).append("verbosity", verbosity);
+        if ("executionStats".equals(verbosity)) {
+            explainCmd.append("maxTimeMS", DEEP_DIAGNOSIS_TIMEOUT_MS);
+        }
         try {
-            return withClient(client -> db(client)
-                    .runCommand(new Document("explain", command).append("verbosity", "queryPlanner"))
-                    .toJson(PRETTY));
+            return withClient(client -> db(client).runCommand(explainCmd).toJson(PRETTY));
         } catch (Exception e) {
             throw new OperatorException("MongoDB 실행계획 조회 실패: " + e.getMessage(), e);
         }

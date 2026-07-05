@@ -544,6 +544,8 @@ function openDetail(query) {
   $("#advisor-section").hidden = true;
   $("#advisor-columns").value = "";
   $("#advisor-result").innerHTML = "";
+  $("#deep-section").hidden = true;
+  $("#deep-result").innerHTML = "";
   $("#inquiry-section").hidden = true;
   $("#inquiry-note").value = "";
   $("#inquiry-result").innerHTML = "";
@@ -653,6 +655,51 @@ async function runIndexAdvisor() {
     if (data.afterPlan) {
       html += `<h3>가상 인덱스 적용 후 실행계획</h3><pre class="codeblock">${esc(data.afterPlan)}</pre>`;
     }
+    result.innerHTML = html;
+  } finally { btn.classList.remove("loading"); }
+}
+
+// 심층 원인 진단 (D9) — 실제 실행 계획으로 카디널리티 괴리·근본원인을 짚는다.
+// explain(추정)과 달리 쿼리를 실제 실행하므로 ADMIN 전용(서버가 인가). 파라미터 자리는 실제 값이어야 한다.
+async function runDeepDiagnose() {
+  const sql = $("#detail-sql").value.trim();
+  if (!sql) return;
+  const btn = $("#btn-deep");
+  btn.classList.add("loading");
+  $("#deep-section").hidden = false;
+  const result = $("#deep-result");
+  result.innerHTML = '<div class="muted">실제 실행 계획으로 진단 중... (쿼리를 실제 실행 — 타임아웃 적용)</div>';
+  try {
+    let data;
+    try {
+      data = await api(`/api/instances/${state.instance.id}/deep-diagnose`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
+      });
+    } catch (e) {
+      result.innerHTML = `<div class="finding-item">진단 실패: ${esc(e.message)}</div>`;
+      return;
+    }
+    let html = "";
+    if (data.worstGap) {
+      const g = data.worstGap;
+      html += `<div class="finding-item"><strong>카디널리티 오추정</strong> — ${esc(g.node)}: `
+        + `추정 ${fmtNum(g.estimatedRows, 0)}행 vs 실제 ${fmtNum(g.actualRows, 0)}행 `
+        + `(약 ${fmtNum(g.ratio)}배 괴리, loops=${fmtNum(g.loops, 0)})</div>`;
+    } else {
+      html += `<div class="muted">추정·실제 행수 괴리(10배+) 지점 없음 — 카디널리티는 대체로 맞음.</div>`;
+    }
+    if ((data.rootCauses ?? []).length) {
+      html += (data.rootCauses).map((c) =>
+        `<div class="finding-item"><span class="advisor-status unsupported">${esc(c.cause)}</span>`
+        + `<div class="advisor-finding-detail">신호: ${esc(c.signal)}</div>`
+        + `<div class="advisor-finding-reco">${esc(c.detail)}</div></div>`).join("");
+    } else {
+      html += `<div class="muted">근본원인 규칙 매칭 없음 — 형변환·컬럼함수·선두 누락 신호가 발견되지 않음.</div>`;
+    }
+    if ((data.notes ?? []).length) {
+      html += `<div class="advisor-note muted">${data.notes.map(esc).join(" · ")}</div>`;
+    }
+    html += `<h3>실제 실행 계획</h3><pre class="codeblock">${esc(data.plan)}</pre>`;
     result.innerHTML = html;
   } finally { btn.classList.remove("loading"); }
 }
@@ -1286,6 +1333,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // "인덱스 제안" 버튼은 섹션을 펼치고, 섹션 안의 "시뮬레이션" 버튼이 실제 호출한다(후보 컬럼 입력이 필요해서)
   $("#btn-advisor").addEventListener("click", () => { $("#advisor-section").hidden = false; $("#advisor-columns").focus(); });
   $("#btn-advisor-run").addEventListener("click", runIndexAdvisor);
+  $("#btn-deep").addEventListener("click", runDeepDiagnose);
   $("#btn-inquiry").addEventListener("click", runInquiry);
   $("#btn-schema-diff").addEventListener("click", runSchemaDiff);
   $("#btn-param-diff").addEventListener("click", runParamDiff);

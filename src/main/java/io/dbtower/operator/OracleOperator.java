@@ -120,6 +120,46 @@ public class OracleOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * 실제 실행 계획 (D9) — 쿼리에 /*+ gather_plan_statistics *&#47; 힌트를 주입해 실행(행을 실제로 소진)한 뒤,
+     * 같은 커넥션에서 DBMS_XPLAN.DISPLAY_CURSOR(NULL,NULL,'ALLSTATS LAST')로 E-Rows(추정) vs A-Rows(실측)를 읽는다.
+     * 커서 통계는 세션에 매여 있어 실행과 조회가 같은 커넥션이어야 한다(기존 explain의 ConnectionCallback 패턴).
+     * 필요한 V$ 뷰 권한은 SELECT_CATALOG_ROLE로 충분(모니터링 계정 이미 보유). Oracle A-Rows는 이미 누적 총량이라
+     * loops(Starts)를 곱하지 않는다 — MySQL/PG의 loops당 평균과 다르다(DeepAnalyzer가 기종별로 구분).
+     *
+     * 안전: setQueryTimeout으로 실행을 상한한다. SELECT 전용(requireSelect).
+     */
+    @Override
+    public String explainAnalyze(String sql) {
+        requireSelect(sql);
+        String hinted = sql.replaceFirst("(?i)^\\s*select", "SELECT /*+ gather_plan_statistics */");
+        try {
+            return jdbc().execute((ConnectionCallback<String>) conn -> {
+                try (Statement stmt = conn.createStatement()) {
+                    stmt.setQueryTimeout((int) (DEEP_DIAGNOSIS_TIMEOUT_MS / 1000));
+                    // 실제 실행 — 행을 끝까지 소진해야 실행 통계가 커서에 쌓인다
+                    try (ResultSet rs = stmt.executeQuery(hinted)) {
+                        while (rs.next()) {
+                            // 통계 수집 목적의 소진 — 값은 쓰지 않는다
+                        }
+                    }
+                    StringBuilder plan = new StringBuilder();
+                    try (ResultSet rs = stmt.executeQuery(
+                            "SELECT plan_table_output FROM TABLE("
+                                    + "DBMS_XPLAN.DISPLAY_CURSOR(NULL, NULL, 'ALLSTATS LAST'))")) {
+                        while (rs.next()) {
+                            plan.append(rs.getString(1)).append('\n');
+                        }
+                    }
+                    return plan.toString();
+                }
+            });
+        } catch (DataAccessException e) {
+            throw new OperatorException("Oracle 실제 실행계획(DISPLAY_CURSOR) 실패"
+                    + "(SELECT_CATALOG_ROLE·타임아웃 확인): " + e.getMessage(), e);
+        }
+    }
+
     @Override
     public List<TableStat> tableStats(int limit) {
         // num_rows는 옵티마이저 통계 기준이라 통계 수집(DBMS_STATS) 이후에만 채워진다
