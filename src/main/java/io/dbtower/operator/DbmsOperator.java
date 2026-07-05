@@ -13,6 +13,12 @@ import java.util.List;
  */
 public interface DbmsOperator {
 
+    /**
+     * 심층 진단(explainAnalyze)이 실제로 쿼리를 실행할 때 거는 안전 타임아웃(ms).
+     * 진단 도구가 부하 유발자가 되지 않도록 전 기종 공통 상한 — 각 구현이 기종별 타임아웃 수단으로 적용한다.
+     */
+    long DEEP_DIAGNOSIS_TIMEOUT_MS = 10_000L;
+
     /** 연결 확인 + 버전 + 응답시간 */
     HealthStatus health();
 
@@ -22,8 +28,25 @@ public interface DbmsOperator {
     /** 느린 쿼리 상위 N개 */
     List<SlowQuery> slowQueries(int limit);
 
-    /** SELECT 쿼리의 실행계획(JSON/XML 문자열) */
+    /** SELECT 쿼리의 실행계획(JSON/XML 문자열) — 옵티마이저의 <b>추정</b> 계획(쿼리를 실행하지 않음) */
     String explain(String sql);
+
+    /**
+     * 심층 원인 진단용 <b>실제 실행 계획</b> (D9) — explain()이 추정만 보는 것과 달리,
+     * 쿼리를 진짜 실행해 추정 행수 vs 실제 행수의 괴리(카디널리티 오추정)를 드러낸다.
+     * "무엇이 느린가"를 넘어 "왜 인덱스를 못 타나"를 짚는 근본원인 진단의 원천 데이터다.
+     *
+     * 기종별 획득 방식(docs/ai-analysis-rules.md "심층 원인 규칙 (D9)" 절이 스펙):
+     * MySQL=EXPLAIN ANALYZE FORMAT=JSON(actual_* 필드), PostgreSQL=EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON),
+     * Oracle=/*+ gather_plan_statistics *&#47; 후 DBMS_XPLAN.DISPLAY_CURSOR('ALLSTATS LAST')(같은 커넥션),
+     * SQL Server=SET STATISTICS XML ON(플랜이 별도 결과셋), MongoDB=explain verbosity executionStats.
+     *
+     * <b>실제로 실행하므로 위험하다</b> — 반드시 SELECT 전용(requireSelect)이고 타임아웃을 건다
+     * (MySQL MAX_EXECUTION_TIME 힌트·PG SET LOCAL statement_timeout·Mongo maxTimeMS·나머지 setQueryTimeout).
+     * 진단 도구가 부하 유발자가 되면 안 된다. 권한·버전 미달로 실제 계획을 못 얻으면 OperatorException으로
+     * 실제 원인을 그대로 올린다(추정 계획으로 몰래 대체하지 않는다 — 위장 금지). 반환은 기종 원문(JSON/텍스트/XML).
+     */
+    String explainAnalyze(String sql);
 
     /** 테이블별 행수·데이터/인덱스 크기 — 용량 추이와 튜닝 판단의 기초 자료 */
     List<TableStat> tableStats(int limit);

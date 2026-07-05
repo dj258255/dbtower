@@ -72,6 +72,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/instances/*/backup").hasRole("ADMIN")
                         // 세션 종료(kill)는 대상 DB의 실행 세션을 끊는 파괴적 행위 — 백업과 같은 ADMIN 경계
                         .requestMatchers(HttpMethod.POST, "/api/instances/*/sessions/*/kill").hasRole("ADMIN")
+                        // 심층 진단(D9)은 explain(추정)과 달리 대상 DB에서 쿼리를 실제로 실행한다(타임아웃은 걸지만
+                        // 워크로드를 돌리는 행위) — "실행하는 행위는 ADMIN" 원칙에 따라 진단이지만 ADMIN 경계에 둔다.
+                        .requestMatchers(HttpMethod.POST, "/api/instances/*/deep-diagnose").hasRole("ADMIN")
                         // 복원 검증도 대상 DB에 임시 DB를 만들고 지우는 행위라 백업과 같은 ADMIN 경계
                         .requestMatchers(HttpMethod.POST, "/api/instances/*/backup/verify").hasRole("ADMIN")
                         // 온라인 스키마 변경(gh-ost, B4)은 실제 테이블 구조를 바꾸는 가장 파괴적 행위 — ADMIN만.

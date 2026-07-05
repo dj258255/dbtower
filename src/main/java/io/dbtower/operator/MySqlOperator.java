@@ -285,6 +285,41 @@ public class MySqlOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 실제 실행 계획 (D9) — EXPLAIN ANALYZE. 쿼리를 진짜 실행하며 추정(cost=.. rows=EST) 옆에
+     * 실측(actual time=.. rows=ACT loops=L)을 함께 준다. actual rows는 loops당 평균이라 총량은
+     * loops를 곱해야 한다 — 이 오독은 DeepAnalyzer가 처리한다(TREE 출력을 정규식으로 파싱).
+     *
+     * 주의: EXPLAIN ANALYZE는 MySQL 8.4에서도 TREE 포맷만 지원한다. FORMAT=JSON은
+     * "doesn't yet support 'EXPLAIN ANALYZE with JSON format'"로 거부되므로(실측 확인, 2026-07-05)
+     * ai-analysis-rules.md의 JSON 표기와 달리 여기서는 실제로 동작하는 TREE 포맷을 쓴다(위장 대신 실동작).
+     *
+     * 안전: SELECT 전용 힌트 MAX_EXECUTION_TIME(ms)를 SELECT 바로 뒤에 주입해 실행을 상한한다
+     * (이 힌트는 read-only SELECT에만 먹는다 — requireSelect가 선행 전제). 여러 행으로 와도 줄바꿈으로 합친다.
+     */
+    @Override
+    public String explainAnalyze(String sql) {
+        requireSelect(sql);
+        // "select" 다음 위치에 옵티마이저 힌트를 끼운다: SELECT /*+ MAX_EXECUTION_TIME(ms) */ ...
+        String timed = sql.replaceFirst("(?i)^\\s*select",
+                "SELECT /*+ MAX_EXECUTION_TIME(" + DEEP_DIAGNOSIS_TIMEOUT_MS + ") */");
+        try {
+            return jdbc().query("EXPLAIN ANALYZE " + timed, rs -> {
+                StringBuilder sb = new StringBuilder();
+                while (rs.next()) {
+                    if (sb.length() > 0) {
+                        sb.append('\n');
+                    }
+                    sb.append(rs.getString(1));
+                }
+                return sb.toString();
+            });
+        } catch (DataAccessException e) {
+            throw new OperatorException("MySQL EXPLAIN ANALYZE 실패(8.0.18+ 필요·권한/타임아웃 확인): "
+                    + e.getMessage(), e);
+        }
+    }
+
+    /**
      * 대기 이벤트 — performance_schema.events_waits_summary_global_by_event_name (서버 기동 이후 누적).
      *
      * 보이는 범위는 setup_instruments에 달려 있다: 기본값은 wait/io·wait/lock만 켜져 있고

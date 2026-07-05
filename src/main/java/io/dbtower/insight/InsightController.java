@@ -1,8 +1,12 @@
 package io.dbtower.insight;
 
 import io.dbtower.analysis.AiAnalyzer;
+import io.dbtower.analysis.DeepAnalyzer;
+import io.dbtower.analysis.DeepDiagnosis;
 import io.dbtower.analysis.RuleBasedAnalyzer;
+import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
+import io.dbtower.operator.SchemaSnapshot;
 import io.dbtower.operator.QueryStat;
 import io.dbtower.operator.SessionInfo;
 import io.dbtower.operator.SlowQuery;
@@ -25,18 +29,21 @@ public class InsightController {
     private final ComparisonService comparisonService;
     private final RuleBasedAnalyzer analyzer;
     private final AiAnalyzer aiAnalyzer;
+    private final DeepAnalyzer deepAnalyzer;
     private final QuerySnapshotRepository snapshotRepository;
     private final BaselineService baselineService;
 
     public InsightController(RegistryService registryService, DbmsOperatorFactory operatorFactory,
                              ComparisonService comparisonService, RuleBasedAnalyzer analyzer,
-                             AiAnalyzer aiAnalyzer, QuerySnapshotRepository snapshotRepository,
+                             AiAnalyzer aiAnalyzer, DeepAnalyzer deepAnalyzer,
+                             QuerySnapshotRepository snapshotRepository,
                              BaselineService baselineService) {
         this.registryService = registryService;
         this.operatorFactory = operatorFactory;
         this.comparisonService = comparisonService;
         this.analyzer = analyzer;
         this.aiAnalyzer = aiAnalyzer;
+        this.deepAnalyzer = deepAnalyzer;
         this.snapshotRepository = snapshotRepository;
         this.baselineService = baselineService;
     }
@@ -161,6 +168,30 @@ public class InsightController {
     public io.dbtower.operator.IndexAdvice indexAdvisor(@PathVariable Long id,
                                                         @RequestBody IndexAdviceRequest req) {
         return operatorFactory.create(registryService.findById(id)).adviseIndex(req.sql(), req.columns());
+    }
+
+    /**
+     * 심층 원인 진단 (D9) — explain(추정)을 넘어 <b>실제 실행 계획</b>으로 "왜 인덱스를 못 타나"를 짚는다.
+     * 추정 vs 실제 행수 괴리(카디널리티 오추정)의 최하위 노드 + 근본원인 5종(형변환·컬럼함수·앞와일드카드·
+     * 복합 선두 누락·통계 노후)을 돌려준다. describeSchema로 컬럼 타입·인덱스 선두를 대조하며, 스키마
+     * 조회가 실패해도 계획 기반 판정은 진행한다(스키마 없으면 형변환·선두 판정만 생략, 안내에 명시).
+     *
+     * <b>인가: ADMIN.</b> explain·index-advisor는 추정만 하고 쿼리를 실행하지 않아 VIEWER지만, 이 진단은
+     * 대상 DB에서 쿼리를 <b>실제로 실행</b>한다(타임아웃은 걸지만 워크로드를 돌리는 행위). SecurityConfig의
+     * 원칙("대상 DB를 바꾸거나 실행하는 행위는 ADMIN")에 따라 세션 kill·백업과 같은 ADMIN 경계에 둔다.
+     */
+    @PostMapping("/deep-diagnose")
+    public DeepDiagnosis deepDiagnose(@PathVariable Long id, @RequestBody ExplainRequest req) {
+        DatabaseInstance instance = registryService.findById(id);
+        DbmsOperator operator = operatorFactory.create(instance);
+        String plan = operator.explainAnalyze(req.sql());
+        SchemaSnapshot schema;
+        try {
+            schema = operator.describeSchema();
+        } catch (RuntimeException e) {
+            schema = null; // 스키마 조회 실패는 치명적이지 않다 — 계획 기반 판정만으로 진행
+        }
+        return deepAnalyzer.diagnose(instance.getType(), req.sql(), plan, schema);
     }
 
     /**
