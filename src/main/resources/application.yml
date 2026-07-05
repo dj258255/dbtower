@@ -52,6 +52,9 @@ dbtower:
     # mongorestore는 --config /dev/stdin(비밀번호)이 stdin을 쓰므로 아카이브는 docker cp로 넣고 파일 경로로 준다
     mongo-restore-command: "docker exec -i dbtower-mongo mongorestore --host localhost --port 27017 -u {user} --authenticationDatabase admin --config /dev/stdin"
     poll-ms: 30000
+    # 백업 신선도 임계(D7) — 마지막 성공 백업이 이 시간을 넘기면 STALE로 보고 경보한다.
+    # DBA 일일 점검("모든 DB가 최근에 백업됐나")의 "최근"을 정의. 기본 24h(일 1회 백업 전제).
+    freshness-hours: 24
   online-ddl:
     # 온라인 스키마 변경(gh-ost, MySQL 전용, B4). 대형 테이블 ALTER를 락 최소화로 수행한다.
     # 기본은 dry-run(noop) — 실제 변경은 요청 body의 execute=true를 명시할 때만.
