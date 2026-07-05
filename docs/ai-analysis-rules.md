@@ -98,6 +98,41 @@ db-hobby 8편에서 EXPLAIN을 직접 구현할 때, 어떤 접근 경로를 고
 행수·rows examined와 함께 제시한다. 회귀 감지(확장3)가 "rows/call 폭증"을 별도 신호로 두는 것도
 같은 맥락 — 실행계획 텍스트만으로는 선택도 변화를 못 보니, 실제로 읽은 행수의 변화를 함께 본다.
 
+## 심층 원인 규칙 (D9) — "무엇이 느린가"를 넘어 "왜 인덱스를 못 타나"
+
+위 기종별 규칙은 **증상**(풀스캔·정렬)을 잡는다. 여기서부터는 **근본 원인**이다.
+핵심 열쇠는 하나 — **옵티마이저의 추정 행수 vs 실제 행수의 괴리(카디널리티 오추정)**.
+추정이 크게 틀리면 옵티마이저는 "그 추정 기준으로는 합리적인" 나쁜 플랜을 고른다.
+느린 노드가 아니라, **추정과 실제가 크게(10배+) 갈라지는 가장 아래(최하위) 노드**가 원인이다.
+
+### 추정 vs 실제를 보는 법 (기종별 — 실제 실행 계획 필요)
+
+| 기종 | 방법 | 추정 vs 실제 신호 | 주의 |
+|---|---|---|---|
+| MySQL 8.4 | `EXPLAIN ANALYZE FORMAT=JSON` (8.3+에서 JSON 지원 — actual_* 필드 파싱, 정규식 불필요) | estimated_rows vs actual_rows, filtered | actual_rows는 **loops당 평균** — 총량은 loops를 곱해야 한다 |
+| PostgreSQL | `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` | Plan Rows vs Actual Rows, Rows Removed by Filter, Shared Hit/Read Blocks | Actual Rows·시간은 **loops당 평균**(공식 문서 명시) — Nested Loop 안쪽에서 특히 오독 주의 |
+| Oracle | 쿼리에 `/*+ gather_plan_statistics */` 힌트 후 같은 세션에서 `DBMS_XPLAN.DISPLAY_CURSOR(format=>'ALLSTATS LAST')` | E-Rows vs A-Rows | 같은 커넥션 필수(기존 explain의 ConnectionCallback 패턴). 필요한 V$ 권한은 SELECT_CATALOG_ROLE에 포함(모니터링 계정 이미 보유) |
+| SQL Server | `SET STATISTICS XML ON` 후 실행 — 플랜이 **별도 결과셋**(XML)으로 옴 | EstimateRows vs RunTimeInformation/ActualRows, 플랜 안의 missing index·경고(spill·implicit conversion) | JDBC에선 PreparedStatement가 아니라 plain Statement + getMoreResults()로 결과셋 순회 |
+| MongoDB | `explain`을 verbosity `executionStats`로 | totalDocsExamined ÷ nReturned 비율(스캔 낭비), totalKeysExamined vs totalDocsExamined, rejectedPlans | executionStats는 실제 실행 — maxTimeMS 필수 |
+
+**실행 안전(전 기종 공통)**: 실제 실행 계획은 쿼리를 진짜 실행한다. SELECT 전용(기존 requireSelect) +
+타임아웃 필수 — MySQL은 `/*+ MAX_EXECUTION_TIME(ms) */`(SELECT 전용 힌트), PG는 트랜잭션 내
+`SET LOCAL statement_timeout`, Mongo는 maxTimeMS, Oracle/MSSQL은 JDBC setQueryTimeout.
+진단 도구가 부하 유발자가 되면 안 된다.
+
+### 인덱스 무력화 근본원인 5종 (증상이 아니라 원인)
+
+| 원인 | 왜 인덱스를 못 타나 | 감지 신호 | 특히 심한 기종 |
+|---|---|---|---|
+| 암시적 형변환 | 문자열 컬럼 = 숫자 비교 시 컬럼 전체를 변환해야 해서 seek이 scan이 된다 ('1', ' 1', '1a'가 모두 1로 변환되므로 인덱스 순서를 못 쓴다) | 컬럼 타입 vs 비교값 타입 불일치. MSSQL은 플랜에 CONVERT_IMPLICIT 경고 | MySQL·MSSQL (VARCHAR 컬럼에 INT 파라미터가 단골) |
+| 컬럼에 함수/표현식 | LEFT(col), YEAR(dt) 등 — 옵티마이저가 표현식 결과를 미리 알 수 없어 인덱스 무력화 | WHERE 절에서 컬럼이 함수 안에 있는 패턴 | 전 기종 (해법: 함수를 상수 쪽으로, 또는 함수 기반 인덱스) |
+| 통계 노후 | 옵티마이저가 옛날 행수·분포로 추정 → 잘못된 플랜 | 추정 vs 실제 괴리 + 통계 수집 시각 오래됨(D2 stale-statistics Advisor와 짝) | 전 기종 |
+| 낮은 선택도 / 다중 컬럼 상관 | 결과가 테이블 대부분이면 옵티마이저가 일부러 풀스캔(정상). 다중 컬럼 조합 추정은 단일 컬럼 통계로는 자주 틀림(PG는 CREATE STATISTICS로 보정) | 추정 vs 실제 괴리가 조인·GROUP BY 노드에서 발생 | PG(n_distinct 조합), 전 기종 |
+| 복합 인덱스 선두 누락 / 앞 와일드카드 | B+Tree는 선두 컬럼부터 시작점을 잡는다 — 선두 없이 뒷 컬럼만 조건이면 못 탄다. LIKE '%x'도 동일 원리(위 MySQL 절 참고) | 인덱스 정의(describeSchema) vs WHERE 컬럼 대조 | 전 기종 |
+
+이 표가 D3(자연어 진단)와 AI 1차 분석의 프롬프트 근거가 된다 — AI는 "풀스캔입니다"에서 멈추지 말고,
+추정 vs 실제 괴리와 위 5종 원인 중 어디에 해당하는지까지 근거를 들어 짚어야 한다. 근거가 없으면 모른다고 답한다.
+
 ## AI 1차 분석 프롬프트에서 이 문서의 역할
 
 확장3의 AiAnalyzer는 이 문서 전체를 system 프롬프트로 넣고 "반드시 이 기준에 근거해서만 판정하고,
