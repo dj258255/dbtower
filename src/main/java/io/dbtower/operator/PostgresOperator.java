@@ -170,6 +170,57 @@ public class PostgresOperator extends AbstractJdbcOperator {
         return Math.round(v * 100.0) / 100.0;
     }
 
+    /**
+     * 파티션 조회 (D5) — 선언적 파티셔닝(PostgreSQL 10+) 기준. pg_partitioned_table(부모)에서 파티션
+     * 전략(partstrat: r/l/h)을, pg_inherits로 자식 파티션을, pg_class에서 자식별 이름·경계·행수·크기를 모은다.
+     * boundary는 pg_get_expr(relpartbound)로 "FOR VALUES FROM ... TO ..." 같은 실제 경계 정의를 얻는다.
+     * 상속(테이블 상속)을 이용한 구식 파티셔닝은 pg_partitioned_table에 없어 잡히지 않는다(선언적만). 읽기 전용.
+     */
+    @Override
+    public List<PartitionInfo> partitions(int limit) {
+        String sql = """
+                SELECT parent.relname AS table_name,
+                       child.relname  AS partition_name,
+                       pt.partstrat   AS strat,
+                       pg_get_partkeydef(parent.oid)          AS part_expr,
+                       pg_get_expr(child.relpartbound, child.oid) AS boundary,
+                       child.reltuples::bigint                AS row_count,
+                       pg_total_relation_size(child.oid)      AS size_bytes
+                FROM pg_partitioned_table pt
+                JOIN pg_class parent   ON parent.oid = pt.partrelid
+                JOIN pg_inherits inh   ON inh.inhparent = parent.oid
+                JOIN pg_class child    ON child.oid = inh.inhrelid
+                JOIN pg_namespace ns   ON ns.oid = parent.relnamespace
+                WHERE ns.nspname NOT IN ('pg_catalog', 'information_schema')
+                ORDER BY parent.relname, child.relname
+                LIMIT ?
+                """;
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new PartitionInfo(
+                            rs.getString("table_name"),
+                            rs.getString("partition_name"),
+                            partStrat(rs.getString("strat")),
+                            rs.getString("part_expr"),
+                            rs.getString("boundary"),
+                            rs.getObject("row_count", Long.class),
+                            rs.getObject("size_bytes", Long.class)),
+                    limit);
+        } catch (DataAccessException e) {
+            throw new OperatorException("PostgreSQL 파티션 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /** pg_partitioned_table.partstrat 한 글자 코드를 사람이 읽을 이름으로 (r=RANGE, l=LIST, h=HASH). */
+    private static String partStrat(String code) {
+        return switch (code == null ? "" : code) {
+            case "r" -> "RANGE";
+            case "l" -> "LIST";
+            case "h" -> "HASH";
+            default -> code;
+        };
+    }
+
     @Override
     public List<SlowQuery> slowQueries(int limit) {
         // PG는 로그 파일 파싱 대신 pg_stat_statements의 평균 수행시간으로 판정한다

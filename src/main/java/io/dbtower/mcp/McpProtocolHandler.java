@@ -157,6 +157,15 @@ public final class McpProtocolHandler {
                 schema(Map.of("instanceId", intProp("대상 인스턴스 id"))),
                 args -> get("/api/instances/" + args.get("instanceId").asLong() + "/schema")));
 
+        tools.put("partitions", new Tool(
+                "테이블 파티션 목록 (D5) — 테이블·파티션명·방식(RANGE/LIST/HASH)·경계·행수·크기. "
+                        + "MySQL/PostgreSQL/Oracle/SQL Server는 각 카탈로그를 통합한 뷰, MongoDB는 파티션 개념이 없어 UNSUPPORTED. "
+                        + "파티션 없는 테이블/DB는 빈 결과. 조회 전용 — 파티션 생성·삭제는 하지 않는다.",
+                schema(Map.of("instanceId", intProp("대상 인스턴스 id"),
+                        "limit", intProp("최대 개수 (기본 50)"))),
+                args -> get("/api/instances/" + args.get("instanceId").asLong()
+                        + "/partitions?limit=" + optInt(args, "limit", 50))));
+
         tools.put("schema_diff", new Tool(
                 "두 인스턴스 스키마 비교 (B7) — 같은 역할의 두 장비(스테이징 vs 운영)에서 '왜 저 장비만 다르지'를 추적한다. "
                         + "추가(right에만)/삭제(left에만)/변경된 테이블·컬럼·인덱스. 기종이 다르면 타입 표기 차이 경고 포함.",

@@ -157,6 +157,60 @@ public class MsSqlOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 파티션 조회 (D5) — SQL Server는 파티션 함수(RANGE LEFT/RIGHT)와 파티션 스킴 기반이다.
+     * sys.partitions는 모든 테이블에 최소 1행이 있으므로, 파티션 스킴(data_space type='PS')에 올라탄
+     * 인덱스만 골라 진짜 파티션 테이블만 남긴다. 파티션은 이름이 아니라 번호라 partitionName은 "partition N".
+     * boundary는 sys.partition_range_values에서 경계값을(RANGE RIGHT면 boundary_id=번호-1, LEFT면 번호),
+     * 파티션 컬럼은 partition_ordinal=1인 인덱스 컬럼에서 얻는다. 읽기 전용.
+     */
+    @Override
+    public List<PartitionInfo> partitions(int limit) {
+        String sql = """
+                SELECT TOP (?)
+                       t.name AS table_name,
+                       p.partition_number AS partition_number,
+                       pf.name AS func_name,
+                       pf.boundary_value_on_right AS on_right,
+                       (SELECT c.name FROM sys.index_columns ic
+                          JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                          WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id
+                            AND ic.partition_ordinal = 1) AS part_expr,
+                       CAST(prv.value AS nvarchar(256)) AS boundary,
+                       p.rows AS row_count,
+                       SUM(au.total_pages) * 8192 AS size_bytes
+                FROM sys.partitions p
+                JOIN sys.indexes i ON i.object_id = p.object_id AND i.index_id = p.index_id
+                JOIN sys.tables t ON t.object_id = p.object_id
+                JOIN sys.data_spaces ds ON ds.data_space_id = i.data_space_id AND ds.type = 'PS'
+                JOIN sys.partition_schemes psch ON psch.data_space_id = ds.data_space_id
+                JOIN sys.partition_functions pf ON pf.function_id = psch.function_id
+                JOIN sys.allocation_units au ON au.container_id = p.hobt_id
+                LEFT JOIN sys.partition_range_values prv ON prv.function_id = pf.function_id
+                       AND prv.boundary_id = p.partition_number
+                            - CASE WHEN pf.boundary_value_on_right = 1 THEN 1 ELSE 0 END
+                WHERE i.index_id IN (0, 1)
+                GROUP BY t.name, p.partition_number, pf.name, pf.boundary_value_on_right,
+                         i.object_id, i.index_id, prv.value, p.rows
+                ORDER BY t.name, p.partition_number
+                """;
+        try {
+            return jdbc().query(sql,
+                    (rs, i) -> new PartitionInfo(
+                            rs.getString("table_name"),
+                            "partition " + rs.getInt("partition_number"),
+                            "RANGE " + (rs.getBoolean("on_right") ? "RIGHT" : "LEFT")
+                                    + " (" + rs.getString("func_name") + ")",
+                            rs.getString("part_expr"),
+                            rs.getString("boundary"),
+                            rs.getObject("row_count", Long.class),
+                            rs.getObject("size_bytes", Long.class)),
+                    limit);
+        } catch (DataAccessException e) {
+            throw new OperatorException("MSSQL 파티션 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * 대기 이벤트 — sys.dm_os_wait_stats (서버 기동 이후 누적).
      *
      * 이 DMV는 백그라운드 스레드가 "일이 올 때까지 자는" 시간까지 전부 기록해서, 필터 없이는

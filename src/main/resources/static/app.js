@@ -46,6 +46,16 @@ const toLocalInput = (date) => {
 };
 const fmtNum = (v, digits = 2) => v == null ? "-" : Number(v).toLocaleString("ko-KR", { maximumFractionDigits: digits });
 
+// 바이트를 사람이 읽는 단위로 (파티션 크기 등). 1024 진법, 소수 한 자리.
+const fmtBytes = (v) => {
+  if (v == null) return "-";
+  let n = Number(v);
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let u = 0;
+  while (n >= 1024 && u < units.length - 1) { n /= 1024; u += 1; }
+  return `${u === 0 ? n : n.toFixed(1)} ${units[u]}`;
+};
+
 // 증감 셀: "target값 (▲ diff)" — KDMS 표기. changePct가 null(base 0)이면 화살표 생략
 function deltaCell(base, target, changePct, digits = 2) {
   const t = fmtNum(target, digits);
@@ -108,7 +118,7 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
-  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadAdvisors(), loadAnomalies()]);
+  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadPartitions(), loadAdvisors(), loadAnomalies()]);
 }
 
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
@@ -661,6 +671,36 @@ async function loadLatencyPercentiles() {
   } catch (e) {
     table.querySelector("tbody").innerHTML =
       `<tr><td colspan="4" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+// 파티션 조회 (D5) — 테이블별 파티션 목록·방식·경계·행수·크기. 조회 전용(생성·삭제 없음).
+// MongoDB는 partitionMethod=UNSUPPORTED 안내 행으로 오고, 이때 boundary에 사유가 담긴다 —
+// "파티션 없음"과 "이 기종은 원래 파티션 개념이 없음"을 정직하게 구분해 보여준다.
+async function loadPartitions() {
+  const table = $("#partition-table");
+  table.querySelector("thead").innerHTML = `
+    <tr><th>Table</th><th>Partition</th><th>Method</th><th>Boundary</th>
+        <th class="num">Rows</th><th class="num">Size</th></tr>`;
+  try {
+    const rows = await api(`/api/instances/${state.instance.id}/partitions?limit=50`);
+    if (rows.length && rows[0].partitionMethod === "UNSUPPORTED") {
+      table.querySelector("tbody").innerHTML =
+        `<tr><td colspan="6" class="muted">미지원 — ${esc(rows[0].boundary)}</td></tr>`;
+      return;
+    }
+    table.querySelector("tbody").innerHTML = rows.length ? rows.map((p) => `
+      <tr>
+        <td>${esc(p.tableName)}</td>
+        <td>${esc(p.partitionName ?? "-")}</td>
+        <td>${esc(p.partitionMethod ?? "-")}${p.partitionExpression ? ` <span class="muted">(${esc(p.partitionExpression)})</span>` : ""}</td>
+        <td class="qtext" title="${esc(p.boundary ?? "")}">${esc(p.boundary ?? "-")}</td>
+        <td class="num">${p.rowCount != null ? fmtNum(p.rowCount, 0) : "-"}</td>
+        <td class="num">${p.sizeBytes != null ? fmtBytes(p.sizeBytes) : "-"}</td>
+      </tr>`).join("") : '<tr><td colspan="6" class="muted">파티션이 있는 테이블이 없습니다.</td></tr>';
+  } catch (e) {
+    table.querySelector("tbody").innerHTML =
+      `<tr><td colspan="6" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
   }
 }
 
