@@ -1,0 +1,20 @@
+# 빌드 컨텍스트 최소화 — 이미지 빌드에 불필요한 것 제외
+.git
+.github
+.gradle
+build
+backups
+data
+docs
+infra
+scripts
+*.md
+docker-compose*.yml
+Dockerfile
+.dockerignore
+.idea
+*.iml
+.DS_Store
+.env
+.env.*
+!.env.example

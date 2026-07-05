@@ -1,0 +1,19 @@
+# 컨테이너(셀프호스트) 프로파일 — SPRING_PROFILES_ACTIVE=docker 로 활성화.
+#
+# 왜 별도 프로파일인가: 로컬 데브의 백업 명령은 "docker exec 로 형제 컨테이너 안에서 실행"
+#   하는 형태다(앱이 호스트에서 돌고, mysqldump 가 호스트에 없어 컨테이너 것을 빌려 씀).
+#   컨테이너로 배포하면 그 전제가 깨진다 — 대상 DB 는 사용자의 원격 DB 고, 형제 컨테이너가 아니다.
+#   그래서 이 프로파일은 백업/복원 명령을 "이미지에 번들된 클라이언트로 대상에 직접 네트워크 접속"
+#   하는 형태로 덮어쓴다(Dockerfile 이 mysqldump/pg_dump/mongodump 를 번들 = 배터리 포함).
+#   비밀번호는 argv 금지 원칙 유지 — MySQL=MYSQL_PWD, PostgreSQL=PGPASSWORD 환경변수(각 Operator 가 주입),
+#   MongoDB=--config /dev/stdin(표준입력).
+dbtower:
+  backup:
+    # 컨테이너 안의 볼륨 마운트 지점(docker-compose.app.yml 에서 named volume 으로 영속)
+    dir: /app/backups
+    mysqldump-command: "mysqldump -h {host} -P {port} -u {user} --single-transaction --databases {db}"
+    pg-dump-command: "pg_dump -h {host} -p {port} -U {user} -d {db}"
+    mongodump-command: "mongodump --host {host} --port {port} -u {user} --authenticationDatabase admin --db {db} --archive --config /dev/stdin"
+    mysql-restore-command: "mysql -h {host} -P {port} -u {user}"
+    pg-restore-command: "psql -h {host} -p {port} -v ON_ERROR_STOP=1 -U {user}"
+    mongo-restore-command: "mongorestore --host {host} --port {port} -u {user} --authenticationDatabase admin --config /dev/stdin"

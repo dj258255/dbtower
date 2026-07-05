@@ -1,0 +1,56 @@
+# DBTower 셀프호스트 (앱 + 전용 메타 DB) — "5분 만에 내 DB 붙이기"
+#
+# 이 compose 는 관리 "도구"만 띄운다. 관리 "대상" DB(MySQL/PG/... )는 사용자가 이미 가진
+# 것을 웹 UI(또는 API)에서 등록한다 — Grafana/PMM 처럼 셀프호스트로 자기 인프라에 붙이는 모델.
+# (5기종 데모 대상까지 한 번에 띄우려면 docker-compose.yml 을 함께 쓰는 놀이터 구성을 README 참고.)
+#
+# 시작:  cp .env.example .env  &&  편집  &&  docker compose -f docker-compose.app.yml up -d
+services:
+  dbtower:
+    # 게시 후엔 이미지 pull 로 충분. 최초/오프라인은 로컬 빌드(--build).
+    image: ghcr.io/dj258255/dbtower:${DBTOWER_TAG:-latest}
+    build:
+      context: .
+    container_name: dbtower-app
+    depends_on:
+      meta-db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      # 메타 DB(플랫폼 자체 저장소) — 대상 DB 가 아니라 DBTower 의 상태 저장소
+      DBTOWER_DB_URL: jdbc:postgresql://meta-db:5432/dbtower
+      DBTOWER_DB_USERNAME: dbtower
+      DBTOWER_DB_PASSWORD: ${DBTOWER_DB_PASSWORD:?meta DB 비밀번호를 .env 에 설정하세요}
+      # 관리자 초기 비밀번호(미설정 시 앱이 랜덤 생성 후 로그로 1회 안내)
+      DBTOWER_ADMIN_PASSWORD: ${DBTOWER_ADMIN_PASSWORD:-}
+      # 등록 대상 DB 비밀번호를 저장 시 암호화(AES-256-GCM). base64 32바이트. 미설정 시 평문 저장(WARN).
+      DBTOWER_ENCRYPTION_KEY: ${DBTOWER_ENCRYPTION_KEY:-}
+      # 이상 감지 알림 웹훅(선택). 미설정 시 알림 비활성.
+      DBTOWER_WEBHOOK_URL: ${DBTOWER_WEBHOOK_URL:-}
+      JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75}
+    ports:
+      - "${DBTOWER_PORT:-8080}:8080"
+    volumes:
+      # 백업 산출물 영속(application-docker.yml 의 dbtower.backup.dir=/app/backups)
+      - dbtower-backups:/app/backups
+    restart: unless-stopped
+
+  meta-db:
+    image: postgres:16
+    container_name: dbtower-meta-db
+    environment:
+      POSTGRES_USER: dbtower
+      POSTGRES_PASSWORD: ${DBTOWER_DB_PASSWORD:?meta DB 비밀번호를 .env 에 설정하세요}
+      POSTGRES_DB: dbtower
+    volumes:
+      - dbtower-meta-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbtower -d dbtower"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  dbtower-meta-data:
+  dbtower-backups:

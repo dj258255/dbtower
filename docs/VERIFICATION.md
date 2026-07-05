@@ -1320,3 +1320,30 @@ DbmsOperator 메서드 1개 추가 또는 기존 재사용으로 5기종 통합 
   전체 스위트·ModularityTests·Spring 컨텍스트 로드(신규 MongoClientCache→ConnectionPools 와이어링·설정 바인딩) 그린.
 
 Phase A 8개 축 전부 완료(로드맵 A 항목 9/9). Phase A~D 전 항목 완료.
+
+## 52. Phase E — 셀프호스트 제품화 (컨테이너 이미지·원커맨드 배포·GHCR)
+
+왜 셀프호스트인가: SaaS 는 대상 DB 자격증명 수탁·사설망 도달·멀티테넌시·비용 네 벽에 막힌다.
+Grafana/PMM 처럼 사용자가 자기 인프라에 도구를 띄우고 자기 DB 를 붙이는 모델로 간다.
+
+산출물:
+- **Dockerfile**(멀티스테이지): 빌드 스테이지에서 `clean bootJar -x test`(build/jar 를 부르면 생기는
+  실행 불가 `-plain.jar` 회피). 런타임은 `eclipse-temurin:21-jre` + 비루트(uid 1001) + actuator HEALTHCHECK.
+- **배터리 포함**: 백업/복원이 shell-out 하는 클라이언트 번들 — 셀프호스트 사용자가 추가 설치 없이 백업 가능
+  ("정직하게 동작하는 제품"). SQL Server 백업은 서버사이드 T-SQL, Oracle 은 UNSUPPORTED 라 그 둘의 CLI 는 불필요.
+- **application-docker.yml**: 컨테이너 프로파일. 로컬 데브의 docker-exec 백업 명령을 "대상에 직접
+  네트워크 접속(mysqldump -h {host} ...)" 형태로 덮어씀. 로컬 application.yml 은 불변(데브 환경 보존).
+- **docker-compose.app.yml + .env.example**: 앱 + 전용 메타 DB 원커맨드. `.gitignore` 에 `.env` 추가.
+- **release.yml**: `vX.Y.Z` 태그 push 시 GHCR 게시(docker/metadata-action semver 자동 태깅, 게시 전
+  `./gradlew test` 게이트). 게시는 사용자가 태그를 push 할 때만 — 공개 행위는 사용자 트리거.
+- build.gradle 버전 `0.0.1-SNAPSHOT → 1.0.0`.
+
+실측(이미지 빌드·기동, 기존 데모와 격리된 별도 프로젝트/포트):
+- `docker build` 성공, 이미지 751MB(배터리 포함 규모). 멀티스테이지에서 bootJar 단일 산출 확인.
+- `docker compose -f docker-compose.app.yml up -d`(포트 18080): meta-db pg_isready Healthy 후 앱 기동,
+  프로파일 `docker` 활성 로그, 신규 메타 DB에 Flyway 마이그레이션 후 `/actuator/health` 200(readiness UP).
+- 번들 클라이언트 컨테이너 내 실행 검증: `mysqldump Ver 8.0.46`, `pg_dump (PostgreSQL) 16.14`
+  (PGDG — PG16 서버와 버전 일치, 로컬 데브가 겪던 스큐 없음), `mongodump 100.17.0`.
+- 검증 후 스택·이미지 정리, 기존 데모(9 컨테이너)·데브 앱(8080) 무사 확인.
+
+Phase A(8)·B(8)·C(4)·D(10) 전 기능 + Phase E 제품화 완료. A9 로 로드맵 마지막 기능 항목까지 닫음.

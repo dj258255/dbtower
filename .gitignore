@@ -44,3 +44,6 @@ infra/terraform/*.tfvars
 infra/terraform/.terraform/
 infra/terraform/*.tfstate*
 infra/k8s/*-secret.yml
+
+# 셀프호스트 시크릿 — 절대 커밋 금지
+.env

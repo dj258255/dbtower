@@ -134,6 +134,19 @@ D8은 단독·마지막.
 않고, 5기종 통합을 유지하며, 못 하는 기종은 UNSUPPORTED로 정직하게 표기한다. 이 선을 넘으면(예: 자동
 인덱스 생성, SQL 승인 워크플로) 그건 다른 제품이다.
 
+## Phase E — 셀프호스트 제품화 (완료: VERIFICATION 52절)
+
+SaaS 는 이 제품에 안 맞는다 — 대상 DB 자격증명 수탁, 사설망 도달, 멀티테넌시, 비용 네 가지가 막는다.
+그래서 Grafana/PMM 처럼 **셀프호스트**로 간다: 사용자가 자기 인프라에 도구를 띄우고 자기 DB 를 붙인다.
+
+| 항목 | 내용 |
+|---|---|
+| 앱 컨테이너화 | 멀티스테이지 Dockerfile — 빌드 스테이지에서 `bootJar`(plain jar 회피), 런타임은 JRE + 비루트 + actuator HEALTHCHECK |
+| 배터리 포함 | 백업/복원이 shell-out 하는 클라이언트 번들 — mysqldump·pg_dump(PGDG 16, 스큐 방지)·mongodump. MSSQL(서버사이드 T-SQL)·Oracle(UNSUPPORTED)은 불필요라 미포함 |
+| 컨테이너 프로파일 | `application-docker.yml` — 로컬 데브의 docker-exec 백업 명령을 "대상에 직접 네트워크 접속" 형태로 덮어씀(로컬 설정 불변) |
+| 원커맨드 셀프호스트 | `docker-compose.app.yml`(앱 + 전용 메타 DB) + `.env.example` — `docker compose -f docker-compose.app.yml up -d` |
+| 이미지 게시 | `release.yml` — `vX.Y.Z` 태그 push 시 GHCR 게시(semver 자동 태깅, 게시 전 테스트 게이트). 게시는 사용자가 태그를 push 할 때만 |
+
 ## 범위 밖 (여전히 의도적으로 안 한다)
 
 - **SQL 변경 심의·승인 워크플로 (Bytebase/Archery형)** — gh-ost류가 MySQL 전용이라 이기종 정체성과
