@@ -108,6 +108,11 @@ Seq Scan, Clustered Index Scan, TABLE ACCESS FULL, COLLSCAN 등)으로 비효율
 
 ![심층 원인 진단 — 추정 300행 vs 실제 1행 괴리, 암시적 형변환 지목과 처방](docs/images/webui/13-deep-diagnose.png)
 
+처방을 말로만 하지 않습니다 — 기계적으로 안전한 수정(숫자 리터럴에 따옴표)이 가능한 경우
+수정안 SQL을 함께 만들어, 버튼 한 번으로 재진단해 before/after를 비교합니다.
+
+![수정안 원클릭 재진단 — 괴리 300배에서 없음으로, 풀스캔에서 Index lookup으로](docs/images/webui/17-deep-before-after.png)
+
 ### MCP — AI 에이전트의 채널
 
 웹 콘솔이 사람의 채널이라면 MCP는 AI 에이전트의 채널입니다. 회귀 감지가 push(플랫폼이
