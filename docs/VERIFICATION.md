@@ -1257,3 +1257,38 @@ DISPLAY_CURSOR ALLSTATS LAST, MSSQL SET STATISTICS XML 별도 결과셋, Mongo e
 (2) 인덱스 무력화 근본원인 5종(암시적 형변환·컬럼 함수·통계 노후·낮은 선택도·복합 선두 누락),
 (3) 실행 안전(SELECT 전용+타임아웃). 검증된 함정 명시: MySQL/PG actual rows는 loops당 평균(총량=loops 곱),
 Oracle 권한은 SELECT_CATALOG_ROLE로 충분, MSSQL은 plain Statement+getMoreResults. 구현은 Phase D9(미착수).
+
+## 50. Phase D 완결 — 자율 진단 (D1~D9)
+
+"사람이 모는 대시보드"에서 "스스로 보고 설명하는 관제탑"으로. 전부 읽기·진단, 5기종 유지, 실측 근거.
+
+| # | 기능 | 실존 제품 근거 | 절 |
+|---|---|---|---|
+| D1 | 이상 자동 감지(베이스라인) | AWS DevOps Guru for RDS | 46 |
+| D2 | Advisors 자동 점검 | Percona PMM Advisors | 46 |
+| D3 | 자연어 근본원인 진단(AI 도구 루프) | KDMS·pganalyze | 47 |
+| D4 | DB SLO / 에러 버짓 | Google SRE·DBRE | 48 |
+| D4a | 레이턴시 백분위(p95/p99) | MySQL QUANTILE·Mongo profile | 46 |
+| D5 | 파티션 조회 | KDMS 6기능 | 47 |
+| D6 | 비용/효율 인사이트(FinOps) | AWS FinOps·Mydbops | 48 |
+| D7 | 백업 신선도·커버리지 | 3-2-1 원칙 | 47 |
+| D8 | 통합 헬스 스코어 | 관측성 자동 우선순위 | 50 |
+| D9 | 심층 원인 진단(왜 인덱스를 못 타나) | 추정 vs 실제 카디널리티 | 50 |
+
+### 50-1. D8 통합 헬스 스코어
+health·D1·D2·D4·D7을 인스턴스별 0~100+등급으로 합산(가중치 설정), 감점 사유 분해, 나쁜 순 정렬.
+"데이터 부족(INSUFFICIENT_DATA)"과 "나쁨" 구분, health 프로브 예외는 down으로 수렴(치명). 신호 격리(partial).
+실측(실 8080): local-mysql/mssql F 52점, 나머지 B~88점 나쁜 순. canary kill 시 F 35점 최상단. 단위 21건.
+
+### 50-2. D9 심층 원인 진단
+explainAnalyze() 5기종 실제 실행 계획(추정 아님) — MySQL EXPLAIN ANALYZE(TREE, 8.4는 FORMAT=JSON
+거부라 실측대로 TREE), PG (ANALYZE,BUFFERS,FORMAT JSON), Oracle gather_plan_statistics+DISPLAY_CURSOR
+ALLSTATS LAST(같은 커넥션), MSSQL SET STATISTICS XML(별도 결과셋), Mongo executionStats. SELECT 전용+
+타임아웃(실제 실행이라 ADMIN 경계). 추정 vs 실제 10배+ 괴리 최하위 노드 지목(MySQL/PG loops 곱·Oracle
+A-Rows 총량), 근본원인 5종(형변환·컬럼함수·앞와일드카드·복합선두누락·통계노후).
+실측(실 8080, 핵심): MySQL `code = 12345`(숫자) -> 풀스캔 + "암시적 형변환" 정확 지목 + 처방("문자열로
+주거나 컬럼 타입 맞춰라"), `'012345'`(문자열) -> 근본원인 없음 정상. PG 추정5 vs 실제348(69.6배) 앞
+와일드카드, Mongo docsExamined 2만배, PG pg_sleep 타임아웃 10초 취소. 단위 12건(loops 곱 정확성 포함).
+
+Phase A(운영 안전 8)·B(진단 심화 8)·C(프로비저닝 4)·D(자율 진단 10) 전부 완료. 새 능력은 전부
+DbmsOperator 메서드 1개 추가 또는 기존 재사용으로 5기종 통합 — 아키텍처 주장의 반복 검증.
