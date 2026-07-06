@@ -1437,3 +1437,45 @@ P4 00:00:48 인덱스 드랍 -> 좁은 범위 -> 60초 뒤 00:01:48 감지:
 ```
 단위 5건(shape 정규화 — 추정치 무시·인덱스 차이·중첩 트리·텍스트 폴백). 3-2-1·TLS와 함께
 심화 아크 완료 — 새 축 없이 기존 축의 정직한 잔여를 닫았다.
+
+## 57. 심화 아크 2차·1 — 플랜 플립 5기종 완성 (planShapeForDigest)
+
+한계 인지: 플랜 변경 감지(56절)가 PostgreSQL만 완전했다 — 정규화 텍스트($1·?)로 계획을 얻는
+길이 기종마다 달라 나머지 4기종은 스킵됐다.
+
+설계: DbmsOperator.planShapeForDigest(queryId, queryText) default 메서드 하나로 각 기종이 최선
+경로로 계획을 얻어 정규화 shape를 반환하게 하고(PlanChangeTracker는 엔진 무관해짐), shape 정규화는
+PlanShapes 유틸(operator 모듈 — alert↔operator 순환 회피)에 기종별로 모았다. 기종별 획득(전부 읽기 전용):
+- PostgreSQL: EXPLAIN (GENERIC_PLAN) — 기존 경로 위임(동작 불변)
+- MySQL: performance_schema digest의 QUERY_SAMPLE_TEXT(리터럴 샘플)를 EXPLAIN FORMAT=JSON (Datadog DBM 방식).
+  절단(max_sql_text_length 1024B) 시 EXPLAIN 문법오류 → 스킵(정직)
+- SQL Server: Query Store sys.query_store_plan의 계획 이력(캐시 축출 무관, NATIVE). actual_state
+  게이트로 OFF DB는 스킵(켜는 행위 안 함), is_forced_plan은 [FORCED] 표기
+- Oracle: v$sqlstats의 plan_hash_value가 곧 형태 식별자('PHV:x'). 무료 뷰(19c 라이선스 매뉴얼 —
+  팩 대상은 v$active_session_history·DBA_HIST뿐)
+- MongoDB: system.profile 샘플 명령을 explain(queryPlanner) 재실행, 세션 메타 필드 제거
+
+실측(실 8081):
+- MySQL 라이브 플립 e2e: 같은 digest(code=?)로 baseline(ref idx_code) 저장 → DROP INDEX → 회귀 →
+  플립 알림(ALL(products))  ※ 아래 로그
+- MSSQL 라이브 플립 e2e: QS 켠 사용자 DB(dbtower_qs) 등록 → Index Seek 기준선 → DROP INDEX →
+  플립. planShapeForDigest 획득 쿼리(query_hash → query_store_plan → showplan XML) 직접 검증 확인
+- Oracle: v$sqlstats에서 (sql_id, plan_hash_value) 조회 가능 확인(무료 뷰)
+- Mongo: 프로파일러 레벨 2에서 system.profile에 queryHash 존재 확인
+- MSSQL master(local-mssql)는 Query Store 미지원(시스템 DB) → 게이트가 empty로 스킵(정직한 동작)
+- 단위 12건: PlanShapes 기종별 shape 정규화(PG·MySQL·MSSQL·Mongo·텍스트) — 구조 남기고 수치 버림
+
+## 58. 심화 아크 2차·2 — PG 복제 슬롯 감시(C-1) + 블로트 신호(C-2)
+
+C-1 한계: pg_stat_replication은 "연결된 복제"만 보여줘, 비활성 슬롯이 WAL을 무한 보존해 디스크를
+고갈시키는 PG 최빈 장애를 못 봤다. replicationSlots() PG 구현 — pg_replication_slots의 wal_status·
+보존 WAL·safe_wal_size. OpsAlertDetector 규칙: lost=무효(구독자 재구축), unreserved=위험,
+비활성+임계(slot-retained-mb) 초과=디스크 고갈. /replication-slots API + 복제 카드 배지.
+실측(실 8081): 물리 슬롯(dbtower_demo_slot, 비활성) 생성 후 보존 WAL 119MB → API 노출 확인,
+OpsAlert "비활성 복제 슬롯 ... 보존 WAL 119MB (디스크 고갈 위험)" 발화.
+
+C-2: tableBloat() PG 구현 — pg_stat_user_tables의 n_dead_tup·last_autovacuum·n_mod_since_analyze.
+BloatAdvisor(PG 전용): dead ratio 20%+ & 1만개+ 블로트 후보, ANALYZE 이후 5만+ 통계 노후. 추정치라
+"삭제 근거 아닌 점검 신호"로 정직 표기. 실측: bloat_demo 대량 UPDATE(autovacuum off 데모) →
+Advisor VIOLATIONS "죽은 튜플 200,000개 / 66.7% (추정치)". 단위 5건. 덤: 최초 실측에서 autovacuum이
+이미 청소해 0건이었던 것 자체가 autovacuum 정상 동작의 실측이었다.
