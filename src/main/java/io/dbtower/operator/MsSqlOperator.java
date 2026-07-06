@@ -504,6 +504,50 @@ public class MsSqlOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 플랜 변경 감지용 shape (plan flip) — Query Store가 query_id당 plan_id를 <b>이력으로 보존</b>하므로
+     * (플랜 캐시와 달리 축출로 사라지지 않음) 정규화 텍스트 없이도 NATIVE로 플립을 잡는다. queryId =
+     * query_hash 16진 문자열.
+     *
+     * "있으면 쓴다" 게이트: Query Store가 꺼진 DB(2019 기본 OFF·복원/업그레이드 DB)는 empty로 스킵 —
+     * 켜는 행위(ALTER DATABASE)는 대상 변경이라 하지 않는다(2022 신규 DB는 기본 ON). is_forced_plan이면
+     * shape에 [FORCED] 표기(누군가 플랜을 강제한 상태 관측 — 강제 실행 자체는 안 함). 권한 VIEW DATABASE STATE.
+     */
+    @Override
+    public java.util.Optional<String> planShapeForDigest(String queryId, String queryText) {
+        try {
+            // 게이트: Query Store 활성 상태 확인 (OFF면 스킵)
+            String state = jdbc().query(
+                    "SELECT actual_state_desc FROM sys.database_query_store_options",
+                    rs -> rs.next() ? rs.getString(1) : null);
+            if (state == null || !(state.equals("READ_WRITE") || state.equals("READ_ONLY"))) {
+                return java.util.Optional.empty();
+            }
+            String planXml = jdbc().query("""
+                    SELECT TOP 1 CAST(p.query_plan AS nvarchar(max)) AS plan_xml, p.is_forced_plan
+                    FROM sys.query_store_query q
+                    JOIN sys.query_store_plan p ON p.query_id = q.query_id
+                    WHERE q.query_hash = CONVERT(binary(8), ?, 1)
+                    ORDER BY p.last_execution_time DESC
+                    """, rs -> {
+                if (!rs.next()) {
+                    return null;
+                }
+                String xml = rs.getString("plan_xml");
+                return rs.getBoolean("is_forced_plan") ? "[FORCED]" + xml : xml;
+            }, queryId);
+            if (planXml == null) {
+                return java.util.Optional.empty();
+            }
+            boolean forced = planXml.startsWith("[FORCED]");
+            String xml = forced ? planXml.substring("[FORCED]".length()) : planXml;
+            String shape = PlanShapes.fromMssqlXml(xml);
+            return java.util.Optional.of(forced ? "[FORCED]" + shape : shape);
+        } catch (DataAccessException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    /**
      * 실제 실행 계획 (D9) — SET STATISTICS XML ON 후 쿼리를 실행하면, 실행 계획이 쿼리 결과와는
      * <b>별도 결과셋</b>(XML)으로 따라온다. 그래서 PreparedStatement가 아니라 plain Statement로 실행하고
      * getMoreResults()로 결과셋을 순회해 ShowPlanXML을 찾는다(PreparedStatement는 이 부가 결과셋을 놓치는 함정).

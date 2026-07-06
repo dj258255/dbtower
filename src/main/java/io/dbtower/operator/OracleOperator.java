@@ -124,6 +124,27 @@ public class OracleOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 플랜 변경 감지용 shape (plan flip) — Oracle은 v$sqlstats가 (sql_id, plan_hash_value)당 1행이라
+     * <b>plan_hash_value가 곧 계획의 형태 식별자</b>다(별도 정규화가 필요 없다). queryId = sql_id.
+     *
+     * 무료 확정(19c 라이선스 매뉴얼): Diagnostics Pack 대상은 v$active_session_history·DBA_HIST뿐이고
+     * v$sqlstats는 무료다. 함정: shared pool age-out 시 과거 플랜은 서버에서 사라지므로, 이력의
+     * 단일 출처는 우리가 저장하는 PlanSnapshot이다(그래서 첫 관측을 기준선으로 남긴다).
+     */
+    @Override
+    public java.util.Optional<String> planShapeForDigest(String queryId, String queryText) {
+        try {
+            return jdbc().query(
+                    "SELECT plan_hash_value FROM v$sqlstats WHERE sql_id = ? ORDER BY last_active_time DESC "
+                            + "FETCH FIRST 1 ROWS ONLY",
+                    rs -> rs.next() ? java.util.Optional.of("PHV:" + rs.getLong(1)) : java.util.Optional.<String>empty(),
+                    queryId);
+        } catch (DataAccessException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    /**
      * 실제 실행 계획 (D9) — 쿼리에 /*+ gather_plan_statistics *&#47; 힌트를 주입해 실행(행을 실제로 소진)한 뒤,
      * 같은 커넥션에서 DBMS_XPLAN.DISPLAY_CURSOR(NULL,NULL,'ALLSTATS LAST')로 E-Rows(추정) vs A-Rows(실측)를 읽는다.
      * 커서 통계는 세션에 매여 있어 실행과 조회가 같은 커넥션이어야 한다(기존 explain의 ConnectionCallback 패턴).

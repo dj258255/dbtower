@@ -222,6 +222,47 @@ public class MongoOperator implements DbmsOperator {
     }
 
     /**
+     * 플랜 변경 감지용 shape (plan flip) — Mongo는 계획이 명령 JSON 기반이라 정규화 텍스트로는 explain이
+     * 안 된다. system.profile이 저장해 둔 <b>실제 명령</b>을 queryHash로 찾아 explain(queryPlanner)으로
+     * 재실행하고, winningPlan의 stage·indexName만 shape로 남긴다. queryId = queryHash.
+     *
+     * 전제: 프로파일러가 켜져 있어야 샘플이 있다(꺼져 있으면 empty — 우리는 레벨을 바꾸지 않는다).
+     * 함정: 프로파일러 command엔 세션·라우팅 메타($db·lsid 등)가 섞여 있어 explain 전에 걷어낸다.
+     * 플랜 캐시는 노드별 인메모리라 이력의 단일 출처는 우리 PlanSnapshot이다.
+     */
+    @Override
+    public java.util.Optional<String> planShapeForDigest(String queryId, String queryText) {
+        try {
+            return withClient(client -> {
+                Document sample = db(client).getCollection("system.profile")
+                        .find(new Document("queryHash", queryId))
+                        .sort(new Document("ts", -1)).limit(1).first();
+                if (sample == null) {
+                    return java.util.Optional.<String>empty();
+                }
+                Document command = sample.get("command", Document.class);
+                if (command == null) {
+                    return java.util.Optional.<String>empty();
+                }
+                // explain에 부적합한 세션·라우팅 메타 필드 제거
+                for (String meta : List.of("$db", "lsid", "$clusterTime", "readConcern",
+                        "$readPreference", "apiVersion", "$audit", "mayBypassWriteBlocking")) {
+                    command.remove(meta);
+                }
+                String first = command.keySet().stream().findFirst().orElse("");
+                if (!EXPLAINABLE.contains(first)) {
+                    return java.util.Optional.<String>empty();
+                }
+                Document explainCmd = new Document("explain", command).append("verbosity", "queryPlanner");
+                String json = db(client).runCommand(explainCmd).toJson();
+                return java.util.Optional.of(PlanShapes.fromMongoPlan(json));
+            });
+        } catch (Exception e) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    /**
      * 실제 실행 계획 (D9) — verbosity를 executionStats로 올려 explain을 돌린다. queryPlanner(추정)와 달리
      * executionStats는 후보 플랜을 <b>실제로 실행</b>해 totalDocsExamined·totalKeysExamined·nReturned를 준다.
      * docsExamined ÷ nReturned(스캔 낭비 비율)로 "인덱스를 못 타 훑는 정도"를 정량화한다(DeepAnalyzer가 판정).

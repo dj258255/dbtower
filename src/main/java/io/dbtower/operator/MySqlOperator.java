@@ -288,6 +288,38 @@ public class MySqlOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 플랜 변경 감지용 shape (plan flip) — MySQL엔 PG의 GENERIC_PLAN 상당물이 없다. 대신
+     * performance_schema가 digest마다 저장해 둔 <b>리터럴 샘플</b>(QUERY_SAMPLE_TEXT)을 EXPLAIN한다
+     * (Datadog DBM과 같은 방식). queryId = DIGEST.
+     *
+     * 함정: 샘플은 performance_schema_max_sql_text_length(기본 1024B)에서 잘릴 수 있는데, 잘린 SQL은
+     * EXPLAIN 문법 오류가 나므로 실패 시 스킵(지어내지 않음). 또 샘플은 특정 파라미터 값의 계획이라
+     * digest 대표 플랜과 다를 수 있다 — 그래도 "같은 값의 플랜이 바뀌었나"는 유효하게 잡힌다.
+     */
+    @Override
+    public java.util.Optional<String> planShapeForDigest(String queryId, String queryText) {
+        String sample;
+        try {
+            sample = jdbc().query("""
+                    SELECT QUERY_SAMPLE_TEXT
+                    FROM performance_schema.events_statements_summary_by_digest
+                    WHERE DIGEST = ? AND QUERY_SAMPLE_TEXT IS NOT NULL
+                    ORDER BY QUERY_SAMPLE_SEEN DESC LIMIT 1
+                    """, rs -> rs.next() ? rs.getString(1) : null, queryId);
+        } catch (DataAccessException e) {
+            return java.util.Optional.empty();
+        }
+        if (sample == null || !sample.trim().toLowerCase().startsWith("select")) {
+            return java.util.Optional.empty(); // 샘플 없음/비 SELECT digest — 스킵
+        }
+        try {
+            return java.util.Optional.of(PlanShapes.fromMysqlJson(explain(sample)));
+        } catch (RuntimeException e) {
+            return java.util.Optional.empty(); // 샘플 절단 등으로 EXPLAIN 실패 시 정직하게 스킵
+        }
+    }
+
+    /**
      * 실제 실행 계획 (D9) — EXPLAIN ANALYZE. 쿼리를 진짜 실행하며 추정(cost=.. rows=EST) 옆에
      * 실측(actual time=.. rows=ACT loops=L)을 함께 준다. actual rows는 loops당 평균이라 총량은
      * loops를 곱해야 한다 — 이 오독은 DeepAnalyzer가 처리한다(TREE 출력을 정규식으로 파싱).
