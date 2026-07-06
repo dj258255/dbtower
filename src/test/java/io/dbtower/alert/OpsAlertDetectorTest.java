@@ -44,7 +44,7 @@ class OpsAlertDetectorTest {
     void setUp() {
         // idle-txn 5s, replication-lag 30s, snapshot-stall 10m, cooldown 30m
         detector = new OpsAlertDetector(instanceRepository, operatorFactory, snapshotRepository,
-                backupFreshnessService, notifier, 5, 30, 10, 30);
+                backupFreshnessService, notifier, 5, 30, 10, 30, 1024);
         instance = new DatabaseInstance(
                 "test-db", DbmsType.POSTGRESQL, "127.0.0.1", 5432, "sample", "postgres", "pw");
         when(instanceRepository.findAll()).thenReturn(List.of(instance));

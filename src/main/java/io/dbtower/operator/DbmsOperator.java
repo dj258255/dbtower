@@ -178,4 +178,21 @@ public interface DbmsOperator {
      * 기본·권한 보장 아님)은 UNSUPPORTED 안내 행으로 정직하게 표기한다(지원 위장 금지). limit로 상한.
      */
     List<IndexUsage> indexUsage(int limit);
+
+    /**
+     * 복제 슬롯 상태 (C-1, PostgreSQL 전용) — 비활성 슬롯이 WAL을 무한 보존해 디스크를 고갈시키는
+     * 대표 장애의 사각을 본다. pg_stat_replication은 "연결된 복제"만 보여줘 이걸 못 잡는다. 읽기 전용.
+     * 슬롯 개념이 없거나 조회 불가한 기종은 빈 목록(기본).
+     */
+    default List<ReplicationSlot> replicationSlots() {
+        return List.of();
+    }
+
+    /**
+     * 테이블 블로트/VACUUM 신호 (C-2, PostgreSQL 전용) — autovacuum이 죽은 튜플을 못 따라가는 것을
+     * pg_stat_user_tables로 감지한다(추정치 기반 — 실측 아님). 읽기 전용. 미지원 기종은 빈 목록(기본).
+     */
+    default List<TableBloat> tableBloat(int limit) {
+        return List.of();
+    }
 }

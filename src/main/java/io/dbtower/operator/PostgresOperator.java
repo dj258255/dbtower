@@ -369,6 +369,69 @@ public class PostgresOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 복제 슬롯 잔량 (C-1) — 비활성 슬롯이 WAL을 무한 보존해 디스크를 채우는 사고를 본다.
+     * retained는 restart_lsn 이후 보존 중인 WAL 바이트, safe_wal_size는 max_slot_wal_keep_size까지
+     * 남은 여유(무제한 설정이면 NULL). 스탠바이/슬롯 없음이면 빈 결과. 읽기 전용(pg_read_all_stats로 충분).
+     */
+    @Override
+    public List<ReplicationSlot> replicationSlots() {
+        String sql = """
+                SELECT slot_name, active, wal_status,
+                       pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) AS retained_bytes,
+                       safe_wal_size
+                FROM pg_replication_slots
+                WHERE restart_lsn IS NOT NULL
+                ORDER BY retained_bytes DESC
+                """;
+        try {
+            return jdbc().query(sql, (rs, i) -> {
+                long safe = rs.getLong("safe_wal_size");
+                return new ReplicationSlot(
+                        rs.getString("slot_name"),
+                        rs.getBoolean("active"),
+                        rs.getString("wal_status"),
+                        rs.getLong("retained_bytes"),
+                        rs.wasNull() ? null : safe);
+            });
+        } catch (DataAccessException e) {
+            // 스탠바이(pg_current_wal_lsn 불가)·구버전 등은 사각을 못 볼 뿐 폴러를 죽이지 않는다
+            return List.of();
+        }
+    }
+
+    /**
+     * 테이블 블로트/VACUUM 신호 (C-2) — pg_stat_user_tables의 죽은 튜플·마지막 autovacuum·
+     * ANALYZE 이후 변경 수. dead 튜플 많은 순 상위 N개. 추정치 기반(n_dead_tup은 통계 추정). 읽기 전용.
+     */
+    @Override
+    public List<TableBloat> tableBloat(int limit) {
+        String sql = """
+                SELECT schemaname || '.' || relname AS table_name,
+                       n_dead_tup, n_live_tup,
+                       CASE WHEN n_live_tup + n_dead_tup > 0
+                            THEN n_dead_tup::float8 / (n_live_tup + n_dead_tup) ELSE 0 END AS dead_ratio,
+                       last_autovacuum, n_mod_since_analyze
+                FROM pg_stat_user_tables
+                ORDER BY n_dead_tup DESC
+                LIMIT ?
+                """;
+        try {
+            return jdbc().query(sql, (rs, i) -> {
+                var ts = rs.getTimestamp("last_autovacuum");
+                return new TableBloat(
+                        rs.getString("table_name"),
+                        rs.getLong("n_dead_tup"),
+                        rs.getLong("n_live_tup"),
+                        Math.round(rs.getDouble("dead_ratio") * 10000.0) / 10000.0,
+                        ts == null ? null : ts.toLocalDateTime().toString(),
+                        rs.getLong("n_mod_since_analyze"));
+            }, limit);
+        } catch (DataAccessException e) {
+            throw new OperatorException("PostgreSQL 블로트 신호 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * 실제 실행 계획 (D9) — EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON). 쿼리를 진짜 실행해
      * Plan Rows(추정) vs Actual Rows(실측)·Rows Removed by Filter·버퍼 히트를 준다.
      * Actual Rows·시간은 loops당 평균(공식 문서 명시) — 총량 환산(loops 곱)은 DeepAnalyzer가 한다.

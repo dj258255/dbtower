@@ -99,6 +99,7 @@ dbtower:
     replication-lag-seconds: 30  # 복제 지연이 이 초를 넘으면 경보(STANDALONE·음수 lag은 스킵)
     snapshot-stall-minutes: 10   # 이 시간 동안 신규 스냅샷 배치가 0이면 수집 정지로 판단(선택 규칙)
     cooldown-minutes: 30         # 같은 신호 재알림 쿨다운
+    slot-retained-mb: 1024       # 비활성 복제 슬롯(PG)이 이 MB 이상 WAL을 붙잡으면 경보(디스크 고갈 위험)
   slo:
     # DB SLO / 에러 버짓 (D4) — Google SRE·DBRE 모델. "인프라 지표(CPU)가 아니라 사용자 경험 지표".
     # 목표는 우선 전역 기본값 하나만 둔다 — 인스턴스별 목표(per-instance target)는 향후 확장 여지로 남긴다

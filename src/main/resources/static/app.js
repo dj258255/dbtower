@@ -854,6 +854,22 @@ async function loadReplication() {
     $("#replication-box").textContent =
       `role: ${r.role}\nlagSeconds: ${r.lagSeconds}\n${r.detail ?? ""}`;
   } catch (e) { $("#replication-box").textContent = `조회 실패: ${e.message}`; }
+  loadReplicationSlots();
+}
+
+// 복제 슬롯 잔량 (C-1) — 비활성 슬롯이 WAL을 무한 보존해 디스크를 채우는 사각. PG만 결과가 있다.
+async function loadReplicationSlots() {
+  const box = $("#replication-slots");
+  try {
+    const slots = await api(`/api/instances/${state.instance.id}/replication-slots`);
+    if (!slots.length) { box.textContent = ""; return; }
+    box.innerHTML = "복제 슬롯: " + slots.map((s) => {
+      const mb = (s.retainedBytes / (1024 * 1024)).toFixed(1);
+      const warn = s.walStatus === "lost" || s.walStatus === "unreserved" || (!s.active);
+      const label = `${esc(s.slotName)} [${esc(s.walStatus)}${s.active ? "" : ", 비활성"}, 보존 ${mb}MB]`;
+      return warn ? `<span class="verify-badge verify-FAILED">${label}</span>` : `<span>${label}</span>`;
+    }).join(" ");
+  } catch (e) { box.textContent = ""; }
 }
 
 // 이상 감지 (D1) — 평소(이 요일·시간대 베이스라인) 대비 z-score 이탈 쿼리 목록.

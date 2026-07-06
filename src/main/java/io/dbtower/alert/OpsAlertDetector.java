@@ -52,6 +52,7 @@ public class OpsAlertDetector {
     private final int replicationLagSeconds;
     private final int snapshotStallMinutes;
     private final int cooldownMinutes;
+    private final long slotRetainedBytes;
 
     /** key = instanceId:종류(:식별자), value = 마지막 알림 시각 */
     private final Map<String, LocalDateTime> lastAlerted = new ConcurrentHashMap<>();
@@ -64,7 +65,8 @@ public class OpsAlertDetector {
                             @Value("${dbtower.ops-alert.idle-txn-seconds:300}") int idleTxnSeconds,
                             @Value("${dbtower.ops-alert.replication-lag-seconds:30}") int replicationLagSeconds,
                             @Value("${dbtower.ops-alert.snapshot-stall-minutes:10}") int snapshotStallMinutes,
-                            @Value("${dbtower.ops-alert.cooldown-minutes:30}") int cooldownMinutes) {
+                            @Value("${dbtower.ops-alert.cooldown-minutes:30}") int cooldownMinutes,
+                            @Value("${dbtower.ops-alert.slot-retained-mb:1024}") long slotRetainedMb) {
         this.instanceRepository = instanceRepository;
         this.operatorFactory = operatorFactory;
         this.snapshotRepository = snapshotRepository;
@@ -74,6 +76,7 @@ public class OpsAlertDetector {
         this.replicationLagSeconds = replicationLagSeconds;
         this.snapshotStallMinutes = snapshotStallMinutes;
         this.cooldownMinutes = cooldownMinutes;
+        this.slotRetainedBytes = slotRetainedMb * 1024 * 1024;
     }
 
     // HA 분산 락(Phase A5): RegressionDetector와 같은 이유로 한 시점에 한 노드만 운영 감지를 돌린다.
@@ -90,6 +93,7 @@ public class OpsAlertDetector {
                 DbmsOperator operator = operatorFactory.create(instance);
                 findings.addAll(detectIdleTransactions(instance, operator, now));
                 findings.addAll(detectReplicationLag(instance, operator, now));
+                findings.addAll(detectReplicationSlots(instance, operator, now));
                 findings.addAll(detectSnapshotStall(instance, now));
             } catch (Exception e) {
                 // 폴러가 죽으면 안 된다 — 감지 실패는 로그로만 남기고 넘어간다
@@ -152,6 +156,39 @@ public class OpsAlertDetector {
         }
         return List.of("복제 지연 role=%s lag=%.1fs (임계 %ds 초과, %s)"
                 .formatted(state.role(), state.lagSeconds(), replicationLagSeconds, state.detail()));
+    }
+
+    /**
+     * 복제 슬롯 잔량 (C-1, PostgreSQL) — 비활성 슬롯이 WAL을 무한 보존해 디스크를 채우는 사고를 본다.
+     * pg_stat_replication의 lag는 "연결된 복제"만 보므로 이 사각을 못 잡는다. 판정:
+     * - wal_status='lost' → 이미 슬롯 무효(구독자 재구축 필요), 가장 심각
+     * - wal_status='unreserved' → 곧 잃기 직전 경고
+     * - 비활성 슬롯이 임계 이상 WAL을 붙잡음 → 디스크 고갈 경고
+     * 슬롯이 없거나 슬롯 개념이 없는 기종은 빈 결과라 자연히 스킵된다.
+     */
+    private List<String> detectReplicationSlots(DatabaseInstance instance, DbmsOperator operator, LocalDateTime now) {
+        List<String> findings = new ArrayList<>();
+        for (var slot : operator.replicationSlots()) {
+            String status = slot.walStatus() == null ? "" : slot.walStatus().toLowerCase();
+            String key = "slot:" + slot.slotName();
+            if (status.equals("lost")) {
+                if (passCooldown(key, instance, now)) {
+                    findings.add("복제 슬롯 무효 slot=%s wal_status=lost — 슬롯이 필요한 WAL을 이미 잃었다(구독자 재구축 필요)"
+                            .formatted(slot.slotName()));
+                }
+            } else if (status.equals("unreserved")) {
+                if (passCooldown(key, instance, now)) {
+                    findings.add("복제 슬롯 위험 slot=%s wal_status=unreserved active=%b — WAL 한계 초과 직전, 곧 무효화된다"
+                            .formatted(slot.slotName(), slot.active()));
+                }
+            } else if (!slot.active() && slot.retainedBytes() >= slotRetainedBytes) {
+                if (passCooldown(key, instance, now)) {
+                    findings.add("비활성 복제 슬롯 slot=%s 보존 WAL %,dMB (구독자 끊김 — 디스크 고갈 위험)"
+                            .formatted(slot.slotName(), slot.retainedBytes() / (1024 * 1024)));
+                }
+            }
+        }
+        return findings;
     }
 
     /**

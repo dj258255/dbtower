@@ -79,6 +79,15 @@ public class InsightController {
     }
 
     /**
+     * 복제 슬롯 잔량 (C-1, PostgreSQL) — 비활성 슬롯이 WAL을 무한 보존해 디스크를 채우는 사각을 본다.
+     * 슬롯 개념이 없거나 슬롯이 없는 인스턴스는 빈 목록.
+     */
+    @GetMapping("/replication-slots")
+    public java.util.List<io.dbtower.operator.ReplicationSlot> replicationSlots(@PathVariable Long id) {
+        return operatorFactory.create(registryService.findById(id)).replicationSlots();
+    }
+
+    /**
      * 대기 이벤트 (B1) — load%가 "누가 시간을 쓰나"라면 이것은 "그 시간에 무엇을 기다렸나".
      * 기종별 의미 차이(누적/순간 스냅샷/큐 지표)는 WaitEvent record 주석 참고.
      */
