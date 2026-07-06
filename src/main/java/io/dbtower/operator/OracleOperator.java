@@ -10,6 +10,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Oracle 어댑터.
@@ -132,15 +133,15 @@ public class OracleOperator extends AbstractJdbcOperator {
      * 단일 출처는 우리가 저장하는 PlanSnapshot이다(그래서 첫 관측을 기준선으로 남긴다).
      */
     @Override
-    public java.util.Optional<String> planShapeForDigest(String queryId, String queryText) {
+    public Optional<String> planShapeForDigest(String queryId, String queryText) {
         try {
             return jdbc().query(
                     "SELECT plan_hash_value FROM v$sqlstats WHERE sql_id = ? ORDER BY last_active_time DESC "
                             + "FETCH FIRST 1 ROWS ONLY",
-                    rs -> rs.next() ? java.util.Optional.of("PHV:" + rs.getLong(1)) : java.util.Optional.<String>empty(),
+                    rs -> rs.next() ? Optional.of("PHV:" + rs.getLong(1)) : Optional.<String>empty(),
                     queryId);
         } catch (DataAccessException e) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
     }
 

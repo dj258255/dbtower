@@ -12,6 +12,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * SQL Server 어댑터.
@@ -513,14 +514,14 @@ public class MsSqlOperator extends AbstractJdbcOperator {
      * shape에 [FORCED] 표기(누군가 플랜을 강제한 상태 관측 — 강제 실행 자체는 안 함). 권한 VIEW DATABASE STATE.
      */
     @Override
-    public java.util.Optional<String> planShapeForDigest(String queryId, String queryText) {
+    public Optional<String> planShapeForDigest(String queryId, String queryText) {
         try {
             // 게이트: Query Store 활성 상태 확인 (OFF면 스킵)
             String state = jdbc().query(
                     "SELECT actual_state_desc FROM sys.database_query_store_options",
                     rs -> rs.next() ? rs.getString(1) : null);
             if (state == null || !(state.equals("READ_WRITE") || state.equals("READ_ONLY"))) {
-                return java.util.Optional.empty();
+                return Optional.empty();
             }
             String planXml = jdbc().query("""
                     SELECT TOP 1 CAST(p.query_plan AS nvarchar(max)) AS plan_xml, p.is_forced_plan
@@ -536,14 +537,14 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 return rs.getBoolean("is_forced_plan") ? "[FORCED]" + xml : xml;
             }, queryId);
             if (planXml == null) {
-                return java.util.Optional.empty();
+                return Optional.empty();
             }
             boolean forced = planXml.startsWith("[FORCED]");
             String xml = forced ? planXml.substring("[FORCED]".length()) : planXml;
             String shape = PlanShapes.fromMssqlXml(xml);
-            return java.util.Optional.of(forced ? "[FORCED]" + shape : shape);
+            return Optional.of(forced ? "[FORCED]" + shape : shape);
         } catch (DataAccessException e) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
     }
 

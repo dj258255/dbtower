@@ -3,6 +3,7 @@ package io.dbtower.operator;
 import io.dbtower.registry.HealthStatus;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 이기종 DBMS 운영 작업의 공통 경계.
@@ -53,15 +54,15 @@ public interface DbmsOperator {
      * - Oracle: v$sqlstats의 (sql_id, plan_hash_value) — 플랜 해시가 곧 형태 식별자
      * - MongoDB: system.profile 샘플 명령을 explain(queryPlanner)으로 재실행
      *
-     * 반환은 {@link io.dbtower.alert.PlanShapes}로 정규화한 shape 문자열(구조는 남기고 수치는 버림).
+     * 반환은 {@link PlanShapes}로 정규화한 shape 문자열(구조는 남기고 수치는 버림).
      * 얻을 수 없으면 {@code Optional.empty()} — 지어내지 않는다(플레이스홀더를 임의 값으로 채우면
      * 타입에 따라 다른 플랜이 나와 "가짜 변경"이 된다). 기본은 미지원.
      *
      * @param queryId   통계 소스의 쿼리 식별자(digest/query_hash/sql_id/queryHash)
      * @param queryText 정규화 쿼리 텍스트(기종에 따라 SQL 또는 명령 JSON)
      */
-    default java.util.Optional<String> planShapeForDigest(String queryId, String queryText) {
-        return java.util.Optional.empty();
+    default Optional<String> planShapeForDigest(String queryId, String queryText) {
+        return Optional.empty();
     }
 
     /**

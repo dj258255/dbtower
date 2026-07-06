@@ -14,6 +14,7 @@ import org.bson.json.JsonWriterSettings;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -231,18 +232,18 @@ public class MongoOperator implements DbmsOperator {
      * 플랜 캐시는 노드별 인메모리라 이력의 단일 출처는 우리 PlanSnapshot이다.
      */
     @Override
-    public java.util.Optional<String> planShapeForDigest(String queryId, String queryText) {
+    public Optional<String> planShapeForDigest(String queryId, String queryText) {
         try {
             return withClient(client -> {
                 Document sample = db(client).getCollection("system.profile")
                         .find(new Document("queryHash", queryId))
                         .sort(new Document("ts", -1)).limit(1).first();
                 if (sample == null) {
-                    return java.util.Optional.<String>empty();
+                    return Optional.<String>empty();
                 }
                 Document command = sample.get("command", Document.class);
                 if (command == null) {
-                    return java.util.Optional.<String>empty();
+                    return Optional.<String>empty();
                 }
                 // explain에 부적합한 세션·라우팅 메타 필드 제거
                 for (String meta : List.of("$db", "lsid", "$clusterTime", "readConcern",
@@ -251,14 +252,14 @@ public class MongoOperator implements DbmsOperator {
                 }
                 String first = command.keySet().stream().findFirst().orElse("");
                 if (!EXPLAINABLE.contains(first)) {
-                    return java.util.Optional.<String>empty();
+                    return Optional.<String>empty();
                 }
                 Document explainCmd = new Document("explain", command).append("verbosity", "queryPlanner");
                 String json = db(client).runCommand(explainCmd).toJson();
-                return java.util.Optional.of(PlanShapes.fromMongoPlan(json));
+                return Optional.of(PlanShapes.fromMongoPlan(json));
             });
         } catch (Exception e) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
     }
 

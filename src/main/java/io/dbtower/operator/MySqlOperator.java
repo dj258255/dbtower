@@ -8,6 +8,7 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * MySQL 어댑터.
@@ -297,7 +298,7 @@ public class MySqlOperator extends AbstractJdbcOperator {
      * digest 대표 플랜과 다를 수 있다 — 그래도 "같은 값의 플랜이 바뀌었나"는 유효하게 잡힌다.
      */
     @Override
-    public java.util.Optional<String> planShapeForDigest(String queryId, String queryText) {
+    public Optional<String> planShapeForDigest(String queryId, String queryText) {
         String sample;
         try {
             sample = jdbc().query("""
@@ -307,15 +308,15 @@ public class MySqlOperator extends AbstractJdbcOperator {
                     ORDER BY QUERY_SAMPLE_SEEN DESC LIMIT 1
                     """, rs -> rs.next() ? rs.getString(1) : null, queryId);
         } catch (DataAccessException e) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
         if (sample == null || !sample.trim().toLowerCase().startsWith("select")) {
-            return java.util.Optional.empty(); // 샘플 없음/비 SELECT digest — 스킵
+            return Optional.empty(); // 샘플 없음/비 SELECT digest — 스킵
         }
         try {
-            return java.util.Optional.of(PlanShapes.fromMysqlJson(explain(sample)));
+            return Optional.of(PlanShapes.fromMysqlJson(explain(sample)));
         } catch (RuntimeException e) {
-            return java.util.Optional.empty(); // 샘플 절단 등으로 EXPLAIN 실패 시 정직하게 스킵
+            return Optional.empty(); // 샘플 절단 등으로 EXPLAIN 실패 시 정직하게 스킵
         }
     }
 

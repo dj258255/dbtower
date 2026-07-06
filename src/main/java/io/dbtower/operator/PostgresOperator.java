@@ -5,6 +5,7 @@ import org.springframework.dao.DataAccessException;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * PostgreSQL 어댑터.
@@ -355,15 +356,15 @@ public class PostgresOperator extends AbstractJdbcOperator {
      * SELECT가 아니거나 계획 획득 실패면 empty(회귀 알림은 계속되므로 조용히 스킵).
      */
     @Override
-    public java.util.Optional<String> planShapeForDigest(String queryId, String queryText) {
+    public Optional<String> planShapeForDigest(String queryId, String queryText) {
         if (queryText == null || !queryText.trim().toLowerCase().startsWith("select")) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
         try {
-            return java.util.Optional.of(
+            return Optional.of(
                     PlanShapes.fromPgJson(explainNormalized(queryText)));
         } catch (RuntimeException e) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
     }
 
