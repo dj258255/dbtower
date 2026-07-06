@@ -42,6 +42,29 @@ public interface DbmsOperator {
     }
 
     /**
+     * 플랜 변경 감지(plan flip)용 — 정규화 쿼리($1·? 플레이스홀더)의 실행계획 <b>형태(shape)</b>.
+     * "쿼리도 데이터도 그대로인데 갑자기 느려짐 = 옵티마이저가 플랜을 갈아탐"을 잡는다.
+     *
+     * 통계 소스의 쿼리 텍스트는 리터럴이 지워진 형태라 그대로 explain이 안 되는 게 벽인데, 기종마다
+     * 넘는 길이 전부 다르다(전부 읽기 전용):
+     * - PostgreSQL: EXPLAIN (GENERIC_PLAN) — 플레이스홀더 채로 제네릭 플랜
+     * - MySQL: performance_schema digest의 QUERY_SAMPLE_TEXT(리터럴 샘플)를 EXPLAIN FORMAT=JSON
+     * - SQL Server: Query Store(sys.query_store_plan)의 계획 이력 — 활성일 때만("있으면 쓴다")
+     * - Oracle: v$sqlstats의 (sql_id, plan_hash_value) — 플랜 해시가 곧 형태 식별자
+     * - MongoDB: system.profile 샘플 명령을 explain(queryPlanner)으로 재실행
+     *
+     * 반환은 {@link io.dbtower.alert.PlanShapes}로 정규화한 shape 문자열(구조는 남기고 수치는 버림).
+     * 얻을 수 없으면 {@code Optional.empty()} — 지어내지 않는다(플레이스홀더를 임의 값으로 채우면
+     * 타입에 따라 다른 플랜이 나와 "가짜 변경"이 된다). 기본은 미지원.
+     *
+     * @param queryId   통계 소스의 쿼리 식별자(digest/query_hash/sql_id/queryHash)
+     * @param queryText 정규화 쿼리 텍스트(기종에 따라 SQL 또는 명령 JSON)
+     */
+    default java.util.Optional<String> planShapeForDigest(String queryId, String queryText) {
+        return java.util.Optional.empty();
+    }
+
+    /**
      * 심층 원인 진단용 <b>실제 실행 계획</b> (D9) — explain()이 추정만 보는 것과 달리,
      * 쿼리를 진짜 실행해 추정 행수 vs 실제 행수의 괴리(카디널리티 오추정)를 드러낸다.
      * "무엇이 느린가"를 넘어 "왜 인덱스를 못 타나"를 짚는 근본원인 진단의 원천 데이터다.

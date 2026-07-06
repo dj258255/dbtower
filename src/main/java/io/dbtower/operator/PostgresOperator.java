@@ -351,6 +351,23 @@ public class PostgresOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 플랜 변경 감지용 shape — GENERIC_PLAN(플레이스홀더 채로)의 계획을 PlanShapes로 정규화한다.
+     * SELECT가 아니거나 계획 획득 실패면 empty(회귀 알림은 계속되므로 조용히 스킵).
+     */
+    @Override
+    public java.util.Optional<String> planShapeForDigest(String queryId, String queryText) {
+        if (queryText == null || !queryText.trim().toLowerCase().startsWith("select")) {
+            return java.util.Optional.empty();
+        }
+        try {
+            return java.util.Optional.of(
+                    PlanShapes.fromPgJson(explainNormalized(queryText)));
+        } catch (RuntimeException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    /**
      * 실제 실행 계획 (D9) — EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON). 쿼리를 진짜 실행해
      * Plan Rows(추정) vs Actual Rows(실측)·Rows Removed by Filter·버퍼 히트를 준다.
      * Actual Rows·시간은 loops당 평균(공식 문서 명시) — 총량 환산(loops 곱)은 DeepAnalyzer가 한다.
