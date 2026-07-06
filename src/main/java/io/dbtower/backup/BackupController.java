@@ -69,10 +69,10 @@ public class BackupController {
     }
 
     public record BackupRunView(String startedAt, long durationMs, String status, String detail,
-                                String verifyStatus) {
+                                String verifyStatus, String remoteLocation) {
         static BackupRunView from(BackupRun r) {
             return new BackupRunView(r.getStartedAt().toString(), r.getDurationMs(),
-                    r.getStatus().name(), r.getDetail(), r.getVerifyStatus());
+                    r.getStatus().name(), r.getDetail(), r.getVerifyStatus(), r.getRemoteLocation());
         }
     }
 }

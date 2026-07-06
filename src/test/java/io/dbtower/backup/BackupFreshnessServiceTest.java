@@ -130,11 +130,11 @@ class BackupFreshnessServiceTest {
         // 정렬·카운트 계약(BackupFreshnessReport.of)만 고정한다 — 입력 순서와 무관하게 나쁜 순으로 나온다
         LocalDateTime now = LocalDateTime.now();
         BackupFreshnessReport report = BackupFreshnessReport.of(now, 24, List.of(
-                new BackupFreshness(1L, "fresh", DbmsType.MYSQL, now.minusHours(1), "VERIFIED", 1.0, true,
+                new BackupFreshness(1L, "fresh", DbmsType.MYSQL, now.minusHours(1), "VERIFIED", null, 1.0, true,
                         BackupFreshness.Status.FRESH, 24),
-                new BackupFreshness(2L, "stale", DbmsType.POSTGRESQL, now.minusHours(40), null, 40.0, false,
+                new BackupFreshness(2L, "stale", DbmsType.POSTGRESQL, now.minusHours(40), null, null, 40.0, false,
                         BackupFreshness.Status.STALE, 24),
-                new BackupFreshness(3L, "none", DbmsType.MONGODB, null, null, null, false,
+                new BackupFreshness(3L, "none", DbmsType.MONGODB, null, null, null, null, false,
                         BackupFreshness.Status.NO_BACKUP, 24)));
 
         assertEquals(3, report.total());

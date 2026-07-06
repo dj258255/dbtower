@@ -32,6 +32,16 @@ public interface DbmsOperator {
     String explain(String sql);
 
     /**
+     * 파라미터 플레이스홀더가 남은 <b>정규화 텍스트</b>의 실행계획 — 플랜 변경 감지용.
+     * 통계 소스의 쿼리 텍스트는 리터럴이 지워진 형태($1·?)라 일반 explain이 실패한다.
+     * PostgreSQL 16+는 EXPLAIN (GENERIC_PLAN)으로 플레이스홀더 채로 계획을 뽑을 수 있어 오버라이드하고,
+     * 기본 구현은 explain() 위임 — 플레이스홀더 없는 텍스트에서만 성립한다(호출부가 걸러낸다).
+     */
+    default String explainNormalized(String sql) {
+        return explain(sql);
+    }
+
+    /**
      * 심층 원인 진단용 <b>실제 실행 계획</b> (D9) — explain()이 추정만 보는 것과 달리,
      * 쿼리를 진짜 실행해 추정 행수 vs 실제 행수의 괴리(카디널리티 오추정)를 드러낸다.
      * "무엇이 느린가"를 넘어 "왜 인덱스를 못 타나"를 짚는 근본원인 진단의 원천 데이터다.

@@ -63,7 +63,7 @@ public class BackupFreshnessService {
 
         if (latest == null) {
             return new BackupFreshness(instance.getId(), instance.getName(), instance.getType(),
-                    null, null, null, false, BackupFreshness.Status.NO_BACKUP, freshnessHours);
+                    null, null, null, null, false, BackupFreshness.Status.NO_BACKUP, freshnessHours);
         }
 
         LocalDateTime lastBackupAt = latest.getStartedAt();
@@ -71,6 +71,7 @@ public class BackupFreshnessService {
         boolean fresh = elapsedHours <= freshnessHours;
         BackupFreshness.Status status = fresh ? BackupFreshness.Status.FRESH : BackupFreshness.Status.STALE;
         return new BackupFreshness(instance.getId(), instance.getName(), instance.getType(),
-                lastBackupAt, latest.getVerifyStatus(), elapsedHours, fresh, status, freshnessHours);
+                lastBackupAt, latest.getVerifyStatus(), latest.getRemoteLocation(),
+                elapsedHours, fresh, status, freshnessHours);
     }
 }

@@ -31,8 +31,11 @@ public class OracleOperator extends AbstractJdbcOperator {
     /** dbName은 서비스명(예: FREEPDB1) — Oracle은 데이터베이스가 아니라 서비스로 붙는다 */
     @Override
     protected String jdbcUrl() {
-        return "jdbc:oracle:thin:@//%s:%d/%s"
-                .formatted(instance.getHost(), instance.getPort(), instance.getDbName());
+        // useTls면 TCPS 프로토콜 — Oracle은 URL 파라미터가 아니라 프로토콜 지정 방식이다.
+        // 비TLS는 기존 EZConnect(@//) 형태를 그대로 유지(하위 호환).
+        String prefix = instance.isUseTls() ? "tcps://" : "//";
+        return "jdbc:oracle:thin:@%s%s:%d/%s"
+                .formatted(prefix, instance.getHost(), instance.getPort(), instance.getDbName());
     }
 
     @Override

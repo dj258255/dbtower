@@ -44,10 +44,13 @@ public class RegressionDetector {
     /** key = instanceId:queryId:종류, value = 마지막 알림 시각 */
     private final Map<String, LocalDateTime> lastAlerted = new ConcurrentHashMap<>();
 
+    private final PlanChangeTracker planChangeTracker;
+
     public RegressionDetector(DatabaseInstanceRepository instanceRepository,
                               ComparisonService comparisonService,
                               WebhookNotifier notifier,
                               AiAnalyzer aiAnalyzer,
+                              PlanChangeTracker planChangeTracker,
                               @Value("${dbtower.regression.recent-minutes:5}") int recentMinutes,
                               @Value("${dbtower.regression.baseline-minutes:15}") int baselineMinutes,
                               @Value("${dbtower.regression.cooldown-minutes:30}") int cooldownMinutes) {
@@ -55,6 +58,7 @@ public class RegressionDetector {
         this.comparisonService = comparisonService;
         this.notifier = notifier;
         this.aiAnalyzer = aiAnalyzer;
+        this.planChangeTracker = planChangeTracker;
         this.recentMinutes = recentMinutes;
         this.baselineMinutes = baselineMinutes;
         this.cooldownMinutes = cooldownMinutes;
@@ -113,15 +117,25 @@ public class RegressionDetector {
                 findings.add("호출량 급증: %s (QPS %.2f -> %.2f, %+.0f%%)"
                         .formatted(shortText, d.baseQps(), d.targetQps(), d.qpsChangePct()));
             }
+            boolean planSuspect = false;
             if (d.latencyChangePct() != null && d.latencyChangePct() >= 200 && d.targetAvgMs() >= 1
                     && underCooldown(instance, d, "latency", now)) {
                 findings.add("레이턴시 회귀: %s (평균 %.2f -> %.2fms, %+.0f%%)"
                         .formatted(shortText, d.baseAvgMs(), d.targetAvgMs(), d.latencyChangePct()));
+                planSuspect = true;
             }
             if (d.rowsPerCallChangePct() != null && d.rowsPerCallChangePct() >= 500 && d.targetRowsPerCall() >= 100
                     && underCooldown(instance, d, "rows", now)) {
                 findings.add("읽는 행수 폭증(플랜 변화 의심): %s (rows/call %.0f -> %.0f, %+.0f%%)"
                         .formatted(shortText, d.baseRowsPerCall(), d.targetRowsPerCall(), d.rowsPerCallChangePct()));
+                planSuspect = true;
+            }
+            // 플랜 변경(plan flip) 확인 — "느려졌다"에서 "계획이 갈아탔다"까지. 회귀가 감지된
+            // 쿼리만 추정 explain을 뜨므로 실행 부하 없음(A9). 첫 관측은 기준선이라 조용하다.
+            if (planSuspect) {
+                planChangeTracker.check(instance, d.queryId(), d.queryText()).ifPresent(pc ->
+                        findings.add("실행계획 변경 확인: %s — %s  ->  %s"
+                                .formatted(shortText, pc.fromShape(), pc.toShape())));
             }
         }
         return findings;

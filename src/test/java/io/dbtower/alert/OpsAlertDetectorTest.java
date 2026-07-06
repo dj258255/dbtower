@@ -59,7 +59,7 @@ class OpsAlertDetectorTest {
 
     private BackupFreshness fresh() {
         return new BackupFreshness(1L, "test-db", DbmsType.POSTGRESQL,
-                java.time.LocalDateTime.now().minusHours(1), "VERIFIED", 1.0, true,
+                java.time.LocalDateTime.now().minusHours(1), "VERIFIED", null, 1.0, true,
                 BackupFreshness.Status.FRESH, 24);
     }
 
@@ -139,12 +139,12 @@ class OpsAlertDetectorTest {
 
     private BackupFreshness stale(double elapsedHours, String verifyStatus) {
         return new BackupFreshness(1L, "test-db", DbmsType.POSTGRESQL,
-                java.time.LocalDateTime.now().minusHours((long) elapsedHours), verifyStatus,
+                java.time.LocalDateTime.now().minusHours((long) elapsedHours), verifyStatus, null,
                 elapsedHours, false, BackupFreshness.Status.STALE, 24);
     }
 
     private BackupFreshness noBackup() {
-        return new BackupFreshness(1L, "test-db", DbmsType.POSTGRESQL, null, null, null, false,
+        return new BackupFreshness(1L, "test-db", DbmsType.POSTGRESQL, null, null, null, null, false,
                 BackupFreshness.Status.NO_BACKUP, 24);
     }
 

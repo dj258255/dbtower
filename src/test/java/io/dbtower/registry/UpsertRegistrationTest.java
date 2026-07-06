@@ -24,7 +24,7 @@ class UpsertRegistrationTest {
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         DatabaseInstance result = service.upsert("prod-orders", DbmsType.MYSQL,
-                "10.0.0.1", 3306, "orders", "monitor", "pw");
+                "10.0.0.1", 3306, "orders", "monitor", "pw", false);
 
         assertEquals("prod-orders", result.getName());
         verify(operations).health(any());
@@ -41,7 +41,7 @@ class UpsertRegistrationTest {
 
         // 같은 이름으로 host가 바뀐 재등록(예: 페일오버로 새 엔드포인트)
         DatabaseInstance result = service.upsert("prod-orders", DbmsType.MYSQL,
-                "10.0.0.2", 3306, "orders", "monitor", "new-pw");
+                "10.0.0.2", 3306, "orders", "monitor", "new-pw", false);
 
         assertEquals("10.0.0.2", result.getHost());
         assertEquals("new-pw", result.getPassword());
@@ -58,7 +58,7 @@ class UpsertRegistrationTest {
         when(operations.health(any())).thenReturn(HealthStatus.down("접속 불가"));
 
         assertThrows(IllegalArgumentException.class, () -> service.upsert("prod-orders",
-                DbmsType.MYSQL, "10.0.0.9", 3306, "orders", "monitor", "pw"));
+                DbmsType.MYSQL, "10.0.0.9", 3306, "orders", "monitor", "pw", false));
         verify(repository, never()).save(any());
     }
 }

@@ -71,8 +71,11 @@ public class MsSqlOperator extends AbstractJdbcOperator {
 
     @Override
     protected String jdbcUrl() {
-        return "jdbc:sqlserver://%s:%d;databaseName=%s;encrypt=false;loginTimeout=3"
-                .formatted(instance.getHost(), instance.getPort(), instance.getDbName());
+        // useTls면 encrypt=true + 인증서 체인 검증(trustServerCertificate=false) — Azure SQL 등
+        // TLS 강제 환경 대응. 검증을 끄는 우회는 일부러 안 둔다(자가서명이면 truststore에 등록).
+        String encrypt = instance.isUseTls() ? "encrypt=true;trustServerCertificate=false" : "encrypt=false";
+        return "jdbc:sqlserver://%s:%d;databaseName=%s;%s;loginTimeout=3"
+                .formatted(instance.getHost(), instance.getPort(), instance.getDbName(), encrypt);
     }
 
     @Override

@@ -27,6 +27,13 @@ services:
       DBTOWER_ENCRYPTION_KEY: ${DBTOWER_ENCRYPTION_KEY:-}
       # 이상 감지 알림 웹훅(선택). 미설정 시 알림 비활성.
       DBTOWER_WEBHOOK_URL: ${DBTOWER_WEBHOOK_URL:-}
+      # 백업 원격 보관(선택, 3-2-1 오프사이트) — S3 호환(AWS S3·MinIO·R2).
+      # enabled=true + 자격증명을 주면 성공 백업이 자동 업로드된다(실패해도 로컬 백업은 유효).
+      DBTOWER_BACKUP_REMOTE_ENABLED: ${DBTOWER_BACKUP_REMOTE_ENABLED:-false}
+      DBTOWER_BACKUP_REMOTE_ENDPOINT: ${DBTOWER_BACKUP_REMOTE_ENDPOINT:-}
+      DBTOWER_BACKUP_REMOTE_BUCKET: ${DBTOWER_BACKUP_REMOTE_BUCKET:-dbtower-backups}
+      DBTOWER_S3_ACCESS_KEY: ${DBTOWER_S3_ACCESS_KEY:-}
+      DBTOWER_S3_SECRET_KEY: ${DBTOWER_S3_SECRET_KEY:-}
       JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75}
     ports:
       - "${DBTOWER_PORT:-8080}:8080"

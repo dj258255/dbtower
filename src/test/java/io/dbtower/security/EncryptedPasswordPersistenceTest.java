@@ -48,8 +48,8 @@ class EncryptedPasswordPersistenceTest {
     void 암호화_도입_전의_평문_행도_그대로_읽힌다() {
         // 컨버터를 거치지 않고 평문을 직접 심는다 — 기존 운영 데이터를 재현
         jdbc.update("insert into database_instance"
-                        + " (name, type, host, port, db_name, username, password, created_at)"
-                        + " values (?, ?, ?, ?, ?, ?, ?, now())",
+                        + " (name, type, host, port, db_name, username, password, created_at, use_tls)"
+                        + " values (?, ?, ?, ?, ?, ?, ?, now(), false)",
                 "legacy-row", "POSTGRESQL", "localhost", 5432, "app", "postgres", "legacy-plain-pw");
         Long id = jdbc.queryForObject(
                 "select id from database_instance where name = 'legacy-row'", Long.class);

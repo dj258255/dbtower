@@ -31,12 +31,12 @@ public class RegistryService {
      * 어느 경로든 등록 전에 실제 접속을 검증한다(register와 동일한 fail-closed).
      */
     public DatabaseInstance upsert(String name, DbmsType type, String host, int port,
-                                   String dbName, String username, String password) {
+                                   String dbName, String username, String password, boolean useTls) {
         DatabaseInstance existing = repository.findByName(name).orElse(null);
         if (existing == null) {
-            return register(new DatabaseInstance(name, type, host, port, dbName, username, password));
+            return register(new DatabaseInstance(name, type, host, port, dbName, username, password, useTls));
         }
-        existing.updateConnection(type, host, port, dbName, username, password);
+        existing.updateConnection(type, host, port, dbName, username, password, useTls);
         HealthStatus health = operations.health(existing);
         if (!health.up()) {
             throw new IllegalArgumentException("접속 실패로 갱신 거부: " + health.message());

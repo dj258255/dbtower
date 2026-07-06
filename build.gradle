@@ -41,6 +41,9 @@ dependencies {
 	// JdbcTemplate 프로바이더: 이미 쓰는 메타 DB(PostgreSQL)에 락 테이블 하나만 추가하면 되어 별도 인프라(Redis/ZK)가 불필요.
 	implementation 'net.javacrumbs.shedlock:shedlock-spring:5.16.0'
 	implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:5.16.0'
+	// 백업 원격 보관(3-2-1의 오프사이트) — S3 호환(AWS S3·MinIO·R2 등)에 업로드.
+	// MinIO를 로컬 데모로 쓰므로 path-style 접근을 켠다. Boot BOM 미관리라 버전 명시.
+	implementation 'software.amazon.awssdk:s3:2.46.7'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.springframework.boot:spring-boot-starter-security'

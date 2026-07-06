@@ -116,9 +116,25 @@ services:
     depends_on:
       - prometheus
 
+  # 백업 원격 보관 데모(3-2-1의 오프사이트) — S3 호환 API. 클라우드 계정 없이 로컬에서
+  # "백업 -> 원격 업로드"를 실측하기 위한 것. 콘솔: http://localhost:19001
+  minio:
+    image: minio/minio:latest
+    container_name: dbtower-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: dbtower
+      MINIO_ROOT_PASSWORD: dbtower1234
+    ports:
+      - "19000:9000"
+      - "19001:9001"
+    volumes:
+      - minio-data:/data
+
 volumes:
   mysql-data:
   postgres-data:
   mssql-data:
   mongo-data:
   oracle-data:
+  minio-data:

@@ -21,13 +21,16 @@ public class BackupService {
     private final DbmsOperatorFactory operatorFactory;
     private final BackupPolicyRepository policyRepository;
     private final BackupRunRepository runRepository;
+    private final RemoteBackupStore remoteStore;
 
     public BackupService(RegistryService registryService, DbmsOperatorFactory operatorFactory,
-                         BackupPolicyRepository policyRepository, BackupRunRepository runRepository) {
+                         BackupPolicyRepository policyRepository, BackupRunRepository runRepository,
+                         RemoteBackupStore remoteStore) {
         this.registryService = registryService;
         this.operatorFactory = operatorFactory;
         this.policyRepository = policyRepository;
         this.runRepository = runRepository;
+        this.remoteStore = remoteStore;
     }
 
     /** 정책 등록/수정 — 인스턴스당 하나 */
@@ -51,6 +54,8 @@ public class BackupService {
             run = new BackupRun(instanceId, startedAt, System.currentTimeMillis() - start,
                     BackupRun.Status.SUCCESS, result.location() + " (" + result.bytes() + " bytes)",
                     result.location());
+            // 3-2-1의 오프사이트 — 업로드 실패는 백업 실패가 아니다(로컬 성공은 유효, 위치만 비움)
+            remoteStore.upload(instanceId, result.location()).ifPresent(run::recordRemote);
         } catch (Exception e) {
             run = new BackupRun(instanceId, startedAt, System.currentTimeMillis() - start,
                     BackupRun.Status.FAILED, e.getMessage());

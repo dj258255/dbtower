@@ -22,7 +22,8 @@ import java.time.LocalDateTime;
  * @param thresholdHours 신선 판정 임계(dbtower.backup.freshness-hours)
  */
 public record BackupFreshness(Long instanceId, String instanceName, DbmsType type,
-                              LocalDateTime lastBackupAt, String verifyStatus, Double elapsedHours,
+                              LocalDateTime lastBackupAt, String verifyStatus, String remoteLocation,
+                              Double elapsedHours,
                               boolean fresh, Status status, int thresholdHours) {
 
     /** 신선도 판정 3-값 — 빈칸 대신 사각지대(NO_BACKUP)까지 이름을 붙인다 */

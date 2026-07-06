@@ -44,6 +44,13 @@ public class BackupRun {
 
     private LocalDateTime verifiedAt;
 
+    /**
+     * 원격 보관 위치(3-2-1의 오프사이트) — S3 호환 스토리지에 업로드된 객체 키(s3://bucket/key).
+     * null이면 원격 보관 안 됨(비활성/실패) — 로컬 성공과 원격 보관은 별개 사실로 기록한다.
+     */
+    @Column(length = 512)
+    private String remoteLocation;
+
     public BackupRun(Long instanceId, LocalDateTime startedAt, long durationMs, Status status, String detail) {
         this(instanceId, startedAt, durationMs, status, detail, null);
     }
@@ -62,5 +69,10 @@ public class BackupRun {
     public void recordVerification(String verifyStatus, LocalDateTime verifiedAt) {
         this.verifyStatus = verifyStatus;
         this.verifiedAt = verifiedAt;
+    }
+
+    /** 원격 업로드 성공 시 위치 기록 — 업로드는 백업 성공 이후의 별도 단계다 */
+    public void recordRemote(String remoteLocation) {
+        this.remoteLocation = remoteLocation;
     }
 }

@@ -49,8 +49,22 @@ public class DatabaseInstance {
     @Column(nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
+    /**
+     * 전송 암호화 강제(TLS) — Atlas·Azure SQL·RDS(rds.force_ssl)처럼 TLS를 강제하는 관리형
+     * 서비스에 붙기 위한 옵션. 기종별 반영: MySQL sslMode=REQUIRED, PG sslmode=require,
+     * MSSQL encrypt=true, Oracle tcps, Mongo sslSettings. 서버 인증서 검증은 JVM truststore
+     * 기본을 따른다 — 사설 CA는 truststore에 등록해야 하며, 검증을 끄는 옵션은 일부러 안 둔다.
+     */
+    @Column(nullable = false)
+    private boolean useTls = false;
+
     public DatabaseInstance(String name, DbmsType type, String host, int port,
                             String dbName, String username, String password) {
+        this(name, type, host, port, dbName, username, password, false);
+    }
+
+    public DatabaseInstance(String name, DbmsType type, String host, int port,
+                            String dbName, String username, String password, boolean useTls) {
         this.name = name;
         this.type = type;
         this.host = host;
@@ -58,6 +72,7 @@ public class DatabaseInstance {
         this.dbName = dbName;
         this.username = username;
         this.password = password;
+        this.useTls = useTls;
     }
 
     /**
@@ -66,12 +81,13 @@ public class DatabaseInstance {
      * createdAt은 유지(최초 등록 시각) — "언제부터 관제했나"의 의미를 지킨다.
      */
     public void updateConnection(DbmsType type, String host, int port,
-                                 String dbName, String username, String password) {
+                                 String dbName, String username, String password, boolean useTls) {
         this.type = type;
         this.host = host;
         this.port = port;
         this.dbName = dbName;
         this.username = username;
         this.password = password;
+        this.useTls = useTls;
     }
 }

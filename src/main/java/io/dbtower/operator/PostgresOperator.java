@@ -85,8 +85,10 @@ public class PostgresOperator extends AbstractJdbcOperator {
 
     @Override
     protected String jdbcUrl() {
-        return "jdbc:postgresql://%s:%d/%s?connectTimeout=3&socketTimeout=15"
-                .formatted(instance.getHost(), instance.getPort(), instance.getDbName());
+        // useTls면 require — RDS rds.force_ssl 같은 TLS 강제 환경 대응. 미지정 시 드라이버 기본(prefer).
+        String ssl = instance.isUseTls() ? "&sslmode=require" : "";
+        return "jdbc:postgresql://%s:%d/%s?connectTimeout=3&socketTimeout=15%s"
+                .formatted(instance.getHost(), instance.getPort(), instance.getDbName(), ssl);
     }
 
     @Override
@@ -316,6 +318,35 @@ public class PostgresOperator extends AbstractJdbcOperator {
             });
         } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL EXPLAIN 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 플랜 변경 감지용 — pg_stat_statements의 정규화 텍스트($1·$2 플레이스홀더)를 그대로 계획으로.
+     * PostgreSQL 16의 GENERIC_PLAN이 정확히 이 용도다: 파라미터 값 없이 제네릭 플랜을 산출한다.
+     *
+     * 풀을 안 쓰고 1회용 simple-protocol 커넥션을 여는 이유(실측으로 밟은 함정): pgjdbc는 기본
+     * extended protocol이라 서버가 텍스트 속 $1을 <b>바인드 파라미터로 파싱</b>해 "0개 바인드" 에러가
+     * 난다 — psql(simple)에서는 되던 게 JDBC에서 깨진다. GENERIC_PLAN은 simple protocol이 필요하고,
+     * 이 호출은 회귀 감지 때만 드물게 일어나므로 1회용 커넥션 비용을 수용한다.
+     */
+    @Override
+    public String explainNormalized(String sql) {
+        requireSelect(sql);
+        String url = jdbcUrl() + "&preferQueryMode=simple";
+        try (java.sql.Connection conn = java.sql.DriverManager.getConnection(
+                url, instance.getUsername(), instance.getPassword());
+             java.sql.Statement st = conn.createStatement()) {
+            st.setQueryTimeout(10);
+            StringBuilder sb = new StringBuilder();
+            try (java.sql.ResultSet rs = st.executeQuery("EXPLAIN (GENERIC_PLAN, FORMAT JSON) " + sql)) {
+                while (rs.next()) {
+                    sb.append(rs.getString(1));
+                }
+            }
+            return sb.toString();
+        } catch (java.sql.SQLException e) {
+            throw new OperatorException("PostgreSQL EXPLAIN(GENERIC_PLAN) 실패: " + e.getMessage(), e);
         }
     }
 

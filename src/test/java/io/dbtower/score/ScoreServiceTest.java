@@ -64,7 +64,7 @@ class ScoreServiceTest {
         when(sloService.evaluate(id))
                 .thenReturn(new SloReport(id, inst.getName(), DbmsType.MYSQL, now, null, null, null, SloReport.MEETING));
         when(freshnessService.freshnessFor(inst)).thenReturn(
-                new BackupFreshness(id, inst.getName(), DbmsType.MYSQL, null, null, 2.0, true,
+                new BackupFreshness(id, inst.getName(), DbmsType.MYSQL, null, null, null, 2.0, true,
                         BackupFreshness.Status.FRESH, 24));
     }
 
@@ -112,7 +112,7 @@ class ScoreServiceTest {
         when(sloService.evaluate(1L))
                 .thenReturn(new SloReport(1L, "mysql", DbmsType.MYSQL, now, null, null, null, SloReport.INSUFFICIENT_DATA));
         when(freshnessService.freshnessFor(inst)).thenReturn(
-                new BackupFreshness(1L, "mysql", DbmsType.MYSQL, null, null, null, false,
+                new BackupFreshness(1L, "mysql", DbmsType.MYSQL, null, null, null, null, false,
                         BackupFreshness.Status.NO_BACKUP, 24));
 
         HealthScore s = service.evaluate(inst, now);
@@ -141,7 +141,7 @@ class ScoreServiceTest {
         when(sloService.evaluate(1L))
                 .thenReturn(new SloReport(1L, "dead", DbmsType.MYSQL, now, null, null, null, SloReport.INSUFFICIENT_DATA));
         when(freshnessService.freshnessFor(dead)).thenReturn(
-                new BackupFreshness(1L, "dead", DbmsType.MYSQL, null, null, null, false,
+                new BackupFreshness(1L, "dead", DbmsType.MYSQL, null, null, null, null, false,
                         BackupFreshness.Status.NO_BACKUP, 24));
         // 입력 순서는 건강한 것 먼저 — 정렬이 뒤집는지 본다
         when(registryService.findAll()).thenReturn(List.of(ok, dead));

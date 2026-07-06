@@ -35,7 +35,7 @@ class SignalContributionTest {
     }
 
     private BackupFreshness backup(BackupFreshness.Status status, Double elapsed) {
-        return new BackupFreshness(1L, "b", DbmsType.MYSQL, null, null, elapsed,
+        return new BackupFreshness(1L, "b", DbmsType.MYSQL, null, null, null, elapsed,
                 status == BackupFreshness.Status.FRESH, status, 24);
     }
 

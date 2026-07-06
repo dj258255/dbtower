@@ -118,7 +118,7 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
-  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies()]);
+  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies(), loadPlanChanges()]);
 }
 
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
@@ -337,6 +337,10 @@ async function loadBackupFreshness() {
     const verify = f.verifyStatus
       ? `<span class="verify-badge verify-${esc(f.verifyStatus)}">${esc(f.verifyStatus)}</span>`
       : '<span class="muted">미검증</span>';
+    // 3-2-1의 오프사이트 — 로컬 성공과 원격 보관은 별개 사실이라 따로 보여준다
+    const remote = f.remoteLocation
+      ? `<span class="verify-badge verify-VERIFIED" title="${esc(f.remoteLocation)}">원격 보관</span>`
+      : '<span class="muted">로컬만</span>';
     return `
       <tr class="fresh-row fresh-row-${esc(f.status)}">
         <td><span class="type-badge type-${esc(f.type)}">${esc(f.type)}</span> ${esc(f.instanceName)}</td>
@@ -344,12 +348,13 @@ async function loadBackupFreshness() {
         <td>${last}</td>
         <td class="num">${elapsed}</td>
         <td>${verify}</td>
+        <td>${remote}</td>
       </tr>`;
   }).join("");
   box.innerHTML = `
     <div class="table-scroll">
       <table class="qtable freshness-table">
-        <thead><tr><th>인스턴스</th><th>신선도</th><th>마지막 백업</th><th>경과</th><th>복원 검증</th></tr></thead>
+        <thead><tr><th>인스턴스</th><th>신선도</th><th>마지막 백업</th><th>경과</th><th>복원 검증</th><th>원격 보관</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
@@ -879,6 +884,28 @@ async function loadAnomalies() {
     }
     box.className = "anomaly-result";
     box.innerHTML = parts.join("");
+  } catch (e) {
+    box.className = "anomaly-result muted";
+    box.textContent = `조회 실패: ${e.message}`;
+  }
+}
+
+// 실행계획 변경(plan flip) — 회귀 감지된 쿼리만 계획을 떠서 비교하므로(부하 원칙),
+// 이 목록은 "회귀 + 플랜 변경"의 교집합이다. 비었으면 그 자체가 정보(플랜은 안 갈아탔다).
+async function loadPlanChanges() {
+  const box = $("#plan-change-result");
+  try {
+    const changes = await api(`/api/instances/${state.instance.id}/plan-changes`);
+    if (!changes.length) {
+      box.className = "anomaly-result muted";
+      box.textContent = "감지된 플랜 변경 없음 — 회귀 쿼리의 계획이 기준선과 동일하거나, 아직 기준선만 쌓인 상태.";
+      return;
+    }
+    box.className = "anomaly-result";
+    box.innerHTML = changes.map((c) => `<div class="anomaly-item">
+        <div class="anomaly-q">${esc(c.changedAt.replace("T", " "))} · queryId=${esc(c.queryId)}</div>
+        <div class="anomaly-metric"><b>${esc(c.fromShape)}</b> &rarr; <b>${esc(c.toShape)}</b></div>
+      </div>`).join("");
   } catch (e) {
     box.className = "anomaly-result muted";
     box.textContent = `조회 실패: ${e.message}`;

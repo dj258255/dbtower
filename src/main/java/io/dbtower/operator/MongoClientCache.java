@@ -62,6 +62,8 @@ public class MongoClientCache {
                 .applyToSocketSettings(b -> b
                         .connectTimeout(3, TimeUnit.SECONDS)
                         .readTimeout(socketReadTimeoutSeconds, TimeUnit.SECONDS))
+                // useTls면 TLS 강제 — Atlas 등 TLS 필수 서비스 대응. 인증서 검증은 JVM truststore 기본
+                .applyToSslSettings(b -> b.enabled(instance.isUseTls()))
                 .credential(MongoCredential.createCredential(
                         instance.getUsername(), "admin", instance.getPassword().toCharArray()))
                 .applicationName("dbtower")

@@ -82,8 +82,11 @@ public class MySqlOperator extends AbstractJdbcOperator {
 
     @Override
     protected String jdbcUrl() {
-        return "jdbc:mysql://%s:%d/%s?connectTimeout=3000&socketTimeout=15000"
-                .formatted(instance.getHost(), instance.getPort(), instance.getDbName());
+        // useTls면 REQUIRED — 암호화를 강제하되 인증서 검증은 JVM truststore 기본을 따른다.
+        // 미지정 시 드라이버 기본(PREFERRED: 서버가 지원하면 암호화) 유지 — 기존 등록 하위 호환.
+        String ssl = instance.isUseTls() ? "&sslMode=REQUIRED" : "";
+        return "jdbc:mysql://%s:%d/%s?connectTimeout=3000&socketTimeout=15000%s"
+                .formatted(instance.getHost(), instance.getPort(), instance.getDbName(), ssl);
     }
 
     @Override

@@ -32,13 +32,20 @@ public class RegistryController {
             @NotBlank @Pattern(regexp = "[a-zA-Z0-9_]+", message = "dbName은 영문/숫자/밑줄만 허용합니다")
             String dbName,
             @NotBlank String username,
-            @NotBlank String password) {
+            @NotBlank String password,
+            // TLS 강제(선택) — 미지정(null)이면 false. 기존 IaC 페이로드 하위 호환
+            Boolean useTls) {
+        boolean tls() {
+            return Boolean.TRUE.equals(useTls);
+        }
     }
 
     /** 응답에 접속 정보(계정)는 노출하지 않는다 */
-    public record InstanceResponse(Long id, String name, DbmsType type, String host, int port, String dbName) {
+    public record InstanceResponse(Long id, String name, DbmsType type, String host, int port, String dbName,
+                                   boolean useTls) {
         static InstanceResponse from(DatabaseInstance i) {
-            return new InstanceResponse(i.getId(), i.getName(), i.getType(), i.getHost(), i.getPort(), i.getDbName());
+            return new InstanceResponse(i.getId(), i.getName(), i.getType(), i.getHost(), i.getPort(), i.getDbName(),
+                    i.isUseTls());
         }
     }
 
@@ -46,7 +53,8 @@ public class RegistryController {
     @ResponseStatus(HttpStatus.CREATED)
     public InstanceResponse register(@Valid @RequestBody RegisterRequest req) {
         DatabaseInstance saved = registryService.register(new DatabaseInstance(
-                req.name(), req.type(), req.host(), req.port(), req.dbName(), req.username(), req.password()));
+                req.name(), req.type(), req.host(), req.port(), req.dbName(), req.username(), req.password(),
+                req.tls()));
         return InstanceResponse.from(saved);
     }
 
@@ -57,7 +65,8 @@ public class RegistryController {
     @PutMapping
     public InstanceResponse upsert(@Valid @RequestBody RegisterRequest req) {
         DatabaseInstance saved = registryService.upsert(
-                req.name(), req.type(), req.host(), req.port(), req.dbName(), req.username(), req.password());
+                req.name(), req.type(), req.host(), req.port(), req.dbName(), req.username(), req.password(),
+                req.tls());
         return InstanceResponse.from(saved);
     }
 
