@@ -231,10 +231,12 @@
       <div class="monitor-card latency-card">
         <h3>레이턴시 백분위 p95/p99 <span class="hint">(평균은 멀쩡한데 꼬리가 아프다 — 같은 지표라도 기종마다 원자료가 다르다)</span></h3>
         <p class="hint latency-legend">
-          <span class="src-badge src-native">실측</span> MySQL QUANTILE 컬럼(리셋 이후 누적 — 최근 윈도우 아님) ·
+          <span class="src-badge src-native">실측누적</span> MySQL QUANTILE(리셋 이후 누적) ·
+          <span class="src-badge src-native">실측구간</span> MySQL 히스토그램 차분(최근 구간, 버킷 상한 근사) ·
+          <span class="src-badge src-native">히스토그램</span> Mongo opLatencies 보간(프로파일러 무관, 인스턴스 단위) ·
           <span class="src-badge src-computed">직접계산</span> Mongo profile 원샘플 ·
-          <span class="src-badge src-estimated">추정</span> PostgreSQL 평균+표준편차 근사(정규분포 가정, 꼬리 무거우면 과소평가) ·
-          <span class="src-badge src-unsupported">미지원</span> SQL Server/Oracle(원자료 없음)
+          <span class="src-badge src-estimated">추정</span> PostgreSQL/SQL Server 평균+표준편차(꼬리 무거우면 과소평가) ·
+          <span class="src-badge src-unsupported">미지원</span> Oracle(원자료 없음)
         </p>
         <div class="table-scroll">
           <table class="qtable" id="latency-table">

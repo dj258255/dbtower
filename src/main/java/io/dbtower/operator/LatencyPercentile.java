@@ -11,13 +11,23 @@ package io.dbtower.operator;
  *       events_statements_summary_by_digest의 QUANTILE_95/QUANTILE_99 컬럼(피코초→ms).
  *       <b>한계:</b> 이 값은 통계 리셋(서버 재기동/TRUNCATE) 이후 <b>누적</b> 백분위라 "최근 윈도우"가
  *       아니다 — 오래 뜬 서버일수록 과거 이력에 눌려 최근 급변을 늦게 반영한다. 응답·UI에 이 사실을 표기한다.</li>
+ *   <li>NATIVE_WINDOWED — DB의 <b>누적</b> 히스토그램을 직전 스냅샷과 <b>버킷별 차분</b>해 복원한 "최근 윈도우"
+ *       백분위. MySQL events_statements_histogram_by_digest(450버킷) 두 스냅샷 차이로 최근 구간 분포를 만들고,
+ *       누적 95% 교차 버킷의 상한(BUCKET_TIMER_HIGH)을 p95로 쓴다. NATIVE(누적)와 달리 오래된 이력에
+ *       눌리지 않고 최근 부하를 반영한다. <b>버킷 상한 근사</b>이므로 정확한 분위수가 아니라 상한 근사임을 표기한다.</li>
+ *   <li>NATIVE_HISTOGRAM — DB가 제공하는 히스토그램 버킷을 우리가 <b>보간</b>해 얻은 백분위. Mongo serverStatus
+ *       opLatencies·$collStats latencyStats(2^n 하한 버킷)의 스냅샷 차분 후 선형 보간, 또는 PostgreSQL
+ *       pg_stat_monitor(있으면) resp_calls 버킷 배열 보간. 쿼리 단위가 아니라 인스턴스/컬렉션 단위일 수 있어
+ *       그 범위를 함께 표기한다. 버킷 경계 보간이라 원자료 정밀도에 종속된다.</li>
  *   <li>COMPUTED    — 원시 샘플에서 우리가 직접 계산한 백분위. MongoDB system.profile의 op별 raw millis를
  *       정렬해 nearest-rank로 산출(프로파일러 레벨 2 전제). capped collection이라 최근 표본 위주라는 성질이 있다.</li>
  *   <li>ESTIMATED   — 백분위 원자료가 없어 평균+표준편차로 근사한 <b>추정치</b>. PostgreSQL
  *       pg_stat_statements의 mean_exec_time + z×stddev_exec_time(정규분포 가정, p95 z=1.645 / p99 z=2.326).
+ *       SQL Server Query Store의 avg_duration + z×stdev_duration(구간 interval 재집계, max로 캡)도 같은 규약.
  *       실제 레이턴시 분포는 꼬리가 무거워(right-skewed) 이 근사는 대개 <b>과소평가</b>한다 — 진짜 백분위가 아니다.</li>
- *   <li>UNSUPPORTED — 백분위 원자료가 없어 계산도 정직한 근사도 불가능한 기종(SQL Server / Oracle).
- *       통계 뷰가 min/max/평균/총계만 제공하고 분위수·표준편차를 주지 않는다. 지원하는 척하지 않는다.</li>
+ *   <li>UNSUPPORTED — 백분위 원자료가 없어 계산도 정직한 근사도 불가능한 기종. Query Store가 꺼진 SQL Server,
+ *       원자료(표준편차·히스토그램) 자체가 없는 Oracle v$sqlstats. 통계 뷰가 min/max/평균/총계만 준다.
+ *       지원하는 척하지 않는다.</li>
  * </ul>
  *
  * p95Ms/p99Ms는 값을 낼 수 없으면 null이고, 그 이유는 source가 말한다.
@@ -26,12 +36,14 @@ package io.dbtower.operator;
  * @param queryText 쿼리문(정규화 텍스트, 요약). UNSUPPORTED면 미지원 사유 문장
  * @param p95Ms     95 백분위 레이턴시(ms). 없으면 null
  * @param p99Ms     99 백분위 레이턴시(ms). 없으면 null
- * @param source    NATIVE / COMPUTED / ESTIMATED / UNSUPPORTED
+ * @param source    NATIVE / NATIVE_WINDOWED / NATIVE_HISTOGRAM / COMPUTED / ESTIMATED / UNSUPPORTED
  */
 public record LatencyPercentile(String queryId, String queryText,
                                 Double p95Ms, Double p99Ms, String source) {
 
     public static final String NATIVE = "NATIVE";
+    public static final String NATIVE_WINDOWED = "NATIVE_WINDOWED";
+    public static final String NATIVE_HISTOGRAM = "NATIVE_HISTOGRAM";
     public static final String COMPUTED = "COMPUTED";
     public static final String ESTIMATED = "ESTIMATED";
     public static final String UNSUPPORTED = "UNSUPPORTED";

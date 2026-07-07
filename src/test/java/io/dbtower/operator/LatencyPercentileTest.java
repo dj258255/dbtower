@@ -10,9 +10,10 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * 레이턴시 백분위 (D4a) — 네 종류 source(NATIVE/COMPUTED/ESTIMATED/UNSUPPORTED)의 정직성 규약,
- * Mongo nearest-rank 계산, PG 정규분포 근사 산식, MSSQL/Oracle 미지원 분기를 커넥션 없이 못 박는다.
- * 실제 DB에서 나오는 값(QUANTILE 컬럼·profile 계산)은 라이브 검증으로 확인한다.
+ * 레이턴시 백분위 (D4a → 2차 아크) — source 라벨(NATIVE/NATIVE_WINDOWED/NATIVE_HISTOGRAM/
+ * COMPUTED/ESTIMATED/UNSUPPORTED)의 정직성 규약, Mongo nearest-rank 계산, PG 정규분포 근사 산식,
+ * Oracle 미지원 분기를 커넥션 없이 못 박는다. 히스토그램 차분·보간은 HistogramPercentileTest,
+ * MSSQL 추정 캡은 MsSqlLatencyEstimateTest가 맡고, 라이브 값은 VERIFICATION으로 확인한다.
  */
 class LatencyPercentileTest {
 
@@ -65,21 +66,16 @@ class LatencyPercentileTest {
     }
 
     @Test
-    void mssql와_oracle은_백분위_원자료가_없어_UNSUPPORTED로_정직하게_보고한다() {
-        // 두 기종은 AbstractJdbcOperator 기본 UNSUPPORTED — 커넥션을 열지 않고 즉시 반환한다
-        DatabaseInstance mssql = new DatabaseInstance(
-                "ms", DbmsType.MSSQL, "127.0.0.1", 1433, "app", "sa", "pw");
-        List<LatencyPercentile> ms = new MsSqlOperator(mssql, null, null).latencyPercentiles(20);
-        assertEquals(1, ms.size());
-        assertEquals(LatencyPercentile.UNSUPPORTED, ms.get(0).source());
-        assertNull(ms.get(0).p95Ms());
-        assertTrue(ms.get(0).queryText().contains("MSSQL"), ms.get(0).queryText());
-
+    void oracle은_백분위_원자료가_없어_UNSUPPORTED로_정직하게_보고한다() {
+        // Oracle은 AbstractJdbcOperator 기본 UNSUPPORTED — 커넥션을 열지 않고 즉시 반환한다.
+        // (v$sqlstats에 분위수도 표준편차도 히스토그램도 없어 이 아크에서도 못 올린다 — 정직성 대비군)
         DatabaseInstance oracle = new DatabaseInstance(
                 "or", DbmsType.ORACLE, "127.0.0.1", 1521, "FREEPDB1", "system", "pw");
         List<LatencyPercentile> or = new OracleOperator(oracle, null, null).latencyPercentiles(20);
         assertEquals(1, or.size());
         assertEquals(LatencyPercentile.UNSUPPORTED, or.get(0).source());
         assertTrue(or.get(0).queryText().contains("ORACLE"), or.get(0).queryText());
+        // MSSQL은 2차 아크(B-2)에서 Query Store가 켜져 있으면 ESTIMATED를 낸다 — 게이트가 라이브 연결을
+        // 요구하므로 단위가 아니라 라이브로 검증한다. 추정 산식 캡은 MsSqlLatencyEstimateTest가 커버한다.
     }
 }

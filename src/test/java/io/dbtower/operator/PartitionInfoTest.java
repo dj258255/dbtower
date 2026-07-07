@@ -31,7 +31,7 @@ class PartitionInfoTest {
         // MongoDB는 관계형 파티셔닝이 없다 — 커넥션을 열지 않고 즉시 미지원 안내 행을 낸다
         DatabaseInstance mongo = new DatabaseInstance(
                 "mg", DbmsType.MONGODB, "127.0.0.1", 27017, "app", "admin", "pw");
-        List<PartitionInfo> rows = new MongoOperator(mongo, null, null).partitions(50);
+        List<PartitionInfo> rows = new MongoOperator(mongo, null, null, null).partitions(50);
         assertEquals(1, rows.size());
         assertEquals(PartitionInfo.UNSUPPORTED, rows.get(0).partitionMethod());
         assertTrue(rows.get(0).boundary().contains("샤딩"), rows.get(0).boundary());

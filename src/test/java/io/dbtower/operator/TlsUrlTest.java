@@ -31,9 +31,9 @@ class TlsUrlTest {
 
     @Test
     void MySQL_useTls면_sslMode_REQUIRED_아니면_기존_URL_그대로() throws Exception {
-        assertThat(url(new MySqlOperator(instance(DbmsType.MYSQL, false), null, null)))
+        assertThat(url(new MySqlOperator(instance(DbmsType.MYSQL, false), null, null, null)))
                 .isEqualTo("jdbc:mysql://db.example.com:1234/sample?connectTimeout=3000&socketTimeout=15000");
-        assertThat(url(new MySqlOperator(instance(DbmsType.MYSQL, true), null, null)))
+        assertThat(url(new MySqlOperator(instance(DbmsType.MYSQL, true), null, null, null)))
                 .endsWith("&sslMode=REQUIRED");
     }
 

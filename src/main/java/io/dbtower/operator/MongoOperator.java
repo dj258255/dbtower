@@ -41,11 +41,14 @@ public class MongoOperator implements DbmsOperator {
     private final DatabaseInstance instance;
     private final MongoClientCache clients;
     private final BackupTools backupTools;
+    private final HistogramSnapshotStore histogramStore;
 
-    public MongoOperator(DatabaseInstance instance, MongoClientCache clients, BackupTools backupTools) {
+    public MongoOperator(DatabaseInstance instance, MongoClientCache clients, BackupTools backupTools,
+                         HistogramSnapshotStore histogramStore) {
         this.instance = instance;
         this.clients = clients;
         this.backupTools = backupTools;
+        this.histogramStore = histogramStore;
     }
 
     /** 캐시 클라이언트는 재사용, 등록 전 검증용 1회 클라이언트는 쓰고 바로 닫는다 */
@@ -143,6 +146,9 @@ public class MongoOperator implements DbmsOperator {
         try {
             return withClient(client -> {
                 List<LatencyPercentile> result = new ArrayList<>();
+                // 인스턴스 단위 히스토그램(opLatencies)을 먼저 — 프로파일러가 꺼져 있어도 나오는 값이라
+                // COMPUTED가 전멸하는 상황에서 이게 유일한 관측이 된다(B-3의 핵심 가치).
+                addInstanceLatencyHistogram(client, result);
                 for (Document doc : db(client).getCollection("system.profile").aggregate(pipeline)) {
                     List<Double> samples = new ArrayList<>();
                     for (Object m : doc.getList("samples", Object.class, List.of())) {
@@ -161,6 +167,81 @@ public class MongoOperator implements DbmsOperator {
         } catch (Exception e) {
             throw new OperatorException("MongoDB 레이턴시 백분위 계산 실패: " + e.getMessage(), e);
         }
+    }
+
+    /** opLatencies 히스토그램을 뽑을 연산 축 — reads/writes/commands(트랜잭션은 데모 범위 밖). */
+    private static final List<String> OP_LATENCY_CATEGORIES = List.of("reads", "writes", "commands");
+
+    /**
+     * 인스턴스 단위 레이턴시 백분위 (B-3, NATIVE_HISTOGRAM) — serverStatus의 opLatencies 히스토그램.
+     *
+     * <p>MongoDB는 {@code serverStatus.opLatencies}에 reads/writes/commands별로 지수 폭 버킷 히스토그램
+     * ({@code {micros: <버킷 하한>, count: <재기동 이후 누적>}})을 항상 기록한다 — <b>프로파일러와 무관</b>하게.
+     * 프로파일러가 꺼진 인스턴스에선 system.profile 기반 COMPUTED가 전멸하는데, 이 히스토그램은 살아 있어
+     * 인스턴스 층위의 p95를 준다. 버킷이 누적이라 직전 스냅샷과 차분하면 "최근 구간"이 되고, 교차 버킷 안을
+     * {@link HistogramPercentile#interpolate}로 선형 보간한다.
+     *
+     * <p>정직 표기: 이건 <b>쿼리 단위가 아니라 인스턴스(연산 축) 단위</b>이며 버킷 경계 보간이다 — queryText에
+     * 그 범위를 밝힌다. 첫 호출/재기동으로 차분이 불가하면 누적 버킷 그대로 보간하고 "누적 — 구간 학습 중" 노트를 단다.
+     * serverStatus 접근이 막히면(권한) 조용히 건너뛴다 — 이 축이 없다고 전체 조회가 실패해선 안 된다.
+     */
+    private void addInstanceLatencyHistogram(MongoClient client, List<LatencyPercentile> result) {
+        Document opLat;
+        try {
+            Document status = db(client).runCommand(new Document("serverStatus", 1)
+                    .append("opLatencies", new Document("histograms", true)));
+            opLat = status.get("opLatencies", Document.class);
+        } catch (RuntimeException e) {
+            return; // serverStatus 권한 없음 등 — 인스턴스 축만 생략(COMPUTED는 그대로 진행)
+        }
+        if (opLat == null) {
+            return;
+        }
+        for (String category : OP_LATENCY_CATEGORIES) {
+            Document cat = opLat.get(category, Document.class);
+            if (cat == null) {
+                continue;
+            }
+            List<Document> hist = cat.getList("histogram", Document.class, List.of());
+            if (hist.isEmpty()) {
+                continue; // 이 축에 표본이 아직 없음
+            }
+            List<Document> sorted = new ArrayList<>(hist);
+            sorted.sort((a, b) -> Long.compare(micros(a), micros(b)));
+            int n = sorted.size();
+            double[] lowerMs = new double[n];
+            double[] upperMs = new double[n];
+            long[] counts = new long[n];
+            for (int i = 0; i < n; i++) {
+                lowerMs[i] = micros(sorted.get(i)) / 1000.0;
+                counts[i] = ((Number) sorted.get(i).getOrDefault("count", 0L)).longValue();
+            }
+            for (int i = 0; i < n; i++) {
+                upperMs[i] = (i + 1 < n) ? lowerMs[i + 1] : lowerMs[i]; // 마지막 버킷은 상한 미상 — 하한으로 축약
+            }
+            long[] prev = histogramStore.swap(instance.getId() + ":mongo-oplat:" + category, counts.clone());
+            long[] delta = HistogramPercentile.windowDiff(prev, counts);
+            long[] use = delta != null ? delta : counts;
+            String scope = delta != null ? "최근 구간" : "누적 — 구간 학습 중";
+            Double p95 = HistogramPercentile.interpolate(lowerMs, upperMs, use, 0.95);
+            if (p95 == null) {
+                continue; // 이번 구간 이 축 연산 0회
+            }
+            Double p99 = HistogramPercentile.interpolate(lowerMs, upperMs, use, 0.99);
+            result.add(new LatencyPercentile(
+                    "opLatencies:" + category,
+                    "인스턴스 " + category + " 레이턴시 (프로파일러 무관, " + scope + ")",
+                    round2(p95), p99 == null ? null : round2(p99),
+                    LatencyPercentile.NATIVE_HISTOGRAM));
+        }
+    }
+
+    private static long micros(Document bucket) {
+        return ((Number) bucket.getOrDefault("micros", 0L)).longValue();
+    }
+
+    private static double round2(double v) {
+        return Math.round(v * 100.0) / 100.0;
     }
 
     /**

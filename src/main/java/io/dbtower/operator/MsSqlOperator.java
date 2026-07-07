@@ -548,6 +548,96 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /** p95의 표준정규 z값 — 정규분포에서 상위 5% 경계. */
+    static final double Z95 = 1.645;
+
+    /** p99의 표준정규 z값 — 정규분포에서 상위 1% 경계. */
+    static final double Z99 = 2.326;
+
+    /** 최근 윈도우 길이(시간). Query Store interval 중 이 구간에 시작한 것만 재집계해 "최근 부하"를 본다. */
+    static final int RECENT_HOURS = 2;
+
+    /**
+     * 레이턴시 백분위 (B-2, ESTIMATED) — Query Store가 켜져 있으면 avg_duration + z×stdev_duration으로 근사한다.
+     *
+     * <p>왜 ESTIMATED인가: Query Store는 분위수 원자료를 주지 않고 구간별 평균·최대·표준편차만 준다. 그래서
+     * 정규분포를 가정해 mean + z×stdev로 근사한다(p95 z=1.645, p99 z=2.326). 실제 레이턴시 분포는 오른쪽
+     * 꼬리가 무거워(락 대기·IO 스파이크) 이 근사는 대개 <b>과소평가</b>한다 — 진짜 백분위가 아니라 참고용 하한이다.
+     *
+     * <p>왜 max로 캡을 씌우나: 표준편차가 큰 쿼리는 avg + z×stdev가 관측된 max_duration을 넘어설 수 있는데,
+     * 추정치가 "실제로 본 최대"보다 크면 명백히 틀린 값이라 max로 상한을 건다(min(추정, max)).
+     *
+     * <p>왜 dm_exec_query_stats 누적이 아니라 구간 interval인가: dm_exec_query_stats는 플랜 캐시 생존 기간
+     * 전체의 누적 평균이라 "지금 느려졌는지"를 못 본다. Query Store의 runtime_stats는 시간 구간(interval)별로
+     * 쪼개 보존하므로 최근 N시간만 골라 최근 부하의 분포를 근사할 수 있다.
+     *
+     * <p>함정: 활성 interval은 같은 plan을 in-memory 버퍼와 flush된 행으로 <b>중복</b> 집계하고 execution_type
+     * (정상/중단/예외)별로도 행이 갈린다. 그래서 avg_duration을 단순 AVG하면 안 되고 count_executions로 가중
+     * 재집계(Σ(avg×cnt)/Σcnt)해야 한다 — 아래 쿼리가 그렇게 SUM으로 재집계한다.
+     *
+     * <p>게이트: Query Store가 꺼진 DB면 원자료(구간 stdev)가 없어 근사조차 불가능하므로 UNSUPPORTED 안내 행
+     * 하나만 돌려준다. 켜는 행위(ALTER DATABASE)는 대상 DB를 바꾸는 것이라 <b>하지 않는다</b>(읽기 전용). 단위는
+     * 마이크로초(µs)라 ms로 환산(/1000)하고, source=ESTIMATED로 실측과 반드시 구분한다.
+     */
+    @Override
+    public List<LatencyPercentile> latencyPercentiles(int limit) {
+        try {
+            // 게이트: Query Store 활성 상태 확인 (OFF면 근사 재료가 없어 UNSUPPORTED). planShapeForDigest와 동일 패턴.
+            String state = jdbc().query(
+                    "SELECT actual_state_desc FROM sys.database_query_store_options",
+                    rs -> rs.next() ? rs.getString(1) : null);
+            if (state == null || !(state.equals("READ_WRITE") || state.equals("READ_ONLY"))) {
+                return List.of(LatencyPercentile.unsupported(
+                        "SQL Server 레이턴시 백분위: Query Store가 이 DB에서 꺼져 있어 원자료(구간 stdev) 없음 — "
+                        + "켜면 ESTIMATED 제공. Query Store를 켜는 행위(ALTER DATABASE)는 대상 DB 변경이라 하지 않는다."));
+            }
+            // TOP(?) = limit, DATEADD(hour, -?, ...) = RECENT_HOURS 순서로 바인딩한다
+            String sql = """
+                    SELECT TOP (?)
+                           CONVERT(varchar(64), q.query_hash, 1) AS query_id,
+                           SUBSTRING(MAX(qt.query_sql_text), 1, 200) AS query_text,
+                           SUM(rs.avg_duration * rs.count_executions) / NULLIF(SUM(rs.count_executions), 0) AS avg_us,
+                           MAX(rs.max_duration) AS max_us,
+                           MAX(rs.stdev_duration) AS stdev_us
+                    FROM sys.query_store_runtime_stats rs
+                    JOIN sys.query_store_runtime_stats_interval i
+                           ON i.runtime_stats_interval_id = rs.runtime_stats_interval_id
+                    JOIN sys.query_store_plan p ON p.plan_id = rs.plan_id
+                    JOIN sys.query_store_query q ON q.query_id = p.query_id
+                    JOIN sys.query_store_query_text qt ON qt.query_text_id = q.query_text_id
+                    WHERE i.start_time >= DATEADD(hour, -?, SYSUTCDATETIME())
+                    GROUP BY q.query_hash
+                    ORDER BY SUM(rs.avg_duration * rs.count_executions) DESC
+                    """;
+            return jdbc().query(sql,
+                    (rs, i) -> {
+                        double avgMs = rs.getDouble("avg_us") / 1000.0;
+                        double maxMs = rs.getDouble("max_us") / 1000.0;
+                        // stdev_duration이 NULL(단일 실행 등)이면 getDouble이 0을 주므로 p95=avg(캡 적용)로 자연 처리된다
+                        double stdevMs = rs.getDouble("stdev_us") / 1000.0;
+                        return new LatencyPercentile(
+                                rs.getString("query_id"),
+                                rs.getString("query_text"),
+                                estimateCapped(avgMs, stdevMs, maxMs, Z95),
+                                estimateCapped(avgMs, stdevMs, maxMs, Z99),
+                                LatencyPercentile.ESTIMATED);
+                    },
+                    limit, RECENT_HOURS);
+        } catch (DataAccessException e) {
+            throw new OperatorException("MSSQL 레이턴시 백분위 근사 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 정규분포 근사 백분위 = min(avg + z×stdev, max). 추정이 관측 최대를 넘지 않게 max로 캡을 씌우고
+     * 소수 둘째 자리로 반올림한다. stdev=0이면 avg가 그대로(캡 적용). 단위는 ms.
+     */
+    static Double estimateCapped(double avgMs, double stdevMs, double maxMs, double z) {
+        double est = avgMs + z * stdevMs;
+        double capped = Math.min(est, maxMs);
+        return Math.round(capped * 100.0) / 100.0;
+    }
+
     /**
      * 실제 실행 계획 (D9) — SET STATISTICS XML ON 후 쿼리를 실행하면, 실행 계획이 쿼리 결과와는
      * <b>별도 결과셋</b>(XML)으로 따라온다. 그래서 PreparedStatement가 아니라 plain Statement로 실행하고

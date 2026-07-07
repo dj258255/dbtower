@@ -949,11 +949,13 @@ async function loadWaitEvents() {
   }
 }
 
-// 레이턴시 백분위 p95/p99 (D4a) — 같은 지표라도 기종마다 원자료가 달라 source로 출처를 구분한다.
-// 값을 절대 섞지 않는다: 실측(NATIVE)·직접계산(COMPUTED)·추정(ESTIMATED)·미지원(UNSUPPORTED)을
-// 배지로 정직하게 구분해 보여준다. 값이 없으면(null) "-"로, 추정/미지원은 배지 색으로 오독을 막는다.
+// 레이턴시 백분위 p95/p99 (D4a → 2차 아크) — 같은 지표라도 기종마다 원자료가 달라 source로 출처를 구분한다.
+// 값을 절대 섞지 않는다: 실측 누적(NATIVE)·실측 구간(NATIVE_WINDOWED)·히스토그램 보간(NATIVE_HISTOGRAM)·
+// 직접계산(COMPUTED)·추정(ESTIMATED)·미지원(UNSUPPORTED)을 배지로 구분한다. 값이 없으면(null) "-"로.
 const LATENCY_SOURCE = {
-  NATIVE: { cls: "src-native", label: "실측", note: "리셋 이후 누적 — 최근 윈도우 아님" },
+  NATIVE: { cls: "src-native", label: "실측누적", note: "리셋 이후 누적 — 최근 윈도우 아님" },
+  NATIVE_WINDOWED: { cls: "src-native", label: "실측구간", note: "히스토그램 두 스냅샷 차분 — 최근 구간 p95(버킷 상한 근사)" },
+  NATIVE_HISTOGRAM: { cls: "src-native", label: "히스토그램", note: "DB 히스토그램 버킷 보간 — 인스턴스/컬렉션 단위(쿼리 단위 아님)" },
   COMPUTED: { cls: "src-computed", label: "직접계산", note: "profile 원샘플에서 계산" },
   ESTIMATED: { cls: "src-estimated", label: "추정", note: "평균+표준편차 근사 — 실제 백분위 아님, 과소평가 가능" },
   UNSUPPORTED: { cls: "src-unsupported", label: "미지원", note: "백분위 원자료 없음" },

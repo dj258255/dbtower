@@ -5,6 +5,7 @@ import org.springframework.dao.DataAccessException;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -130,16 +131,41 @@ public class PostgresOperator extends AbstractJdbcOperator {
     static final double Z99 = 2.326;
 
     /**
-     * 레이턴시 백분위 (D4a) — pg_stat_statements에는 백분위 원자료가 <b>없다</b>. mean_exec_time과
-     * stddev_exec_time만 있으므로, 정규분포를 가정하고 mean + z×stddev로 <b>근사</b>한다(ESTIMATED).
-     * p95는 z=1.645, p99는 z=2.326.
+     * 레이턴시 백분위 (D4a + B-4 "있으면 승격") — 기본 경로는 pg_stat_statements의 mean+z×stddev
+     * <b>근사(ESTIMATED)</b>다. pg_stat_statements에는 백분위 원자료가 없기 때문이다. 다만 확장
+     * <b>pg_stat_monitor</b>가 설치돼 있으면 그쪽이 resp_calls(응답시간 버킷별 호출 수) 히스토그램을
+     * 제공하므로, 이를 보간해 <b>NATIVE_HISTOGRAM</b>으로 승격한다(HypoPG·MSSQL Query Store와 같은
+     * "게이트=있으면 승격, 없으면 정직한 스킵" 패턴).
      *
-     * <b>이것은 진짜 백분위가 아니다.</b> 실제 레이턴시 분포는 오른쪽 꼬리가 두꺼워(락 대기·GC·IO 스파이크)
-     * 정규분포보다 훨씬 치우친다. 그래서 이 근사는 대개 실제 p95/p99를 <b>과소평가</b>한다. 값은 참고용 하한으로만
-     * 읽어야 하며, source=ESTIMATED로 실측(NATIVE/COMPUTED)과 반드시 구분해 표기한다.
+     * <p>게이트(pg_extension 존재 확인) 미통과, 또는 승격 과정의 어떤 실패(버전차/권한/빈 결과)든
+     * <b>조용히 ESTIMATED로 폴백</b>한다 — 승격 실패를 통과로 위장하지 않고 정직하게 추정치를 낸다.
+     * 데모 컨테이너에는 pg_stat_monitor가 없을 가능성이 높아, 라이브 관측 동작은 대개 ESTIMATED 유지다.
      */
     @Override
     public List<LatencyPercentile> latencyPercentiles(int limit) {
+        // 게이트: 확장이 없으면 기존 ESTIMATED 경로를 그대로(동작 불변) 실행한다
+        if (!hasPgStatMonitor()) {
+            return estimatedFromStatStatements(limit);
+        }
+        try {
+            List<LatencyPercentile> promoted = histogramFromStatMonitor(limit);
+            // 표본이 없거나(빈 히스토그램) 경계를 못 읽으면 승격 포기 → 추정치로 내려간다
+            if (promoted != null && !promoted.isEmpty()) {
+                return promoted;
+            }
+        } catch (DataAccessException e) {
+            // resp_calls/range() 조회 실패(버전차·권한) — 정직하게 ESTIMATED로 폴백
+        }
+        return estimatedFromStatStatements(limit);
+    }
+
+    /**
+     * 기존 D4a 경로 — pg_stat_statements의 mean_exec_time + z×stddev_exec_time 정규분포 근사(ESTIMATED).
+     * p95는 z=1.645, p99는 z=2.326. <b>이것은 진짜 백분위가 아니다.</b> 실제 레이턴시 분포는 오른쪽 꼬리가
+     * 두꺼워(락 대기·GC·IO 스파이크) 정규분포보다 치우쳐, 이 근사는 대개 실제 p95/p99를 <b>과소평가</b>한다.
+     * source=ESTIMATED로 실측(NATIVE/COMPUTED/NATIVE_HISTOGRAM)과 반드시 구분해 표기한다.
+     */
+    private List<LatencyPercentile> estimatedFromStatStatements(int limit) {
         // stddev_exec_time은 pg_stat_statements가 제공하는 표준편차 — 이걸 근사의 재료로 쓴다
         String sql = """
                 SELECT queryid::text AS query_id, query,
@@ -165,6 +191,197 @@ public class PostgresOperator extends AbstractJdbcOperator {
         } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 레이턴시 백분위 근사 실패: " + e.getMessage(), e);
         }
+    }
+
+    /** 게이트 — pg_stat_monitor 확장이 설치돼 있는지만 확인(존재 확인, 상태 변경 없음). 조회 실패면 없음으로 간주. */
+    private boolean hasPgStatMonitor() {
+        try {
+            Integer found = jdbc().query(
+                    "SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_monitor'",
+                    rs -> rs.next() ? 1 : 0);
+            return found != null && found == 1;
+        } catch (DataAccessException e) {
+            return false;
+        }
+    }
+
+    /**
+     * 승격 경로 — pg_stat_monitor의 resp_calls(버킷별 호출 수)를 range()가 준 시간 경계로 보간해
+     * NATIVE_HISTOGRAM 백분위를 낸다. pg_stat_monitor는 버킷(bucket) 시간창으로 데이터를 순환 저장하므로
+     * 같은 queryid가 여러 bucket 행으로 나뉘어 나올 수 있다 — queryid로 묶어 resp_calls를 <b>배열 요소별로
+     * 합산</b>한 뒤, 공통 경계로 {@link HistogramPercentile#interpolate}를 호출한다. 정렬은 calls 상위 N.
+     *
+     * <p>경계를 못 읽거나(빈 range) 표본이 없으면 null/빈 목록을 돌려 호출자가 ESTIMATED로 폴백하게 한다.
+     */
+    private List<LatencyPercentile> histogramFromStatMonitor(int limit) {
+        double[][] bounds = respCallBounds();
+        if (bounds == null) {
+            return null; // 경계를 못 읽음 → 승격 포기 신호
+        }
+        double[] lower = bounds[0];
+        double[] upper = bounds[1];
+
+        // resp_calls를 queryid별로 요소합산해야 하므로 현재 DB의 원시 행을 모두 가져온다(버킷 순환 포함)
+        String sql = """
+                SELECT queryid::text AS query_id, query, resp_calls, calls
+                FROM pg_stat_monitor
+                WHERE datname = current_database()
+                """;
+        List<MonitorRow> rows = jdbc().query(sql, (rs, i) -> new MonitorRow(
+                rs.getString("query_id"),
+                rs.getString("query"),
+                toLongArray(rs.getArray("resp_calls")),
+                rs.getLong("calls")));
+
+        // queryid별 그룹: resp_calls 요소합산, calls 누적(정렬용), query 텍스트는 첫 행 것을 유지
+        java.util.LinkedHashMap<String, Agg> byId = new java.util.LinkedHashMap<>();
+        for (MonitorRow r : rows) {
+            if (r.queryId() == null || r.respCalls() == null) {
+                continue;
+            }
+            Agg agg = byId.computeIfAbsent(r.queryId(), k -> new Agg(r.query()));
+            agg.buckets = (agg.buckets == null)
+                    ? r.respCalls()
+                    : sumElementwise(agg.buckets, r.respCalls());
+            agg.calls += r.calls();
+        }
+
+        // calls 상위 N만 승격 대상으로 정렬
+        List<Map.Entry<String, Agg>> ranked = new java.util.ArrayList<>(byId.entrySet());
+        ranked.sort((a, b) -> Long.compare(b.getValue().calls, a.getValue().calls));
+
+        List<LatencyPercentile> out = new java.util.ArrayList<>();
+        for (Map.Entry<String, Agg> e : ranked) {
+            if (out.size() >= limit) {
+                break;
+            }
+            Agg agg = e.getValue();
+            // interpolate는 counts.length <= 경계 길이를 전제 — 경계 길이에 맞춰 절단/패딩
+            long[] counts = fitLength(agg.buckets, lower.length);
+            Double p95 = HistogramPercentile.interpolate(lower, upper, counts, 0.95);
+            Double p99 = HistogramPercentile.interpolate(lower, upper, counts, 0.99);
+            out.add(new LatencyPercentile(
+                    e.getKey(), agg.query,
+                    p95 == null ? null : round2(p95),
+                    p99 == null ? null : round2(p99),
+                    LatencyPercentile.NATIVE_HISTOGRAM));
+        }
+        return out;
+    }
+
+    /** pg_stat_monitor 한 행의 원시 값(queryid·query·resp_calls 버킷·calls). */
+    private record MonitorRow(String queryId, String query, long[] respCalls, long calls) {
+    }
+
+    /** queryid별 누적 상자 — resp_calls 요소합산 결과와 정렬용 calls 합, 대표 query 텍스트. */
+    private static final class Agg {
+        final String query;
+        long[] buckets;
+        long calls;
+
+        Agg(String query) {
+            this.query = query;
+        }
+    }
+
+    /**
+     * SELECT range() — pg_stat_monitor가 resp_calls 각 버킷의 시간 범위 문자열 배열("(low - high)", ms)을
+     * 준다. 이를 파싱해 lowerBounds/upperBounds(ms) 두 배열로 만든다. 비었거나 널이면 null(승격 포기 신호).
+     */
+    private double[][] respCallBounds() {
+        String[] ranges = jdbc().query("SELECT range() AS r", rs -> {
+            if (!rs.next()) {
+                return null;
+            }
+            java.sql.Array arr = rs.getArray("r");
+            if (arr == null) {
+                return null;
+            }
+            Object[] elems = (Object[]) arr.getArray();
+            String[] out = new String[elems.length];
+            for (int i = 0; i < elems.length; i++) {
+                out[i] = elems[i] == null ? null : elems[i].toString();
+            }
+            return out;
+        });
+        if (ranges == null || ranges.length == 0) {
+            return null;
+        }
+        double[] lower = new double[ranges.length];
+        double[] upper = new double[ranges.length];
+        for (int i = 0; i < ranges.length; i++) {
+            double[] b = parseRange(ranges[i]);
+            lower[i] = b[0];
+            upper[i] = b[1];
+        }
+        return new double[][]{lower, upper};
+    }
+
+    /** resp_calls 각 버킷 하한/상한을 담은 범위 문자열 하나에서 숫자를 뽑는다. */
+    private static final java.util.regex.Pattern RANGE_NUM =
+            java.util.regex.Pattern.compile("\\d+(?:\\.\\d+)?");
+
+    /**
+     * range() 원소 "(low - high)"에서 하한·상한(ms)을 뽑는다. 괄호·공백 변형("(0-3)", "( 0 - 3 )")을
+     * 방어하려고 숫자 토큰만 순서대로 취한다. 숫자가 둘 미만이면 파싱 불가로 IllegalArgumentException —
+     * 호출자(승격 경로)는 이를 잡아 ESTIMATED로 폴백한다.
+     */
+    static double[] parseRange(String range) {
+        if (range == null) {
+            throw new IllegalArgumentException("range() 원소가 null입니다");
+        }
+        java.util.regex.Matcher m = RANGE_NUM.matcher(range);
+        double[] out = new double[2];
+        int n = 0;
+        while (n < 2 && m.find()) {
+            out[n++] = Double.parseDouble(m.group());
+        }
+        if (n < 2) {
+            throw new IllegalArgumentException("range() 경계 파싱 실패(숫자 2개 필요): " + range);
+        }
+        return out;
+    }
+
+    /** 두 resp_calls 버킷 배열을 요소별로 합산(순환 bucket 행 병합용). 길이가 다르면 긴 쪽에 맞춰 합산. */
+    static long[] sumElementwise(long[] a, long[] b) {
+        int n = Math.max(a.length, b.length);
+        long[] out = new long[n];
+        for (int i = 0; i < n; i++) {
+            out[i] = (i < a.length ? a[i] : 0) + (i < b.length ? b[i] : 0);
+        }
+        return out;
+    }
+
+    /** 버킷 배열을 경계 길이에 맞춰 절단/0패딩 — interpolate가 counts.length ≤ 경계 길이를 전제하므로. */
+    static long[] fitLength(long[] counts, int len) {
+        if (counts.length == len) {
+            return counts;
+        }
+        long[] out = new long[len];
+        System.arraycopy(counts, 0, out, 0, Math.min(counts.length, len));
+        return out;
+    }
+
+    /** java.sql.Array(text[]/numeric[])를 long[]로. 원소는 문자열화 후 정수 파싱(소수면 반올림). null이면 null. */
+    private static long[] toLongArray(java.sql.Array sqlArray) {
+        if (sqlArray == null) {
+            return null;
+        }
+        try {
+            Object[] elems = (Object[]) sqlArray.getArray();
+            long[] out = new long[elems.length];
+            for (int i = 0; i < elems.length; i++) {
+                out[i] = elems[i] == null ? 0L : Math.round(Double.parseDouble(elems[i].toString().trim()));
+            }
+            return out;
+        } catch (java.sql.SQLException | NumberFormatException e) {
+            return null; // 파싱 불가 → 이 행은 건너뛰게(호출자에서 null 스킵)
+        }
+    }
+
+    /** 소수 둘째 자리 반올림 — 히스토그램 보간 결과 표기용. */
+    static double round2(double v) {
+        return Math.round(v * 100.0) / 100.0;
     }
 
     /** 정규분포 근사 백분위 = mean + z×stddev (음수는 0으로 클램프). 소수 둘째 자리로 반올림. */

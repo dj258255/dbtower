@@ -13,6 +13,9 @@ GRANT SELECT ON sample.* TO 'dbtower_monitor'@'%';
 
 -- query-stats: 다이제스트 요약 테이블 하나면 충분 (performance_schema.* 전체 불요, PROCESS 불요)
 GRANT SELECT ON performance_schema.events_statements_summary_by_digest TO 'dbtower_monitor'@'%';
+-- 2차 아크 B-1: 구간 p95(NATIVE_WINDOWED)는 히스토그램 두 스냅샷 차분이라 이 뷰 읽기 권한이 필요하다.
+-- 권한이 없으면 코드가 조용히 누적값(NATIVE)으로 폴백한다(정직한 열화) — 최소권한 문서에 함께 기록.
+GRANT SELECT ON performance_schema.events_statements_histogram_by_digest TO 'dbtower_monitor'@'%';
 
 -- slow-queries: log_output=TABLE 전제 (docker-compose 설정)
 GRANT SELECT ON mysql.slow_log TO 'dbtower_monitor'@'%';

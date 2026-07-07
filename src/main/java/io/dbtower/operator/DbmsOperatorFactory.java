@@ -13,8 +13,10 @@ public class DbmsOperatorFactory {
     private final ConnectionPools pools;
     private final MongoClientCache mongoClients;
     private final BackupTools backupTools;
+    private final HistogramSnapshotStore histogramStore;
 
     public DbmsOperatorFactory(ConnectionPools pools, MongoClientCache mongoClients,
+                               HistogramSnapshotStore histogramStore,
                                @org.springframework.beans.factory.annotation.Value("${dbtower.backup.mysqldump-command:mysqldump}") String mysqldumpCommand,
                                @org.springframework.beans.factory.annotation.Value("${dbtower.backup.pg-dump-command:pg_dump}") String pgDumpCommand,
                                @org.springframework.beans.factory.annotation.Value("${dbtower.backup.mongodump-command:mongodump}") String mongodumpCommand,
@@ -24,17 +26,18 @@ public class DbmsOperatorFactory {
                                @org.springframework.beans.factory.annotation.Value("${dbtower.backup.dir:./backups}") String backupDir) {
         this.pools = pools;
         this.mongoClients = mongoClients;
+        this.histogramStore = histogramStore;
         this.backupTools = new BackupTools(mysqldumpCommand, pgDumpCommand, mongodumpCommand,
                 mysqlRestoreCommand, pgRestoreCommand, mongoRestoreCommand, backupDir);
     }
 
     public DbmsOperator create(DatabaseInstance instance) {
         return switch (instance.getType()) {
-            case MYSQL -> new MySqlOperator(instance, pools, backupTools);
+            case MYSQL -> new MySqlOperator(instance, pools, backupTools, histogramStore);
             case POSTGRESQL -> new PostgresOperator(instance, pools, backupTools);
             case MSSQL -> new MsSqlOperator(instance, pools, backupTools);
             case ORACLE -> new OracleOperator(instance, pools, backupTools);
-            case MONGODB -> new MongoOperator(instance, mongoClients, backupTools); // 비 JDBC — 풀 대신 클라이언트 캐시
+            case MONGODB -> new MongoOperator(instance, mongoClients, backupTools, histogramStore); // 비 JDBC — 풀 대신 클라이언트 캐시
         };
     }
 }

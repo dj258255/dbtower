@@ -7,7 +7,9 @@ import org.springframework.jdbc.core.ConnectionCallback;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -19,8 +21,14 @@ import java.util.Optional;
  */
 public class MySqlOperator extends AbstractJdbcOperator {
 
-    public MySqlOperator(DatabaseInstance instance, ConnectionPools pools, BackupTools backupTools) {
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(MySqlOperator.class);
+
+    private final HistogramSnapshotStore histogramStore;
+
+    public MySqlOperator(DatabaseInstance instance, ConnectionPools pools, BackupTools backupTools,
+                         HistogramSnapshotStore histogramStore) {
         super(instance, pools, backupTools);
+        this.histogramStore = histogramStore;
     }
 
     /**
@@ -121,38 +129,114 @@ public class MySqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /** 히스토그램 버킷 수 (events_statements_histogram_by_digest는 digest당 BUCKET_NUMBER 0~449 고정). */
+    private static final int HISTOGRAM_BUCKETS = 450;
+
     /**
-     * 레이턴시 백분위 (D4a) — MySQL 8.0+가 events_statements_summary_by_digest에 직접 계산해 두는
-     * QUANTILE_95/QUANTILE_99 컬럼을 그대로 읽는다(NATIVE). 이 컬럼들은 피코초 단위라 1e9로 나눠 ms로 환산한다.
+     * 레이턴시 백분위 (D4a → 2차 아크 B-1) — 두 단계로 정직 등급을 올린다.
      *
-     * <b>한계 — 누적 백분위:</b> 이 QUANTILE 값은 통계 리셋(서버 재기동/TRUNCATE) 이후의 <b>누적</b>이라
-     * "최근 N분 윈도우 p95"가 아니다. 오래 뜬 서버일수록 과거 이력에 눌려 최근 급변을 늦게 반영한다.
-     * 진짜 윈도우 백분위는 events_statements_histogram_by_digest 두 스냅샷을 차분해야 하는데(히스토그램 수집 필요),
-     * 1단계인 여기서는 누적 p95/p99를 정직히 NATIVE로 돌려주고 그 한계를 응답 주석·UI 배지로 표기한다.
+     * <p><b>NATIVE(누적) → NATIVE_WINDOWED(최근 구간).</b> MySQL 8.0+는 두 곳에 원자료를 둔다 —
+     * events_statements_summary_by_digest의 QUANTILE_95/99(재기동 이후 <b>누적</b> 백분위)와
+     * events_statements_histogram_by_digest의 450버킷 히스토그램(역시 누적 카운트)이다. 누적 백분위는
+     * 오래 뜬 서버일수록 과거에 눌려 최근 급변을 늦게 반영한다. 그래서 히스토그램을 직전 스냅샷과
+     * <b>버킷별로 차분</b>해(→ 두 호출 사이 "최근 구간") 누적 95% 교차 버킷의 상한(BUCKET_TIMER_HIGH)을
+     * 구간 p95로 쓴다. 이게 NATIVE_WINDOWED다.
+     *
+     * <p>정직 규칙: (a) 직전 스냅샷이 없는 <b>첫 호출</b>이거나 (b) 카운터가 감소한 <b>재기동/리셋</b>이면
+     * 이번 구간을 만들 수 없으므로 누적 QUANTILE을 NATIVE로 돌려주며 "구간 학습 중" 노트를 단다.
+     * (c) 최근 구간에 그 digest 실행이 0회면 표본이 없어 역시 누적으로 폴백한다. <b>TRUNCATE로 히스토그램을
+     * 리셋하면 즉시 최근 창을 얻지만 그건 대상 DB 상태 변경(가드레일 위반)</b> — 차분 방식이 바로 그 금지의 대안이다.
      */
     @Override
     public List<LatencyPercentile> latencyPercentiles(int limit) {
-        String sql = """
+        String topSql = """
                 SELECT DIGEST, DIGEST_TEXT,
                        QUANTILE_95 / 1000000000 AS p95_ms,
                        QUANTILE_99 / 1000000000 AS p99_ms
                 FROM performance_schema.events_statements_summary_by_digest
-                WHERE DIGEST_TEXT IS NOT NULL
+                WHERE DIGEST_TEXT IS NOT NULL AND DIGEST IS NOT NULL
                 ORDER BY SUM_TIMER_WAIT DESC
                 LIMIT ?
                 """;
         try {
-            return jdbc().query(sql,
-                    (rs, i) -> new LatencyPercentile(
-                            rs.getString("DIGEST"),
-                            rs.getString("DIGEST_TEXT"),
-                            round2(rs.getDouble("p95_ms")),
-                            round2(rs.getDouble("p99_ms")),
-                            LatencyPercentile.NATIVE),
+            List<TopDigest> tops = jdbc().query(topSql,
+                    (rs, i) -> new TopDigest(rs.getString("DIGEST"), rs.getString("DIGEST_TEXT"),
+                            round2(rs.getDouble("p95_ms")), round2(rs.getDouble("p99_ms"))),
                     limit);
+            if (tops.isEmpty()) {
+                return List.of();
+            }
+
+            // 상위 digest들의 히스토그램 버킷을 한 번에 — 누적 COUNT_BUCKET + 고정 버킷 상한(ms).
+            Map<String, long[]> curCounts = new HashMap<>();
+            double[] upperMs = new double[HISTOGRAM_BUCKETS]; // 버킷 상한은 digest 무관 동일 사실
+            String inClause = String.join(",", java.util.Collections.nCopies(tops.size(), "?"));
+            String histSql = "SELECT DIGEST, BUCKET_NUMBER, BUCKET_TIMER_HIGH, COUNT_BUCKET "
+                    + "FROM performance_schema.events_statements_histogram_by_digest "
+                    + "WHERE DIGEST IN (" + inClause + ")";
+            Object[] histArgs = tops.stream().map(TopDigest::digest).toArray();
+            boolean[] histAvailable = {false};
+            try {
+                jdbc().query(histSql, rs -> {
+                    histAvailable[0] = true;
+                    String d = rs.getString("DIGEST");
+                    int b = rs.getInt("BUCKET_NUMBER");
+                    if (b < 0 || b >= HISTOGRAM_BUCKETS) {
+                        return;
+                    }
+                    // 같은 digest가 복수 스키마로 나뉘면 버킷 카운트를 합산한다.
+                    curCounts.computeIfAbsent(d, k -> new long[HISTOGRAM_BUCKETS])[b]
+                            += rs.getLong("COUNT_BUCKET");
+                    // 마지막 버킷의 BUCKET_TIMER_HIGH는 unsigned bigint 최댓값(2^64-1)인 "무한대" 센티넬이라
+                    // getLong()이면 signed long 범위 초과로 터진다 — BigDecimal로 받아 안전히 ms 환산.
+                    java.math.BigDecimal high = rs.getBigDecimal("BUCKET_TIMER_HIGH");
+                    upperMs[b] = high == null ? 0.0 : high.doubleValue() / 1_000_000_000.0;
+                }, histArgs);
+            } catch (DataAccessException histEx) {
+                // 히스토그램 뷰 조회 실패(소비자 꺼짐 / 권한 없음 등) — 누적 NATIVE로 전량 폴백(정직).
+                // 왜 폴백했는지 조용히 삼키지 않고 남긴다(관측성): 최소권한 계정이 이 뷰 권한만 빠졌는지 등을 알 수 있게.
+                histAvailable[0] = false;
+                LOG.warn("MySQL 히스토그램(events_statements_histogram_by_digest) 조회 실패 — 구간 p95 대신 누적 폴백: {}",
+                        histEx.getMessage());
+            }
+
+            List<LatencyPercentile> out = new ArrayList<>(tops.size());
+            for (TopDigest t : tops) {
+                long[] cur = histAvailable[0] ? curCounts.get(t.digest()) : null;
+                if (cur == null) {
+                    out.add(new LatencyPercentile(t.digest(),
+                            t.text() + "  [히스토그램 미수집 — 누적값]", t.p95(), t.p99(),
+                            LatencyPercentile.NATIVE));
+                    continue;
+                }
+                long[] prev = histogramStore.swap(instance.getId() + ":mysql-hist:" + t.digest(), cur);
+                long[] delta = HistogramPercentile.windowDiff(prev, cur);
+                if (delta == null) {
+                    out.add(new LatencyPercentile(t.digest(),
+                            t.text() + "  [구간 학습 중 — 다음 주기부터 최근 윈도우]", t.p95(), t.p99(),
+                            LatencyPercentile.NATIVE));
+                    continue;
+                }
+                Double p95 = HistogramPercentile.bucketCeiling(upperMs, delta, 0.95);
+                if (p95 == null) {
+                    out.add(new LatencyPercentile(t.digest(),
+                            t.text() + "  [최근 구간 실행 없음 — 누적값]", t.p95(), t.p99(),
+                            LatencyPercentile.NATIVE));
+                    continue;
+                }
+                Double p99 = HistogramPercentile.bucketCeiling(upperMs, delta, 0.99);
+                out.add(new LatencyPercentile(t.digest(), t.text(),
+                        round2(p95), p99 == null ? null : round2(p99),
+                        LatencyPercentile.NATIVE_WINDOWED));
+            }
+            return out;
         } catch (DataAccessException e) {
             throw new OperatorException("MySQL 레이턴시 백분위 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    /** 상위 digest의 누적 QUANTILE(폴백용)과 텍스트를 잠깐 담는 내부 운반체. */
+    private record TopDigest(String digest, String text, Double p95, Double p99) {
     }
 
     private static double round2(double v) {

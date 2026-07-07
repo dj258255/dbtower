@@ -60,7 +60,7 @@ class IndexAdviceTest {
         // MySQL은 AbstractJdbcOperator 기본 UNSUPPORTED — 커넥션을 열지 않고 즉시 반환
         DatabaseInstance mysql = new DatabaseInstance(
                 "my", DbmsType.MYSQL, "127.0.0.1", 3306, "app", "root", "pw");
-        IndexAdvice advice = new MySqlOperator(mysql, null, null).adviseIndex("SELECT 1", "t(c)");
+        IndexAdvice advice = new MySqlOperator(mysql, null, null, null).adviseIndex("SELECT 1", "t(c)");
         assertEquals(IndexAdvice.UNSUPPORTED, advice.status());
         assertTrue(advice.detail().contains("PostgreSQL"), advice.detail());
     }
