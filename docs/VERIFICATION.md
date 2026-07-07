@@ -1552,3 +1552,29 @@ docs/images/webui/22(MySQL 구간)·23(Mongo 히스토그램)·24(MSSQL 추정).
 정직 한계(공통): 세 경로 모두 롤링/최신 저장이라 "최근"만 — 과거 전수 이력은 보장하지 않는다(응답·카드에
 표기). 단위 테스트 신규: MSSQL XE 파싱 8·MySQL INNODB 파싱 5·OpsAlert 데드락 3. 전체 그린.
 UI: Monitoring 탭에 데드락 카드(배지=획득 방식, victim·리소스·문장). 스크린샷 webui 25(MySQL)·26(MSSQL).
+
+## 61. 심화 아크 5차 — Phase F 스케일 제어 (5종)
+
+배경: 인스턴스가 많아지거나 대량 장애가 나면 "관제 자체가 부하·병목"이 된다. 다섯 축으로 스케일 여력을 확보.
+
+- **수집 병렬화**: SnapshotScheduler의 직렬 for → 고정 크기 워커 풀(dbtower.snapshot.workers=4) + 인스턴스별
+  시작 지터(40ms 스텝). collect()는 이 틱의 모든 Future.get()으로 완료를 기다려 <b>ShedLock 노드 배타를
+  유지</b>(병렬은 노드 안에서만). 백오프 int[] 갱신은 synchronized로 배타화. **실측**: 인스턴스 14개(여분
+  scale-mysql 8개 등록) 수집이 dbtower-collect 워커 스레드로 실행, 전체 ~1.2s(60s 주기 내). 백오프 단위 4건 유지.
+- **스케줄러 풀 분리**: ThreadPoolTaskScheduler 빈(dbtower.scheduler.pool-size=4)으로 @Scheduled 폴러들이
+  한 스레드를 공유하지 않게(head-of-line blocking 해소, "절전 후 동반 정지" 사건 대응). **실측**: 폴러 로그
+  스레드명이 기본 scheduling-1이 아니라 <b>dbtower-sched-N</b>으로 분산됨 확인.
+- **알림 폭주 제어**: WebhookNotifier에 분당 상한(dbtower.alert.rate-per-minute=12) 슬라이딩 윈도우. 초과분은
+  버리지 않고 억제 카운트만 세었다가 <b>다음 허용 알림에 "그동안 N건 더 발생" 한 줄로 합산</b>. 여러 폴러가
+  서로 다른 스케줄러 스레드에서 부르므로 send는 synchronized. **단위 3건**(상한 내 전송·초과 억제·합산 후 리셋).
+- **인스턴스별 수집 토글**: DatabaseInstance.collectionEnabled(V9, @ColumnDefault true) + PATCH
+  /api/instances/{id}/collection + UI 배지 토글(수집중/격리됨). false면 SnapshotScheduler·OpsAlertDetector가
+  건너뛴다(문제 인스턴스를 삭제 없이 격리). **실측**: scale-mysql-1을 격리 → 다음 주기 그 인스턴스 수집 0건,
+  나머지 13개만 수집(14-1). V9 Flyway 적용 확인.
+- **헬스 스코어 캐시**: ScoreService에 노드별 인메모리 캐시 + 주기 갱신(dbtower.score.refresh-ms=60000).
+  조회는 캐시 반환(매 조회마다 다섯 신호 재수집·프로브 안 함). ShedLock 없음 — 노드별 캐시라 각 노드가 자기
+  것을 독립 갱신(한 노드만 갱신하면 나머지는 캐시가 비어 무의미). **실측**: 연속 GET 2회가 같은 generatedAt
+  반환(재계산 안 함) 확인.
+
+정직 한계: 병렬은 노드 안에서만(노드 간은 ShedLock 그대로). 알림 합산은 다음 알림이 와야 요약이 나간다
+(완전 무음이면 요약도 대기). 전체 테스트 그린(신규 단위 3건 포함). 스크린샷 webui 27(격리 토글 배지).

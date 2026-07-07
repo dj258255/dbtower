@@ -58,6 +58,17 @@ public class DatabaseInstance {
     @Column(nullable = false)
     private boolean useTls = false;
 
+    /**
+     * 수집 활성화 (Phase F, 스케일 제어) — 문제 인스턴스를 <b>일시 격리</b>하는 스위치.
+     * false면 스냅샷 수집·운영 경보 폴러가 이 인스턴스를 건너뛴다(등록 정보는 남긴다). 폭주하거나
+     * 접속이 불안정한 대상을 삭제하지 않고 잠시 관제에서 빼, 그 대상 때문에 전체 수집이 느려지는 걸 막는다.
+     * 기본 true(등록 즉시 관제). V9에서 컬럼 추가, 기존 행은 true로 백필. @ColumnDefault로 컬럼을 생략한
+     * INSERT(레거시 데이터·raw insert)도 true로 채워, Flyway(DEFAULT TRUE)와 Hibernate 생성 스키마를 맞춘다.
+     */
+    @org.hibernate.annotations.ColumnDefault("true")
+    @Column(nullable = false)
+    private boolean collectionEnabled = true;
+
     public DatabaseInstance(String name, DbmsType type, String host, int port,
                             String dbName, String username, String password) {
         this(name, type, host, port, dbName, username, password, false);
@@ -89,5 +100,10 @@ public class DatabaseInstance {
         this.username = username;
         this.password = password;
         this.useTls = useTls;
+    }
+
+    /** 수집 활성/격리 토글 (Phase F). 문제 인스턴스를 삭제하지 않고 관제에서 잠시 뺀다. */
+    public void setCollectionEnabled(boolean enabled) {
+        this.collectionEnabled = enabled;
     }
 }

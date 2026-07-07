@@ -146,6 +146,7 @@ class OpsAlertDetectorTest {
         when(withId.getId()).thenReturn(1L);
         when(withId.getName()).thenReturn("test-db");
         when(withId.getCreatedAt()).thenReturn(java.time.LocalDateTime.now());
+        when(withId.isCollectionEnabled()).thenReturn(true);
         when(instanceRepository.findAll()).thenReturn(List.of(withId));
     }
 
@@ -254,6 +255,7 @@ class OpsAlertDetectorTest {
         when(old.getId()).thenReturn(1L);
         when(old.getName()).thenReturn("test-db");
         when(old.getCreatedAt()).thenReturn(java.time.LocalDateTime.now().minusDays(3));
+        when(old.isCollectionEnabled()).thenReturn(true);
         when(instanceRepository.findAll()).thenReturn(List.of(old));
         when(backupFreshnessService.freshnessFor(any(DatabaseInstance.class))).thenReturn(noBackup());
         detector.detect();

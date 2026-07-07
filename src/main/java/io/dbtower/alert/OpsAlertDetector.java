@@ -95,6 +95,10 @@ public class OpsAlertDetector {
     public void detect() {
         LocalDateTime now = LocalDateTime.now();
         for (DatabaseInstance instance : instanceRepository.findAll()) {
+            // 수집 격리된 인스턴스는 능동 탐침을 멈춘다(문제 대상을 관제에서 잠시 빼는 스위치, Phase F).
+            if (!instance.isCollectionEnabled()) {
+                continue;
+            }
             // 인스턴스 하나의 실패(접속 불가·권한 부족 등)가 다른 인스턴스 감지를 막지 않도록 개별 격리.
             List<String> findings = new ArrayList<>();
             try {

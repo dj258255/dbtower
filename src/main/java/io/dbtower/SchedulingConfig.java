@@ -3,9 +3,11 @@ package io.dbtower;
 import net.javacrumbs.shedlock.provider.jdbctemplate.JdbcTemplateLockProvider;
 import net.javacrumbs.shedlock.spring.annotation.EnableSchedulerLock;
 import net.javacrumbs.shedlock.core.LockProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import javax.sql.DataSource;
 
@@ -39,5 +41,30 @@ public class SchedulingConfig {
                         // DB 한 곳을 단일 시간 기준으로 삼아 그 오차를 제거한다(ShedLock 권장).
                         .usingDbTime()
                         .build());
+    }
+
+    /**
+     * 스케줄러 풀 분리 (Phase F, 스케일 제어) — @Scheduled 폴러들이 한 스레드를 공유하지 않게 한다.
+     *
+     * <p>Spring 기본 스케줄러는 <b>단일 스레드</b>다. 폴러가 여럿(스냅샷·회귀·운영경보·백업신선도·이상감지·
+     * 보존정리 등)인데 한 스레드를 나눠 쓰면, 느린 폴러 하나가 오래 걸릴 때 <b>뒤에 줄 선 폴러 전부가 함께
+     * 밀린다</b>(head-of-line blocking). 실제로 절전에서 깨어난 뒤 한 폴러가 길게 붙잡자 전체 폴러가 동반
+     * 정지하는 사건을 겪었다. 고정 크기 풀로 바꿔 폴러들이 서로를 막지 않게 한다. Spring은 이 이름의
+     * TaskScheduler 빈이 있으면 @Scheduled 실행에 자동으로 쓴다.
+     *
+     * <p>이 풀은 폴러를 서로 다른 스레드로 분산할 뿐, 한 폴러의 동시 재진입을 허용하진 않는다(fixedDelay는
+     * 이전 실행 완료 후 지연을 재므로 같은 폴러는 여전히 직렬). 대상 DB 병렬 수집은 SnapshotScheduler 내부의
+     * 별도 워커 풀이 담당하며 ShedLock 노드 배타는 그대로 유지된다.
+     */
+    @Bean
+    public ThreadPoolTaskScheduler taskScheduler(
+            @Value("${dbtower.scheduler.pool-size:4}") int poolSize) {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(poolSize);
+        scheduler.setThreadNamePrefix("dbtower-sched-");
+        // 종료 시 진행 중 폴러가 안전하게 끝나도록 대기(수집·저장 도중 강제 중단 방지).
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(20);
+        return scheduler;
     }
 }

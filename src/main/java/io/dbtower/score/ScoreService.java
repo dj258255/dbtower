@@ -11,6 +11,7 @@ import io.dbtower.slo.SloService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -63,8 +64,34 @@ public class ScoreService {
                 backupNoBackup, backupStale);
     }
 
-    /** 전 인스턴스 스코어 — 웹 카드·GET /api/health-score. 나쁜 순 정렬은 리포트가 파생한다. */
+    /**
+     * 헬스 스코어 캐시 (Phase F, 스케일 제어) — 노드별 인메모리. 스코어 한 번 계산은 인스턴스마다 다섯 신호를
+     * 모으는(health 프로브로 대상 DB에 붙는) 무거운 작업이라, 대시보드를 열 때마다 재계산하면 조회가 곧 부하가
+     * 된다. 주기 폴러가 미리 계산해 두고 조회는 캐시를 돌려준다. 집계 시각은 리포트가 담아 UI에 표기된다.
+     */
+    private volatile HealthScoreReport cached;
+
+    /**
+     * 스코어를 주기 계산해 캐시에 담는다. ShedLock을 걸지 않는다 — 캐시는 노드별 인메모리라 각 노드가 자기
+     * 캐시를 독립적으로 채워야 한다(한 노드만 계산하면 나머지 노드는 캐시가 비어 매 조회마다 즉석 계산하게 됨).
+     * 프로브는 읽기 전용이라 노드마다 도는 것은 멱등하고 부하 상한도 refresh 주기로 묶인다.
+     */
+    @Scheduled(fixedDelayString = "${dbtower.score.refresh-ms:60000}")
+    public void refreshCache() {
+        try {
+            this.cached = computeAll();
+        } catch (Exception e) {
+            log.warn("헬스 스코어 캐시 갱신 실패(직전 캐시 유지): {}", e.getMessage());
+        }
+    }
+
+    /** 전 인스턴스 스코어 — 웹 카드·GET /api/health-score. 캐시가 있으면 그대로, 없으면(첫 조회) 즉석 계산. */
     public HealthScoreReport reportAll() {
+        HealthScoreReport snapshot = cached;
+        return snapshot != null ? snapshot : computeAll();
+    }
+
+    private HealthScoreReport computeAll() {
         LocalDateTime now = LocalDateTime.now();
         List<HealthScore> scores = registryService.findAll().stream()
                 .map(instance -> evaluate(instance, now))

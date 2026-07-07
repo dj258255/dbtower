@@ -59,6 +59,13 @@ public class RegistryService {
         return operations.health(findById(id));
     }
 
+    /** 수집 활성/격리 토글 (Phase F) — 문제 인스턴스를 삭제하지 않고 관제에서 잠시 뺀다. */
+    public DatabaseInstance setCollectionEnabled(Long id, boolean enabled) {
+        DatabaseInstance instance = findById(id);
+        instance.setCollectionEnabled(enabled);
+        return repository.save(instance);
+    }
+
     public void delete(Long id) {
         repository.deleteById(id);
         operations.release(id);

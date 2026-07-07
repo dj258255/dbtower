@@ -82,6 +82,9 @@ async function loadInstances() {
         <span class="type-badge type-${esc(i.type)}">${esc(i.type)}</span>
         ${esc(i.name)}
         <span class="health-dot" id="health-${i.id}"></span>
+        <button class="collect-toggle ${i.collectionEnabled ? "" : "isolated"}" data-id="${i.id}"
+          title="수집 격리 토글 — 끄면 스냅샷 수집·운영 경보에서 이 인스턴스를 뺀다(등록은 유지)">
+          ${i.collectionEnabled ? "수집중" : "격리됨"}</button>
       </div>
       <div class="instance-host">${esc(i.host)}:${i.port} / ${esc(i.dbName)}
         <span class="health-ms" id="healthms-${i.id}"></span></div>
@@ -89,6 +92,21 @@ async function loadInstances() {
 
   box.querySelectorAll(".instance-card").forEach((card) => {
     card.addEventListener("click", () => selectInstance(list.find((i) => i.id == card.dataset.id), card));
+  });
+  // 수집 격리 토글 — 카드 선택과 분리(stopPropagation). PATCH 후 목록을 다시 그려 상태 반영.
+  box.querySelectorAll(".collect-toggle").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      const inst = list.find((i) => i.id == id);
+      try {
+        await api(`/api/instances/${id}/collection`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: !inst.collectionEnabled }),
+        });
+        loadInstances();
+      } catch (err) { alert("수집 토글 실패: " + err.message); }
+    });
   });
   // 첫 인스턴스 자동 선택 — 진입 즉시 대시보드가 차 있게
   const first = box.querySelector(".instance-card");

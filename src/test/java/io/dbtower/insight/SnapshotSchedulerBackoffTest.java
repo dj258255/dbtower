@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class SnapshotSchedulerBackoffTest {
 
     private SnapshotScheduler scheduler() {
-        return new SnapshotScheduler(null, null, null);
+        return new SnapshotScheduler(null, null, null, 4);
     }
 
     @Test

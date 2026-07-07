@@ -42,11 +42,15 @@ public class RegistryController {
 
     /** 응답에 접속 정보(계정)는 노출하지 않는다 */
     public record InstanceResponse(Long id, String name, DbmsType type, String host, int port, String dbName,
-                                   boolean useTls) {
+                                   boolean useTls, boolean collectionEnabled) {
         static InstanceResponse from(DatabaseInstance i) {
             return new InstanceResponse(i.getId(), i.getName(), i.getType(), i.getHost(), i.getPort(), i.getDbName(),
-                    i.isUseTls());
+                    i.isUseTls(), i.isCollectionEnabled());
         }
+    }
+
+    /** 수집 활성/격리 토글 (Phase F) — 문제 인스턴스를 삭제 없이 관제에서 잠시 뺀다. */
+    public record CollectionToggle(@NotNull Boolean enabled) {
     }
 
     @PostMapping
@@ -78,6 +82,12 @@ public class RegistryController {
     @GetMapping("/{id}/health")
     public HealthStatus health(@PathVariable Long id) {
         return registryService.health(id);
+    }
+
+    /** 수집 격리 토글 — enabled=false면 스냅샷 수집·운영 경보가 이 인스턴스를 건너뛴다(등록은 유지). */
+    @PatchMapping("/{id}/collection")
+    public InstanceResponse setCollection(@PathVariable Long id, @Valid @RequestBody CollectionToggle req) {
+        return InstanceResponse.from(registryService.setCollectionEnabled(id, req.enabled()));
     }
 
     @DeleteMapping("/{id}")
