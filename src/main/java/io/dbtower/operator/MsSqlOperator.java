@@ -1,6 +1,8 @@
 package io.dbtower.operator;
 
 import io.dbtower.registry.DatabaseInstance;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 
 import org.springframework.jdbc.core.ConnectionCallback;
@@ -30,6 +32,16 @@ import java.util.Optional;
  * 운영 DB에 부하를 주지 않고 실제 사용된 플랜을 보는 방식.
  */
 public class MsSqlOperator extends AbstractJdbcOperator {
+
+    private static final Logger log = LoggerFactory.getLogger(MsSqlOperator.class);
+
+    /**
+     * SERVERPROPERTY('EngineEdition') 값의 의미(A-5):
+     * 5 = Azure SQL Database(관리형 단일 DB) — system_health 세션·로컬 .xel 파일이 없어 데드락 조회 불가,
+     * 8 = Azure SQL Managed Instance — system_health가 있어 온프렘과 동일 경로,
+     * 그 외(1=Personal/Desktop, 2=Standard, 3=Enterprise, 4=Express 등) = 온프렘/일반 인스턴스(기존 경로).
+     */
+    static final int ENGINE_EDITION_AZURE_SQL_DB = 5;
 
     public MsSqlOperator(DatabaseInstance instance, ConnectionPools pools, BackupTools backupTools) {
         super(instance, pools, backupTools);
@@ -721,6 +733,23 @@ public class MsSqlOperator extends AbstractJdbcOperator {
      */
     @Override
     public List<DeadlockEvent> recentDeadlocks(int limit) {
+        // A-5: Azure SQL Database(EngineEdition=5)는 system_health XE 세션도 로컬 .xel 파일도 제공하지 않는다.
+        // 그대로 조회하면 fn_xe_file_target_read_file/dm_xe_sessions가 빈 결과를 주어 "데드락 없음"으로 오탐한다.
+        // 그래서 여기서 명시적으로 "이 에디션은 system_health 미제공"을 로그로 남기고 빈 목록을 정직하게 돌려준다.
+        // (온프렘·Managed Instance(8)는 system_health가 있어 아래 기존 경로로 진행한다.)
+        try {
+            Integer engineEdition = jdbc().queryForObject(
+                    "SELECT CONVERT(int, SERVERPROPERTY('EngineEdition'))", Integer.class);
+            if (engineEdition != null && engineEdition == ENGINE_EDITION_AZURE_SQL_DB) {
+                log.info("MSSQL 데드락 조회 스킵 — Azure SQL Database(EngineEdition=5)는 system_health XE 세션/"
+                        + ".xel 파일을 제공하지 않아 데드락 이력을 관측할 수 없습니다 (instance={}). 빈 목록 반환.",
+                        instance.getName());
+                return List.of();
+            }
+        } catch (DataAccessException e) {
+            throw new OperatorException(
+                    "MSSQL EngineEdition 확인 실패(VIEW SERVER STATE 권한/접속 확인): " + e.getMessage(), e);
+        }
         // 파일 타깃: 여러 .xel 롤오버 파일을 한 번에 훑고 file_name/file_offset 역순으로 최근을 먼저.
         String fileSql = """
                 SELECT TOP (?) CAST(event_data AS XML) AS deadlock_xml
@@ -784,6 +813,9 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         try {
             DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
             // deadlock 리포트는 네임스페이스가 없어 tag 이름으로 바로 찾는다(showplan과 달리 setNamespaceAware 불필요).
+            // XXE 방어(A-1) — DeepAnalyzer와 동일하게 보안 처리 강제 + DOCTYPE 자체를 거부해 외부 엔티티 fetch를 원천 차단한다.
+            f.setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
             f.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
             f.setExpandEntityReferences(false);
             Document doc = f.newDocumentBuilder()
@@ -844,6 +876,9 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         }
         try {
             DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
+            // XXE 방어(A-1) — parseDeadlockXml과 동일한 강도(보안 처리 + DOCTYPE 거부)로 맞춘다.
+            f.setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
             f.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
             f.setExpandEntityReferences(false);
             Document doc = f.newDocumentBuilder()

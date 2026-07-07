@@ -103,11 +103,48 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
         return BackupCommands.safeFileName(name);
     }
 
-    /** explain 대상은 SELECT만 허용한다 — 관리 플랫폼이 임의 DML을 실행하면 안 되기 때문. */
+    /**
+     * explain 대상은 SELECT만 허용한다 — 관리 플랫폼이 임의 DML을 실행하면 안 되기 때문.
+     *
+     * <p>A-2: startsWith("select")만 보면 {@code SELECT 1; DROP TABLE x} 같은 스택 쿼리(다중문)가
+     * 게이트를 통과해 배치로 실행될 수 있다(읽기 전용 불변식 위반). 그래서 문자열 리터럴을 걷어낸 뒤
+     * <b>문장 중간</b>에 세미콜론이 남으면 거부한다. 끝에 붙은 단일 세미콜론은 정상 종결이라 허용하고,
+     * 리터럴 안의 세미콜론({@code SELECT ';' AS x})은 데이터라 문제 삼지 않는다. 완전한 SQL 파서를
+     * 들이지 않는 실용적 방어 — 목적은 "여러 문장의 동시 실행"만 확실히 막는 것이다.
+     */
     protected void requireSelect(String sql) {
         if (sql == null || !sql.trim().toLowerCase().startsWith("select")) {
             throw new IllegalArgumentException("EXPLAIN은 SELECT 쿼리만 허용합니다");
         }
+        if (hasStatementSeparator(sql)) {
+            throw new IllegalArgumentException("EXPLAIN은 단일 SELECT 문만 허용합니다 (다중문 불가)");
+        }
+    }
+
+    /**
+     * 문자열 리터럴('...') 밖에서 문장 구분자 세미콜론이 문장 <b>중간</b>에 있는지 검사한다.
+     * 작은따옴표 안(''로 이스케이프된 따옴표 포함)은 데이터로 보고 건너뛰며, 끝에 하나 붙은
+     * 세미콜론(뒤가 공백뿐)은 정상 종결로 허용한다.
+     */
+    private static boolean hasStatementSeparator(String sql) {
+        boolean inString = false;
+        for (int i = 0; i < sql.length(); i++) {
+            char c = sql.charAt(i);
+            if (c == '\'') {
+                // 리터럴 안의 '' 는 이스케이프된 따옴표라 상태를 토글하지 않고 건너뛴다
+                if (inString && i + 1 < sql.length() && sql.charAt(i + 1) == '\'') {
+                    i++;
+                    continue;
+                }
+                inString = !inString;
+            } else if (c == ';' && !inString) {
+                // 뒤에 공백 외 다른 문장이 남아 있으면 다중문 — 끝의 단일 세미콜론만 허용
+                if (!sql.substring(i + 1).isBlank()) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

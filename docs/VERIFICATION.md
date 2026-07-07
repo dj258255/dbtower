@@ -1578,3 +1578,34 @@ UI: Monitoring 탭에 데드락 카드(배지=획득 방식, victim·리소스·
 
 정직 한계: 병렬은 노드 안에서만(노드 간은 ShedLock 그대로). 알림 합산은 다음 알림이 와야 요약이 나간다
 (완전 무음이면 요약도 대기). 전체 테스트 그린(신규 단위 3건 포함). 스크린샷 webui 27(격리 토글 배지).
+
+## 62. 하드닝 아크 — 4축 감사 → 검증된 수정 (WS-A/B/C)
+
+배경: 심화 4개 아크 후, 동시성·자원누수 / 기종정확성·버전 / 보안 / HA·수명주기 4개 축을 병렬 감사(웹서칭
+포함)해 결함을 수집하고, 코드 재검증 + OWASP·CWE·벤더 문서 대조로 FIX/SKIP을 정했다(docs/HARDENING-ROADMAP.md).
+서브에이전트 3개가 파일 소유권으로 분할 구현(충돌 0). 신규 단위 28건 + 통합, 전체 그린.
+
+- **WS-A 보안**: (A-1) XXE — 데드락 파서 2곳·PlanShapes showplan의 DocumentBuilderFactory에
+  disallow-doctype-decl+SECURE_PROCESSING 추가(같은 저장소 DeepAnalyzer가 이미 올바르게 하던 패턴에 정렬,
+  CWE-611). (A-2) requireSelect 스택쿼리 거부(리터럴 밖 `;` 차단, CWE-89). (A-3) 암호화 fail-closed
+  (prod 프로필+키없음 기동 실패, CWE-312). (A-4) 에러 텍스트 노출 → 일반 메시지+errorId. (A-5) MSSQL
+  EngineEdition=5(Azure SQL DB)면 system_health 부재를 정직 처리(오탐 방지).
+- **WS-B 수명주기·동시성**: (B-1) **삭제 시 정리** — V10 FK ON DELETE CASCADE(자식 5표) + InstanceDeletedEvent
+  이벤트로 인메모리 맵(히스토그램·데드락·쿨다운·백오프) evict 배선(evictInstance 데드코드 해소). (B-2)
+  plan_snapshot 보존 잡. (B-3) 지터 캡(≤2s). (B-4) Future.get 예외 분리. (B-5) WebhookNotifier deliver를
+  락 밖으로(폴러 동반 지연 해소). (B-6) 종료 가드. (B-7) **HikariCP 풀 2→6 설정화**(폴러 경합발 허위 백오프
+  해소). (B-9) 웹훅 @everyone 멘션 차단 + 제어문자 이스케이프.
+- **WS-C 기종정확성·타임존**: (C-1) MySQL slowQueries에 +MICROSECOND/1000. (C-2) latency top에 GROUP BY
+  DIGEST. (C-3) PG deadlockCount 클러스터 전체 SUM. (C-4) Oracle 스키마 필터 설정화. (C-5) PHV=0 empty.
+  (C-6) TimeZone UTC 고정 + hibernate.jdbc.time_zone=UTC.
+
+**라이브 실측(실 8081, 컨테이너 재기동 후 V10 적용됨)**:
+- C-1: long_query_time=0.5s에서 sub-second 슬로우쿼리 유발 → 카드가 SLEEP(0.58)=581ms, (0.75)=750ms,
+  (0.6)=600.594ms 등 실측 표기(구코드는 전부 0). mysql.slow_log가 마이크로초를 저장함을 원본으로 확인
+  (`00:00:00.600594`) — 감사가 우려한 "TABLE 초 절삭"과 달리 이 버전은 보존, 수정이 실제 작동. 스크린샷 webui 28.
+- C-6: 기동/스냅샷 로그 시각이 `...Z`(UTC)로 표기(이전 +09:00 KST) — 노드 간 일관성 확보.
+- B-1: 임시 인스턴스(del-test) 등록·수집 후 삭제 → query_snapshot 32행 → **0행**(FK CASCADE 작동).
+- 단위 28건(XXE 5·requireSelect 6·WsC 6·evict 5·mention 1·cipher 5) + 통합(PlanSnapshotRetention) 그린.
+- 회귀 없음: 전체 스위트 BUILD SUCCESSFUL, 기존 기능 정상.
+
+정직 잔여: 저장 컬럼의 Instant 전환·쿨다운 메타DB 외부화·대규모 보존 배치 삭제는 범위 밖(로드맵에 문서화).

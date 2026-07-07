@@ -17,6 +17,13 @@ spring:
       # validate라 마이그레이션과 엔티티가 어긋나면 부팅이 실패한다 — 어긋남을 런타임이 아니라 기동 시점에 잡는다.
       ddl-auto: validate
     open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          # C-6: JDBC 드라이버가 TIMESTAMP를 읽고 쓸 때 쓰는 타임존을 UTC로 고정한다.
+          # JVM 기본 TZ 고정(DbtowerApplication)과 짝을 이뤄, 노드 서버 TZ가 달라도 메타 DB에
+          # 저장/조회되는 시각이 UTC로 일관된다. 저장 컬럼 타입(Instant) 변경은 범위 밖.
+          time_zone: UTC
   flyway:
     # 이미 테이블·데이터가 있는 DB에 Flyway를 도입할 때의 표준 절차 —
     # 기존 스키마를 V1(베이스라인)으로 표시만 하고 건너뛴다(비파괴). 빈 DB에는 V1부터 전부 실행된다.
@@ -26,6 +33,22 @@ server:
   port: 8080
 
 dbtower:
+  # 기종 정확성 (WS-C)
+  oracle:
+    # C-4: Oracle 통계(queryStats/slowQueries)를 볼 앱 스키마. 모니터 계정과 앱 스키마가 다를 때
+    # (모니터≠앱) 필수 — 비우면 모니터 CURRENT_SCHEMA가 아니라 SYS/SYSTEM/DBSNMP/SYSMAN 시스템
+    # 스키마만 제외하고 모든 앱 SQL을 본다. 특정 앱 스키마만 보려면 그 이름(대문자)을 지정한다.
+    app-schema: ""
+  pool:
+    # 인스턴스별 HikariCP 최대 커넥션(B-7) — 한 인스턴스를 폴러 다수(스냅샷·운영경보·SLO·백업·이상·회귀·
+    # Advisor·스코어)가 공유하는데 2였을 때 3번째 동시 접근이 대기→타임아웃→허위 백오프/수집정지 경보를 냈다.
+    max-per-instance: 6
+    connection-timeout-ms: 5000   # 커넥션 획득 대기 상한(B-7, 경합 시 여유)
+  plan-snapshot:
+    # plan_snapshot 보존(B-2) — 플랜 변경 감지가 append만 하고 삭제가 없어 무한 성장하던 것을,
+    # (instance,query)별 최신 N개만 남긴다. 인덱스 조회는 최신만 보므로 옛 행은 읽히지 않고 쌓이기만 했다.
+    retention-per-query: 20
+    retention-sweep-ms: 3600000   # 보존 정리 주기(1시간)
   # A9 분석 보호장치: 모든 대상 DB 조회의 기본 상한(초). JDBC는 Statement.setQueryTimeout,
   # Mongo는 소켓 read 상한으로 적용된다. 진단 도구가 실수로 무거운 쿼리를 던져도 대상 DB를
   # 오래 붙잡지 않게 — "진단이 부하 유발자가 되면 안 된다"는 원칙. 심층 진단(explain 실제 실행)은

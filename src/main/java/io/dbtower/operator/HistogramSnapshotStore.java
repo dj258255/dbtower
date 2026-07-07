@@ -1,5 +1,7 @@
 package io.dbtower.operator;
 
+import io.dbtower.registry.InstanceDeletedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -35,5 +37,11 @@ public class HistogramSnapshotStore {
     public void evictInstance(long instanceId) {
         String prefix = instanceId + ":";
         snapshots.keySet().removeIf(k -> k.startsWith(prefix));
+    }
+
+    /** 인스턴스 삭제 이벤트(B-1) — 그 인스턴스의 히스토그램 스냅샷을 비워 인메모리 누수를 막는다. */
+    @EventListener
+    public void onInstanceDeleted(InstanceDeletedEvent event) {
+        evictInstance(event.instanceId());
     }
 }

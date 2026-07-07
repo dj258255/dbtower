@@ -10,10 +10,12 @@ import io.dbtower.operator.ReplicationState;
 import io.dbtower.operator.SessionInfo;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.InstanceDeletedEvent;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -310,6 +312,24 @@ public class OpsAlertDetector {
         }
         lastAlerted.put(key, now);
         return true;
+    }
+
+    /**
+     * 인스턴스 삭제 이벤트(B-1) — 그 인스턴스가 남긴 인메모리 상태를 전부 비운다.
+     * - lastAlerted는 키가 "instanceId:종류(:식별자)"라 접두 일치로 그 인스턴스 것만 제거한다.
+     * - lastDeadlockCount/lastDeadlockSig는 instanceId 키라 바로 remove.
+     * 안 비우면 삭제된 인스턴스의 키가 맵에 영구 잔존하고, 같은 id가 재사용될 경우 낡은 기준선으로 오판한다.
+     */
+    @EventListener
+    public void onInstanceDeleted(InstanceDeletedEvent event) {
+        evict(event.instanceId());
+    }
+
+    void evict(long instanceId) {
+        String prefix = instanceId + ":";
+        lastAlerted.keySet().removeIf(k -> k.startsWith(prefix));
+        lastDeadlockCount.remove(instanceId);
+        lastDeadlockSig.remove(instanceId);
     }
 
     private void notify(DatabaseInstance instance, List<String> findings) {

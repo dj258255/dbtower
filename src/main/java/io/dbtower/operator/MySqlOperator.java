@@ -152,19 +152,29 @@ public class MySqlOperator extends AbstractJdbcOperator {
      * (c) 최근 구간에 그 digest 실행이 0회면 표본이 없어 역시 누적으로 폴백한다. <b>TRUNCATE로 히스토그램을
      * 리셋하면 즉시 최근 창을 얻지만 그건 대상 DB 상태 변경(가드레일 위반)</b> — 차분 방식이 바로 그 금지의 대안이다.
      */
+    /**
+     * 상위 digest 선정 쿼리 (C-2) — 같은 DIGEST가 여러 SCHEMA_NAME 행으로 나뉘어도 digest당 1행이 되도록
+     * {@code GROUP BY DIGEST}로 접는다. 접지 않으면 (SCHEMA_NAME,DIGEST) 키라 한 digest가 두 스키마에서
+     * 실행됐을 때 tops에 2행이 잡히고, 뒤의 히스토그램 스냅샷 키(instance:mysql-hist:digest)가 충돌해
+     * 허위 "학습 중"이 반복됐다. 정렬은 스키마 합산 부하(SUM(SUM_TIMER_WAIT))로, 텍스트는 대표값(MAX),
+     * 누적 QUANTILE은 대표값으로 스키마별 최댓값(MAX — 최악 스키마의 백분위)을 쓴다.
+     */
+    static final String LATENCY_TOP_SQL = """
+            SELECT DIGEST,
+                   MAX(DIGEST_TEXT) AS DIGEST_TEXT,
+                   MAX(QUANTILE_95) / 1000000000 AS p95_ms,
+                   MAX(QUANTILE_99) / 1000000000 AS p99_ms
+            FROM performance_schema.events_statements_summary_by_digest
+            WHERE DIGEST_TEXT IS NOT NULL AND DIGEST IS NOT NULL
+            GROUP BY DIGEST
+            ORDER BY SUM(SUM_TIMER_WAIT) DESC
+            LIMIT ?
+            """;
+
     @Override
     public List<LatencyPercentile> latencyPercentiles(int limit) {
-        String topSql = """
-                SELECT DIGEST, DIGEST_TEXT,
-                       QUANTILE_95 / 1000000000 AS p95_ms,
-                       QUANTILE_99 / 1000000000 AS p99_ms
-                FROM performance_schema.events_statements_summary_by_digest
-                WHERE DIGEST_TEXT IS NOT NULL AND DIGEST IS NOT NULL
-                ORDER BY SUM_TIMER_WAIT DESC
-                LIMIT ?
-                """;
         try {
-            List<TopDigest> tops = jdbc().query(topSql,
+            List<TopDigest> tops = jdbc().query(LATENCY_TOP_SQL,
                     (rs, i) -> new TopDigest(rs.getString("DIGEST"), rs.getString("DIGEST_TEXT"),
                             round2(rs.getDouble("p95_ms")), round2(rs.getDouble("p99_ms"))),
                     limit);
@@ -318,20 +328,29 @@ public class MySqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * 슬로우 쿼리 조회 SQL (C-1) — {@code TIME_TO_SEC}는 정수 초라 그것만 *1000하면 1초 미만 쿼리가 전부
+     * 0ms로 뭉개진다. {@code MICROSECOND(query_time)/1000}(마이크로초→ms)을 더해 밀리초 이하를 살린다.
+     * 정직한 한계: mysql.slow_log는 {@code log_output=TABLE}일 때 query_time을 초 정밀도(TIME)로만
+     * 저장하는 경우가 있어(서버·버전에 따라 MICROSECOND가 0으로 나옴) 이 보정으로도 sub-ms까지는
+     * 완전하지 않다. 마이크로초를 온전히 보존하려면 log_output=FILE로 전환해야 하는데 그것은 대상 DB
+     * 설정 변경이라 범위 밖 — TABLE 안에서의 최선 보정이다.
+     */
+    static final String SLOW_QUERIES_SQL = """
+            SELECT CONVERT(sql_text USING utf8mb4) AS sql_text,
+                   TIME_TO_SEC(query_time) * 1000 + MICROSECOND(query_time) / 1000 AS elapsed_ms,
+                   rows_examined,
+                   start_time
+            FROM mysql.slow_log
+            ORDER BY start_time DESC
+            LIMIT ?
+            """;
+
     @Override
     public List<SlowQuery> slowQueries(int limit) {
         // docker-compose에서 slow_query_log=ON, log_output=TABLE로 켜두어 mysql.slow_log에서 직접 조회한다
-        String sql = """
-                SELECT CONVERT(sql_text USING utf8mb4) AS sql_text,
-                       TIME_TO_SEC(query_time) * 1000 AS elapsed_ms,
-                       rows_examined,
-                       start_time
-                FROM mysql.slow_log
-                ORDER BY start_time DESC
-                LIMIT ?
-                """;
         try {
-            return jdbc().query(sql,
+            return jdbc().query(SLOW_QUERIES_SQL,
                     (rs, i) -> new SlowQuery(
                             rs.getString("sql_text"),
                             rs.getDouble("elapsed_ms"),

@@ -57,11 +57,27 @@ public class WebhookNotifier {
      * 분당 상한을 적용해 보낸다. 상한 안이면 즉시 전송(억제분이 있으면 요약을 덧붙임), 초과면 억제 카운트만 올린다.
      * 순수 판정을 테스트할 수 있도록 시각(now)을 받는 패키지-프라이빗 오버로드로 분리한다.
      */
-    public synchronized void send(String message) {
+    public void send(String message) {
         sendAt(message, System.currentTimeMillis());
     }
 
-    synchronized void sendAt(String message, long now) {
+    void sendAt(String message, long now) {
+        // B-5: 레이트리밋 판정(윈도우·suppressed 갱신 + 보낼 메시지 결정)만 락 안에서 하고,
+        // 실제 전송(deliver = HTTP, 최대 ~8s)은 락 밖에서 한다. 락 안에서 HTTP를 하면 웹훅이 느릴 때
+        // 모든 폴러 send가 직렬 블로킹돼 알림 폭주 시 폴러까지 동반 지연된다.
+        String toDeliver = decide(message, now);
+        // 락을 놓은 뒤 전송 — non-null이면 이번에 보낼 메시지(억제 요약이 붙어 있을 수 있다).
+        // (여전히 호출 스레드에서 동기로 보내므로 기존 단위 테스트의 deliver 관측은 그대로 유지된다.)
+        if (toDeliver != null) {
+            deliver(toDeliver);
+        }
+    }
+
+    /**
+     * 레이트리밋 판정(배타) — 보낼 메시지(억제 요약 포함)를 돌려주거나, 상한 초과면 null.
+     * 슬라이딩 윈도우·suppressed·sentWindow는 여러 폴러 스레드가 공유하는 상태라 이 판정만 배타화한다.
+     */
+    private synchronized String decide(String message, long now) {
         // 윈도우에서 60초 지난 전송 기록 제거
         while (!sentWindow.isEmpty() && now - sentWindow.peekFirst() > WINDOW_MS) {
             sentWindow.pollFirst();
@@ -69,7 +85,7 @@ public class WebhookNotifier {
         if (sentWindow.size() >= ratePerMinute) {
             suppressed++;
             log.warn("알림 레이트리밋 초과 — 억제 {}건(분당 {}건 상한, 다음 허용 알림에 합산)", suppressed, ratePerMinute);
-            return;
+            return null;
         }
         String out = message;
         if (suppressed > 0) {
@@ -77,7 +93,7 @@ public class WebhookNotifier {
             suppressed = 0;
         }
         sentWindow.addLast(now);
-        deliver(out);
+        return out;
     }
 
     /** 실제 웹훅 전송(package-private — 레이트리밋 판정만 떼어 테스트할 때 오버라이드해 관측한다). */
@@ -86,8 +102,10 @@ public class WebhookNotifier {
             log.info("[알림(webhook 미설정)] {}", message);
             return;
         }
+        // B-9: Discord는 allowed_mentions.parse=[]로 @everyone/@here·역할 멘션 인젝션을 원천 차단한다
+        // (사용자 텍스트가 content로 그대로 들어가므로, 명시적으로 "어떤 멘션도 해석하지 말라"고 못 박는다).
         String payload = webhookUrl.contains("discord.com")
-                ? "{\"content\": %s}".formatted(jsonString(message))   // Discord 포맷
+                ? "{\"content\": %s, \"allowed_mentions\": {\"parse\": []}}".formatted(jsonString(message))  // Discord 포맷
                 : "{\"text\": %s}".formatted(jsonString(message));     // Slack 포맷
         try {
             HttpRequest request = HttpRequest.newBuilder()
@@ -106,7 +124,34 @@ public class WebhookNotifier {
         }
     }
 
+    /**
+     * JSON 문자열 리터럴로 이스케이프한다. B-9: \n만 처리하던 것을 확장해 역슬래시·따옴표·모든 제어문자
+     * (\r·\t·\b·\f 및 그 밖의 U+0000..U+001F)를 안전하게 이스케이프한다 — 제어문자가 날것으로 들어가면
+     * 페이로드 JSON이 깨지거나(전송 실패) \r 등이 주입 벡터가 될 수 있다.
+     */
     private String jsonString(String s) {
-        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"";
+        StringBuilder sb = new StringBuilder(s.length() + 16);
+        sb.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\' -> sb.append("\\\\");
+                case '"' -> sb.append("\\\"");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                case '\b' -> sb.append("\\b");
+                case '\f' -> sb.append("\\f");
+                default -> {
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c)); // 그 밖의 제어문자
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        sb.append('"');
+        return sb.toString();
     }
 }

@@ -15,7 +15,9 @@ class UpsertRegistrationTest {
 
     private final DatabaseInstanceRepository repository = Mockito.mock(DatabaseInstanceRepository.class);
     private final InstanceOperations operations = Mockito.mock(InstanceOperations.class);
-    private final RegistryService service = new RegistryService(repository, operations);
+    private final org.springframework.context.ApplicationEventPublisher events =
+            Mockito.mock(org.springframework.context.ApplicationEventPublisher.class);
+    private final RegistryService service = new RegistryService(repository, operations, events);
 
     @Test
     void 같은_이름이_없으면_새로_등록한다() {

@@ -20,8 +20,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * 개선 아크 1: 매 수집마다 DriverManager로 새 커넥션을 열던 방식(TCP+인증 핸드셰이크 반복)을
  * 인스턴스별 HikariCP 풀로 교체. before/after는 docs/DESIGN.md의 실측 기록 참고.
  *
- * 관리 플랫폼은 대상 DB를 "가끔" 조회하므로 풀을 작게 유지한다(max 2).
- * 대상 DB의 커넥션 슬롯은 서비스가 써야 할 자원이라, 관제 도구가 많이 점유하면 안 된다.
+ * 관리 플랫폼은 대상 DB를 "가끔" 조회하므로 풀을 작게 유지한다 — 대상 DB의 커넥션 슬롯은 서비스가
+ * 써야 할 자원이라 관제 도구가 많이 점유하면 안 된다. 다만 한 인스턴스에 독립 접근자가 여럿이다
+ * (SnapshotScheduler + 워커, OpsAlert, SLO, Backup, Anomaly, Regression, Advisor, Score). max=2였을 때는
+ * 3번째 동시 요청부터 connectionTimeout만큼 대기하다 SQLException이 나고, SnapshotScheduler가 정상
+ * 인스턴스를 죽은 대상으로 오인해 최대 16분 백오프 + 허위 경보를 냈다(B-7). 그래서 풀 상한을 설정값으로
+ * 올려(기본 6) 동시 접근자 수에 맞춘다. connectionTimeout도 여유 있게(기본 5s) 둔다.
  */
 @Component
 public class ConnectionPools {
@@ -31,9 +35,19 @@ public class ConnectionPools {
     /** A9: 모든 JDBC 조회의 기본 쿼리 타임아웃(초). 진단이 대상 DB를 오래 붙잡지 않게. */
     private final int queryTimeoutSeconds;
 
+    /** B-7: 인스턴스별 HikariCP 풀 최대 커넥션 수. 한 인스턴스의 동시 접근자(폴러·워커) 수에 맞춘다. */
+    private final int maxPoolSize;
+
+    /** B-7: 커넥션 획득 대기 상한(ms). 풀이 포화됐을 때 얼마나 기다렸다 실패로 볼지. */
+    private final int connectionTimeoutMs;
+
     public ConnectionPools(
-            @org.springframework.beans.factory.annotation.Value("${dbtower.query-timeout-seconds:15}") int queryTimeoutSeconds) {
+            @org.springframework.beans.factory.annotation.Value("${dbtower.query-timeout-seconds:15}") int queryTimeoutSeconds,
+            @org.springframework.beans.factory.annotation.Value("${dbtower.pool.max-per-instance:6}") int maxPoolSize,
+            @org.springframework.beans.factory.annotation.Value("${dbtower.pool.connection-timeout-ms:5000}") int connectionTimeoutMs) {
         this.queryTimeoutSeconds = queryTimeoutSeconds;
+        this.maxPoolSize = Math.max(1, maxPoolSize);
+        this.connectionTimeoutMs = connectionTimeoutMs;
     }
 
     public int queryTimeoutSeconds() {
@@ -67,9 +81,9 @@ public class ConnectionPools {
         config.setJdbcUrl(jdbcUrl);
         config.setUsername(instance.getUsername());
         config.setPassword(instance.getPassword());
-        config.setMaximumPoolSize(2);
+        config.setMaximumPoolSize(maxPoolSize);
         config.setMinimumIdle(1);
-        config.setConnectionTimeout(3000);
+        config.setConnectionTimeout(connectionTimeoutMs);
         config.setPoolName("dbtower-" + instance.getName());
         return new HikariDataSource(config);
     }

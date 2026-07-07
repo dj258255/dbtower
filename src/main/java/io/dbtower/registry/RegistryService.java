@@ -1,5 +1,6 @@
 package io.dbtower.registry;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -10,10 +11,13 @@ public class RegistryService {
 
     private final DatabaseInstanceRepository repository;
     private final InstanceOperations operations;
+    private final ApplicationEventPublisher events;
 
-    public RegistryService(DatabaseInstanceRepository repository, InstanceOperations operations) {
+    public RegistryService(DatabaseInstanceRepository repository, InstanceOperations operations,
+                           ApplicationEventPublisher events) {
         this.repository = repository;
         this.operations = operations;
+        this.events = events;
     }
 
     /** 등록 전에 실제로 붙어보고, 붙지 않으면 등록을 거부한다 — 죽은 인스턴스가 레지스트리에 쌓이는 것 방지 */
@@ -67,7 +71,13 @@ public class RegistryService {
     }
 
     public void delete(Long id) {
+        // 자식 행(query_snapshot·plan_snapshot·backup_run·backup_policy_entity·health_sample)은
+        // FK ON DELETE CASCADE(V10)가 DB에서 함께 지운다 — 여기선 부모 한 행만 지운다.
         repository.deleteById(id);
+        // 커넥션 풀·클라이언트 정리(대상 접속 자원).
         operations.release(id);
+        // 폴러들이 폴 사이에 들고 있는 인메모리 상태(히스토그램·데드락 카운터/시그·쿨다운·백오프)를
+        // 각 모듈이 @EventListener로 비우게 알린다 — DB CASCADE가 닿지 못하는 프로세스 메모리 정리(B-1).
+        events.publishEvent(new InstanceDeletedEvent(id));
     }
 }

@@ -25,8 +25,51 @@ import java.util.Optional;
  */
 public class OracleOperator extends AbstractJdbcOperator {
 
+    /**
+     * 통계를 볼 앱 스키마(C-4). 설정값 dbtower.oracle.app-schema에서 주입되며(팩토리가 전달), 비었으면
+     * 시스템 스키마만 제외하고 모든 앱 SQL을 본다. 예전엔 모니터 계정의 CURRENT_SCHEMA로만 필터해서
+     * 모니터≠앱이면 앱 SQL이 전멸했다.
+     */
+    private final String appSchema;
+
+    /** 앱 스키마 미지정 시 노이즈로 제외할 Oracle 시스템 스키마들. */
+    private static final String SYSTEM_SCHEMAS = "'SYS', 'SYSTEM', 'DBSNMP', 'SYSMAN'";
+
     public OracleOperator(DatabaseInstance instance, ConnectionPools pools, BackupTools backupTools) {
+        this(instance, pools, backupTools, null);
+    }
+
+    public OracleOperator(DatabaseInstance instance, ConnectionPools pools, BackupTools backupTools,
+                          String appSchema) {
         super(instance, pools, backupTools);
+        this.appSchema = appSchema == null ? "" : appSchema.trim();
+    }
+
+    /** 앱 스키마 설정 여부. */
+    private boolean hasAppSchema() {
+        return !appSchema.isEmpty();
+    }
+
+    /**
+     * parsing_schema_name 필터 절(C-4). 앱 스키마가 지정되면 바인딩 파라미터(=?)로 그 스키마만,
+     * 비면 시스템 스키마만 NOT IN으로 제외해 앱 SQL 전체를 본다. 바인딩이 필요한 경우 args 앞머리에
+     * appSchema가 온다(호출부가 limit 앞에 붙인다).
+     */
+    static String schemaFilterClause(boolean hasAppSchema) {
+        return hasAppSchema
+                ? "parsing_schema_name = ?"
+                : "parsing_schema_name NOT IN (" + SYSTEM_SCHEMAS + ")";
+    }
+
+    /** SQL 바인딩 인자를 조립한다 — 앱 스키마가 있으면 그 값을 tail(예: limit) 앞에 끼운다. */
+    private Object[] schemaFilterArgs(Object... tail) {
+        if (!hasAppSchema()) {
+            return tail;
+        }
+        Object[] args = new Object[tail.length + 1];
+        args[0] = appSchema;
+        System.arraycopy(tail, 0, args, 1, tail.length);
+        return args;
     }
 
     /** dbName은 서비스명(예: FREEPDB1) — Oracle은 데이터베이스가 아니라 서비스로 붙는다 */
@@ -47,7 +90,7 @@ public class OracleOperator extends AbstractJdbcOperator {
     @Override
     public List<QueryStat> queryStats(int limit) {
         // V$SQL은 sql_id당 child cursor가 여러 행일 수 있어 sql_id로 합산한다.
-        // 자기 스키마 파싱 쿼리만 — SYS 백그라운드 잡 노이즈 제거
+        // 스키마 필터는 설정값 기반(C-4) — 앱 스키마 지정 시 그 스키마만, 미지정 시 시스템 스키마만 제외.
         String sql = """
                 SELECT sql_id,
                        MAX(SUBSTR(sql_text, 1, 2000)) AS query_text,
@@ -55,11 +98,11 @@ public class OracleOperator extends AbstractJdbcOperator {
                        SUM(elapsed_time) / 1000 AS total_ms,
                        SUM(buffer_gets) AS logical_reads
                 FROM v$sql
-                WHERE parsing_schema_name = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
+                WHERE %s
                 GROUP BY sql_id
                 ORDER BY SUM(elapsed_time) DESC
                 FETCH FIRST ? ROWS ONLY
-                """;
+                """.formatted(schemaFilterClause(hasAppSchema()));
         try {
             return jdbc().query(sql,
                     (rs, i) -> new QueryStat(
@@ -68,7 +111,7 @@ public class OracleOperator extends AbstractJdbcOperator {
                             rs.getLong("calls"),
                             rs.getDouble("total_ms"),
                             rs.getLong("logical_reads")),
-                    limit);
+                    schemaFilterArgs(limit));
         } catch (DataAccessException e) {
             throw new OperatorException("Oracle 쿼리 통계 수집 실패: " + e.getMessage(), e);
         }
@@ -76,6 +119,7 @@ public class OracleOperator extends AbstractJdbcOperator {
 
     @Override
     public List<SlowQuery> slowQueries(int limit) {
+        // 스키마 필터는 설정값 기반(C-4) — 모니터 CURRENT_SCHEMA 고정이면 모니터≠앱일 때 앱 SQL이 전멸한다.
         String sql = """
                 SELECT SUBSTR(sql_text, 1, 2000) AS query_text,
                        elapsed_time / executions / 1000 AS avg_ms,
@@ -83,10 +127,10 @@ public class OracleOperator extends AbstractJdbcOperator {
                        TO_CHAR(last_active_time, 'YYYY-MM-DD HH24:MI:SS') AS captured_at
                 FROM v$sql
                 WHERE executions > 0
-                  AND parsing_schema_name = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
+                  AND %s
                 ORDER BY elapsed_time / executions DESC
                 FETCH FIRST ? ROWS ONLY
-                """;
+                """.formatted(schemaFilterClause(hasAppSchema()));
         try {
             return jdbc().query(sql,
                     (rs, i) -> new SlowQuery(
@@ -94,7 +138,7 @@ public class OracleOperator extends AbstractJdbcOperator {
                             rs.getDouble("avg_ms"),
                             rs.getLong("avg_reads"),
                             rs.getString("captured_at")),
-                    limit);
+                    schemaFilterArgs(limit));
         } catch (DataAccessException e) {
             throw new OperatorException("Oracle 슬로우 쿼리 조회 실패: " + e.getMessage(), e);
         }
@@ -138,11 +182,20 @@ public class OracleOperator extends AbstractJdbcOperator {
             return jdbc().query(
                     "SELECT plan_hash_value FROM v$sqlstats WHERE sql_id = ? ORDER BY last_active_time DESC "
                             + "FETCH FIRST 1 ROWS ONLY",
-                    rs -> rs.next() ? Optional.of("PHV:" + rs.getLong(1)) : Optional.<String>empty(),
+                    rs -> rs.next() ? planShapeForPhv(rs.getLong(1)) : Optional.<String>empty(),
                     queryId);
         } catch (DataAccessException e) {
             return Optional.empty();
         }
+    }
+
+    /**
+     * plan_hash_value → shape 식별자(C-5). PHV=0은 Oracle이 계획을 포착하지 못한 상태(계획 미수집)라
+     * 실제 shape가 아니다. 이를 "PHV:0"으로 저장하면 다음 폴에서 진짜 PHV가 잡히는 순간 허위 플립으로
+     * 오탐한다. 그래서 PHV=0이면 empty(관측 없음)로 정직하게 스킵한다.
+     */
+    static Optional<String> planShapeForPhv(long phv) {
+        return phv == 0 ? Optional.empty() : Optional.of("PHV:" + phv);
     }
 
     /**

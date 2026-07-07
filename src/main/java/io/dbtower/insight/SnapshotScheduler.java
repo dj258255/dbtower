@@ -4,11 +4,13 @@ import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.QueryStat;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.InstanceDeletedEvent;
 import jakarta.annotation.PreDestroy;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -17,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -44,13 +47,18 @@ public class SnapshotScheduler {
     // (한 틱에선 인스턴스가 서로 달라 같은 id를 두 워커가 만지지 않지만, 방어적으로 배타화한다.)
     private final Map<Long, int[]> backoff = new ConcurrentHashMap<>(); // id -> [남은 skip, 실패 연속 횟수]
 
-    /** 인스턴스별 시작 지터 상한(ms) — 워커들이 동시에 대상 DB에 접속을 몰지 않게 조금씩 어긋나게 한다. */
+    /** 인스턴스별 시작 지터 단위(ms) — 워커들이 동시에 대상 DB에 접속을 몰지 않게 조금씩 어긋나게 한다. */
     private static final long JITTER_STEP_MS = 40;
+    // B-3: 시작 지터 상한(ms). 인스턴스가 많으면 (order++)*STEP가 무한정 커져 후순위 워커가 수 초~수십 초
+    // sleep하며 워커 슬롯을 점유(collect 벽시계 팽창)한다. 지터의 목적은 "동시 접속을 조금 흩는" 것뿐이라
+    // 상한을 둬도 그 효과는 유지된다. order를 workers로 모듈러해 한 워커 슬롯 주기(step) 안으로 접고 캡을 씌운다.
+    private static final long JITTER_CAP_MS = 2000;
 
     private final DatabaseInstanceRepository instanceRepository;
     private final SnapshotWriter snapshotWriter;
     private final DbmsOperatorFactory operatorFactory;
     private final ExecutorService pool;
+    private final int workers;
 
     public SnapshotScheduler(DatabaseInstanceRepository instanceRepository,
                              SnapshotWriter snapshotWriter,
@@ -59,7 +67,8 @@ public class SnapshotScheduler {
         this.instanceRepository = instanceRepository;
         this.snapshotWriter = snapshotWriter;
         this.operatorFactory = operatorFactory;
-        this.pool = Executors.newFixedThreadPool(Math.max(1, workers), r -> {
+        this.workers = Math.max(1, workers);
+        this.pool = Executors.newFixedThreadPool(this.workers, r -> {
             Thread t = new Thread(r, "dbtower-collect");
             t.setDaemon(true);
             return t;
@@ -89,6 +98,11 @@ public class SnapshotScheduler {
     @Scheduled(fixedDelayString = "${dbtower.snapshot.interval-ms:60000}")
     @SchedulerLock(name = "snapshot-collect", lockAtLeastFor = "PT50S", lockAtMostFor = "PT2M")
     public void collect() {
+        // B-6: 종료 중이면 시작하지 않는다 — @PreDestroy로 풀이 내려가는 중에 submit하면
+        // RejectedExecutionException 노이즈만 남는다(taskScheduler와 이 풀의 파괴 순서는 보장되지 않는다).
+        if (pool.isShutdown()) {
+            return;
+        }
         List<Future<?>> futures = new ArrayList<>();
         int order = 0;
         for (DatabaseInstance instance : instanceRepository.findAll()) {
@@ -100,15 +114,25 @@ public class SnapshotScheduler {
                 log.debug("스냅샷 수집 건너뜀(백오프) instance={}", instance.getName());
                 continue;
             }
-            final long jitterMs = (order++) * JITTER_STEP_MS;
+            if (pool.isShutdown()) {
+                break; // 루프 도중 종료가 시작되면 남은 submit을 멈춘다(B-6)
+            }
+            // B-3: order를 워커 수로 접어 한 슬롯 주기 안에서 흩고, 상한(JITTER_CAP_MS)으로 유한화한다.
+            final long jitterMs = Math.min((order++ % workers) * JITTER_STEP_MS, JITTER_CAP_MS);
             futures.add(pool.submit(() -> collectOne(instance, jitterMs)));
         }
         // 이 틱의 모든 워커가 끝날 때까지 대기 — ShedLock 창 안에서 완료를 보장(다음 노드 끼어들기 방지).
         for (Future<?> f : futures) {
             try {
                 f.get();
-            } catch (Exception e) {
+            } catch (InterruptedException e) {
+                // 이 스케줄 스레드 자신이 인터럽트된 경우에만 플래그를 복원하고 대기를 중단한다(B-4).
                 Thread.currentThread().interrupt();
+                break;
+            } catch (ExecutionException e) {
+                // 워커 내부 예외는 collectOne이 이미 격리·로깅하므로 여기 오는 건 드물다.
+                // 오더라도 인터럽트로 뭉개지 말고 경고만 남기고 나머지 워커를 계속 기다린다(B-4).
+                log.warn("스냅샷 워커 실행 예외 cause={}", e.getCause() == null ? e.getMessage() : e.getCause().getMessage());
             }
         }
     }
@@ -179,5 +203,15 @@ public class SnapshotScheduler {
         int skip = Math.min(1 << Math.min(state[1] - 1, 30), MAX_SKIP);
         state[0] = skip;
         return skip;
+    }
+
+    /** 인스턴스 삭제 이벤트(B-1) — 그 인스턴스의 백오프 상태를 비운다(삭제된 id가 맵에 잔존하지 않게). */
+    @EventListener
+    public void onInstanceDeleted(InstanceDeletedEvent event) {
+        evict(event.instanceId());
+    }
+
+    synchronized void evict(long instanceId) {
+        backoff.remove(instanceId);
     }
 }

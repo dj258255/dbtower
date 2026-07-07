@@ -14,9 +14,12 @@ public class DbmsOperatorFactory {
     private final MongoClientCache mongoClients;
     private final BackupTools backupTools;
     private final HistogramSnapshotStore histogramStore;
+    /** Oracle 통계 필터 대상 앱 스키마(C-4) — 비면 시스템 스키마만 제외. Operator는 빈이 아니라 여기서 전달한다. */
+    private final String oracleAppSchema;
 
     public DbmsOperatorFactory(ConnectionPools pools, MongoClientCache mongoClients,
                                HistogramSnapshotStore histogramStore,
+                               @org.springframework.beans.factory.annotation.Value("${dbtower.oracle.app-schema:}") String oracleAppSchema,
                                @org.springframework.beans.factory.annotation.Value("${dbtower.backup.mysqldump-command:mysqldump}") String mysqldumpCommand,
                                @org.springframework.beans.factory.annotation.Value("${dbtower.backup.pg-dump-command:pg_dump}") String pgDumpCommand,
                                @org.springframework.beans.factory.annotation.Value("${dbtower.backup.mongodump-command:mongodump}") String mongodumpCommand,
@@ -27,6 +30,7 @@ public class DbmsOperatorFactory {
         this.pools = pools;
         this.mongoClients = mongoClients;
         this.histogramStore = histogramStore;
+        this.oracleAppSchema = oracleAppSchema;
         this.backupTools = new BackupTools(mysqldumpCommand, pgDumpCommand, mongodumpCommand,
                 mysqlRestoreCommand, pgRestoreCommand, mongoRestoreCommand, backupDir);
     }
@@ -36,7 +40,7 @@ public class DbmsOperatorFactory {
             case MYSQL -> new MySqlOperator(instance, pools, backupTools, histogramStore);
             case POSTGRESQL -> new PostgresOperator(instance, pools, backupTools);
             case MSSQL -> new MsSqlOperator(instance, pools, backupTools);
-            case ORACLE -> new OracleOperator(instance, pools, backupTools);
+            case ORACLE -> new OracleOperator(instance, pools, backupTools, oracleAppSchema);
             case MONGODB -> new MongoOperator(instance, mongoClients, backupTools, histogramStore); // 비 JDBC — 풀 대신 클라이언트 캐시
         };
     }

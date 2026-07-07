@@ -649,15 +649,22 @@ public class PostgresOperator extends AbstractJdbcOperator {
     }
 
     /**
-     * 누적 데드락 카운터 (3차 아크 D-3) — PG는 개별 데드락 리포트를 안 남기고 pg_stat_database.deadlocks
-     * 누적 카운터만 준다(개별 사건은 로그에만, 뷰엔 없음). 현재 DB의 누적값을 그대로 돌려주고, 폴 사이
-     * 델타 판단은 OpsAlert가 한다. pg_read_all_stats로 충분. 카운터가 없으면(권한/버전) empty.
+     * 누적 데드락 카운터 (3차 아크 D-3 → C-3 클러스터 집계) — PG는 개별 데드락 리포트를 안 남기고
+     * pg_stat_database.deadlocks 누적 카운터만 준다(개별 사건은 로그에만, 뷰엔 없음). 폴 사이 델타
+     * 판단은 OpsAlert가 한다. pg_read_all_stats로 충분. 카운터가 없으면(권한/버전) empty.
+     *
+     * C-3: 예전엔 current_database()만 봐서 같은 클러스터의 형제 DB에서 난 데드락을 놓쳤다. 이제
+     * 템플릿(template0/template1)과 datname NULL(집계 행)을 뺀 클러스터 전체 deadlocks를 SUM한다.
+     * 트레이드오프: 어느 DB에서 난 데드락인지 per-DB 귀속은 상실한다. 대신 클러스터의 어느 DB에서
+     * 나든 하나도 놓치지 않는다 — 관제의 목적(놓침 방지)에 부합하는 선택. SUM은 대상 행이 항상 있어
+     * 정상 경로에서 NULL이 아니지만, 방어적으로 Optional.ofNullable로 감싼다.
      */
     @Override
     public Optional<Long> deadlockCount() {
         try {
             Long n = jdbc().queryForObject(
-                    "SELECT deadlocks FROM pg_stat_database WHERE datname = current_database()",
+                    "SELECT SUM(deadlocks) FROM pg_stat_database "
+                            + "WHERE datname NOT IN ('template0', 'template1') AND datname IS NOT NULL",
                     Long.class);
             return Optional.ofNullable(n);
         } catch (DataAccessException e) {

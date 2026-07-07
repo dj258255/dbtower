@@ -197,6 +197,9 @@ public final class PlanShapes {
         try {
             DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
             f.setNamespaceAware(true); // showplan XML은 기본 네임스페이스가 있어 localName 비교에 필요
+            // XXE 방어(A-1) — DeepAnalyzer와 동일하게 보안 처리 강제 + DOCTYPE 거부로 외부 엔티티 fetch를 원천 차단.
+            f.setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
             f.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
             f.setExpandEntityReferences(false);
             Document doc = f.newDocumentBuilder()
