@@ -649,6 +649,23 @@ public class PostgresOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 누적 데드락 카운터 (3차 아크 D-3) — PG는 개별 데드락 리포트를 안 남기고 pg_stat_database.deadlocks
+     * 누적 카운터만 준다(개별 사건은 로그에만, 뷰엔 없음). 현재 DB의 누적값을 그대로 돌려주고, 폴 사이
+     * 델타 판단은 OpsAlert가 한다. pg_read_all_stats로 충분. 카운터가 없으면(권한/버전) empty.
+     */
+    @Override
+    public Optional<Long> deadlockCount() {
+        try {
+            Long n = jdbc().queryForObject(
+                    "SELECT deadlocks FROM pg_stat_database WHERE datname = current_database()",
+                    Long.class);
+            return Optional.ofNullable(n);
+        } catch (DataAccessException e) {
+            return Optional.empty();
+        }
+    }
+
+    /**
      * 실제 실행 계획 (D9) — EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON). 쿼리를 진짜 실행해
      * Plan Rows(추정) vs Actual Rows(실측)·Rows Removed by Filter·버퍼 히트를 준다.
      * Actual Rows·시간은 loops당 평균(공식 문서 명시) — 총량 환산(loops 곱)은 DeepAnalyzer가 한다.

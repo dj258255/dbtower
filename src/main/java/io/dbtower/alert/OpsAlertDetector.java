@@ -5,6 +5,7 @@ import io.dbtower.backup.BackupFreshnessService;
 import io.dbtower.insight.QuerySnapshotRepository;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
+import io.dbtower.operator.DeadlockEvent;
 import io.dbtower.operator.ReplicationState;
 import io.dbtower.operator.SessionInfo;
 import io.dbtower.registry.DatabaseInstance;
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -57,6 +59,12 @@ public class OpsAlertDetector {
     /** key = instanceId:종류(:식별자), value = 마지막 알림 시각 */
     private final Map<String, LocalDateTime> lastAlerted = new ConcurrentHashMap<>();
 
+    /** PG 데드락 누적 카운터의 직전 값(instanceId → count) — 폴 사이 델타로 "새 데드락"을 센다. */
+    private final Map<Long, Long> lastDeadlockCount = new ConcurrentHashMap<>();
+
+    /** MSSQL/MySQL 최근 데드락의 직전 식별 문자열(instanceId → sig) — 같은 사건 반복 알림을 막는다. */
+    private final Map<Long, String> lastDeadlockSig = new ConcurrentHashMap<>();
+
     public OpsAlertDetector(DatabaseInstanceRepository instanceRepository,
                             DbmsOperatorFactory operatorFactory,
                             QuerySnapshotRepository snapshotRepository,
@@ -94,6 +102,7 @@ public class OpsAlertDetector {
                 findings.addAll(detectIdleTransactions(instance, operator, now));
                 findings.addAll(detectReplicationLag(instance, operator, now));
                 findings.addAll(detectReplicationSlots(instance, operator, now));
+                findings.addAll(detectDeadlocks(instance, operator, now));
                 findings.addAll(detectSnapshotStall(instance, now));
             } catch (Exception e) {
                 // 폴러가 죽으면 안 된다 — 감지 실패는 로그로만 남기고 넘어간다
@@ -189,6 +198,48 @@ public class OpsAlertDetector {
             }
         }
         return findings;
+    }
+
+    /**
+     * 데드락 감지 (3차 아크 D-축) — 기종마다 관측 입도가 달라 두 갈래로 처리한다.
+     * - PostgreSQL: 개별 사건이 없고 pg_stat_database.deadlocks 누적 카운터뿐 → 폴 사이 <b>델타</b>가
+     *   0보다 크면 "새 데드락 N건". 첫 관측(직전 값 없음)이나 카운터 감소(통계 리셋)는 알리지 않는다.
+     * - SQL Server / MySQL: recentDeadlocks()가 최근 리포트를 준다 → 가장 최근 사건의 식별 문자열이
+     *   직전과 다르면 "새 데드락"으로 1건 알린다(같은 사건 반복 알림 방지). 롤링 저장이라 "최근"만 본다.
+     * 데드락은 자체 회복(한쪽 롤백)되지만 애플리케이션 오류로 이어지므로, 반복되면 락 순서 점검 신호다.
+     */
+    private List<String> detectDeadlocks(DatabaseInstance instance, DbmsOperator operator, LocalDateTime now) {
+        long id = instance.getId();
+        Optional<Long> counter = operator.deadlockCount();
+        if (counter.isPresent()) {
+            long cur = counter.get();
+            Long prev = lastDeadlockCount.put(id, cur);
+            if (prev != null && cur > prev && passCooldown("deadlock", instance, now)) {
+                return List.of("데드락 발생 +%d건 (누적 %d, pg_stat_database.deadlocks 델타) — 반복되면 락 순서 점검"
+                        .formatted(cur - prev, cur));
+            }
+            return List.of();
+        }
+        List<DeadlockEvent> events = operator.recentDeadlocks(5);
+        if (events.isEmpty()) {
+            return List.of();
+        }
+        DeadlockEvent newest = events.get(0);
+        String sig = newest.detectedAt() + "|" + newest.victim() + "|" + newest.resource();
+        String prevSig = lastDeadlockSig.put(id, sig);
+        if (!sig.equals(prevSig) && prevSig != null && passCooldown("deadlock", instance, now)) {
+            String victim = newest.victim() == null ? "(victim 미상)" : newest.victim();
+            return List.of("데드락 감지 (%s) victim=%s — %s"
+                    .formatted(newest.source(), truncate(victim), newest.detectedAt()));
+        }
+        return List.of();
+    }
+
+    private static String truncate(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() <= 120 ? s : s.substring(0, 120) + "...";
     }
 
     /**

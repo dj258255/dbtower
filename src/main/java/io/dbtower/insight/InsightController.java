@@ -88,6 +88,18 @@ public class InsightController {
     }
 
     /**
+     * 최근 데드락 (3차 아크 D-축) — SQL Server system_health XE / MySQL INNODB STATUS에서 최근 리포트를
+     * 읽는다(설정 변경 0, 롤링이라 "최근"만). PostgreSQL은 개별 사건이 없어(누적 카운터뿐) 빈 목록이고,
+     * PG 데드락은 OpsAlert 카운터 델타로 알린다.
+     */
+    @GetMapping("/deadlocks")
+    public java.util.List<io.dbtower.operator.DeadlockEvent> deadlocks(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "10") int limit) {
+        return operatorFactory.create(registryService.findById(id)).recentDeadlocks(limit);
+    }
+
+    /**
      * 대기 이벤트 (B1) — load%가 "누가 시간을 쓰나"라면 이것은 "그 시간에 무엇을 기다렸나".
      * 기종별 의미 차이(누적/순간 스냅샷/큐 지표)는 WaitEvent record 주석 참고.
      */

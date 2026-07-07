@@ -189,6 +189,10 @@
         <h3>이상 감지 <span class="hint">(평소=이 요일·시간대 베이스라인 대비 z-score 이탈 — 고정 임계와 별개로 "평소와 다른가"를 본다)</span></h3>
         <div id="anomaly-result" class="anomaly-result muted">조회 중...</div>
       </div>
+      <div class="monitor-card deadlock-card">
+        <h3>최근 데드락 <span class="hint">(DB가 이미 남긴 흔적을 설정 변경 0으로 읽음 — MSSQL system_health XE·MySQL INNODB STATUS. 롤링이라 "최근"만, PG는 카운터라 알림으로)</span></h3>
+        <div id="deadlock-result" class="anomaly-result muted">조회 중...</div>
+      </div>
       <div class="monitor-card plan-change-card">
         <h3>실행계획 변경 <span class="hint">("쿼리도 데이터도 그대로인데 느려짐 = 플랜 플립" — 회귀 감지된 쿼리만 계획을 떠서 비교, 첫 관측은 기준선)</span></h3>
         <div id="plan-change-result" class="anomaly-result muted">조회 중...</div>

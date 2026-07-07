@@ -5,8 +5,11 @@ import io.dbtower.backup.BackupFreshnessService;
 import io.dbtower.insight.QuerySnapshotRepository;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
+import io.dbtower.operator.DeadlockEvent;
 import io.dbtower.operator.ReplicationState;
 import io.dbtower.operator.SessionInfo;
+
+import java.util.Optional;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DatabaseInstanceRepository;
 import io.dbtower.registry.DbmsType;
@@ -133,6 +136,69 @@ class OpsAlertDetectorTest {
         when(operator.activeSessions(anyInt())).thenThrow(new RuntimeException("접속 실패"));
         assertDoesNotThrow(detector::detect);
         verify(notifier, never()).send(anyString());
+    }
+
+    // ---------- 데드락 (3차 아크 D-축) ----------
+
+    /** 데드락 감지는 instanceId를 dedup 키로 쓰므로(운영 인스턴스는 항상 id 보유) id 있는 인스턴스로 검증한다. */
+    private void useInstanceWithId() {
+        DatabaseInstance withId = Mockito.mock(DatabaseInstance.class);
+        when(withId.getId()).thenReturn(1L);
+        when(withId.getName()).thenReturn("test-db");
+        when(withId.getCreatedAt()).thenReturn(java.time.LocalDateTime.now());
+        when(instanceRepository.findAll()).thenReturn(List.of(withId));
+    }
+
+    @Test
+    void PG_데드락은_카운터가_늘어난_때만_알리고_첫관측은_조용하다() {
+        useInstanceWithId();
+        // 첫 관측: 직전 값이 없어 기준선만 저장(알림 없음) — 과거분을 새 데드락으로 오인하지 않는다
+        when(operator.deadlockCount()).thenReturn(Optional.of(5L));
+        detector.detect();
+        verify(notifier, never()).send(anyString());
+
+        // 카운터 증가: 델타만큼 새 데드락으로 알림
+        when(operator.deadlockCount()).thenReturn(Optional.of(8L));
+        detector.detect();
+        String message = notifiedMessage();
+        assertTrue(message.contains("데드락 발생"));
+        assertTrue(message.contains("+3"));
+    }
+
+    @Test
+    void PG_데드락_카운터가_그대로면_조용하다() {
+        useInstanceWithId();
+        when(operator.deadlockCount()).thenReturn(Optional.of(5L));
+        detector.detect();
+        detector.detect(); // 값 불변 → 새 데드락 아님
+        verify(notifier, never()).send(anyString());
+    }
+
+    @Test
+    void MSSQL_MySQL_데드락은_새_사건일_때만_알린다() {
+        useInstanceWithId();
+        when(operator.deadlockCount()).thenReturn(Optional.empty()); // 카운터 없는 기종 → recentDeadlocks 경로
+        // 첫 관측: 기준선 저장(알림 없음)
+        when(operator.recentDeadlocks(anyInt())).thenReturn(List.of(deadlock("2026-07-07T10:00:00Z", "spid 51")));
+        detector.detect();
+        verify(notifier, never()).send(anyString());
+
+        // 새 사건(다른 식별 문자열) → 알림
+        when(operator.recentDeadlocks(anyInt())).thenReturn(List.of(deadlock("2026-07-07T10:05:00Z", "spid 77")));
+        detector.detect();
+        String message = notifiedMessage();
+        assertTrue(message.contains("데드락 감지"));
+        assertTrue(message.contains("spid 77"));
+
+        // 같은 사건 반복 → 조용(반복 알림 방지)
+        Mockito.reset(notifier);
+        detector.detect();
+        verify(notifier, never()).send(anyString());
+    }
+
+    private DeadlockEvent deadlock(String at, String victim) {
+        return new DeadlockEvent(at, List.of("UPDATE t WHERE id=1"), victim,
+                "db.dbo.t.PK", "MSSQL system_health XE");
     }
 
     // ---------- 백업 신선도 (D7) ----------

@@ -22,3 +22,6 @@ GRANT SELECT ON mysql.slow_log TO 'dbtower_monitor'@'%';
 
 -- replication: SHOW REPLICA STATUS는 REPLICATION CLIENT, 폴백 SHOW REPLICAS는 REPLICATION SLAVE
 GRANT REPLICATION CLIENT, REPLICATION SLAVE ON *.* TO 'dbtower_monitor'@'%';
+
+-- 3차 아크 D-2: SHOW ENGINE INNODB STATUS(최근 데드락 1건)는 PROCESS 권한이 필요하다.
+GRANT PROCESS ON *.* TO 'dbtower_monitor'@'%';

@@ -118,7 +118,7 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
-  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies(), loadPlanChanges()]);
+  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks()]);
 }
 
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
@@ -870,6 +870,31 @@ async function loadReplicationSlots() {
       return warn ? `<span class="verify-badge verify-FAILED">${label}</span>` : `<span>${label}</span>`;
     }).join(" ");
   } catch (e) { box.textContent = ""; }
+}
+
+// 최근 데드락 (3차 아크 D-축) — DB가 이미 남긴 흔적을 설정 변경 0으로 읽는다.
+// MSSQL system_health XE / MySQL INNODB STATUS는 리포트를, PG는 개별 사건이 없어(카운터뿐) 빈 목록이다.
+// 롤링 저장이라 "최근"만 본다 — 없으면 "최근 데드락 없음"으로 정직하게 표기(과거 전수 보장 아님).
+async function loadDeadlocks() {
+  const box = $("#deadlock-result");
+  try {
+    const rows = await api(`/api/instances/${state.instance.id}/deadlocks?limit=10`);
+    if (!rows.length) {
+      box.innerHTML = '<p class="muted">최근 데드락 없음 (롤링 저장이라 "최근"만 관측 — PG는 발생 시 알림으로).</p>';
+      return;
+    }
+    box.innerHTML = rows.map((d) => {
+      const stmts = (d.statements || []).map((s) => `<code>${esc(s)}</code>`).join("<br>");
+      return `<div class="anomaly-item">
+        <div><span class="src-badge src-estimated">${esc(d.source)}</span>
+          <b>${esc(d.detectedAt || "시각 미상")}</b></div>
+        <div class="muted">victim: ${esc(d.victim || "미상")}${d.resource ? " · 리소스: " + esc(d.resource) : ""}</div>
+        ${stmts ? `<div class="deadlock-stmts">${stmts}</div>` : ""}
+      </div>`;
+    }).join("");
+  } catch (e) {
+    box.innerHTML = `<p class="muted">조회 실패: ${esc(e.message)}</p>`;
+  }
 }
 
 // 이상 감지 (D1) — 평소(이 요일·시간대 베이스라인) 대비 z-score 이탈 쿼리 목록.

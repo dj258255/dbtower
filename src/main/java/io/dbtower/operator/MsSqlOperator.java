@@ -4,13 +4,21 @@ import io.dbtower.registry.DatabaseInstance;
 import org.springframework.dao.DataAccessException;
 
 import org.springframework.jdbc.core.ConnectionCallback;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
 
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 
@@ -684,5 +692,245 @@ public class MsSqlOperator extends AbstractJdbcOperator {
             throw new OperatorException("MSSQL 실제 실행계획(STATISTICS XML) 실패(타임아웃/권한 확인): "
                     + e.getMessage(), e);
         }
+    }
+
+    /** inputbuf 문장의 최대 보존 길이(자) — QueryStat/SUBSTRING 관례처럼 과도한 SQL 텍스트를 자른다. */
+    static final int DEADLOCK_STMT_MAX = 200;
+
+    /** victim 요약에 붙이는 inputbuf 앞부분 길이(자) — 어느 세션이 롤백됐는지 식별할 정도만. */
+    static final int DEADLOCK_VICTIM_MAX = 120;
+
+    /** 데드락 리포트 획득 방식 라벨 — DeadlockEvent.source 규약값. */
+    static final String DEADLOCK_SOURCE = "MSSQL system_health XE";
+
+    /**
+     * 최근 데드락 (3차 아크 D-1) — system_health 확장 이벤트 세션이 데드락마다 남기는
+     * xml_deadlock_report를 <b>설정 변경 0으로</b> 읽는다(system_health는 SQL Server가 기본으로 켜 둠).
+     *
+     * <p>두 타깃을 모두 읽어 병합하는 이유(라이브 실측 근거): 조사 단계에선 ring_buffer가 2022에서
+     * xml_deadlock_report를 빈 결과로 주는 사례가 보고됐으나, 실제 데모(SQL Server 2022 Linux)에선 반대로
+     * <b>방금 발생한 데드락이 ring_buffer에만 즉시 나타나고 .xel 파일 타깃에는 아직 flush되지 않는</b>
+     * 현상을 확인했다. 그래서 파일 타깃(과거 롤오버 포함)과 ring_buffer(가장 최근)를 <b>둘 다</b> 읽고
+     * 내용으로 중복 제거해 어느 쪽 한계에도 최근 데드락을 놓치지 않는다.
+     *
+     * <p>정직한 한계: 둘 다 크기·개수 상한이 있는 <b>롤링</b> 저장이라 "최근"만 남고 오래된 데드락은 관측
+     * 범위 밖이다(과거 전수 이력을 보장하지 않는다).
+     *
+     * <p>권한: sys.fn_xe_file_target_read_file·dm_xe_session_targets 조회에는 VIEW SERVER STATE가 필요하다 —
+     * 없으면 이 메서드는 OperatorException으로 실패하고 상위에서 ERROR로 격리된다.
+     */
+    @Override
+    public List<DeadlockEvent> recentDeadlocks(int limit) {
+        // 파일 타깃: 여러 .xel 롤오버 파일을 한 번에 훑고 file_name/file_offset 역순으로 최근을 먼저.
+        String fileSql = """
+                SELECT TOP (?) CAST(event_data AS XML) AS deadlock_xml
+                FROM sys.fn_xe_file_target_read_file('system_health*.xel', NULL, NULL, NULL)
+                WHERE object_name = 'xml_deadlock_report'
+                ORDER BY file_name DESC, file_offset DESC
+                """;
+        // ring_buffer 타깃: 인메모리라 방금 발생한 최근 데드락을 즉시 담는다(파일 flush 지연 보완).
+        String ringSql = """
+                SELECT CAST(t.target_data AS NVARCHAR(MAX)) AS ring_xml
+                FROM sys.dm_xe_session_targets t
+                JOIN sys.dm_xe_sessions s ON s.address = t.event_session_address
+                WHERE s.name = 'system_health' AND t.target_name = 'ring_buffer'
+                """;
+        try {
+            List<DeadlockEvent> merged = new ArrayList<>();
+            // SQLXML 드라이버 편차를 피하려고 XML을 문자열로 받아(getString) 우리가 DOM으로 파싱한다.
+            for (String xml : jdbc().query(fileSql, (rs, i) -> rs.getString("deadlock_xml"), limit)) {
+                DeadlockEvent ev = parseDeadlockXml(xml); // 개별 파싱 실패는 null → 스킵
+                if (ev != null) {
+                    merged.add(ev);
+                }
+            }
+            for (String ringXml : jdbc().queryForList(ringSql, String.class)) {
+                merged.addAll(parseRingBufferDeadlocks(ringXml));
+            }
+            // 내용(시각+victim+리소스)으로 중복 제거 — 파일·ring에 같은 사건이 겹쳐 잡힐 수 있다.
+            LinkedHashSet<String> seen = new LinkedHashSet<>();
+            List<DeadlockEvent> deduped = new ArrayList<>();
+            for (DeadlockEvent ev : merged) {
+                String key = ev.detectedAt() + "|" + ev.victim() + "|" + ev.resource();
+                if (seen.add(key)) {
+                    deduped.add(ev);
+                }
+            }
+            // 최근순 정렬(detectedAt 문자열은 ISO/정렬 가능 형식) 후 상한.
+            deduped.sort((a, b) -> {
+                String x = a.detectedAt() == null ? "" : a.detectedAt();
+                String y = b.detectedAt() == null ? "" : b.detectedAt();
+                return y.compareTo(x);
+            });
+            return deduped.size() > limit ? deduped.subList(0, limit) : deduped;
+        } catch (DataAccessException e) {
+            throw new OperatorException(
+                    "MSSQL 데드락 조회 실패(VIEW SERVER STATE 권한/타깃 확인): " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * xml_deadlock_report 한 건(event_data XML)을 DeadlockEvent로 변환한다. JDBC 없이 테스트 가능하도록
+     * 파싱만 담당하는 순수 메서드다. 깨진/부분 XML은 예외를 던지지 않고 {@code null}을 돌려준다(호출부가 스킵).
+     *
+     * <p>구조: {@code <deadlock>} 루트 안에 victim-list(롤백된 프로세스 id) / process-list(각 프로세스의
+     * inputbuf=그 세션 SQL) / resource-list(경합 락 리소스). 발생 시각은 {@code <deadlock>} 또는 이를 감싼
+     * {@code <event>}의 @timestamp를 방어적으로 둘 다 시도한다(파일 타깃은 event로 감싸 준다).
+     */
+    static DeadlockEvent parseDeadlockXml(String xml) {
+        if (xml == null || xml.isBlank()) {
+            return null;
+        }
+        try {
+            DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
+            // deadlock 리포트는 네임스페이스가 없어 tag 이름으로 바로 찾는다(showplan과 달리 setNamespaceAware 불필요).
+            f.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            f.setExpandEntityReferences(false);
+            Document doc = f.newDocumentBuilder()
+                    .parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+
+            Element deadlock = first(doc, "deadlock");
+            if (deadlock == null) {
+                return null; // deadlock 요소가 없으면 우리가 다룰 리포트가 아니다
+            }
+            // 발생 시각: deadlock/@timestamp 우선, 없으면 부모 event/@timestamp(없으면 null)
+            String detectedAt = attrOrNull(deadlock, "timestamp");
+            if (detectedAt == null) {
+                Element event = first(doc, "event");
+                if (event != null) {
+                    detectedAt = attrOrNull(event, "timestamp");
+                }
+            }
+            return parseDeadlockElement(deadlock, detectedAt);
+        } catch (Exception e) {
+            return null; // 개별 리포트 파싱 실패는 스킵(전체 조회를 죽이지 않는다)
+        }
+    }
+
+    /**
+     * deadlock 요소 하나를 DeadlockEvent로 — file target과 ring_buffer가 공유하는 코어 파서.
+     * victimProcess는 이 deadlock 하위로 스코프해(ring_buffer의 다중 deadlock 대비) 다른 사건과 섞이지 않게 한다.
+     */
+    private static DeadlockEvent parseDeadlockElement(Element deadlock, String detectedAt) {
+        Element victimProcess = first(deadlock, "victimProcess");
+        String victimId = victimProcess != null ? attrOrNull(victimProcess, "id") : null;
+
+        List<String> statements = new ArrayList<>();
+        String victimSummary = null;
+        NodeList processes = deadlock.getElementsByTagName("process");
+        for (int i = 0; i < processes.getLength(); i++) {
+            Element p = (Element) processes.item(i);
+            String inputbuf = collapse(textOfChild(p, "inputbuf"));
+            statements.add(clip(inputbuf, DEADLOCK_STMT_MAX)); // inputbuf 없으면 빈 문자열
+            if (victimId != null && victimId.equals(p.getAttribute("id"))) {
+                String spid = p.getAttribute("spid");
+                String label = spid.isBlank() ? victimId : spid;
+                victimSummary = "spid " + label + " / " + clip(inputbuf, DEADLOCK_VICTIM_MAX);
+            }
+        }
+        return new DeadlockEvent(detectedAt, statements, victimSummary,
+                summarizeResources(deadlock), DEADLOCK_SOURCE);
+    }
+
+    /**
+     * ring_buffer 타깃의 XML(여러 xml_deadlock_report event 포함)에서 데드락들을 파싱한다.
+     * 파일 타깃이 아직 flush하지 않은 <b>가장 최근</b> 데드락은 ring_buffer에만 있을 수 있어 함께 읽는다
+     * (라이브 실측에서 SQL Server 2022 Linux는 방금 발생한 데드락이 ring_buffer에만 즉시 나타났다).
+     */
+    static List<DeadlockEvent> parseRingBufferDeadlocks(String ringXml) {
+        List<DeadlockEvent> out = new ArrayList<>();
+        if (ringXml == null || ringXml.isBlank()) {
+            return out;
+        }
+        try {
+            DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
+            f.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            f.setExpandEntityReferences(false);
+            Document doc = f.newDocumentBuilder()
+                    .parse(new ByteArrayInputStream(ringXml.getBytes(StandardCharsets.UTF_8)));
+            NodeList events = doc.getElementsByTagName("event");
+            for (int i = 0; i < events.getLength(); i++) {
+                Element event = (Element) events.item(i);
+                if (!"xml_deadlock_report".equals(event.getAttribute("name"))) {
+                    continue;
+                }
+                Element deadlock = first(event, "deadlock");
+                if (deadlock == null) {
+                    continue;
+                }
+                String detectedAt = attrOrNull(deadlock, "timestamp");
+                if (detectedAt == null) {
+                    detectedAt = attrOrNull(event, "timestamp");
+                }
+                DeadlockEvent ev = parseDeadlockElement(deadlock, detectedAt);
+                if (ev != null) {
+                    out.add(ev);
+                }
+            }
+        } catch (Exception e) {
+            return out; // 파싱 실패는 파일 타깃 결과만으로 진행
+        }
+        return out;
+    }
+
+    /** resource-list의 락 리소스를 objectname[.indexname] 요약으로 — 중복 제거 후 세미콜론 결합(없으면 null). */
+    private static String summarizeResources(Element deadlock) {
+        Element resourceList = first(deadlock, "resource-list");
+        if (resourceList == null) {
+            return null;
+        }
+        LinkedHashSet<String> parts = new LinkedHashSet<>();
+        NodeList all = resourceList.getElementsByTagName("*"); // keylock/pagelock/objectlock 등 종류 무관
+        for (int i = 0; i < all.getLength(); i++) {
+            Element el = (Element) all.item(i);
+            String obj = el.getAttribute("objectname");
+            if (obj.isBlank()) {
+                continue;
+            }
+            String idx = el.getAttribute("indexname");
+            parts.add(idx.isBlank() ? obj : obj + "." + idx);
+        }
+        return parts.isEmpty() ? null : String.join("; ", parts);
+    }
+
+    /** 문서 전체에서 태그명이 tag인 첫 요소(없으면 null). */
+    private static Element first(Document doc, String tag) {
+        NodeList nl = doc.getElementsByTagName(tag);
+        return nl.getLength() > 0 ? (Element) nl.item(0) : null;
+    }
+
+    /** parent 하위에서 태그명이 tag인 첫 요소(없으면 null). */
+    private static Element first(Element parent, String tag) {
+        NodeList nl = parent.getElementsByTagName(tag);
+        return nl.getLength() > 0 ? (Element) nl.item(0) : null;
+    }
+
+    /** 자식 요소 tag의 텍스트(없으면 빈 문자열). */
+    private static String textOfChild(Element parent, String tag) {
+        Element child = first(parent, tag);
+        if (child == null) {
+            return "";
+        }
+        String text = child.getTextContent();
+        return text == null ? "" : text;
+    }
+
+    /** 속성이 비어있으면 null(있으면 그대로). */
+    private static String attrOrNull(Element el, String name) {
+        String v = el.getAttribute(name);
+        return v.isBlank() ? null : v;
+    }
+
+    /** 공백(개행·연속 스페이스)을 하나로 정리하고 앞뒤를 다듬는다. */
+    private static String collapse(String s) {
+        return s == null ? "" : s.trim().replaceAll("\\s+", " ");
+    }
+
+    /** max자를 넘으면 잘라내고 말줄임(...)을 붙인다. */
+    private static String clip(String s, int max) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() > max ? s.substring(0, max) + "..." : s;
     }
 }

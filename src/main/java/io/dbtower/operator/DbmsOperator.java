@@ -195,4 +195,23 @@ public interface DbmsOperator {
     default List<TableBloat> tableBloat(int limit) {
         return List.of();
     }
+
+    /**
+     * 최근 데드락 기록 (3차 아크 D-축) — DB가 이미 남긴 흔적에서 설정 변경 0으로 읽는다.
+     * SQL Server는 system_health XE(여러 건), MySQL은 SHOW ENGINE INNODB STATUS(최근 1건).
+     * PostgreSQL은 개별 사건이 없어(누적 카운터뿐) 여기 아니라 OpsAlert 카운터 델타로 다룬다.
+     * 롤링 저장이라 "최근"만 — 과거 전수는 보장하지 않는다. 읽기 전용. 미지원/무발생은 빈 목록(기본).
+     */
+    default List<DeadlockEvent> recentDeadlocks(int limit) {
+        return List.of();
+    }
+
+    /**
+     * 누적 데드락 카운터 (3차 아크 D-3, PostgreSQL 전용) — PG는 개별 데드락 리포트를 안 남기고
+     * pg_stat_database.deadlocks 누적 카운터만 준다. 값 자체가 아니라 폴 사이 <b>델타</b>가 신호다
+     * (OpsAlert가 이전 값과 비교해 "새 데드락 N건"으로 알린다). 카운터가 없는 기종은 empty(기본).
+     */
+    default Optional<Long> deadlockCount() {
+        return Optional.empty();
+    }
 }

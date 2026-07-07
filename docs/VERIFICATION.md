@@ -1524,3 +1524,31 @@ interpolate) + HistogramSnapshotStore(operator는 매 호출 새로 생성되므
 
 UI: 레이턴시 카드 배지 6종(실측누적/실측구간/히스토그램/직접계산/추정/미지원) + 범례 갱신. 스크린샷
 docs/images/webui/22(MySQL 구간)·23(Mongo 히스토그램)·24(MSSQL 추정). 전체 테스트 그린(신규 30건 포함).
+
+## 60. 심화 아크 4차 — 데드락 축 (D-1~D-3)
+
+배경: "서로가 서로의 락을 기다려 아무도 못 나아가는" 데드락은 자체 회복(한쪽 롤백)되지만 애플리케이션
+오류로 드러난다. DB는 이미 흔적을 남기므로 <b>설정 변경 0으로</b> 읽는다. 기종마다 관측 입도가 근본적으로
+달라 두 갈래로 설계: MSSQL/MySQL은 recentDeadlocks()가 리포트를, PG는 개별 사건이 없어 카운터 델타로.
+공용 레코드 DeadlockEvent(detectedAt·statements·victim·resource·source), DbmsOperator에 default 2종
+추가(recentDeadlocks·deadlockCount). OpsAlert 데드락 규칙 + /deadlocks API + Monitoring 카드.
+
+- **D-1 MSSQL — system_health XE (NATIVE, 설정 변경 0)**: system_health 세션이 데드락마다 남기는
+  xml_deadlock_report를 읽어 victim·관여 프로세스(inputbuf SQL)·경합 리소스를 파싱. **라이브 실측에서
+  설계 수정**: 조사 단계엔 "ring_buffer가 2022에서 빈 결과"라 file target으로 고정했으나, 실제 데모
+  (SQL Server 2022 Linux)에선 <b>반대로 방금 발생한 데드락이 ring_buffer에만 즉시 나타나고 .xel 파일엔
+  아직 flush 안 됨</b>을 확인. 그래서 <b>두 타깃을 모두 읽어 내용으로 dedup</b>하도록 확장(어느 한계에도
+  최근을 안 놓침). **실측(id 3)**: dl_test에서 두 세션 크로스 락 → 1205 victim(Process 65) → /deadlocks가
+  victim="spid 65", resource="dl_test.dbo.t.PK__...", 두 트랜잭션 SQL 정확 파싱. 권한 VIEW SERVER STATE.
+- **D-2 MySQL — SHOW ENGINE INNODB STATUS**: 출력의 "LATEST DETECTED DEADLOCK" 섹션을 파싱(InnoDB가
+  최신 1건만 보존 → 최대 1건). **실측(id 1)**: dl_demo 크로스 락 → ERROR 1213 → /deadlocks가
+  victim="트랜잭션 (2) 롤백", statements 2건, resource="index PRIMARY of table `sample`.`dl_demo`" 정확.
+  권한 PROCESS(mysql-init·least-privilege 반영). 새 기능=새 권한.
+- **D-3 PG — pg_stat_database.deadlocks 카운터 델타**: PG는 개별 리포트가 없어(로그에만) 누적 카운터뿐.
+  deadlockCount()가 현재 DB 누적값을 주고, OpsAlert가 폴 사이 델타로 "새 데드락 N건"을 알린다(첫 관측·
+  카운터 감소는 알리지 않음). **실측(sample DB)**: 크로스 락 데드락 → pg_stat_database.deadlocks 0 → 1 확인.
+  OpsAlert 델타/시그니처 로직은 단위 3건(첫 관측 조용·증가 시 알림·반복 억제)으로 고정.
+
+정직 한계(공통): 세 경로 모두 롤링/최신 저장이라 "최근"만 — 과거 전수 이력은 보장하지 않는다(응답·카드에
+표기). 단위 테스트 신규: MSSQL XE 파싱 8·MySQL INNODB 파싱 5·OpsAlert 데드락 3. 전체 그린.
+UI: Monitoring 탭에 데드락 카드(배지=획득 방식, victim·리소스·문장). 스크린샷 webui 25(MySQL)·26(MSSQL).

@@ -5,12 +5,17 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.ConnectionCallback;
 
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * MySQL 어댑터.
@@ -646,5 +651,140 @@ public class MySqlOperator extends AbstractJdbcOperator {
         } catch (DataAccessException e) {
             throw new OperatorException("MySQL 복제 상태 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 최근 데드락 (3차 아크 D-2) — InnoDB는 SHOW ENGINE INNODB STATUS 출력의 "LATEST DETECTED DEADLOCK"
+     * 섹션에 <b>가장 최근 1건</b>만 남긴다(그 이전 것은 다음 데드락이 나면 덮여 사라진다). 그래서 이 경로는
+     * 설정 변경 0으로 텍스트만 읽되 최대 1건이 한계다 — 과거 전수 이력은 보장하지 않는다.
+     *
+     * 이 명령의 Status 컬럼은 최대 약 1MB로 잘릴 수 있어(innodb_status 출력 상한) 앞뒤가 잘린 부분 출력이
+     * 올 수 있고, 파싱은 그 경우에도 예외 없이 가능한 필드만 채운다. 실행에는 PROCESS 권한이 필요하다.
+     */
+    @Override
+    public List<DeadlockEvent> recentDeadlocks(int limit) {
+        if (limit < 1) {
+            return List.of();
+        }
+        try {
+            // SHOW ENGINE INNODB STATUS는 결과 한 행에 Type/Name/Status 3컬럼이고 Status에 전체 상태 텍스트가 담긴다.
+            // PreparedStatement보다 plain 실행이 무난한 관리 문장이라 파라미터 없이 던진다(읽기 전용).
+            String status = jdbc().query("SHOW ENGINE INNODB STATUS", rs -> {
+                if (!rs.next()) {
+                    return null;
+                }
+                // 드라이버 라벨은 'Status'지만, 방어적으로 라벨 실패 시 컬럼 인덱스 3으로 폴백한다.
+                try {
+                    return rs.getString("Status");
+                } catch (SQLException labelMiss) {
+                    return rs.getString(3);
+                }
+            });
+            return parseLatestDeadlock(status);
+        } catch (DataAccessException e) {
+            throw new OperatorException(
+                    "MySQL 데드락 조회 실패(SHOW ENGINE INNODB STATUS — PROCESS 권한 필요): " + e.getMessage(), e);
+        }
+    }
+
+    /** 데드락 텍스트에서 뽑은 SQL/요약 문자열의 최대 길이. 원문이 길면 이 길이로 잘라 담는다. */
+    private static final int DEADLOCK_TEXT_MAX = 200;
+
+    /** 데드락 블록 상단의 발생 시각 라인(예: "2024-01-15 10:30:00 0x7f..."). */
+    private static final Pattern DEADLOCK_TS = Pattern.compile("(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})");
+
+    /** "*** WE ROLL BACK TRANSACTION (N)" — victim(롤백당한) 트랜잭션 번호. */
+    private static final Pattern ROLLBACK_TXN = Pattern.compile("\\*\\*\\* WE ROLL BACK TRANSACTION \\((\\d+)\\)");
+
+    /** 락 대상 요약 — "index <이름> of table <스키마.테이블>" (WAITING/HOLDS 락 라인에서 공통). */
+    private static final Pattern LOCK_TARGET = Pattern.compile("index (\\S+) of table (\\S+)");
+
+    /**
+     * SHOW ENGINE INNODB STATUS 출력에서 최근 데드락 1건을 파싱한다(JDBC 없이 테스트 가능하도록 분리).
+     *
+     * <p>"LATEST DETECTED DEADLOCK" 헤더가 없으면 데드락 미발생(정상 다수 케이스)이라 빈 목록을 돌려준다.
+     * 있으면 그 헤더부터 다음 "TRANSACTIONS" 섹션까지를 블록으로 잘라, 발생 시각·두 트랜잭션의 SQL·
+     * victim(롤백 트랜잭션)·경합 리소스(락 대상)를 뽑는다. 특정 라인이 없으면 그 필드만 null/빈값으로 두고
+     * 예외는 던지지 않는다(부분/절단 출력 방어). 최대 1건.
+     */
+    static List<DeadlockEvent> parseLatestDeadlock(String status) {
+        if (status == null) {
+            return List.of();
+        }
+        int header = status.indexOf("LATEST DETECTED DEADLOCK");
+        if (header < 0) {
+            return List.of(); // 데드락 미발생 — 흔한 정상 케이스
+        }
+        // 헤더 다음 "TRANSACTIONS" 섹션(복수형 — 데드락 블록의 "TRANSACTION:" 단수와 구분됨) 전까지가 블록.
+        int end = status.indexOf("TRANSACTIONS", header + "LATEST DETECTED DEADLOCK".length());
+        String block = end < 0 ? status.substring(header) : status.substring(header, end);
+
+        String detectedAt = null;
+        Matcher ts = DEADLOCK_TS.matcher(block);
+        if (ts.find()) {
+            detectedAt = ts.group(1);
+        }
+
+        String sql1 = extractTxnSql(block, 1);
+        String sql2 = extractTxnSql(block, 2);
+        List<String> statements = new ArrayList<>(2);
+        if (sql1 != null) {
+            statements.add(sql1);
+        }
+        if (sql2 != null) {
+            statements.add(sql2);
+        }
+
+        String victim = null;
+        Matcher rb = ROLLBACK_TXN.matcher(block);
+        if (rb.find()) {
+            String n = rb.group(1);
+            String victimSql = "1".equals(n) ? sql1 : ("2".equals(n) ? sql2 : null);
+            victim = "트랜잭션 (" + n + ") 롤백"
+                    + (victimSql != null ? " — " + cut(victimSql, 80) : "");
+        }
+
+        // WAITING/HOLDS 락 라인에서 index·table을 모아 중복 제거해 경합 리소스 요약을 만든다.
+        Set<String> targets = new LinkedHashSet<>();
+        Matcher lm = LOCK_TARGET.matcher(block);
+        while (lm.find()) {
+            targets.add("index " + lm.group(1) + " of table " + lm.group(2));
+        }
+        String resource = targets.isEmpty() ? null : cut(String.join("; ", targets), DEADLOCK_TEXT_MAX);
+
+        return List.of(new DeadlockEvent(detectedAt, statements, victim, resource, "MySQL INNODB STATUS"));
+    }
+
+    /**
+     * 데드락 블록에서 "*** (N) TRANSACTION:" 마커가 가리키는 트랜잭션의 실행 SQL을 뽑는다.
+     * InnoDB 출력에서 SQL은 "MySQL thread id ..., query id ..., ... &lt;state&gt;" 라인 <b>다음 줄들</b>에
+     * 오고, 다음 "*** " 마커 전까지가 그 SQL이다(여러 줄일 수 있어 공백으로 합친다). 없으면 null.
+     */
+    private static String extractTxnSql(String block, int n) {
+        String marker = "*** (" + n + ") TRANSACTION:";
+        int start = block.indexOf(marker);
+        if (start < 0) {
+            return null;
+        }
+        // 이 트랜잭션 구획의 끝 = 다음 "*** " 마커 라인(WAITING/HOLDS/다음 트랜잭션) 또는 블록 끝.
+        int next = block.indexOf("\n*** ", start + marker.length());
+        String region = next < 0 ? block.substring(start) : block.substring(start, next);
+
+        int mt = region.indexOf("MySQL thread id");
+        if (mt < 0) {
+            return null; // thread id 라인이 없으면 SQL 위치를 특정할 수 없음
+        }
+        int sqlStart = region.indexOf('\n', mt);
+        if (sqlStart < 0) {
+            return null; // thread id 라인 뒤에 SQL이 붙지 않은 절단 출력
+        }
+        // 여러 줄 SQL을 공백 한 칸으로 합쳐 정리한 뒤 길이 상한으로 자른다.
+        String sql = region.substring(sqlStart + 1).trim().replaceAll("\\s+", " ");
+        return sql.isEmpty() ? null : cut(sql, DEADLOCK_TEXT_MAX);
+    }
+
+    /** 문자열을 최대 길이로 자른다(초과분은 버림) — 데드락 텍스트 컷 공통 규칙. */
+    private static String cut(String s, int max) {
+        return s.length() > max ? s.substring(0, max) : s;
     }
 }
