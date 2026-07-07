@@ -217,7 +217,7 @@ open http://localhost:8080                        # admin / (.env 의 DBTOWER_AD
 
 이미지는 [GHCR](https://github.com/dj258255/dbtower/pkgs/container/dbtower)에서 pull하거나
 (`ghcr.io/dj258255/dbtower:latest`), 위 compose가 `--build`로 로컬 빌드합니다. 릴리스는 `vX.Y.Z`
-태그를 push하면 `release.yml` 워크플로가 이미지를 게시합니다.
+태그를 push하면 `release.yml` 워크플로가 이미지를 게시합니다. 버전별 변경은 [CHANGELOG.md](CHANGELOG.md) 참고.
 
 > 5기종 데모 대상까지 한 번에 띄워 둘러보려면: `docker compose up -d`(대상 5종+모니터링)를 함께 쓰고
 > 앱은 아래 "개발 모드"로 실행합니다.
