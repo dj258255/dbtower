@@ -166,6 +166,21 @@ DB 접속정보를 다루는 관리 도구라 인증 없이는 운영에 못 들
 모듈 간 순환 의존을 테스트(ModularityTests)가 빌드에서 실패시킵니다. 도입 첫 실행에서
 실제로 순환 2개(registry<->operator, insight<->alert)를 잡아 의존 역전으로 해소했습니다 —
 과정은 [VERIFICATION 20절](docs/VERIFICATION.md), 모듈 다이어그램은 [docs/modules/](docs/modules/).
+(모듈은 이후 페이즈에서 advisor·finops·score·slo·audit·onlineddl이 더해져 현재 14개입니다.)
+
+### 상세 아키텍처
+
+채널 3종부터 모듈 14개, 기종 어댑터, 외부 의존(메타 PG·MinIO·AI 백엔드·관측 스택)까지 —
+실제 모듈명(io.dbtower 하위 패키지)과 docker-compose 포트 기준의 상세도입니다.
+
+![DBTower 상세 아키텍처 — 채널 3종 · 모듈 14개 · 관제 대상 5기종](docs/architecture-detail.svg)
+
+### 메타 DB ERD
+
+메타 DB 스키마의 단일 권위는 Flyway 마이그레이션(V1~V10)입니다. 표 9개와 관계(FK 5개는 전부
+V10에서 ON DELETE CASCADE로 일괄 추가 — 인스턴스 삭제 시 자식 데이터 자동 정리)를 정리했습니다.
+
+![DBTower 메타 DB ERD — Flyway V1~V10 기준 표 9개](docs/erd.svg)
 
 ## 기존 모니터링 스택과의 관계
 
