@@ -48,13 +48,49 @@ public class InquiryService {
         if (!notifier.isConfigured()) {
             return new InquiryResult(false, "웹훅 미설정 — DBTOWER_WEBHOOK_URL");
         }
-        notifier.send(format(instance, req, currentPrincipal()));
+        String principal = currentPrincipal();
+        notifier.sendEmbed(format(instance, req, principal), buildEmbed(instance, req, principal));
         return new InquiryResult(true, null);
     }
 
     private static String currentPrincipal() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         return auth != null ? auth.getName() : "unknown";
+    }
+
+    /** 브랜드 인디고 — 아이콘의 중심 노드 색과 같다. */
+    private static final int EMBED_COLOR = 0x6366F1;
+
+    /**
+     * Discord embed 카드 — 같은 내용을 필드로 구조화한다(제목/요청자/쿼리/실행계획/규칙/AI/비고).
+     * SQL·실행계획은 코드블록으로 감싸되, Discord 필드 한도(1024자) 안에서 코드블록이 닫히도록
+     * 본문을 먼저 900자로 줄인다 — 한도 절단이 코드블록 백틱을 삼키면 이후 텍스트 전체가 코드로 렌더된다.
+     */
+    private static WebhookNotifier.Embed buildEmbed(DatabaseInstance instance, InquiryRequest req, String principal) {
+        List<WebhookNotifier.Embed.Field> fields = new java.util.ArrayList<>();
+        fields.add(new WebhookNotifier.Embed.Field("요청자", principal, true));
+        fields.add(new WebhookNotifier.Embed.Field("인스턴스", instance.getName() + " (" + instance.getType() + ")", true));
+        fields.add(new WebhookNotifier.Embed.Field("쿼리", codeBlock("sql", blankToDash(req.sql())), false));
+        if (hasText(req.plan())) {
+            fields.add(new WebhookNotifier.Embed.Field("실행계획", codeBlock("", req.plan().strip()), false));
+        }
+        List<String> findings = req.findings();
+        if (findings != null && !findings.isEmpty()) {
+            fields.add(new WebhookNotifier.Embed.Field("규칙 지적",
+                    String.join("\n", findings.stream().map(f -> "- " + f).toList()), false));
+        }
+        if (hasText(req.aiAnalysis())) {
+            fields.add(new WebhookNotifier.Embed.Field("AI 분석", req.aiAnalysis().strip(), false));
+        }
+        if (hasText(req.note())) {
+            fields.add(new WebhookNotifier.Embed.Field("비고", req.note().strip(), false));
+        }
+        return new WebhookNotifier.Embed("DBTower DB팀 문의", EMBED_COLOR, fields);
+    }
+
+    private static String codeBlock(String lang, String body) {
+        String clipped = body.length() > 900 ? body.substring(0, 892) + "… (잘림)" : body;
+        return "```" + lang + "\n" + clipped + "\n```";
     }
 
     /**

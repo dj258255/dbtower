@@ -57,7 +57,8 @@ class InquiryServiceTest {
         assertNull(result.reason());
 
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(notifier).send(captor.capture());
+        ArgumentCaptor<WebhookNotifier.Embed> embedCaptor = ArgumentCaptor.forClass(WebhookNotifier.Embed.class);
+        verify(notifier).sendEmbed(captor.capture(), embedCaptor.capture());
         String msg = captor.getValue();
         assertTrue(msg.contains("prod-orders"), "인스턴스명 포함");
         assertTrue(msg.contains("MYSQL"), "기종 포함");
@@ -66,6 +67,18 @@ class InquiryServiceTest {
         assertTrue(msg.contains("풀 테이블 스캔 의심"), "규칙 지적 포함");
         assertTrue(msg.contains("user_id 인덱스를 검토하세요"), "AI 분석 포함");
         assertTrue(msg.contains("주문 조회가 느립니다"), "비고 포함");
+
+        // embed도 같은 내용을 구조화해 담는다 — 쿼리는 sql 코드블록, 요청자·인스턴스는 인라인 필드
+        WebhookNotifier.Embed embed = embedCaptor.getValue();
+        assertTrue(embed.title().contains("DB팀 문의"));
+        String joined = embed.fields().stream()
+                .map(f -> f.name() + "=" + f.value())
+                .reduce("", (a, b) -> a + "\n" + b);
+        assertTrue(joined.contains("요청자=alice"));
+        assertTrue(joined.contains("prod-orders (MYSQL)"));
+        assertTrue(joined.contains("```sql"), "쿼리는 sql 코드블록");
+        assertTrue(joined.contains("SELECT * FROM orders"));
+        assertTrue(joined.contains("- 풀 테이블 스캔 의심"));
     }
 
     @Test
@@ -79,6 +92,7 @@ class InquiryServiceTest {
         assertFalse(result.sent());
         assertTrue(result.reason().contains("DBTOWER_WEBHOOK_URL"));
         verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -91,7 +105,8 @@ class InquiryServiceTest {
 
         assertTrue(result.sent());
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(notifier).send(captor.capture());
+        ArgumentCaptor<WebhookNotifier.Embed> embedCaptor = ArgumentCaptor.forClass(WebhookNotifier.Embed.class);
+        verify(notifier).sendEmbed(captor.capture(), embedCaptor.capture());
         String msg = captor.getValue();
         assertTrue(msg.contains("SELECT 1"));
         // 선택 항목이 없으면 해당 섹션 헤더 자체가 없다

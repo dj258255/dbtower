@@ -61,6 +61,32 @@ public class WebhookNotifier {
         sendAt(message, System.currentTimeMillis());
     }
 
+    /**
+     * 리치 embed 알림 (KDMS류 문의 카드). Discord는 embeds 페이로드로, Slack·미설정은 fallbackText로
+     * 보낸다 — 웹훅도 이기종이라 "잘 꾸며주는 쪽"과 "확실히 도착하는 쪽"을 URL이 결정한다.
+     * 레이트리밋은 텍스트 경로와 같은 윈도우를 쓴다(embed라고 도배가 허용되는 건 아니므로).
+     */
+    public void sendEmbed(String fallbackText, Embed embed) {
+        sendEmbedAt(fallbackText, embed, System.currentTimeMillis());
+    }
+
+    void sendEmbedAt(String fallbackText, Embed embed, long now) {
+        String decided = decide(fallbackText, now);
+        if (decided == null) {
+            return;
+        }
+        // decide가 억제 요약을 덧붙였다면 그 꼬리를 분리해 embed에는 별도 알림줄로 싣는다
+        String note = decided.length() > fallbackText.length()
+                ? decided.substring(fallbackText.length()).strip() : "";
+        deliverEmbed(decided, note, embed);
+    }
+
+    /** embed 한 장 — 제목·색·필드 목록. 필드 value가 비면 페이로드에서 제외된다. */
+    public record Embed(String title, int color, java.util.List<Field> fields) {
+        public record Field(String name, String value, boolean inline) {
+        }
+    }
+
     void sendAt(String message, long now) {
         // B-5: 레이트리밋 판정(윈도우·suppressed 갱신 + 보낼 메시지 결정)만 락 안에서 하고,
         // 실제 전송(deliver = HTTP, 최대 ~8s)은 락 밖에서 한다. 락 안에서 HTTP를 하면 웹훅이 느릴 때
@@ -96,6 +122,54 @@ public class WebhookNotifier {
         return out;
     }
 
+    /**
+     * embed 실제 전송(package-private — 테스트에서 오버라이드해 관측).
+     * Discord가 아니면(슬랙 등) embed 문법이 없으므로 textFallback(억제 요약 포함)을 그대로 보낸다.
+     */
+    void deliverEmbed(String textFallback, String suppressedNote, Embed embed) {
+        if (webhookUrl == null || webhookUrl.isBlank()) {
+            log.info("[알림(webhook 미설정)] {}", textFallback);
+            return;
+        }
+        String payload = webhookUrl.contains("discord.com")
+                ? discordEmbedPayload(embed, suppressedNote)
+                : "{\"text\": %s}".formatted(jsonString(textFallback));
+        postJson(payload);
+    }
+
+    /**
+     * Discord embeds 페이로드. 한도(제목 256자·필드 값 1024자·필드 25개)를 여기 경계에서 자른다 —
+     * 호출자가 한도를 몰라도 전송이 4xx로 죽지 않게. allowed_mentions는 텍스트 경로와 같은 이유로 잠근다.
+     */
+    String discordEmbedPayload(Embed embed, String suppressedNote) {
+        StringBuilder fields = new StringBuilder();
+        int count = 0;
+        for (Embed.Field f : embed.fields()) {
+            if (f.value() == null || f.value().isBlank() || count >= 25) {
+                continue;
+            }
+            if (count > 0) {
+                fields.append(',');
+            }
+            fields.append("{\"name\": ").append(jsonString(clip(f.name(), 256)))
+                  .append(", \"value\": ").append(jsonString(clip(f.value(), 1024)))
+                  .append(", \"inline\": ").append(f.inline()).append('}');
+            count++;
+        }
+        String content = suppressedNote == null || suppressedNote.isBlank()
+                ? "" : "\"content\": %s, ".formatted(jsonString(suppressedNote));
+        return "{%s\"embeds\": [{\"title\": %s, \"color\": %d, \"fields\": [%s]}], \"allowed_mentions\": {\"parse\": []}}"
+                .formatted(content, jsonString(clip(embed.title(), 256)), embed.color(), fields);
+    }
+
+    /** Discord 한도 초과분을 자르고 잘렸음을 표시한다 — 조용한 절단은 "왜 뒷부분이 없지"를 만든다. */
+    private static String clip(String s, int max) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() <= max ? s : s.substring(0, max - 8) + "… (잘림)";
+    }
+
     /** 실제 웹훅 전송(package-private — 레이트리밋 판정만 떼어 테스트할 때 오버라이드해 관측한다). */
     void deliver(String message) {
         if (webhookUrl == null || webhookUrl.isBlank()) {
@@ -107,6 +181,10 @@ public class WebhookNotifier {
         String payload = webhookUrl.contains("discord.com")
                 ? "{\"content\": %s, \"allowed_mentions\": {\"parse\": []}}".formatted(jsonString(message))  // Discord 포맷
                 : "{\"text\": %s}".formatted(jsonString(message));     // Slack 포맷
+        postJson(payload);
+    }
+
+    private void postJson(String payload) {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(webhookUrl))
