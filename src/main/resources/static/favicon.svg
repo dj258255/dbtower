@@ -1,0 +1,14 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DBTower">
+  <rect width="512" height="512" rx="116" fill="#0b1220"/>
+  <g transform="translate(256,256)">
+    <!-- hexagon frame -->
+    <polygon points="0,-136 118,-68 118,68 0,136 -118,68 -118,-68"
+             fill="none" stroke="#818cf8" stroke-width="26" stroke-linejoin="round"/>
+    <!-- central hub -->
+    <circle cx="0" cy="0" r="52" fill="#6366f1"/>
+    <!-- status dots (health) -->
+    <circle cx="0" cy="-128" r="21" fill="#34d399"/>
+    <circle cx="111" cy="64" r="21" fill="#fbbf24"/>
+    <circle cx="-111" cy="64" r="21" fill="#f87171"/>
+  </g>
+</svg>

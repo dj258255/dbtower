@@ -1,4 +1,4 @@
-# DBTower — 이기종 DBMS 운영 관리 플랫폼
+# <img src="docs/icon.svg" width="34" align="top"> DBTower — 이기종 DBMS 운영 관리 플랫폼
 
 [![CI](https://github.com/dj258255/dbtower/actions/workflows/ci.yml/badge.svg)](https://github.com/dj258255/dbtower/actions/workflows/ci.yml)
 
