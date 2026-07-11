@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1220 470" font-family="Apple SD Gothic Neo, NanumGothic, sans-serif">
+  <defs>
+    <filter id="cardshadow" x="-8%" y="-8%" width="116%" height="130%">
+      <feDropShadow dx="0" dy="2.5" stdDeviation="3.5" flood-color="#1c2430" flood-opacity="0.13"/>
+    </filter>
+    <filter id="colshadow" x="-6%" y="-6%" width="112%" height="118%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#1c2430" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+  <style>
+    .hd { fill:#4a4e55; } .hdt { fill:#ffffff; font-size:21px; font-weight:800; }
+    .col { fill:#ffffff; stroke:#e6e8ec; filter:url(#colshadow); }
+    .card { fill:#f8f9fb; stroke:#e6e8ec; filter:url(#cardshadow); }
+    .ct { fill:#2a2e35; font-size:16.5px; font-weight:600; }
+    .cs { fill:#7a8089; font-size:12.5px; }
+    .arrow { stroke:#b0b5bc; stroke-width:6; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+    @media (prefers-color-scheme: dark) {
+      .col { fill:#f4f5f7; } /* 문서 인쇄용 고정 팔레트 */
+    }
+  </style>
+
+  <!-- 1열: 문제 쿼리 식별 -->
+  <rect class="col" x="20" y="16" width="360" height="438" rx="10"/>
+  <rect class="hd" x="20" y="16" width="360" height="52" rx="10"/>
+  <rect class="hd" x="20" y="44" width="360" height="24"/>
+  <text class="hdt" x="200" y="50" text-anchor="middle">1. 문제 쿼리 식별</text>
+  <g>
+    <rect class="card" x="44" y="88" width="312" height="56" rx="10"/>
+    <text class="ct" x="64" y="122">상위 SQL · 슬로우 쿼리 표시</text>
+    <rect class="card" x="44" y="156" width="312" height="56" rx="10"/>
+    <text class="ct" x="64" y="190">시점 비교 (구간 차분)</text>
+    <rect class="card" x="44" y="224" width="312" height="56" rx="10"/>
+    <text class="ct" x="64" y="258">쿼리별 지표 증감률 · 신규 쿼리</text>
+    <rect class="card" x="44" y="292" width="312" height="56" rx="10"/>
+    <text class="ct" x="64" y="326">회귀 자동 감지 (+461%/+852%)</text>
+    <rect class="card" x="44" y="360" width="312" height="56" rx="10"/>
+    <text class="ct" x="64" y="394">플랜 플립 감지 (60초 내 알림)</text>
+  </g>
+
+  <path class="arrow" d="M396 235 h34 m-12 -11 l14 11 l-14 11"/>
+
+  <!-- 2열: 원인 분석 -->
+  <rect class="col" x="446" y="16" width="360" height="438" rx="10"/>
+  <rect class="hd" x="446" y="16" width="360" height="52" rx="10"/>
+  <rect class="hd" x="446" y="44" width="360" height="24"/>
+  <text class="hdt" x="626" y="50" text-anchor="middle">2. 원인 분석</text>
+  <g>
+    <rect class="card" x="470" y="88" width="312" height="56" rx="10"/>
+    <text class="ct" x="490" y="122">실제 실행계획 (추정 vs 실제)</text>
+    <rect class="card" x="470" y="156" width="312" height="56" rx="10"/>
+    <text class="ct" x="490" y="190">규칙 지적 (형변환·인덱스 등)</text>
+    <rect class="card" x="470" y="224" width="312" height="56" rx="10"/>
+    <text class="ct" x="490" y="258">AI 1차 분석 (read-only 도구만)</text>
+    <rect class="card" x="470" y="292" width="312" height="56" rx="10"/>
+    <text class="ct" x="490" y="326">원클릭 재진단 before/after</text>
+  </g>
+
+  <path class="arrow" d="M822 235 h34 m-12 -11 l14 11 l-14 11"/>
+
+  <!-- 3열: 공유·문의 -->
+  <rect class="col" x="872" y="16" width="328" height="438" rx="10"/>
+  <rect class="hd" x="872" y="16" width="328" height="52" rx="10"/>
+  <rect class="hd" x="872" y="44" width="328" height="24"/>
+  <text class="hdt" x="1036" y="50" text-anchor="middle">3. 공유 · DB팀 문의</text>
+  <g>
+    <rect class="card" x="896" y="88" width="280" height="74" rx="10"/>
+    <text class="ct" x="916" y="118">웹훅 경보 push</text>
+    <text class="cs" x="916" y="142">회귀·이상·플랜 플립 — Discord/Slack</text>
+    <rect class="card" x="896" y="174" width="280" height="92" rx="10"/>
+    <text class="ct" x="916" y="204">DB팀에 문의 (원클릭)</text>
+    <text class="cs" x="916" y="228">쿼리·실행계획·규칙 지적·AI 분석을</text>
+    <text class="cs" x="916" y="248">한 메시지로 묶어 첨부</text>
+    <rect class="card" x="896" y="278" width="280" height="74" rx="10"/>
+    <text class="ct" x="916" y="308">침묵 실패 방지</text>
+    <text class="cs" x="916" y="332">웹훅 미설정 시 sent:false + 원인 반환</text>
+  </g>
+</svg>
