@@ -53,12 +53,19 @@ services:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: dbtower1234
     # 프로파일러 레벨 2 — 모든 연산을 system.profile에 기록 (플랫폼의 통계 소스)
-    command: ["mongod", "--auth", "--profile", "2", "--slowms", "0"]
+    # 단일노드 복제셋(rs0) — oplog 백업(Phase 2)의 전제. auth+replSet은 내부 인증용 keyFile이 필수라
+    # 바인드 마운트 파일을 컨테이너 안으로 복사해 소유자/권한(400)을 맞춘 뒤 기동한다(macOS 마운트 권한 우회).
+    # 최초 1회 rs.initiate()가 필요하다: docker exec dbtower-mongo mongosh -u root -p ... --eval 'rs.initiate()'
+    command: >
+      bash -c "cp /mongo-keyfile.src /tmp/mongo-keyfile && chmod 400 /tmp/mongo-keyfile
+      && chown mongodb /tmp/mongo-keyfile
+      && exec docker-entrypoint.sh mongod --auth --replSet rs0 --keyFile /tmp/mongo-keyfile --profile 2 --slowms 0"
     ports:
       - "17017:27017"
     volumes:
       - mongo-data:/data/db
       - ./docker/mongo-init.js:/docker-entrypoint-initdb.d/init.js
+      - ./docker/mongo-keyfile:/mongo-keyfile.src:ro
 
   oracle:
     image: gvenzl/oracle-free:23-slim-faststart

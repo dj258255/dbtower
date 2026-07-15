@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class PitrRestoreGuideTest {
 
-    private final BackupTools tools = new BackupTools("d", "d", "d", "r", "r", "r", "b", "o", "/tmp");
+    private final BackupTools tools = new BackupTools("d", "d", "d", "r", "r", "r", "b", "o", "w", "a", "/tmp");
 
     @Test
     void MySQL_안내는_FULL_적재_후_binlog를_stop_datetime까지_재생한다() {
@@ -53,10 +53,21 @@ class PitrRestoreGuideTest {
     }
 
     @Test
-    void 미지원_기종은_지어내지_않고_미지원을_말한다() {
+    void PG_안내는_논리_덤프의_한계를_정직하게_말한다() {
+        // pg_dump 논리 덤프에는 WAL을 재생할 수 없다 — 절차를 지어내지 않고 물리 베이스백업 필요를 명시
         DatabaseInstance pg = new DatabaseInstance("p", DbmsType.POSTGRESQL, "h", 5432, "db", "u", "p");
         PostgresOperator op = new PostgresOperator(pg, Mockito.mock(ConnectionPools.class), tools);
-        assertThat(op.pitrRestoreGuide("/b/full.sql", List.of(), "t"))
+        String guide = op.pitrRestoreGuide("/b/full.sql", List.of("/b/wal1"), "2026-07-15 12:00:00");
+        assertThat(guide).contains("논리 덤프라 WAL을 재생할 수 없다");
+        assertThat(guide).contains("pg_basebackup");
+        assertThat(guide).contains("recovery_target_time = '2026-07-15 12:00:00'");
+    }
+
+    @Test
+    void 미지원_기종은_지어내지_않고_미지원을_말한다() {
+        DatabaseInstance oracle = new DatabaseInstance("o", DbmsType.ORACLE, "h", 1521, "FREE", "u", "p");
+        OracleOperator op = new OracleOperator(oracle, Mockito.mock(ConnectionPools.class), tools);
+        assertThat(op.pitrRestoreGuide("/b/full.dmp", List.of(), "t"))
                 .contains("지원하지 않습니다");
     }
 }

@@ -619,6 +619,25 @@ public class MongoOperator implements DbmsOperator {
     }
 
     /**
+     * Mongo PITR 안내 (Phase 2) — 정석은 FULL 복원 후 oplog를 --oplogReplay + --oplogLimit(ts:ordinal)로
+     * 목표 시점까지 재생하는 것(Percona·Pythian의 표준 절차). 생성·안내만, 실행은 사람이 한다.
+     */
+    @Override
+    public String pitrRestoreGuide(String fullLocation, List<String> logLocations, String targetTime) {
+        return """
+                # MongoDB 시점 복구 안내 (생성된 문안 — 반드시 격리된 복구용 인스턴스에서 실행할 것)
+                # 1) 마지막 FULL 아카이브 복원
+                mongorestore --archive=%s --drop
+                # 2) oplog 아카이브에서 oplog.rs.bson을 추출해 목표 시점까지 재생
+                #    (아카이브 %d개 — 시간순. --oplogLimit은 <unix_ts>:<ordinal>, 그 시각 이후 항목은 미적용)
+                #    %s
+                mongorestore --oplogReplay --oplogFile=<추출한 oplog.rs.bson> --oplogLimit=<%s의 unix_ts>:1
+                # 주의: oplog는 순환(capped) 컬렉션 — FULL 이후 구간이 덮어써지기 전에 수집돼 있어야 체인이 유효하다."""
+                .formatted(fullLocation, logLocations.size(),
+                        String.join("\n                #    ", logLocations), targetTime);
+    }
+
+    /**
      * MongoDB 복원 검증 = 아카이브를 격리된 임시 DB로 실제 복원 후 컬렉션 수 확인.
      *
      * mongorestore는 --config /dev/stdin(비밀번호)이 stdin을 쓰므로 아카이브를 stdin으로 줄 수 없다.

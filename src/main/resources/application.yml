@@ -104,8 +104,15 @@ dbtower:
     #   (mysqlbinlog도 MYSQL_PWD를 읽는다 — argv 금지 규칙과 호환. 비면 로그 백업 UNSUPPORTED)
     mysql-binlog-command: "docker exec -w /var/lib/mysql dbtower-mysql cat"
     # MongoDB oplog 덤프 — 복제셋 전용(oplog.rs는 replSet에만 존재, Operator가 사전 게이트).
-    # --oplog는 --db와 함께 못 쓰므로 local.oplog.rs를 직접 덤프한다.
+    # --oplog는 --db와 함께 못 쓰므로 local.oplog.rs를 직접 덤프한다(정석 증분 백업 방식).
     mongo-oplog-command: "docker exec -i dbtower-mongo mongodump --host localhost --port 27017 -u {user} --authenticationDatabase admin --db local --collection oplog.rs --archive --config /dev/stdin"
+    # PostgreSQL WAL 세그먼트 수집 — pg_switch_wal()로 닫은 세그먼트를 수집(접두부 + 파일명 append).
+    # 게이트: wal_level=minimal·pg_switch_wal 권한 부족·명령 미설정은 UNSUPPORTED.
+    # 상시 아카이빙의 정석은 archive_command(서버 구성) 또는 pg_receivewal(스트리밍) — 폴러 원샷 모델의 대응이 이 방식.
+    pg-wal-command: "docker exec -w /var/lib/postgresql/data/pg_wal dbtower-postgres cat"
+    # Oracle 아카이브 로그 수집 — ARCHIVELOG 모드 게이트 + ALTER SYSTEM ARCHIVE LOG CURRENT 후
+    # V$ARCHIVED_LOG 최신 파일(서버 절대경로)을 수집. 정석은 RMAN, 파일 복사도 공식 문서가 인정하는 방식.
+    oracle-archivelog-command: "docker exec dbtower-oracle cat"
     # 복원 검증(A7) 명령 — 백업의 대칭. 임시/격리 대상에만 복원해 보고 원본은 건드리지 않는다.
     # 각 명령은 클라이언트 호출의 접두부만 정의하고(임시 DB 생성/적재/카운트/삭제 인자는 Operator가 덧붙임),
     # MySQL은 -e MYSQL_PWD로, PostgreSQL은 컨테이너 로컬 trust로 접속한다.

@@ -56,17 +56,71 @@ public class PostgresOperator extends AbstractJdbcOperator {
     @Override
     public BackupResult backup(BackupPolicy policy) {
         if (policy.type() == BackupPolicy.BackupType.LOG) {
-            // Phase 2 판단: WAL 수집(archive_command·pg_receivewal의 replication 권한·슬롯)은 대상 서버
-            // 구성을 요구한다 — "대상을 바꾸지 않는다" 원칙상 자동화하지 않고 사유를 정직하게 남긴다.
-            throw new UnsupportedOperationException(
-                    "PostgreSQL 로그(WAL) 백업은 archive_command 또는 pg_receivewal(replication 권한·슬롯) 등 "
-                            + "대상 서버 구성이 필요 — 대상 설정을 바꾸지 않는 원칙상 자동화하지 않는다. "
-                            + "WAL 아카이빙은 서버 소유자가 구성하고, DBTower는 FULL 백업과 신선도 감시를 맡는다");
+            return walBackup();
         }
         Path out = Path.of(backupTools.backupDir(),
                 "postgres-%s-%s.sql".formatted(safeFileName(instance.getName()), backupTimestamp()));
         return runCliBackup(renderCommand(backupTools.pgDumpCommand()),
                 Map.of("PGPASSWORD", instance.getPassword()), out);
+    }
+
+    /**
+     * 로그 백업 (Phase 2) = pg_switch_wal()로 현재 WAL 세그먼트를 닫고, 닫힌 세그먼트를 수집한다.
+     * MySQL의 FLUSH BINARY LOGS와 같은 결 — 서버 설정 변경이 아니라 로그 로테이션(백업 행위의 일부)이다.
+     * pg_walfile_name(pg_switch_wal())은 경계 LSN에서 "직전 세그먼트" 이름을 준다(공식 문서 명세).
+     *
+     * 게이트(정직): wal_level=minimal이면 WAL에 복구 재료가 없다 → UNSUPPORTED. pg_switch_wal은
+     * superuser(또는 EXECUTE grant) 필요 — 권한 부족도 사유와 함께 UNSUPPORTED. 수집 명령 미설정도 동일.
+     *
+     * 정석 대비 위치(웹 확인): 상시 아카이빙의 정석은 archive_command(서버 구성) 또는
+     * pg_receivewal(REPLICATION 권한, 스트리밍 데몬)이다. 폴러 주기의 원샷 모델에는 switch+수집이
+     * 대응하며, 세그먼트 사이 간격(주기 사이 crash)은 스트리밍보다 유실 창이 크다 — note에 명시한다.
+     */
+    private BackupResult walBackup() {
+        String walLevel = jdbc().queryForObject("SHOW wal_level", String.class);
+        if ("minimal".equalsIgnoreCase(walLevel)) {
+            throw new UnsupportedOperationException(
+                    "wal_level=minimal — WAL에 복구 재료가 기록되지 않는다(대상 서버 설정이라 바꾸지 않는다). "
+                            + "replica 이상이면 로그 백업이 동작한다");
+        }
+        if (backupTools.pgWalCommand() == null || backupTools.pgWalCommand().isBlank()) {
+            throw new UnsupportedOperationException(
+                    "WAL 수집 명령 미설정(dbtower.backup.pg-wal-command) — 상시 아카이빙이 필요하면 "
+                            + "pg_receivewal(스트리밍)이 정석이다");
+        }
+        String closed;
+        try {
+            closed = jdbc().queryForObject("SELECT pg_walfile_name(pg_switch_wal())", String.class);
+        } catch (DataAccessException e) {
+            // superuser 아님 등 권한 부족 — 실패가 아니라 "이 계정으론 못 한다"를 정직하게
+            throw new UnsupportedOperationException(
+                    "pg_switch_wal 실행 불가(superuser 또는 EXECUTE grant 필요): " + e.getMessage());
+        }
+        Path out = Path.of(backupTools.backupDir(),
+                "postgres-wal-%s-%s-%s".formatted(safeFileName(instance.getName()), backupTimestamp(), closed));
+        List<String> cmd = new ArrayList<>(renderCommand(backupTools.pgWalCommand()));
+        cmd.add(closed);
+        return runCliBackup(cmd, Map.of("PGPASSWORD", instance.getPassword()), out);
+    }
+
+    /**
+     * PG PITR 안내 (Phase 2) — <b>정직한 한계 명시가 본체</b>: DBTower의 PG FULL은 pg_dump(논리 덤프)라
+     * WAL을 그 위에 재생할 수 없다. PG의 시점 복구는 물리 베이스백업(pg_basebackup) + WAL 재생 조합이며,
+     * 수집한 WAL 세그먼트는 그 조합의 재료다. 지어낸 복원 절차 대신 사실을 안내한다.
+     */
+    @Override
+    public String pitrRestoreGuide(String fullLocation, List<String> logLocations, String targetTime) {
+        return """
+                -- PostgreSQL 시점 복구 안내 (정직한 한계 포함)
+                -- 주의: 현재 FULL(%s)은 pg_dump 논리 덤프라 WAL을 재생할 수 없다.
+                -- PG의 시점 복구는 물리 베이스백업 + WAL 조합이 정석이다:
+                -- 1) pg_basebackup -D <복구 디렉터리> -X none   (물리 베이스백업 — replication 권한)
+                -- 2) 수집된 WAL 세그먼트(%d개)를 <복구 디렉터리>/pg_wal 또는 restore_command 위치에 배치
+                --    %s
+                -- 3) recovery.signal 생성 + postgresql.conf: recovery_target_time = '%s'
+                -- 4) 서버 기동 → 목표 시점까지 재생 후 승격. (물리 FULL 타입 지원은 로드맵 잔여)"""
+                .formatted(fullLocation, logLocations.size(),
+                        String.join("\n                --    ", logLocations), targetTime);
     }
 
     /**

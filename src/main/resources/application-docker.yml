@@ -33,3 +33,7 @@ dbtower:
     # 로그 백업(Phase 2) — 컨테이너 이미지에 mysqlbinlog가 번들돼 원격 수집 가능(파일명 인자는 Operator가 덧붙임)
     mysql-binlog-command: "mysqlbinlog --read-from-remote-server --host {host} --port {port} --user {user}"
     mongo-oplog-command: "mongodump --host {host} --port {port} -u {user} --authenticationDatabase admin --db local --collection oplog.rs --archive --config /dev/stdin"
+    # PG WAL·Oracle 아카이브는 서버 파일시스템 접근이 필요 — 셀프호스트 배치에 맞는 수집 벡터(에이전트·
+    # 공유 볼륨·ssh cat 등)를 조직이 지정한다. 비우면 UNSUPPORTED로 정직 표기(상시 수집 정석은 pg_receivewal/RMAN).
+    pg-wal-command: ""
+    oracle-archivelog-command: ""

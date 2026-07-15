@@ -22,6 +22,7 @@ import io.dbtower.registry.DatabaseInstance;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.ConnectionCallback;
 
+import java.nio.file.Path;
 import java.sql.CallableStatement;
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -45,6 +46,8 @@ import java.util.Optional;
  * 동시에 사라진다.
  */
 public class OracleOperator extends AbstractJdbcOperator {
+
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(OracleOperator.class);
 
     /**
      * 통계를 볼 앱 스키마(C-4). 설정값 dbtower.oracle.app-schema에서 주입되며(팩토리가 전달), 비었으면
@@ -450,7 +453,7 @@ public class OracleOperator extends AbstractJdbcOperator {
     @Override
     public BackupResult backup(BackupPolicy policy) {
         if (policy.type() == BackupPolicy.BackupType.LOG) {
-            throw new UnsupportedOperationException("Oracle 로그(아카이브 로그) 백업은 RMAN 영역 — FULL(Data Pump)만 지원");
+            return archiveLogBackup();
         }
         String dumpFile = "oracle-%s-%s.dmp"
                 .formatted(safeFileName(instance.getName()), backupTimestamp());
@@ -471,6 +474,62 @@ public class OracleOperator extends AbstractJdbcOperator {
             return new BackupResult("(server) DATA_PUMP_DIR/" + dumpFile, -1); // 서버 측 파일이라 크기 조회 생략
         } catch (SQLException e) {
             throw new OperatorException("Oracle 백업 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 로그 백업 (Phase 2) = ALTER SYSTEM ARCHIVE LOG CURRENT(아카이빙 완료까지 대기 — 백업 스크립트의
+     * 표준 관행, 공식 문서)로 현재 리두를 아카이브시킨 뒤, V$ARCHIVED_LOG의 최신 아카이브 파일을 수집한다.
+     * RMAN이 정석이지만 O/S 유틸리티로 아카이브 파일을 복사하는 방식도 공식 문서가 인정하는 방법이다.
+     *
+     * 게이트(정직): NOARCHIVELOG 모드면 아카이브가 생성되지 않는다 — 모드 전환은 mount 재기동이 필요한
+     * 대상 서버 구성이라 우리가 하지 않는다(UNSUPPORTED + 사유). ALTER SYSTEM 권한 부족도 동일 취급.
+     */
+    private BackupResult archiveLogBackup() {
+        try (Connection conn = open(); Statement st = conn.createStatement()) {
+            String mode;
+            try (ResultSet rs = st.executeQuery("SELECT log_mode FROM v$database")) {
+                rs.next();
+                mode = rs.getString(1);
+            }
+            if (!"ARCHIVELOG".equalsIgnoreCase(mode)) {
+                throw new UnsupportedOperationException(
+                        "NOARCHIVELOG 모드 — 아카이브 로그가 생성되지 않는다. 모드 전환은 mount 재기동이 "
+                                + "필요한 대상 서버 구성이라 우리가 바꾸지 않는다(ARCHIVELOG면 로그 백업 동작)");
+            }
+            if (backupTools.oracleArchiveCommand() == null || backupTools.oracleArchiveCommand().isBlank()) {
+                throw new UnsupportedOperationException(
+                        "아카이브 수집 명령 미설정(dbtower.backup.oracle-archivelog-command) — 정석은 RMAN "
+                                + "BACKUP ARCHIVELOG ALL이며, 파일 복사 수집도 공식 문서가 인정하는 방식이다");
+            }
+            try {
+                st.execute("ALTER SYSTEM ARCHIVE LOG CURRENT");
+            } catch (SQLException e) {
+                // best-effort로 강등(실측 교훈): PDB 접속은 ORA-65040(아카이브 전환은 CDB 수준 작업),
+                // 권한 부족은 ORA-01031 — 어느 쪽이든 "경계를 지금 만들지 못할" 뿐, 이미 아카이브된
+                // 최신 파일 수집은 가능하다. 운영 DB는 로그 스위치가 자연 발생하므로 수집은 유효하다.
+                LOG.info("Oracle ARCHIVE LOG CURRENT 생략(경계 없이 기존 아카이브 수집): {}", e.getMessage());
+            }
+            String archived;
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT name FROM (SELECT name FROM v$archived_log WHERE name IS NOT NULL "
+                            + "ORDER BY completion_time DESC) WHERE ROWNUM = 1")) {
+                if (!rs.next() || rs.getString(1) == null) {
+                    throw new OperatorException(
+                            "아카이브된 로그가 아직 없습니다 — 로그 스위치(서버 활동 또는 CDB에서 ARCHIVE LOG CURRENT) 후 생성됩니다");
+                }
+                archived = rs.getString(1);
+            }
+            // 수집 명령은 접두부 템플릿 + 서버 관점 절대경로 인자(다른 기종과 같은 모델)
+            String baseName = archived.substring(archived.lastIndexOf('/') + 1);
+            Path out = Path.of(backupTools.backupDir(),
+                    "oracle-archivelog-%s-%s-%s".formatted(
+                            safeFileName(instance.getName()), backupTimestamp(), safeFileName(baseName)));
+            List<String> cmd = new ArrayList<>(renderCommand(backupTools.oracleArchiveCommand()));
+            cmd.add(archived);
+            return runCliBackup(cmd, Map.of(), out);
+        } catch (SQLException e) {
+            throw new OperatorException("Oracle 아카이브 로그 백업 실패: " + e.getMessage(), e);
         }
     }
 

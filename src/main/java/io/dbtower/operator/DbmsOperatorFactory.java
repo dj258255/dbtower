@@ -38,6 +38,8 @@ public class DbmsOperatorFactory {
                                @Value("${dbtower.backup.mongo-restore-command:mongorestore}") String mongoRestoreCommand,
                                @Value("${dbtower.backup.mysql-binlog-command:}") String mysqlBinlogCommand,
                                @Value("${dbtower.backup.mongo-oplog-command:}") String mongoOplogCommand,
+                               @Value("${dbtower.backup.pg-wal-command:}") String pgWalCommand,
+                               @Value("${dbtower.backup.oracle-archivelog-command:}") String oracleArchiveCommand,
                                @Value("${dbtower.backup.dir:./backups}") String backupDir) {
         this.pools = pools;
         this.mongoClients = mongoClients;
@@ -45,7 +47,7 @@ public class DbmsOperatorFactory {
         this.oracleAppSchema = oracleAppSchema;
         this.backupTools = new BackupTools(mysqldumpCommand, pgDumpCommand, mongodumpCommand,
                 mysqlRestoreCommand, pgRestoreCommand, mongoRestoreCommand,
-                mysqlBinlogCommand, mongoOplogCommand, backupDir);
+                mysqlBinlogCommand, mongoOplogCommand, pgWalCommand, oracleArchiveCommand, backupDir);
     }
 
     public DbmsOperator create(DatabaseInstance instance) {
