@@ -13,7 +13,8 @@ import java.time.LocalDateTime;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class BackupRun {
 
-    public enum Status { SUCCESS, FAILED }
+    /** UNSUPPORTED는 "기종이 못 하는 것" — "하다가 깨진 것"(FAILED)과 다른 사실이라 구분한다(V13) */
+    public enum Status { SUCCESS, FAILED, UNSUPPORTED }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -50,6 +51,17 @@ public class BackupRun {
      */
     @Column(length = 512)
     private String remoteLocation;
+
+    /**
+     * 백업 타입(FULL/LOG) — PITR "복원 가능 범위"(마지막 FULL ~ 그 이후 마지막 LOG) 계산의 전제(V13).
+     * V13 이전 이력은 타입 미기록이라 null — FULL이었다고 위장하지 않고 PITR 계산에서 제외한다.
+     */
+    @Column(length = 10)
+    private String backupType;
+
+    public void setBackupType(String backupType) {
+        this.backupType = backupType;
+    }
 
     public BackupRun(Long instanceId, LocalDateTime startedAt, long durationMs, Status status, String detail) {
         this(instanceId, startedAt, durationMs, status, detail, null);

@@ -30,3 +30,6 @@ dbtower:
     mysql-restore-command: "mysql -h {host} -P {port} -u {user}"
     pg-restore-command: "psql -h {host} -p {port} -v ON_ERROR_STOP=1 -U {user}"
     mongo-restore-command: "mongorestore --host {host} --port {port} -u {user} --authenticationDatabase admin --config /dev/stdin"
+    # 로그 백업(Phase 2) — 컨테이너 이미지에 mysqlbinlog가 번들돼 원격 수집 가능(파일명 인자는 Operator가 덧붙임)
+    mysql-binlog-command: "mysqlbinlog --read-from-remote-server --host {host} --port {port} --user {user}"
+    mongo-oplog-command: "mongodump --host {host} --port {port} -u {user} --authenticationDatabase admin --db local --collection oplog.rs --archive --config /dev/stdin"

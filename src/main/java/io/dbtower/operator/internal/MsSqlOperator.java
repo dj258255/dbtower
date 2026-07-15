@@ -91,6 +91,35 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /** PITR 안내 (Phase 2) — FULL을 NORECOVERY로 적재 후 로그 체인을 STOPAT까지 복원하는 T-SQL 문안. */
+    @Override
+    public String pitrRestoreGuide(String fullLocation, List<String> logLocations, String targetTime) {
+        String db = instance.getDbName().replace("]", "]]");
+        StringBuilder sb = new StringBuilder();
+        sb.append("-- SQL Server 시점 복구 안내 (생성된 문안 — 반드시 복구용 DB 이름으로 실행할 것)\n");
+        sb.append("-- 원본과 같은 서버에 복원하면 데이터 파일이 충돌한다 — RESTORE DATABASE에 MOVE 절로\n");
+        sb.append("-- 논리 파일들을 새 경로(예: MOVE '").append(db).append("' TO '<새 mdf 경로>')로 옮길 것(e2e 실측 교훈).\n");
+        sb.append("-- 1) 마지막 FULL을 NORECOVERY로 적재(뒤에 로그를 이어 붙이기 위해 미완료 상태 유지)\n");
+        sb.append("RESTORE DATABASE [").append(db).append("_pitr] FROM DISK = N'")
+                .append(stripServerPrefix(fullLocation)).append("' WITH NORECOVERY, REPLACE;\n");
+        sb.append("-- 2) 로그 체인을 시간순으로 — 마지막 로그만 STOPAT(목표 시점)과 RECOVERY\n");
+        for (int i = 0; i < logLocations.size(); i++) {
+            boolean last = (i == logLocations.size() - 1);
+            sb.append("RESTORE LOG [").append(db).append("_pitr] FROM DISK = N'")
+                    .append(stripServerPrefix(logLocations.get(i))).append("'")
+                    .append(last ? " WITH STOPAT = '" + targetTime + "', RECOVERY;" : " WITH NORECOVERY;")
+                    .append('\n');
+        }
+        sb.append("-- 주의: 로그 하나라도 빠지면 체인이 끊겨 그 지점 이후 복원 불가.");
+        return sb.toString();
+    }
+
+    /** backup()이 남기는 "(server) <path>" 접두사를 떼고 서버 경로만 — 안내문은 서버 관점 경로가 맞다 */
+    private static String stripServerPrefix(String location) {
+        return location != null && location.startsWith("(server) ")
+                ? location.substring("(server) ".length()) : location;
+    }
+
     /**
      * SQL Server 복원 검증 = RESTORE VERIFYONLY (서버 사이드 T-SQL).
      * 백업이 서버 측 파일(.bak)이라 플랫폼이 파일에 직접 접근하지 못한다 — 전체 복원은 범위 밖.

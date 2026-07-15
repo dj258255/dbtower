@@ -42,6 +42,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Pattern;
+import java.util.Map;
+import java.util.Comparator;
+import java.nio.file.Path;
+import java.nio.file.Files;
 
 /**
  * MongoDB 어댑터 — 유일한 비 JDBC 구현체.
@@ -574,14 +578,42 @@ public class MongoOperator implements DbmsOperator {
     @Override
     public BackupResult backup(BackupPolicy policy) {
         if (policy.type() == BackupPolicy.BackupType.LOG) {
-            throw new UnsupportedOperationException("MongoDB 로그 백업은 oplog 아카이빙으로 별도 구성 필요");
+            return oplogBackup();
         }
-        java.nio.file.Path out = java.nio.file.Path.of(backupTools.backupDir(),
+        Path out = Path.of(backupTools.backupDir(),
                 "mongo-%s-%s.archive".formatted(
                         BackupCommands.safeFileName(instance.getName()), BackupCommands.timestamp()));
         return BackupCommands.run(
                 BackupCommands.render(backupTools.mongodumpCommand(), instance),
-                java.util.Map.of(),
+                Map.of(),
+                out,
+                BackupCommands.yamlEntry("password", instance.getPassword()));
+    }
+
+    /**
+     * 로그 백업 (Phase 2) = local.oplog.rs 덤프. oplog는 복제셋의 변경 로그라 "FULL + oplog"가
+     * 시점 복구의 재료다. mongodump --oplog는 --db와 함께 못 쓰므로 oplog 컬렉션을 직접 덤프한다.
+     *
+     * 게이트(정직): oplog.rs는 복제셋에만 존재한다 — standalone이면 UNSUPPORTED로 사유를 남긴다.
+     * 복제셋 전환은 대상 서버 구성이라 우리가 하지 않는다(단일 노드도 replSet 전환으로 사용 가능 안내).
+     * 판정은 replicationState()(replSetGetStatus, 에러 76=NoReplicationEnabled)를 재사용한다.
+     */
+    private BackupResult oplogBackup() {
+        if ("STANDALONE".equals(replicationState().role())) {
+            throw new UnsupportedOperationException(
+                    "standalone — oplog 없음(복제셋 전용). 단일 노드도 replSet 전환(--replSet + initiate)으로 "
+                            + "oplog 백업이 가능하지만, 대상 서버 구성이라 우리가 바꾸지 않는다");
+        }
+        if (backupTools.mongoOplogCommand() == null || backupTools.mongoOplogCommand().isBlank()) {
+            throw new UnsupportedOperationException(
+                    "oplog 덤프 명령 미설정(dbtower.backup.mongo-oplog-command)");
+        }
+        Path out = Path.of(backupTools.backupDir(),
+                "mongo-oplog-%s-%s.archive".formatted(
+                        BackupCommands.safeFileName(instance.getName()), BackupCommands.timestamp()));
+        return BackupCommands.run(
+                BackupCommands.render(backupTools.mongoOplogCommand(), instance),
+                Map.of(),
                 out,
                 BackupCommands.yamlEntry("password", instance.getPassword()));
     }
@@ -596,8 +628,8 @@ public class MongoOperator implements DbmsOperator {
      */
     @Override
     public RestoreVerification verifyRestore(String location) {
-        java.nio.file.Path archive = java.nio.file.Path.of(location);
-        if (!java.nio.file.Files.isRegularFile(archive)) {
+        Path archive = Path.of(location);
+        if (!Files.isRegularFile(archive)) {
             return RestoreVerification.failed("아카이브 파일을 찾을 수 없습니다: " + location);
         }
         String target = RestoreSupport.verifyTargetName();
@@ -609,7 +641,7 @@ public class MongoOperator implements DbmsOperator {
         try {
             RestoreSupport.ExecResult cp = RestoreSupport.exec(
                     List.of("docker", "cp", location, container + ":" + inContainerArchive),
-                    java.util.Map.of(), null);
+                    Map.of(), null);
             if (!cp.ok()) {
                 return RestoreVerification.failed("아카이브 컨테이너 복사 실패: " + cp.errorTail());
             }
@@ -619,7 +651,7 @@ public class MongoOperator implements DbmsOperator {
             RestoreSupport.ExecResult restore = RestoreSupport.exec(RestoreSupport.concat(base,
                     "--archive=" + inContainerArchive,
                     "--nsFrom=" + instance.getDbName() + ".*",
-                    "--nsTo=" + target + ".*"), java.util.Map.of(), config);
+                    "--nsTo=" + target + ".*"), Map.of(), config);
             if (!restore.ok()) {
                 return RestoreVerification.failed("mongorestore 실패: " + restore.errorTail());
             }
@@ -646,7 +678,7 @@ public class MongoOperator implements DbmsOperator {
             }
             if (copied) {
                 RestoreSupport.exec(List.of("docker", "exec", container, "rm", "-f", inContainerArchive),
-                        java.util.Map.of(), null);
+                        Map.of(), null);
             }
         }
     }
@@ -866,7 +898,7 @@ public class MongoOperator implements DbmsOperator {
                 Document params = client.getDatabase("admin")
                         .runCommand(new Document("getParameter", "*"));
                 List<DbParameter> result = new ArrayList<>();
-                for (java.util.Map.Entry<String, Object> e : params.entrySet()) {
+                for (Map.Entry<String, Object> e : params.entrySet()) {
                     if ("ok".equals(e.getKey())) {
                         continue;
                     }
@@ -880,7 +912,7 @@ public class MongoOperator implements DbmsOperator {
                     }
                     result.add(ParameterSupport.of(e.getKey(), value, null));
                 }
-                result.sort(java.util.Comparator.comparing(DbParameter::name));
+                result.sort(Comparator.comparing(DbParameter::name));
                 return result;
             });
         } catch (Exception e) {

@@ -1,5 +1,6 @@
 package io.dbtower.operator;
 
+import org.springframework.beans.factory.annotation.Value;
 import io.dbtower.operator.internal.BackupTools;
 import io.dbtower.operator.internal.HistogramSnapshotStore;
 import io.dbtower.operator.internal.MongoClientCache;
@@ -28,20 +29,23 @@ public class DbmsOperatorFactory {
 
     public DbmsOperatorFactory(ConnectionPools pools, MongoClientCache mongoClients,
                                HistogramSnapshotStore histogramStore,
-                               @org.springframework.beans.factory.annotation.Value("${dbtower.oracle.app-schema:}") String oracleAppSchema,
-                               @org.springframework.beans.factory.annotation.Value("${dbtower.backup.mysqldump-command:mysqldump}") String mysqldumpCommand,
-                               @org.springframework.beans.factory.annotation.Value("${dbtower.backup.pg-dump-command:pg_dump}") String pgDumpCommand,
-                               @org.springframework.beans.factory.annotation.Value("${dbtower.backup.mongodump-command:mongodump}") String mongodumpCommand,
-                               @org.springframework.beans.factory.annotation.Value("${dbtower.backup.mysql-restore-command:mysql}") String mysqlRestoreCommand,
-                               @org.springframework.beans.factory.annotation.Value("${dbtower.backup.pg-restore-command:psql}") String pgRestoreCommand,
-                               @org.springframework.beans.factory.annotation.Value("${dbtower.backup.mongo-restore-command:mongorestore}") String mongoRestoreCommand,
-                               @org.springframework.beans.factory.annotation.Value("${dbtower.backup.dir:./backups}") String backupDir) {
+                               @Value("${dbtower.oracle.app-schema:}") String oracleAppSchema,
+                               @Value("${dbtower.backup.mysqldump-command:mysqldump}") String mysqldumpCommand,
+                               @Value("${dbtower.backup.pg-dump-command:pg_dump}") String pgDumpCommand,
+                               @Value("${dbtower.backup.mongodump-command:mongodump}") String mongodumpCommand,
+                               @Value("${dbtower.backup.mysql-restore-command:mysql}") String mysqlRestoreCommand,
+                               @Value("${dbtower.backup.pg-restore-command:psql}") String pgRestoreCommand,
+                               @Value("${dbtower.backup.mongo-restore-command:mongorestore}") String mongoRestoreCommand,
+                               @Value("${dbtower.backup.mysql-binlog-command:}") String mysqlBinlogCommand,
+                               @Value("${dbtower.backup.mongo-oplog-command:}") String mongoOplogCommand,
+                               @Value("${dbtower.backup.dir:./backups}") String backupDir) {
         this.pools = pools;
         this.mongoClients = mongoClients;
         this.histogramStore = histogramStore;
         this.oracleAppSchema = oracleAppSchema;
         this.backupTools = new BackupTools(mysqldumpCommand, pgDumpCommand, mongodumpCommand,
-                mysqlRestoreCommand, pgRestoreCommand, mongoRestoreCommand, backupDir);
+                mysqlRestoreCommand, pgRestoreCommand, mongoRestoreCommand,
+                mysqlBinlogCommand, mongoOplogCommand, backupDir);
     }
 
     public DbmsOperator create(DatabaseInstance instance) {

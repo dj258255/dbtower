@@ -54,6 +54,11 @@
   마크 제거. 로그인 화면(미인증)에서도 파비콘이 뜨도록 SecurityConfig permitAll에 파비콘 자산 추가
 
 ### Added
+- 로그 백업 5기종 게이트 + PITR(Phase 2 완결) — MySQL binlog 수집(FLUSH로 닫힌 파일만, log_bin
+  OFF는 UNSUPPORTED 게이트), MongoDB oplog 덤프(복제셋 게이트 — standalone은 사유와 함께 UNSUPPORTED),
+  PG·Oracle은 정직 사유. 백업 이력에 타입(V13)과 UNSUPPORTED 상태 신설("못 하는 것"≠"깨진 것").
+  GET /api/instances/{id}/pitr-window — 복원 가능 창(마지막 FULL~마지막 LOG) + 기종별 복원 명령
+  문안 생성(MySQL --stop-datetime·MSSQL STOPAT — 실행은 사람). MSSQL 실제 시점 복원 e2e 실증
 - 데이터 마스킹 — 외부(웹훅·MCP 응답)로 나가는 SQL의 리터럴만 ?로 가림(식별자·구조 보존, 정규화
   텍스트엔 멱등). 회귀 알림·문의·MCP 에코 4곳 배선, AI 프롬프트는 mask-ai-prompt(기본 false) 토글
 - 통계 수집 건강 Advisor — MySQL digest 포화율(80%)·Performance_schema_digest_lost(신규 쿼리 감지

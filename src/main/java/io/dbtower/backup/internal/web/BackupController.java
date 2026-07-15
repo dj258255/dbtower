@@ -55,6 +55,16 @@ public class BackupController {
     }
 
     /**
+     * PITR 복원 가능 창 + 기종별 복원 명령 안내 (Phase 2) — 읽기 전용(안내문 생성만, 실행은 사람).
+     * targetTime(선택, ISO)을 주면 그 시점 기준의 안내문을, 없으면 창의 끝 시점 기준.
+     */
+    @GetMapping("/pitr-window")
+    public BackupService.PitrWindow pitrWindow(@PathVariable Long id,
+                                               @RequestParam(required = false) String targetTime) {
+        return backupService.pitrWindow(id, targetTime);
+    }
+
+    /**
      * 백업 복원 검증 (A7) — 가장 최근 성공 백업을, location을 주면 그 산출물을 검증한다.
      * status는 VERIFIED/FAILED/UNSUPPORTED, restoredObjectCount는 실제 복원까지 한 경우에만 채워진다.
      */
@@ -73,10 +83,11 @@ public class BackupController {
     }
 
     public record BackupRunView(String startedAt, long durationMs, String status, String detail,
-                                String verifyStatus, String remoteLocation) {
+                                String verifyStatus, String remoteLocation, String backupType) {
         static BackupRunView from(BackupRun r) {
             return new BackupRunView(r.getStartedAt().toString(), r.getDurationMs(),
-                    r.getStatus().name(), r.getDetail(), r.getVerifyStatus(), r.getRemoteLocation());
+                    r.getStatus().name(), r.getDetail(), r.getVerifyStatus(), r.getRemoteLocation(),
+                    r.getBackupType());
         }
     }
 }

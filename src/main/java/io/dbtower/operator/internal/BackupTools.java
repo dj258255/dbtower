@@ -14,5 +14,6 @@ package io.dbtower.operator.internal;
  */
 public record BackupTools(String mysqldumpCommand, String pgDumpCommand, String mongodumpCommand,
                           String mysqlRestoreCommand, String pgRestoreCommand, String mongoRestoreCommand,
+                          String mysqlBinlogCommand, String mongoOplogCommand,
                           String backupDir) {
 }

@@ -39,6 +39,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.LinkedHashMap;
+import java.util.Comparator;
+import java.nio.file.Path;
+import java.nio.file.Files;
 
 /**
  * MySQL 어댑터.
@@ -66,13 +70,63 @@ public class MySqlOperator extends AbstractJdbcOperator {
     @Override
     public BackupResult backup(BackupPolicy policy) {
         if (policy.type() == BackupPolicy.BackupType.LOG) {
-            throw new UnsupportedOperationException("MySQL 로그 백업은 binlog 아카이빙으로 별도 구성 필요");
+            return binlogBackup();
         }
-        java.nio.file.Path out = java.nio.file.Path.of(backupTools.backupDir(),
+        Path out = Path.of(backupTools.backupDir(),
                 "mysql-%s-%s.sql".formatted(safeFileName(instance.getName()), backupTimestamp()));
         // 비밀번호는 argv가 아니라 MYSQL_PWD 환경변수로 — ps로 노출되지 않게
         return runCliBackup(renderCommand(backupTools.mysqldumpCommand()),
-                java.util.Map.of("MYSQL_PWD", instance.getPassword()), out);
+                Map.of("MYSQL_PWD", instance.getPassword()), out);
+    }
+
+    /**
+     * 로그 백업 (Phase 2) = FLUSH BINARY LOGS로 현재 binlog를 닫고, 방금 닫힌 파일을 수집한다.
+     * FULL 이후의 변경분이 binlog에 있으므로 "FULL + binlog 체인"이 시점 복구(PITR)의 재료가 된다.
+     *
+     * 게이트(정직): binlog 활성 여부(log_bin)는 대상 서버 설정이라 우리가 켜지 않는다 — OFF면
+     * UNSUPPORTED로 사유를 남긴다("켜져 있으면 쓴다"). 수집 명령(mysql-binlog-command)이 비어 있어도
+     * 같은 취급이다. FLUSH BINARY LOGS는 데이터 변경이 아니라 로그 로테이션(백업 행위의 일부)이다.
+     *
+     * 수집 명령은 접두부만 템플릿으로 두고 Operator가 파일명(basename)을 덧붙인다 — 데모는
+     * docker exec -w <binlog dir> cat, 프로덕션은 mysqlbinlog --read-from-remote-server(MYSQL_PWD 지원).
+     */
+    private BackupResult binlogBackup() {
+        String logBin = jdbc().queryForObject("SELECT @@log_bin", String.class);
+        if (logBin == null || logBin.equals("0") || logBin.equalsIgnoreCase("OFF")) {
+            throw new UnsupportedOperationException(
+                    "binlog 비활성(log_bin=OFF) — 대상 서버 설정이라 켜지 않는다. "
+                            + "my.cnf에 log-bin을 활성화(재기동)하면 로그 백업이 동작한다");
+        }
+        if (backupTools.mysqlBinlogCommand() == null || backupTools.mysqlBinlogCommand().isBlank()) {
+            throw new UnsupportedOperationException(
+                    "binlog 수집 명령 미설정(dbtower.backup.mysql-binlog-command) — "
+                            + "mysqlbinlog --read-from-remote-server 또는 서버 로컬 수집 명령을 지정해야 한다");
+        }
+        // 현재 파일을 닫아 경계를 만든다 — 닫힌 파일만 수집해야 "쓰는 중 파일" 문제가 없다
+        jdbc().execute("FLUSH BINARY LOGS");
+        List<String> logs = jdbc().query("SHOW BINARY LOGS", (rs, i) -> rs.getString("Log_name"));
+        if (logs.size() < 2) {
+            throw new OperatorException("FLUSH 후에도 binlog가 2개 미만 — 수집할 닫힌 파일이 없습니다");
+        }
+        String closed = logs.get(logs.size() - 2);   // 마지막은 방금 새로 열린 파일, 그 앞이 방금 닫힌 파일
+        Path out = Path.of(backupTools.backupDir(),
+                "mysql-binlog-%s-%s-%s".formatted(safeFileName(instance.getName()), backupTimestamp(), closed));
+        List<String> cmd = new ArrayList<>(renderCommand(backupTools.mysqlBinlogCommand()));
+        cmd.add(closed);
+        return runCliBackup(cmd, Map.of("MYSQL_PWD", instance.getPassword()), out);
+    }
+
+    /** PITR 안내 (Phase 2) — FULL 적재 후 binlog들을 목표 시점까지 재생하는 명령 문안. 실행은 사람이. */
+    @Override
+    public String pitrRestoreGuide(String fullLocation, List<String> logLocations, String targetTime) {
+        return """
+                -- MySQL 시점 복구 안내 (생성된 문안 — 반드시 격리된 복구용 인스턴스에서 실행할 것)
+                -- 1) 마지막 FULL 백업 적재
+                mysql -u <user> -p < %s
+                -- 2) FULL 이후의 binlog를 목표 시점까지 재생 (시간순, --stop-datetime이 시점 경계)
+                mysqlbinlog --stop-datetime='%s' %s | mysql -u <user> -p
+                -- 주의: binlog 파일 순서가 곧 재생 순서다. 목표 시점 이후 변경은 재생되지 않는다."""
+                .formatted(fullLocation, targetTime, String.join(" \\\n                ", logLocations));
     }
 
     /**
@@ -82,14 +136,14 @@ public class MySqlOperator extends AbstractJdbcOperator {
      */
     @Override
     public RestoreVerification verifyRestore(String location) {
-        java.nio.file.Path dump = java.nio.file.Path.of(location);
-        if (!java.nio.file.Files.isRegularFile(dump)) {
+        Path dump = Path.of(location);
+        if (!Files.isRegularFile(dump)) {
             return RestoreVerification.failed("덤프 파일을 찾을 수 없습니다: " + location);
         }
         String target = RestoreSupport.verifyTargetName();
         RestoreSupport.requireSafeName(target);
-        java.util.Map<String, String> env = java.util.Map.of("MYSQL_PWD", instance.getPassword());
-        java.util.List<String> base = renderCommand(backupTools.mysqlRestoreCommand());
+        Map<String, String> env = Map.of("MYSQL_PWD", instance.getPassword());
+        List<String> base = renderCommand(backupTools.mysqlRestoreCommand());
         boolean created = false;
         try {
             RestoreSupport.ExecResult create = RestoreSupport.exec(
@@ -456,7 +510,7 @@ public class MySqlOperator extends AbstractJdbcOperator {
                 (rs, i) -> new IdxRow(rs.getString(1), rs.getString(2),
                         rs.getInt(3) == 0, rs.getString(4), rs.getLong(5)),
                 instance.getDbName(), table);
-        Map<String, TableDetail.IndexDetail> byName = new java.util.LinkedHashMap<>();
+        Map<String, TableDetail.IndexDetail> byName = new LinkedHashMap<>();
         for (IdxRow r : rows) {
             byName.merge(r.name(),
                     new TableDetail.IndexDetail(r.name(), List.of(r.column()), r.unique(), r.type(), r.cardinality()),
@@ -720,7 +774,7 @@ public class MySqlOperator extends AbstractJdbcOperator {
         try {
             List<DbParameter> params = jdbc().query("SHOW GLOBAL VARIABLES",
                     (rs, i) -> ParameterSupport.of(rs.getString(1), rs.getString(2), null));
-            params.sort(java.util.Comparator.comparing(DbParameter::name));
+            params.sort(Comparator.comparing(DbParameter::name));
             return params;
         } catch (DataAccessException e) {
             throw new OperatorException("MySQL 파라미터 조회 실패: " + e.getMessage(), e);

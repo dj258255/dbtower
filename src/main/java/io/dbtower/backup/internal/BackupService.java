@@ -48,7 +48,7 @@ public class BackupService {
         return policyRepository.save(policy);
     }
 
-    /** 즉시 실행 — 실행 방식은 Operator가 기종에 맞게 결정하고, 성공/실패를 이력으로 남긴다 */
+    /** 즉시 실행 — 실행 방식은 Operator가 기종에 맞게 결정하고, 성공/실패/미지원을 이력으로 남긴다 */
     public BackupRun runNow(Long instanceId, BackupPolicy.BackupType type) {
         LocalDateTime startedAt = LocalDateTime.now();
         long start = System.currentTimeMillis();
@@ -61,11 +61,17 @@ public class BackupService {
                     result.location());
             // 3-2-1의 오프사이트 — 업로드 실패는 백업 실패가 아니다(로컬 성공은 유효, 위치만 비움)
             remoteStore.upload(instanceId, result.location()).ifPresent(run::recordRemote);
+        } catch (UnsupportedOperationException e) {
+            // "기종이 못 하는 것"은 실패가 아니다 — 사유와 함께 UNSUPPORTED로 구분 기록(위장 금지)
+            run = new BackupRun(instanceId, startedAt, System.currentTimeMillis() - start,
+                    BackupRun.Status.UNSUPPORTED, e.getMessage());
+            log.info("백업 미지원 instance={} type={} 사유={}", instanceId, type, e.getMessage());
         } catch (Exception e) {
             run = new BackupRun(instanceId, startedAt, System.currentTimeMillis() - start,
                     BackupRun.Status.FAILED, e.getMessage());
             log.warn("백업 실패 instance={} cause={}", instanceId, e.getMessage());
         }
+        run.setBackupType(type.name());   // PITR 범위 계산의 전제(V13) — 어떤 타입의 실행이었는지 기록
         return runRepository.save(run);
     }
 
@@ -116,5 +122,43 @@ public class BackupService {
 
     public List<BackupRun> history(Long instanceId) {
         return runRepository.findTop20ByInstanceIdOrderByStartedAtDesc(instanceId);
+    }
+
+    /**
+     * PITR 복원 가능 창 (Phase 2) — "마지막 성공 FULL 시각 ~ 그 이후 마지막 성공 LOG 시각".
+     * FULL이 없으면 복원 불가, LOG가 없으면 FULL 시점으로만 복원 가능(창이 점 하나)임을 정직하게 표기.
+     * restoreGuide는 기종별 명령 문안(Operator가 생성) — 실행은 사람이 한다.
+     */
+    public record PitrWindow(boolean available, LocalDateTime fullAt, String fullLocation,
+                             LocalDateTime lastLogAt, int logCount, String note, String restoreGuide) {
+    }
+
+    public PitrWindow pitrWindow(Long instanceId, String targetTime) {
+        var instance = registryService.findById(instanceId);
+        var full = runRepository.findTopByInstanceIdAndBackupTypeAndStatusOrderByStartedAtDesc(
+                instanceId, BackupPolicy.BackupType.FULL.name(), BackupRun.Status.SUCCESS);
+        if (full.isEmpty()) {
+            return new PitrWindow(false, null, null, null, 0,
+                    "성공한 FULL 백업이 없어 시점 복구 불가 — 먼저 FULL 백업을 실행하세요"
+                            + " (타입 기록은 V13부터라 이전 이력은 계산에서 제외)", null);
+        }
+        List<BackupRun> logs = runRepository
+                .findByInstanceIdAndBackupTypeAndStatusAndStartedAtAfterOrderByStartedAtAsc(
+                        instanceId, BackupPolicy.BackupType.LOG.name(), BackupRun.Status.SUCCESS,
+                        full.get().getStartedAt());
+        LocalDateTime lastLogAt = logs.isEmpty() ? null : logs.get(logs.size() - 1).getStartedAt();
+        String note = logs.isEmpty()
+                ? "FULL 이후 LOG 백업이 없어 FULL 시점으로만 복원 가능(임의 시점 불가)"
+                : "FULL(%s) ~ 마지막 LOG(%s) 사이의 임의 시점으로 복원 가능".formatted(
+                        full.get().getStartedAt(), lastLogAt);
+        // 안내 목표 시점: 지정 없으면 창의 끝(마지막 LOG 또는 FULL 시각)
+        String target = (targetTime != null && !targetTime.isBlank()) ? targetTime
+                : String.valueOf(lastLogAt != null ? lastLogAt : full.get().getStartedAt());
+        String guide = operatorFactory.create(instance).pitrRestoreGuide(
+                full.get().getLocation(),
+                logs.stream().map(BackupRun::getLocation).toList(),
+                target);
+        return new PitrWindow(true, full.get().getStartedAt(), full.get().getLocation(),
+                lastLogAt, logs.size(), note, guide);
     }
 }

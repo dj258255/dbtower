@@ -178,6 +178,20 @@ public interface DbmsOperator {
     }
 
     /**
+     * 시점 복구(PITR) 복원 명령 안내 (Phase 2) — FULL 산출물과 LOG 체인으로 "특정 시점까지 복원"하는
+     * 기종별 명령 문안을 <b>생성만</b> 한다. 실행은 사람이 한다(DBTower는 대상 DB를 바꾸지 않는다 —
+     * gh-ost dry-run·digest TRUNCATE 안내와 같은 생성·안내 모델). 기종 분기를 서비스에 두지 않기
+     * 위한 Operator 능력이며, 지원 기종은 MySQL(binlog 재생)·SQL Server(RESTORE ... STOPAT)다.
+     *
+     * @param fullLocation 마지막 성공 FULL 산출물 위치
+     * @param logLocations FULL 이후의 성공 LOG 산출물들(시간순)
+     * @param targetTime   복원 목표 시점(ISO, 안내문에 그대로 들어간다)
+     */
+    default String pitrRestoreGuide(String fullLocation, java.util.List<String> logLocations, String targetTime) {
+        return "이 기종은 시점 복구 안내를 지원하지 않습니다";
+    }
+
+    /**
      * 인스턴스 설정 파라미터 전량 (B6 파라미터 드리프트) — "왜 저 장비만 느리지"의 단골 원인인
      * 설정값 차이(max_connections·work_mem 등)를 같은 역할의 두 장비 사이에서 추적하는 원천.
      * 읽기 전용(설정 카탈로그 조회만 — 설정을 바꾸지 않는다).

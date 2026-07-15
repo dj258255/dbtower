@@ -32,6 +32,10 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.nio.file.Path;
+import java.nio.file.Files;
 
 /**
  * PostgreSQL 어댑터.
@@ -52,12 +56,17 @@ public class PostgresOperator extends AbstractJdbcOperator {
     @Override
     public BackupResult backup(BackupPolicy policy) {
         if (policy.type() == BackupPolicy.BackupType.LOG) {
-            throw new UnsupportedOperationException("PostgreSQL 로그 백업은 WAL 아카이빙으로 별도 구성 필요");
+            // Phase 2 판단: WAL 수집(archive_command·pg_receivewal의 replication 권한·슬롯)은 대상 서버
+            // 구성을 요구한다 — "대상을 바꾸지 않는다" 원칙상 자동화하지 않고 사유를 정직하게 남긴다.
+            throw new UnsupportedOperationException(
+                    "PostgreSQL 로그(WAL) 백업은 archive_command 또는 pg_receivewal(replication 권한·슬롯) 등 "
+                            + "대상 서버 구성이 필요 — 대상 설정을 바꾸지 않는 원칙상 자동화하지 않는다. "
+                            + "WAL 아카이빙은 서버 소유자가 구성하고, DBTower는 FULL 백업과 신선도 감시를 맡는다");
         }
-        java.nio.file.Path out = java.nio.file.Path.of(backupTools.backupDir(),
+        Path out = Path.of(backupTools.backupDir(),
                 "postgres-%s-%s.sql".formatted(safeFileName(instance.getName()), backupTimestamp()));
         return runCliBackup(renderCommand(backupTools.pgDumpCommand()),
-                java.util.Map.of("PGPASSWORD", instance.getPassword()), out);
+                Map.of("PGPASSWORD", instance.getPassword()), out);
     }
 
     /**
@@ -68,15 +77,15 @@ public class PostgresOperator extends AbstractJdbcOperator {
      */
     @Override
     public RestoreVerification verifyRestore(String location) {
-        java.nio.file.Path dump = java.nio.file.Path.of(location);
-        if (!java.nio.file.Files.isRegularFile(dump)) {
+        Path dump = Path.of(location);
+        if (!Files.isRegularFile(dump)) {
             return RestoreVerification.failed("덤프 파일을 찾을 수 없습니다: " + location);
         }
         String target = RestoreSupport.verifyTargetName();
         RestoreSupport.requireSafeName(target);
         // 컨테이너 로컬 접속은 trust라 비밀번호가 필요 없지만, 다른 환경 대비 PGPASSWORD도 실어 둔다(무해)
-        java.util.Map<String, String> env = java.util.Map.of("PGPASSWORD", instance.getPassword());
-        java.util.List<String> base = renderCommand(backupTools.pgRestoreCommand());
+        Map<String, String> env = Map.of("PGPASSWORD", instance.getPassword());
+        List<String> base = renderCommand(backupTools.pgRestoreCommand());
         boolean created = false;
         try {
             RestoreSupport.ExecResult create = RestoreSupport.exec(RestoreSupport.concat(base,
@@ -87,7 +96,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
             created = true;
             byte[] sql;
             try {
-                sql = java.nio.file.Files.readAllBytes(dump);
+                sql = Files.readAllBytes(dump);
             } catch (java.io.IOException e) {
                 return RestoreVerification.failed("덤프 파일 읽기 실패: " + e.getMessage());
             }
@@ -259,7 +268,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
                 rs.getLong("calls")));
 
         // queryid별 그룹: resp_calls 요소합산, calls 누적(정렬용), query 텍스트는 첫 행 것을 유지
-        java.util.LinkedHashMap<String, Agg> byId = new java.util.LinkedHashMap<>();
+        LinkedHashMap<String, Agg> byId = new LinkedHashMap<>();
         for (MonitorRow r : rows) {
             if (r.queryId() == null || r.respCalls() == null) {
                 continue;
@@ -272,10 +281,10 @@ public class PostgresOperator extends AbstractJdbcOperator {
         }
 
         // calls 상위 N만 승격 대상으로 정렬
-        List<Map.Entry<String, Agg>> ranked = new java.util.ArrayList<>(byId.entrySet());
+        List<Map.Entry<String, Agg>> ranked = new ArrayList<>(byId.entrySet());
         ranked.sort((a, b) -> Long.compare(b.getValue().calls, a.getValue().calls));
 
-        List<LatencyPercentile> out = new java.util.ArrayList<>();
+        List<LatencyPercentile> out = new ArrayList<>();
         for (Map.Entry<String, Agg> e : ranked) {
             if (out.size() >= limit) {
                 break;
@@ -741,13 +750,13 @@ public class PostgresOperator extends AbstractJdbcOperator {
 
     /** 인덱스-컬럼 행들을 인덱스 단위로 묶는다(컬럼 순서 보존, 카디널리티는 선두 컬럼 통계로 인덱스당 1회 계산). */
     private static List<TableDetail.IndexDetail> groupIndexes(List<IndexRow> rows) {
-        java.util.LinkedHashMap<String, IndexAcc> byIndex = new java.util.LinkedHashMap<>();
+        LinkedHashMap<String, IndexAcc> byIndex = new LinkedHashMap<>();
         for (IndexRow r : rows) {
             IndexAcc acc = byIndex.computeIfAbsent(r.indexName(),
                     k -> new IndexAcc(r.unique(), r.type(), r.nDistinct(), r.reltuples()));
             acc.columns.add(r.column());
         }
-        List<TableDetail.IndexDetail> out = new java.util.ArrayList<>();
+        List<TableDetail.IndexDetail> out = new ArrayList<>();
         for (Map.Entry<String, IndexAcc> e : byIndex.entrySet()) {
             IndexAcc a = e.getValue();
             out.add(new TableDetail.IndexDetail(e.getKey(), a.columns, a.unique, a.type,
@@ -762,7 +771,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
         final String type;
         final Double nDistinct;
         final double reltuples;
-        final List<String> columns = new java.util.ArrayList<>();
+        final List<String> columns = new ArrayList<>();
 
         IndexAcc(boolean unique, String type, Double nDistinct, double reltuples) {
             this.unique = unique;
