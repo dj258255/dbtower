@@ -50,3 +50,6 @@ infra/k8s/*-secret.yml
 
 # 로컬 데이터 디렉터리(옛 H2 등) — 저장소에 넣지 않는다
 data/
+
+# Playwright MCP 브라우저 산출물(스냅샷·콘솔 로그·임시 스크린샷)
+.playwright-mcp/

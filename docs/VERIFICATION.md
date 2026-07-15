@@ -1720,3 +1720,41 @@ UI: Monitoring 탭에 데드락 카드(배지=획득 방식, victim·리소스·
 - **주입 방어 라이브**: `{"table":"users; DROP TABLE users"}` → OperatorException("허용되지 않는
   테이블 식별자")로 거부. 단위 `TableDetailSupportTest`(세미콜론·따옴표·백틱·공백·빈문자 거부).
 - 총 단위 382건 그린. MSSQL·Oracle은 데모 미기동으로 라이브 대신 구현·컴파일·단위로 확인.
+
+**웹 콘솔 실물 스크린샷(로그인 → 상위 쿼리 → 관련 테이블 구조 → "상세 보기" 아코디언, 8890)**:
+
+![MySQL users 테이블 상세 — NATIVE DDL·InnoDB·카디널리티 8118](images/webui/29-table-detail-mysql.png)
+
+![PostgreSQL demo_order 테이블 상세 — FK·CHECK 포함 재구성 DDL·엔진/생성시각 정직 미제공](images/webui/30-table-detail-pg.png)
+
+MySQL은 SHOW CREATE TABLE 원문·엔진/생성시각까지, PG는 "카탈로그 재구성" 배지와 함께 재구성 DDL을
+보이고 엔진·생성시각 행은 아예 렌더하지 않는다("값과 출처의 정직"이 화면까지 관철).
+
+**함정 1 — 단위·API가 못 잡은 프론트 버그를 스크린샷 검증이 잡음**: 위 화면을 실제로 열어 보니
+전 화면이 "불러오는 중..."에서 멈춰 있었다. 콘솔 에러는 `Identifier 'fmtBytes' has already been
+declared` — 아크 3에서 추가한 `const fmtBytes`가 기존 선언(app.js:50)과 중복돼 **app.js 전체가
+SyntaxError로 파싱 중단**, SPA가 아무것도 렌더하지 못한 것. Java 단위 테스트도 curl API 검증도
+프론트 JS 파싱을 거치지 않아 놓쳤고, 브라우저 실물 확인만이 드러냈다(YAML 중복 키가 테스트를
+통과하고 기동에서 터진 Phase 1 사례와 같은 결). 수정: 중복 선언 제거, 크기 통계의 음수(-1=미확보)
+"—" 표기는 `bytesOrDash` 헬퍼로 보존. `node --check`로 전체 구문 재검증.
+
+**정확도 개선 — "카탈로그 재구성(근사)"에서 "근사"를 뗌**: 초기 PG 재구성은 컬럼·PK·인덱스만 담고
+FK·CHECK·트리거·파티션을 생략해 "(근사)" 배지를 달았다. 그러나 PostgreSQL은 `pg_get_constraintdef`·
+`pg_get_indexdef`라는 **자체 권위 정의 함수**(pg_dump가 쓰는 것과 동일)를 제공한다 — 이를 써서 FK·CHECK를
+정확히 담고, 담지 못하는 트리거·파티션은 pg_trigger·relkind로 감지해 **실제로 있을 때만** note에 명시한다.
+배지는 "카탈로그 재구성"으로 바꿔 근사라는 오해를 없앴다(RECONSTRUCTED는 단일 명령이 없다는 사실의 표기이지
+부정확의 표기가 아니다). 라이브 실측(FK+CHECK 데모 테이블 `demo_order`):
+```
+CREATE TABLE demo_order ( ... PRIMARY KEY (id),
+  CONSTRAINT demo_order_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES demo_customer(id),
+  CONSTRAINT demo_order_qty_check CHECK ((qty > 0)) );
+CREATE UNIQUE INDEX demo_order_pkey ...; CREATE INDEX idx_demo_order_customer ...
+```
+FK·CHECK가 원문 그대로 재조립됐고, idx 카디널리티는 customer_id 고유값 50(고객 50명)으로 정확 추정.
+단위 `TableDetailSupportTest.테이블_제약_FK_CHECK를_본문에_넣고_콤마가_어긋나지_않는다` 추가(총 383건 그린).
+
+**브랜딩 — 콘솔·로그인에 DBTower 파비콘 로고 적용, 중복 "DB" 마크 제거**: 헤더의 텍스트 "DB" 박스를
+빼고 파비콘(favicon.svg) 아이콘 + "DBTower"로 통일. 로그인 화면은 미인증이라 favicon.svg가 로그인으로
+리다이렉트돼 안 뜨던 것을 SecurityConfig permitAll에 파비콘 자산(svg·96png·apple-touch)을 추가해 해결.
+
+![로그인 브랜드 — 파비콘 + DBTower, "DB" 박스 제거](images/webui/31-brand-login.png)

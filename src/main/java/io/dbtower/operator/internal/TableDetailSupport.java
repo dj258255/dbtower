@@ -2,6 +2,7 @@ package io.dbtower.operator.internal;
 
 import io.dbtower.operator.OperatorException;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -38,24 +39,40 @@ final class TableDetailSupport {
      */
     static String reconstructDdl(String table, List<ColumnDef> columns, List<String> pkColumns,
                                  List<String> indexDefs) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("CREATE TABLE ").append(table).append(" (\n");
-        for (int i = 0; i < columns.size(); i++) {
-            ColumnDef c = columns.get(i);
-            sb.append("  ").append(c.name()).append(' ').append(c.type());
+        return reconstructDdl(table, columns, pkColumns, List.of(), indexDefs);
+    }
+
+    /**
+     * 테이블 본문에 컬럼·PK 외에 테이블 수준 제약(FK·CHECK 등 이미 렌더된 절)을 함께 넣는 오버로드.
+     * tableConstraints는 "CONSTRAINT name FOREIGN KEY (...) REFERENCES ..." 같은 완성된 절 목록이며,
+     * PostgreSQL은 pg_get_constraintdef 같은 엔진 자체 함수로 얻어 그대로 이어 붙인다(재조립이지 근사가 아님).
+     */
+    static String reconstructDdl(String table, List<ColumnDef> columns, List<String> pkColumns,
+                                 List<String> tableConstraints, List<String> indexDefs) {
+        // 본문 라인을 먼저 모아 마지막에만 콤마를 빼면, 컬럼·PK·제약 어느 조합이 와도 콤마가 어긋나지 않는다
+        List<String> body = new ArrayList<>();
+        for (ColumnDef c : columns) {
+            StringBuilder line = new StringBuilder(c.name()).append(' ').append(c.type());
             if (!c.nullable()) {
-                sb.append(" NOT NULL");
+                line.append(" NOT NULL");
             }
             if (c.defaultValue() != null && !c.defaultValue().isBlank()) {
-                sb.append(" DEFAULT ").append(c.defaultValue());
+                line.append(" DEFAULT ").append(c.defaultValue());
             }
-            if (i < columns.size() - 1 || !pkColumns.isEmpty()) {
-                sb.append(',');
-            }
-            sb.append('\n');
+            body.add(line.toString());
         }
         if (!pkColumns.isEmpty()) {
-            sb.append("  PRIMARY KEY (").append(String.join(", ", pkColumns)).append(")\n");
+            body.add("PRIMARY KEY (" + String.join(", ", pkColumns) + ")");
+        }
+        for (String tc : tableConstraints) {
+            if (tc != null && !tc.isBlank()) {
+                body.add(tc);
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("CREATE TABLE ").append(table).append(" (\n");
+        for (int i = 0; i < body.size(); i++) {
+            sb.append("  ").append(body.get(i)).append(i < body.size() - 1 ? "," : "").append('\n');
         }
         sb.append(")");
         for (String def : indexDefs) {

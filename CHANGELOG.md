@@ -31,7 +31,9 @@
 - 테이블 상세 정보(5기종) — CREATE TABLE 전문·기본 통계(엔진·행수·데이터/인덱스 크기·평균 행 길이·
   생성 시각)·인덱스 정보(타입·카디널리티)를 상세 패널 아코디언과 API로. DDL은 NATIVE(MySQL SHOW CREATE
   TABLE·Oracle DBMS_METADATA)/RECONSTRUCTED(PG·MSSQL 카탈로그 재구성)/UNSUPPORTED로 출처를 정직 구분,
-  미확보 카디널리티는 표시하지 않음. 식별자 주입 방어. POST /api/instances/{id}/table-detail
+  미확보 카디널리티는 표시하지 않음. 식별자 주입 방어. POST /api/instances/{id}/table-detail.
+  PG 재구성은 pg_get_constraintdef·pg_get_indexdef(엔진 자체 함수)로 FK·CHECK까지 정확히 담고,
+  담지 못하는 트리거·파티션은 실제로 있을 때만 명시 — 배지에서 "(근사)"를 뗌
 - 문의에 참조 테이블 구조 첨부 — 쿼리의 FROM·JOIN 테이블(조인 대상 포함)의 컬럼·인덱스·대략 행수를
   인덱스 중심으로 요약해 Discord/Slack 문의와 사이트 상세 패널에 표시(진단 핵심 재료). 존재하지 않는
   참조는 notFound로 정직 표기. POST /api/instances/{id}/referenced-schema
@@ -48,6 +50,13 @@
 - 문서 정리 — 중복 "ROADMAP 2.md"·손상된 PHASE-D-PLAN.md·보일러플레이트 HELP.md 삭제,
   AGENTS.md 모듈 트리 14개·Lombok 실제 정책 반영, README 로그인 안내 정합, DESIGN/HARDENING/
   deepening-spec에 완료 배너, ROADMAP에 프로덕션 로드맵(Phase 0~5)·셀프호스트 준비도 감사 추가
+- 브랜딩 — 콘솔·로그인 헤더를 파비콘(favicon.svg) 로고 + "DBTower"로 통일하고 중복된 텍스트 "DB"
+  마크 제거. 로그인 화면(미인증)에서도 파비콘이 뜨도록 SecurityConfig permitAll에 파비콘 자산 추가
+
+### Fixed
+- 웹 콘솔 전체 백화 — 테이블 상세 추가 시 `const fmtBytes`가 기존 선언과 중복돼 app.js가 SyntaxError로
+  파싱 중단, SPA가 아무것도 렌더하지 못하던 것을 수정(중복 제거, 음수 크기 "—" 표기는 헬퍼로 보존).
+  Java 단위·curl API는 프론트 파싱을 안 거쳐 놓쳤고 브라우저 실물 확인이 잡음
 
 ### 업그레이드 노트 (암호화 fail-closed)
 - 기존에 DBTOWER_ENCRYPTION_KEY 없이(평문 저장) docker로 운영하던 경우, 이번 버전부터 기동이 거부된다.

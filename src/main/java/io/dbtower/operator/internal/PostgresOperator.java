@@ -555,8 +555,9 @@ public class PostgresOperator extends AbstractJdbcOperator {
      * PostgreSQL 특유의 한계를 값과 note에 정직히 반영한다:
      * - engine: 테이블별 스토리지 엔진 개념이 없다 → null
      * - createdAt: 카탈로그에 테이블 생성 시각을 저장하지 않는다 → null
-     * - ddl: SHOW CREATE TABLE이 없어 카탈로그(information_schema·pg_constraint·pg_indexes)로 재구성
-     *   → RECONSTRUCTED(원문 위장 금지). FK/CHECK/트리거/파티션 정의는 생략한 근사.
+     * - ddl: 단일 CREATE 명령이 없어 PostgreSQL 자체 정의 함수(pg_get_constraintdef·pg_get_indexdef)로
+     *   컬럼·PK·FK·CHECK·인덱스까지 재구성 → RECONSTRUCTED(원문 위장 금지, 그러나 근사가 아닌 정확한 재조립).
+     *   트리거·파티션 정의만 담지 못하며, 실제로 있을 때만 note에 명시한다.
      * - cardinality: 인덱스별 네이티브 카디널리티가 없어 선두 컬럼 pg_stats.n_distinct로 추정
      */
     @Override
@@ -661,7 +662,23 @@ public class PostgresOperator extends AbstractJdbcOperator {
                     """,
                     (rs, i) -> rs.getString("attname"),
                     tableName);
+            // FK·CHECK는 PostgreSQL 자체 함수 pg_get_constraintdef로 정확히 얻는다(pg_dump가 쓰는 것과 같은 함수).
+            // conname은 quote_ident로 안전하게 감싸므로 식별자 주입 여지가 없다 → "근사"가 아니라 정확한 재구성.
+            List<String> tableConstraints = jdbc().query("""
+                    SELECT 'CONSTRAINT ' || quote_ident(con.conname) || ' ' || pg_get_constraintdef(con.oid) AS clause
+                    FROM pg_constraint con
+                    JOIN pg_class c ON c.oid = con.conrelid
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE c.relname = ?
+                      AND con.contype IN ('f', 'c')
+                      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                    ORDER BY con.contype DESC, con.conname
+                    """,
+                    (rs, i) -> rs.getString("clause"),
+                    tableName);
             // pg_indexes.indexdef는 이미 완성된 CREATE INDEX 텍스트라 그대로 재료로 넘긴다
+            // (단, PK/UNIQUE 제약이 만든 인덱스는 tableConstraints에서 이미 다뤄지지 않는 순수 인덱스만 남긴다는 뜻은 아니고,
+            //  pg_indexes는 제약이 만든 인덱스도 포함하므로 PK는 위에서 별도 PRIMARY KEY 절로, 인덱스는 CREATE INDEX로 이중 표기될 수 있다)
             List<String> indexDefs = jdbc().query("""
                     SELECT indexdef
                     FROM pg_indexes
@@ -671,13 +688,42 @@ public class PostgresOperator extends AbstractJdbcOperator {
                     """,
                     (rs, i) -> rs.getString("indexdef"),
                     tableName);
-            String ddl = TableDetailSupport.reconstructDdl(tableName, columns, pkColumns, indexDefs);
+            String ddl = TableDetailSupport.reconstructDdl(tableName, columns, pkColumns, tableConstraints, indexDefs);
 
-            String note = "PostgreSQL은 테이블별 스토리지 엔진·생성 시각 개념이 없어 engine/createdAt은 미제공. "
+            // 재구성에 담지 못하는 것은 트리거·파티션 정의뿐 — 실제로 있을 때만 정직히 밝힌다(없으면 사실상 완전한 재현)
+            Integer triggerCount = jdbc().queryForObject("""
+                    SELECT count(*)::int FROM pg_trigger t
+                    JOIN pg_class c ON c.oid = t.tgrelid
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE c.relname = ? AND NOT t.tgisinternal
+                      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                    """, Integer.class, tableName);
+            int triggers = triggerCount != null ? triggerCount : 0;
+            List<Boolean> partRows = jdbc().query("""
+                    SELECT (c.relkind = 'p') AS p FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE c.relname = ? AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                    LIMIT 1
+                    """, (rs, i) -> rs.getBoolean("p"), tableName);
+            boolean partitioned = !partRows.isEmpty() && Boolean.TRUE.equals(partRows.get(0));
+
+            StringBuilder note = new StringBuilder(
+                    "PostgreSQL은 테이블별 스토리지 엔진·생성 시각 개념이 없어 engine/createdAt은 미제공. "
                     + "카디널리티는 선두 컬럼 n_distinct 추정. "
-                    + "DDL은 SHOW CREATE TABLE이 없어 카탈로그로 재구성한 근사(FK·CHECK·트리거·파티션 정의 생략).";
+                    + "DDL은 단일 CREATE 명령이 없어 PostgreSQL 자체 정의 함수(pg_get_constraintdef·pg_get_indexdef)로 "
+                    + "컬럼·PK·FK·CHECK·인덱스까지 재구성.");
+            if (triggers > 0 || partitioned) {
+                note.append(" 단, 이 테이블의");
+                if (triggers > 0) {
+                    note.append(" 트리거 ").append(triggers).append("개");
+                }
+                if (partitioned) {
+                    note.append(triggers > 0 ? "와" : "").append(" 파티션");
+                }
+                note.append(" 정의는 DDL에 포함하지 않음.");
+            }
             return new TableDetail(tableName, null, stats.rowCount(), stats.dataBytes(), stats.indexBytes(),
-                    avgRowBytes, null, ddl, TableDetail.DdlSource.RECONSTRUCTED, indexes, note);
+                    avgRowBytes, null, ddl, TableDetail.DdlSource.RECONSTRUCTED, indexes, note.toString());
         } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 테이블 상세 조회 실패: " + e.getMessage(), e);
         }

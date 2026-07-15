@@ -31,6 +31,7 @@ body {
   padding: 10px 24px; position: sticky; top: 0; z-index: 10;
 }
 .brand { display: flex; align-items: baseline; gap: 8px; }
+.brand-logo { align-self: center; flex: none; }
 .brand-mark {
   background: var(--dark); color: #fff; font-weight: 800;
   padding: 2px 7px; border-radius: 6px; font-size: 15px;
@@ -253,7 +254,7 @@ input[type="datetime-local"] {
   background: #fff; border: 1px solid #e3e6ea; border-radius: 12px;
   padding: 40px 44px; width: 360px; box-shadow: 0 4px 16px rgba(0,0,0,.06);
 }
-.login-brand { justify-content: center; display: flex; }
+.login-brand { justify-content: center; align-items: center; display: flex; gap: 10px; }
 .login-tag { text-align: center; color: #8a94a0; font-size: 13px; margin: 6px 0 24px; }
 .login-form { display: flex; flex-direction: column; gap: 6px; }
 .login-form label { font-size: 13px; color: #4a5560; margin-top: 8px; }

@@ -518,7 +518,8 @@ public class MsSqlOperator extends AbstractJdbcOperator {
      * (권한·부하) 여기서 뽑지 않는다 — 지어내지 않고 미확보(null)로 둔다.
      *
      * <p>DDL은 RECONSTRUCTED: SQL Server에는 SHOW CREATE TABLE이 없어 카탈로그(INFORMATION_SCHEMA)에서
-     * 근사 CREATE TABLE을 재구성한다. 제약조건(FK/CHECK)·트리거·계산열 등은 담지 않는 근사다.
+     * CREATE TABLE을 재구성한다. 현재 컬럼·PK·인덱스까지 담고, 제약조건(FK/CHECK)·트리거·계산열 정의는
+     * 담지 못한다(원문 위장 없이 note에 밝힌다).
      *
      * <p>테이블명은 sys 뷰/INFORMATION_SCHEMA에 문자열 파라미터로 바인딩한다(주입 방어). 읽기 전용.
      */
@@ -621,7 +622,8 @@ public class MsSqlOperator extends AbstractJdbcOperator {
 
             String note = "SQL Server는 스토리지 엔진 개념이 없어 engine=null. "
                     + "카디널리티는 SQL Server 기본 노출이 아니라 미확보(DBCC SHOW_STATISTICS는 무거워 조회 안 함). "
-                    + "DDL은 SHOW CREATE TABLE이 없어 카탈로그에서 재구성한 근사이며 제약조건(FK/CHECK)·트리거는 생략됨.";
+                    + "DDL은 단일 CREATE 명령이 없어 카탈로그(INFORMATION_SCHEMA)로 재구성했으며, "
+                    + "제약조건(FK/CHECK)·트리거·계산열 정의는 아직 담지 못함.";
             return new TableDetail(table, null, stats.rowCount(), stats.dataBytes(), stats.indexBytes(),
                     avgRowBytes, stats.createdAt(), ddl, TableDetail.DdlSource.RECONSTRUCTED, indexes, note);
         } catch (DataAccessException e) {

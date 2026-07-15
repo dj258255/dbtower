@@ -685,12 +685,10 @@ async function toggleTableDetail(btn) {
   }
 }
 
-const fmtBytes = (n) => n < 0 ? "—" : n < 1024 ? `${n} B`
-  : n < 1048576 ? `${(n / 1024).toFixed(1)} KB`
-  : n < 1073741824 ? `${(n / 1048576).toFixed(2)} MB` : `${(n / 1073741824).toFixed(2)} GB`;
-
 function renderTableDetail(d) {
-  const src = { NATIVE: "", RECONSTRUCTED: '<span class="td-badge">카탈로그 재구성(근사)</span>', UNSUPPORTED: '<span class="td-badge">미지원</span>' };
+  // 음수(-1)는 미확보를 뜻한다 — 크기 통계는 fmtBytes(null이 아닌 음수) 대신 "—"로 표기
+  const bytesOrDash = (v) => v < 0 ? "—" : fmtBytes(v);
+  const src = { NATIVE: "", RECONSTRUCTED: '<span class="td-badge">카탈로그 재구성</span>', UNSUPPORTED: '<span class="td-badge">미지원</span>' };
   let html = "";
   // 스키마 정보 (DDL)
   if (d.ddl) {
@@ -701,9 +699,9 @@ function renderTableDetail(d) {
   html += `<div class="td-block"><div class="td-h">기본 통계</div>
     ${d.engine ? stat("엔진", esc(d.engine)) : ""}
     ${stat("행 수", d.rowCount < 0 ? "—" : d.rowCount.toLocaleString())}
-    ${stat("데이터 크기", fmtBytes(d.dataBytes))}
-    ${stat("인덱스 크기", fmtBytes(d.indexBytes))}
-    ${stat("평균 행 길이", d.avgRowBytes < 0 ? "—" : fmtBytes(d.avgRowBytes))}
+    ${stat("데이터 크기", bytesOrDash(d.dataBytes))}
+    ${stat("인덱스 크기", bytesOrDash(d.indexBytes))}
+    ${stat("평균 행 길이", bytesOrDash(d.avgRowBytes))}
     ${d.createdAt ? stat("생성 시각", esc(d.createdAt)) : ""}</div>`;
   // 인덱스 정보
   const idxs = d.indexes ?? [];

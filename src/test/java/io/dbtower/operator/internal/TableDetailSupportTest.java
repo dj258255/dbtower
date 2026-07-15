@@ -54,4 +54,22 @@ class TableDetailSupportTest {
         assertThat(ddl).contains("PRIMARY KEY (id)");
         assertThat(ddl).contains("CREATE INDEX idx_note ON orders (note)");
     }
+
+    @Test
+    void 테이블_제약_FK_CHECK를_본문에_넣고_콤마가_어긋나지_않는다() {
+        String ddl = TableDetailSupport.reconstructDdl("orders",
+                List.of(new TableDetailSupport.ColumnDef("id", "integer", false, null),
+                        new TableDetailSupport.ColumnDef("qty", "integer", false, null),
+                        new TableDetailSupport.ColumnDef("customer_id", "integer", true, null)),
+                List.of("id"),
+                List.of("CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES customer(id)",
+                        "CONSTRAINT chk_qty CHECK ((qty > 0))"),
+                List.of());
+
+        assertThat(ddl).contains("PRIMARY KEY (id),");   // 뒤에 제약이 더 있으니 콤마가 붙는다
+        assertThat(ddl).contains("CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES customer(id),");
+        assertThat(ddl).contains("CONSTRAINT chk_qty CHECK ((qty > 0))");  // 마지막 본문 라인 — 콤마 없음
+        assertThat(ddl).doesNotContain("CHECK ((qty > 0)),");
+        assertThat(ddl).endsWith(")");
+    }
 }

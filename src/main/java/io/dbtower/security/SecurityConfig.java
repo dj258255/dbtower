@@ -88,7 +88,9 @@ public class SecurityConfig {
                 .addFilterBefore(tokenFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(new CsrfCookieFilter(), UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/login.html", "/style.css", "/favicon.ico").permitAll()
+                        // 로그인 화면도 브랜드 아이콘을 보여주므로 파비콘 자산 일체를 미인증 허용(민감정보 아님)
+                        .requestMatchers("/login.html", "/style.css",
+                                "/favicon.ico", "/favicon.svg", "/favicon-96x96.png", "/apple-touch-icon.png").permitAll()
                         // Prometheus 수집 경로 — 네트워크 레벨 제한 전제 (docs/operations.md)
                         .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         .requestMatchers("/mcp").hasRole("ADMIN")
