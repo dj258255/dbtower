@@ -1,6 +1,7 @@
 package io.dbtower.alert;
 
 import io.dbtower.alert.internal.InquiryService;
+import io.dbtower.alert.internal.ReferencedSchemaService;
 import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
@@ -40,7 +41,8 @@ class WebhookEmbedLiveFireTest {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("beomsu", "n/a", List.of()));
 
-        InquiryService service = new InquiryService(registry, new WebhookNotifier(url, 12));
+        ReferencedSchemaService refSchema = Mockito.mock(ReferencedSchemaService.class);
+        InquiryService service = new InquiryService(registry, new WebhookNotifier(url, 12), refSchema);
 
         var result = service.submit(1L, new InquiryService.InquiryRequest(
                 "SELECT instance_id, captured_at, total_time_ms\nFROM query_snapshot\nWHERE query_id = 'a3f9c2'\nORDER BY captured_at DESC",

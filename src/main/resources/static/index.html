@@ -112,6 +112,7 @@
           <span id="detail-qid" class="qid"></span>
           <span class="detail-actions">
             <button id="btn-explain" class="btn btn-primary btn-small">실행계획 보기</button>
+            <button id="btn-schema" class="btn btn-small">관련 테이블 구조</button>
             <button id="btn-ai" class="btn btn-dark btn-small">AI 분석</button>
             <button id="btn-advisor" class="btn btn-small">인덱스 제안</button>
             <button id="btn-deep" class="btn btn-small">심층 진단</button>
@@ -134,6 +135,10 @@
             <button id="btn-advisor-run" class="btn btn-primary btn-small">시뮬레이션</button>
           </div>
           <div id="advisor-result" class="findings"></div>
+        </div>
+        <div class="detail-section" id="schema-section" hidden>
+          <h3>관련 테이블 구조 <span class="hint">(쿼리가 참조하는 테이블의 컬럼·인덱스·대략 행수 — 조인 컬럼 인덱스·타입 불일치 진단용. 문의 시 자동 첨부됩니다)</span></h3>
+          <div id="schema-result" class="findings"></div>
         </div>
         <div class="detail-section" id="ai-section" hidden>
           <h3>AI 1차 분석 <span class="hint">(docs/ai-analysis-rules.md 판단 기준 기반)</span></h3>

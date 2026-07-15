@@ -563,6 +563,8 @@ function openDetail(query) {
   $("#detail-qid").textContent = `SQL ID: ${query.queryId}`;
   $("#detail-sql").value = query.queryText ?? "";
   $("#plan-section").hidden = true;
+  $("#schema-section").hidden = true;
+  $("#schema-result").innerHTML = "";
   $("#ai-section").hidden = true;
   $("#advisor-section").hidden = true;
   $("#advisor-columns").value = "";
@@ -608,6 +610,52 @@ async function runExplain() {
     state.lastPlan = data.plan;
     state.lastFindings = data.findings ?? [];
   } finally { btn.classList.remove("loading"); }
+}
+
+// 관련 테이블 구조 — 쿼리가 참조하는 테이블의 컬럼·인덱스·대략 행수. 문의 시 서버가 자동 첨부하지만,
+// 보내기 전에 사이트에서 미리 확인할 수 있게 한다(원본 요청: "그 사이트에서 볼 때도 마찬가지").
+async function runReferencedSchema() {
+  const sql = $("#detail-sql").value.trim();
+  if (!sql) return;
+  const btn = $("#btn-schema");
+  btn.classList.add("loading");
+  $("#schema-section").hidden = false;
+  const box = $("#schema-result");
+  box.innerHTML = '<div class="muted">참조 테이블 구조 조회 중...</div>';
+  try {
+    let data;
+    try {
+      data = await api(`/api/instances/${state.instance.id}/referenced-schema`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
+      });
+    } catch (e) {
+      box.innerHTML = `<div class="finding-item">조회 실패: ${esc(e.message)}</div>`;
+      return;
+    }
+    box.innerHTML = renderReferencedSchema(data);
+  } finally { btn.classList.remove("loading"); }
+}
+
+function renderReferencedSchema(data) {
+  const tables = data.tables ?? [];
+  if (!tables.length && !(data.notFound ?? []).length) {
+    return '<div class="muted">쿼리에서 참조 테이블을 찾지 못했습니다 (FROM/JOIN 확인).</div>';
+  }
+  let html = "";
+  for (const t of tables) {
+    const rows = t.rowCountApprox >= 0 ? ` <span class="muted">≈ ${t.rowCountApprox.toLocaleString()}행</span>` : "";
+    const idx = (t.indexes ?? []).length
+      ? (t.indexes.map((i) => `${esc(i.name)}${i.unique ? "<span class=\"idx-u\">[U]</span>" : ""}(${esc((i.columns ?? []).join(","))})`).join(", "))
+      : '<span class="muted">없음</span>';
+    const cols = (t.columns ?? []).map((c) => `${esc(c.name)} <span class="muted">${esc(c.type)}${c.nullable ? "?" : ""}</span>`).join(", ");
+    html += `<div class="finding-item schema-table"><b>${esc(t.name)}</b>${rows}
+      <div class="schema-idx">idx: ${idx}</div>
+      <div class="schema-cols">cols: ${cols}</div></div>`;
+  }
+  if ((data.notFound ?? []).length) {
+    html += `<div class="finding-item muted">구조 미확보: ${esc(data.notFound.join(", "))}${data.truncated ? " (스키마 상한 초과 가능)" : ""}</div>`;
+  }
+  return html;
 }
 
 async function runAiAnalysis() {
@@ -1452,6 +1500,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#btn-query").addEventListener("click", runQuery);
   $("#btn-compare").addEventListener("click", runCompare);
   $("#btn-explain").addEventListener("click", runExplain);
+  $("#btn-schema").addEventListener("click", runReferencedSchema);
   $("#btn-ai").addEventListener("click", runAiAnalysis);
   // "인덱스 제안" 버튼은 섹션을 펼치고, 섹션 안의 "시뮬레이션" 버튼이 실제 호출한다(후보 컬럼 입력이 필요해서)
   $("#btn-advisor").addEventListener("click", () => { $("#advisor-section").hidden = false; $("#advisor-columns").focus(); });

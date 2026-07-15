@@ -1,6 +1,7 @@
 package io.dbtower.alert;
 
 import io.dbtower.alert.internal.InquiryService;
+import io.dbtower.alert.internal.ReferencedSchemaService;
 import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
@@ -26,7 +27,8 @@ class InquiryServiceTest {
 
     private final RegistryService registryService = Mockito.mock(RegistryService.class);
     private final WebhookNotifier notifier = Mockito.mock(WebhookNotifier.class);
-    private final InquiryService service = new InquiryService(registryService, notifier);
+    private final ReferencedSchemaService referencedSchema = Mockito.mock(ReferencedSchemaService.class);
+    private final InquiryService service = new InquiryService(registryService, notifier, referencedSchema);
 
     private void stubInstance() {
         DatabaseInstance instance = new DatabaseInstance(

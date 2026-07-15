@@ -28,6 +28,9 @@
   재시작에도 동일 유지(MCP 연동이 재시작마다 깨지던 문제 해소)
 
 ### Added
+- 문의에 참조 테이블 구조 첨부 — 쿼리의 FROM·JOIN 테이블(조인 대상 포함)의 컬럼·인덱스·대략 행수를
+  인덱스 중심으로 요약해 Discord/Slack 문의와 사이트 상세 패널에 표시(진단 핵심 재료). 존재하지 않는
+  참조는 notFound로 정직 표기. POST /api/instances/{id}/referenced-schema
 - 플랫폼 메타 DB 자기 백업 — pg_dump로 관제탑 자신의 상태 저장소를 주기 백업(로컬 + 원격 meta/),
   대상 DB만 백업하던 사각을 메움. PG 아니면 조용히 스킵
 - CONTRIBUTING·CODE_OF_CONDUCT·이슈/PR 템플릿, README 시스템 요구사항 절, 스프링 부트 네이티브 롤링 파일 로깅

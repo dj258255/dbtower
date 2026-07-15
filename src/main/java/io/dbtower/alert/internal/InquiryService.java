@@ -24,10 +24,13 @@ public class InquiryService {
 
     private final RegistryService registryService;
     private final WebhookNotifier notifier;
+    private final ReferencedSchemaService referencedSchema;
 
-    public InquiryService(RegistryService registryService, WebhookNotifier notifier) {
+    public InquiryService(RegistryService registryService, WebhookNotifier notifier,
+                          ReferencedSchemaService referencedSchema) {
         this.registryService = registryService;
         this.notifier = notifier;
+        this.referencedSchema = referencedSchema;
     }
 
     /** 문의 요청 본문 — plan/findings/aiAnalysis/note는 선택(분석을 안 돌리고도 문의 가능) */
@@ -49,8 +52,20 @@ public class InquiryService {
             return new InquiryResult(false, "웹훅 미설정 — DBTOWER_WEBHOOK_URL");
         }
         String principal = currentPrincipal();
-        notifier.sendEmbed(format(instance, req, principal), buildEmbed(instance, req, principal));
+        // 진단의 핵심 재료 — 참조 테이블의 컬럼·인덱스 구조를 함께 붙인다(심화 아크 2).
+        // 대상 조회 실패가 문의 자체를 막지 않게 격리한다(구조가 없어도 쿼리·플랜은 보낸다).
+        String schemaSummary = safeSchemaSummary(instanceId, req.sql());
+        notifier.sendEmbed(format(instance, req, principal, schemaSummary),
+                buildEmbed(instance, req, principal, schemaSummary));
         return new InquiryResult(true, null);
+    }
+
+    private String safeSchemaSummary(Long instanceId, String sql) {
+        try {
+            return ReferencedSchemaService.formatCompact(referencedSchema.describe(instanceId, sql));
+        } catch (RuntimeException e) {
+            return "";  // 대상 DB 조회 실패 — 구조 없이도 문의는 나간다
+        }
     }
 
     private static String currentPrincipal() {
@@ -66,11 +81,15 @@ public class InquiryService {
      * SQL·실행계획은 코드블록으로 감싸되, Discord 필드 한도(1024자) 안에서 코드블록이 닫히도록
      * 본문을 먼저 900자로 줄인다 — 한도 절단이 코드블록 백틱을 삼키면 이후 텍스트 전체가 코드로 렌더된다.
      */
-    private static WebhookNotifier.Embed buildEmbed(DatabaseInstance instance, InquiryRequest req, String principal) {
+    private static WebhookNotifier.Embed buildEmbed(DatabaseInstance instance, InquiryRequest req,
+                                                    String principal, String schemaSummary) {
         List<WebhookNotifier.Embed.Field> fields = new java.util.ArrayList<>();
         fields.add(new WebhookNotifier.Embed.Field("요청자", principal, true));
         fields.add(new WebhookNotifier.Embed.Field("인스턴스", instance.getName() + " (" + instance.getType() + ")", true));
         fields.add(new WebhookNotifier.Embed.Field("쿼리", codeBlock("sql", blankToDash(req.sql())), false));
+        if (hasText(schemaSummary)) {
+            fields.add(new WebhookNotifier.Embed.Field("관련 테이블 구조", codeBlock("", schemaSummary), false));
+        }
         if (hasText(req.plan())) {
             fields.add(new WebhookNotifier.Embed.Field("실행계획", codeBlock("", req.plan().strip()), false));
         }
@@ -98,7 +117,8 @@ public class InquiryService {
      * 마크다운은 쓰지 않는다(플레인 텍스트) — 두 플랫폼에서 렌더가 갈리지 않게, 그리고 SQL/플랜의
      * 특수문자가 마크다운으로 오해석되지 않게.
      */
-    private static String format(DatabaseInstance instance, InquiryRequest req, String principal) {
+    private static String format(DatabaseInstance instance, InquiryRequest req, String principal,
+                                 String schemaSummary) {
         StringBuilder sb = new StringBuilder();
         sb.append("[DBTower DB팀 문의]\n");
         sb.append("인스턴스: ").append(instance.getName()).append(" (").append(instance.getType()).append(")\n");
@@ -106,6 +126,9 @@ public class InquiryService {
 
         sb.append("\n쿼리:\n").append(blankToDash(req.sql()));
 
+        if (hasText(schemaSummary)) {
+            sb.append("\n\n관련 테이블 구조:\n").append(schemaSummary);
+        }
         if (hasText(req.plan())) {
             sb.append("\n\n실행계획:\n").append(req.plan().strip());
         }

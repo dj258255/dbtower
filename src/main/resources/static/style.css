@@ -459,3 +459,9 @@ input[type="datetime-local"] {
 .score-state-badge-PENALIZED { background: #f08c2d; }
 .score-state-badge-INSUFFICIENT_DATA { background: #7b8494; }
 .score-state-badge-ERROR { background: #b0563a; }
+
+/* 관련 테이블 구조 (심화 아크 2) */
+.schema-table b { font-family: var(--mono, monospace); }
+.schema-idx, .schema-cols { margin-top: 3px; font-size: 12px; line-height: 1.5; word-break: break-word; }
+.schema-cols { color: var(--text-muted, #6b7280); }
+.idx-u { color: #6366f1; font-weight: 600; margin: 0 1px; }

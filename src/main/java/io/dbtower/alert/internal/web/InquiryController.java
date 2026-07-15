@@ -1,6 +1,7 @@
 package io.dbtower.alert.internal.web;
 
 import io.dbtower.alert.internal.InquiryService;
+import io.dbtower.alert.internal.ReferencedSchemaService;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -18,14 +19,26 @@ import org.springframework.web.bind.annotation.RestController;
 public class InquiryController {
 
     private final InquiryService inquiryService;
+    private final ReferencedSchemaService referencedSchema;
 
-    public InquiryController(InquiryService inquiryService) {
+    public InquiryController(InquiryService inquiryService, ReferencedSchemaService referencedSchema) {
         this.inquiryService = inquiryService;
+        this.referencedSchema = referencedSchema;
     }
 
     @PostMapping("/api/instances/{id}/inquiry")
     public InquiryService.InquiryResult inquiry(@PathVariable Long id,
                                                 @RequestBody InquiryService.InquiryRequest req) {
         return inquiryService.submit(id, req);
+    }
+
+    /** 상세 패널이 문의 전에 미리 보여줄 "관련 테이블 구조" — 쿼리를 주면 참조 테이블의 컬럼·인덱스·행수 반환 */
+    @PostMapping("/api/instances/{id}/referenced-schema")
+    public ReferencedSchemaService.ReferencedSchema referencedSchema(@PathVariable Long id,
+                                                                     @RequestBody SqlRequest req) {
+        return referencedSchema.describe(id, req.sql());
+    }
+
+    public record SqlRequest(String sql) {
     }
 }

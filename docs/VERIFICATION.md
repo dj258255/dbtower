@@ -1669,3 +1669,24 @@ UI: Monitoring 탭에 데드락 카드(배지=획득 방식, victim·리소스·
   미설정 시 예전엔 매 기동 랜덤이라 MCP 연동이 재시작마다 깨졌다. 라이브: h2 파일 DB로 두 번 부팅해
   `/api/security/mcp-token`을 각각 조회 → **두 부팅 모두 동일 토큰(04dc1b88…)**. 단위: getOrCreate 재조회 동일값.
 - Phase 1 완료 5/5. 총 단위 372건 그린.
+
+## 65. 프로덕션 아크 — Phase 2(1) 문의에 테이블 구조 첨부 (심화 아크 2)
+
+배경: 이 대화의 출발점 — DB팀에 문의를 보낼 때, 정작 진단의 핵심인 "참조 테이블의 컬럼·인덱스와
+조인 구성"이 빠져 있었다(쿼리·플랜·규칙·AI만). 사이트 상세 패널도 마찬가지였다. 그걸 메운다.
+
+- **참조 테이블 추출**: `ReferencedTables.from(sql)` — 주석·문자열 리터럴을 지운 뒤 FROM/JOIN 뒤 식별자를
+  긁고 스키마 수식자·따옴표·대괄호를 벗긴다. best-effort이고, 실재 검증은 describeSchema 교집합이 한다
+  (CTE·별칭은 자동 탈락). 단위 7건(조인·수식자·따옴표·주석/리터럴 안 from 무시).
+- **요약 조립**: `ReferencedSchemaService.describe(instanceId, sql)` — 후보를 describeSchema와 교집합해
+  존재하는 테이블만 컬럼(타입+NULL)·인덱스(유니크)·대략 행수(tableStats "≈")로. 없는 후보는 notFound로 정직 표기.
+  스코프: 전용 describeTables(IN-조회) 대신 describeSchema 재사용(대부분 상한 안, 밖은 notFound). InquiryService가
+  이를 embed·본문에 "관련 테이블 구조" 필드로 붙이되, 대상 조회 실패가 문의를 막지 않게 격리.
+- **사이트 패널**: POST /api/instances/{id}/referenced-schema + 상세 패널 "관련 테이블 구조" 버튼/섹션.
+  동적 값은 전부 esc() 경유(XSS 방어).
+
+**라이브 실측(데모 PostgreSQL sample DB 등록, 실 8891)**:
+- `SELECT ... FROM plan_demo p JOIN bloat_demo b ON p.id=b.id ...` → 엔드포인트가 두 테이블의 실제
+  컬럼(id integer, k integer, pad text NULL 등)과 인덱스(`idx_plan_demo_k(k)`, `plan_demo_pkey[U](id)`,
+  `bloat_demo_pkey[U](id)`)를 반환. 브라우저에서 상세 패널로 렌더 확인 — 스크린샷 gitblog inquiry-schema.png.
+- 총 단위 379건 그린. Phase 2 잔여: 데이터 마스킹, 로그 백업 5기종 게이트·PITR 범위.
