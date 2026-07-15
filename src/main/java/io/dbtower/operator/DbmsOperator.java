@@ -1,5 +1,23 @@
 package io.dbtower.operator;
 
+import io.dbtower.operator.model.WaitEvent;
+import io.dbtower.operator.model.TableStat;
+import io.dbtower.operator.model.TableBloat;
+import io.dbtower.operator.model.SlowQuery;
+import io.dbtower.operator.model.SessionInfo;
+import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.RestoreVerification;
+import io.dbtower.operator.model.ReplicationState;
+import io.dbtower.operator.model.ReplicationSlot;
+import io.dbtower.operator.model.QueryStat;
+import io.dbtower.operator.model.PartitionInfo;
+import io.dbtower.operator.model.LatencyPercentile;
+import io.dbtower.operator.model.IndexUsage;
+import io.dbtower.operator.model.IndexAdvice;
+import io.dbtower.operator.model.DeadlockEvent;
+import io.dbtower.operator.model.DbParameter;
+import io.dbtower.operator.model.BackupResult;
+import io.dbtower.operator.model.BackupPolicy;
 import io.dbtower.registry.HealthStatus;
 
 import java.util.List;

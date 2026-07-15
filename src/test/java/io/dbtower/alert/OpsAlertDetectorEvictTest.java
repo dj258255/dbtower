@@ -1,11 +1,13 @@
 package io.dbtower.alert;
 
+import io.dbtower.alert.internal.WebhookNotifier;
+import io.dbtower.alert.internal.job.OpsAlertDetector;
 import io.dbtower.backup.BackupFreshness;
 import io.dbtower.backup.BackupFreshnessService;
 import io.dbtower.insight.QuerySnapshotRepository;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
-import io.dbtower.operator.SessionInfo;
+import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DatabaseInstanceRepository;
 import io.dbtower.registry.DbmsType;
@@ -55,7 +57,7 @@ class OpsAlertDetectorEvictTest {
 
         when(operatorFactory.create(any())).thenReturn(operator);
         when(operator.activeSessions(anyInt())).thenReturn(List.of());
-        when(operator.replicationState()).thenReturn(new io.dbtower.operator.ReplicationState("STANDALONE", 0, "없음"));
+        when(operator.replicationState()).thenReturn(new io.dbtower.operator.model.ReplicationState("STANDALONE", 0, "없음"));
         when(operator.deadlockCount()).thenReturn(Optional.empty());
         when(backupFreshnessService.freshnessFor(any(DatabaseInstance.class))).thenReturn(fresh());
     }

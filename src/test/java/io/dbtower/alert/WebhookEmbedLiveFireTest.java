@@ -1,5 +1,7 @@
 package io.dbtower.alert;
 
+import io.dbtower.alert.internal.InquiryService;
+import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
 import org.junit.jupiter.api.AfterEach;

@@ -1,6 +1,8 @@
 package io.dbtower.advisor;
 
-import io.dbtower.operator.TableBloat;
+import io.dbtower.advisor.internal.BloatAdvisor;
+
+import io.dbtower.operator.model.TableBloat;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.Test;
 

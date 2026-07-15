@@ -1,13 +1,15 @@
 package io.dbtower.alert;
 
+import io.dbtower.alert.internal.WebhookNotifier;
+import io.dbtower.alert.internal.job.OpsAlertDetector;
 import io.dbtower.backup.BackupFreshness;
 import io.dbtower.backup.BackupFreshnessService;
 import io.dbtower.insight.QuerySnapshotRepository;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
-import io.dbtower.operator.DeadlockEvent;
-import io.dbtower.operator.ReplicationState;
-import io.dbtower.operator.SessionInfo;
+import io.dbtower.operator.model.DeadlockEvent;
+import io.dbtower.operator.model.ReplicationState;
+import io.dbtower.operator.model.SessionInfo;
 
 import java.util.Optional;
 import io.dbtower.registry.DatabaseInstance;

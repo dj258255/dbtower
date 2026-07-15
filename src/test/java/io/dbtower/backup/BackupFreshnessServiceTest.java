@@ -1,5 +1,8 @@
 package io.dbtower.backup;
 
+import io.dbtower.backup.internal.domain.BackupRun;
+import io.dbtower.backup.internal.persistence.BackupRunRepository;
+
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
 import io.dbtower.registry.RegistryService;

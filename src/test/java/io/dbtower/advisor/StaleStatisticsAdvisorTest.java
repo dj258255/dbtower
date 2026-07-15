@@ -1,6 +1,8 @@
 package io.dbtower.advisor;
 
-import io.dbtower.operator.TableStat;
+import io.dbtower.advisor.internal.StaleStatisticsAdvisor;
+
+import io.dbtower.operator.model.TableStat;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.Test;
 

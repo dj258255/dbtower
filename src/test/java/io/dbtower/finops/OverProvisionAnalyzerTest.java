@@ -1,9 +1,13 @@
 package io.dbtower.finops;
 
-import io.dbtower.operator.DbParameter;
+import io.dbtower.finops.internal.OverProvisionAnalyzer;
+import io.dbtower.finops.internal.WasteCandidate;
+import io.dbtower.finops.internal.WasteKind;
+
+import io.dbtower.operator.model.DbParameter;
 import io.dbtower.operator.DbmsOperator;
-import io.dbtower.operator.SessionInfo;
-import io.dbtower.operator.TableStat;
+import io.dbtower.operator.model.SessionInfo;
+import io.dbtower.operator.model.TableStat;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.Test;

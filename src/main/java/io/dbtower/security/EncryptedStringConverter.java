@@ -1,5 +1,7 @@
 package io.dbtower.security;
 
+import io.dbtower.security.internal.SecretCipherHolder;
+
 import jakarta.persistence.AttributeConverter;
 import jakarta.persistence.Converter;
 import org.springframework.stereotype.Component;

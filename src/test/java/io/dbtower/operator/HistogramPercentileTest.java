@@ -1,5 +1,7 @@
 package io.dbtower.operator;
 
+import io.dbtower.operator.internal.HistogramPercentile;
+
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

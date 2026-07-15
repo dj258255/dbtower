@@ -1,0 +1,11 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`io.dbtower.score`
+|Bean references
+|* `i.d.r.RegistryService` (in Registry)
+* `i.d.i.BaselineService` (in Insight)
+* `i.d.a.AdvisorService` (in Advisor)
+* `i.d.s.SloService` (in Slo)
+* `i.d.b.BackupFreshnessService` (in Backup)
+|===

@@ -1,9 +1,11 @@
 package io.dbtower.slo;
 
+import io.dbtower.slo.internal.persistence.HealthSampleRepository;
+
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
-import io.dbtower.operator.LatencyPercentile;
-import io.dbtower.operator.QueryStat;
+import io.dbtower.operator.model.LatencyPercentile;
+import io.dbtower.operator.model.QueryStat;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
 import org.springframework.beans.factory.annotation.Value;

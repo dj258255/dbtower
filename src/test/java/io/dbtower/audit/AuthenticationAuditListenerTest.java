@@ -1,5 +1,8 @@
 package io.dbtower.audit;
 
+import io.dbtower.audit.internal.AuditRecorder;
+import io.dbtower.audit.internal.AuthenticationAuditListener;
+import io.dbtower.audit.internal.domain.AuditEvent;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;

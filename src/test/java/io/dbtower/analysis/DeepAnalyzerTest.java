@@ -2,10 +2,10 @@ package io.dbtower.analysis;
 
 import io.dbtower.analysis.DeepDiagnosis.CardinalityGap;
 import io.dbtower.analysis.DeepDiagnosis.RootCause;
-import io.dbtower.operator.ColumnSchema;
-import io.dbtower.operator.IndexSchema;
-import io.dbtower.operator.SchemaSnapshot;
-import io.dbtower.operator.TableSchema;
+import io.dbtower.operator.model.ColumnSchema;
+import io.dbtower.operator.model.IndexSchema;
+import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.TableSchema;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.Test;
 

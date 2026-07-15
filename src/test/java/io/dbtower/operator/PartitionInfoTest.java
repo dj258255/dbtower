@@ -1,5 +1,8 @@
 package io.dbtower.operator;
 
+import io.dbtower.operator.model.PartitionInfo;
+import io.dbtower.operator.internal.MongoOperator;
+
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.Test;

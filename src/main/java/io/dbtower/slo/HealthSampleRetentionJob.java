@@ -1,5 +1,7 @@
 package io.dbtower.slo;
 
+import io.dbtower.slo.internal.persistence.HealthSampleRepository;
+
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

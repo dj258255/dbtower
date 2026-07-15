@@ -1,5 +1,8 @@
 package io.dbtower.audit;
 
+import io.dbtower.audit.internal.AuditPolicy;
+import io.dbtower.audit.internal.AuditRecorder;
+import io.dbtower.audit.internal.domain.AuditEvent;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.core.Authentication;

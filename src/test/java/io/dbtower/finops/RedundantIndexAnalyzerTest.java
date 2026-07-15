@@ -1,10 +1,14 @@
 package io.dbtower.finops;
 
+import io.dbtower.finops.internal.RedundantIndexAnalyzer;
+import io.dbtower.finops.internal.WasteCandidate;
+import io.dbtower.finops.internal.WasteKind;
+
 import io.dbtower.advisor.DuplicateIndexAdvisor;
 import io.dbtower.operator.DbmsOperator;
-import io.dbtower.operator.IndexSchema;
-import io.dbtower.operator.SchemaSnapshot;
-import io.dbtower.operator.TableSchema;
+import io.dbtower.operator.model.IndexSchema;
+import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.TableSchema;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.Test;

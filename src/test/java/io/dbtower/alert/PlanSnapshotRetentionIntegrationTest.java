@@ -1,5 +1,7 @@
 package io.dbtower.alert;
 
+import io.dbtower.alert.internal.domain.PlanSnapshot;
+import io.dbtower.alert.internal.persistence.PlanSnapshotRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;

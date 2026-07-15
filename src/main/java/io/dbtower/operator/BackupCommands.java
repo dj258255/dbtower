@@ -1,5 +1,6 @@
 package io.dbtower.operator;
 
+import io.dbtower.operator.model.BackupResult;
 import io.dbtower.registry.DatabaseInstance;
 
 import java.nio.charset.StandardCharsets;
@@ -18,12 +19,12 @@ import java.util.Map;
  * - 치환 값은 허용 문자만 통과, "-" 시작 값(플래그 주입) 거부
  * - 비밀번호는 argv에 절대 싣지 않는다 — 환경변수(MYSQL_PWD/PGPASSWORD) 또는 stdin으로만
  */
-final class BackupCommands {
+public final class BackupCommands {
 
     private BackupCommands() {
     }
 
-    static List<String> render(String template, DatabaseInstance instance) {
+    public static List<String> render(String template, DatabaseInstance instance) {
         if (template.contains("{password}")) {
             throw new OperatorException(
                     "백업 명령에 {password}를 쓸 수 없습니다 — 비밀번호는 환경변수/stdin으로 전달됩니다", null);
@@ -39,7 +40,7 @@ final class BackupCommands {
     }
 
     /** CLI를 실행해 stdout을 파일로 받는다. stdinContent가 있으면 표준입력으로 흘려보낸다(mongodump --config /dev/stdin용) */
-    static BackupResult run(List<String> command, Map<String, String> env, Path outFile, String stdinContent) {
+    public static BackupResult run(List<String> command, Map<String, String> env, Path outFile, String stdinContent) {
         try {
             Files.createDirectories(outFile.getParent());
             ProcessBuilder pb = new ProcessBuilder(command);
@@ -72,19 +73,19 @@ final class BackupCommands {
      * 값을 그대로 이어붙이면 개행으로 다른 설정 키(uri: 등)를 주입할 수 있으므로,
      * 제어 문자를 거부하고 YAML 작은따옴표 스칼라로 감싼다(' -> '' 이스케이프).
      */
-    static String yamlEntry(String key, String value) {
+    public static String yamlEntry(String key, String value) {
         if (value == null || value.chars().anyMatch(Character::isISOControl)) {
             throw new OperatorException("백업 설정 값에 제어 문자를 쓸 수 없습니다: " + key, null);
         }
         return key + ": '" + value.replace("'", "''") + "'\n";
     }
 
-    static String timestamp() {
+    public static String timestamp() {
         return java.time.LocalDateTime.now().toString().replace(":", "-");
     }
 
     /** 파일 경로에 들어가는 이름은 안전한 문자만 남긴다 (경로 탈출 방지) */
-    static String safeFileName(String name) {
+    public static String safeFileName(String name) {
         return name.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 

@@ -1,5 +1,7 @@
 package io.dbtower.onlineddl;
 
+import io.dbtower.onlineddl.internal.OnlineDdlResult;
+import io.dbtower.onlineddl.internal.OnlineDdlService;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
 import io.dbtower.registry.RegistryService;

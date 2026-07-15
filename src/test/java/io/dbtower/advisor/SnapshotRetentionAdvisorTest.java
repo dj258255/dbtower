@@ -1,5 +1,7 @@
 package io.dbtower.advisor;
 
+import io.dbtower.advisor.internal.SnapshotRetentionAdvisor;
+
 import io.dbtower.insight.QuerySnapshotRepository;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.registry.DatabaseInstance;

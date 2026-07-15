@@ -1,5 +1,8 @@
 package io.dbtower.alert;
 
+import io.dbtower.alert.internal.PlanChangeTracker;
+import io.dbtower.alert.internal.WebhookNotifier;
+import io.dbtower.alert.internal.job.RegressionDetector;
 import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.QueryDiff;

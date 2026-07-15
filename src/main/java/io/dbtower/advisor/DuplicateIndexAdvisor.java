@@ -1,9 +1,9 @@
 package io.dbtower.advisor;
 
 import io.dbtower.operator.DbmsOperator;
-import io.dbtower.operator.IndexSchema;
-import io.dbtower.operator.SchemaSnapshot;
-import io.dbtower.operator.TableSchema;
+import io.dbtower.operator.model.IndexSchema;
+import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.TableSchema;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
 import org.springframework.stereotype.Component;

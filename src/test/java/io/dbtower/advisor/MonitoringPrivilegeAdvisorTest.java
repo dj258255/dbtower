@@ -1,6 +1,8 @@
 package io.dbtower.advisor;
 
-import io.dbtower.operator.QueryStat;
+import io.dbtower.advisor.internal.MonitoringPrivilegeAdvisor;
+
+import io.dbtower.operator.model.QueryStat;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.Test;
 

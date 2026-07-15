@@ -1,5 +1,7 @@
 package io.dbtower.alert;
 
+import io.dbtower.alert.internal.WebhookNotifier;
+import io.dbtower.alert.internal.job.AnomalyDetector;
 import io.dbtower.insight.BaselineService;
 import io.dbtower.insight.BaselineService.AnomalyScan;
 import io.dbtower.insight.BaselineService.MetricAnomaly;

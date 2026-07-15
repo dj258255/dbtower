@@ -18,18 +18,31 @@ DBTOWER_WEBHOOK_URL="" ./gradlew bootRun   # 앱 기동 (http://localhost:8080)
 ## 저장소 구조
 
 ```text
-src/main/java/io/dbtower/
+src/main/java/io/dbtower/    Spring Modulith 모듈 14개 (경계는 ModularityTests가 빌드에서 강제)
 ├── operator/    DbmsOperator 인터페이스 + 5기종 구현(MySQL/PostgreSQL/MSSQL/Oracle/MongoDB), 커넥션 풀/클라이언트 캐시
 ├── registry/    인스턴스 등록·헬스체크
-├── insight/     스냅샷 수집, 시점 비교, 활동 그래프
-├── analysis/    실행계획 규칙 기반 분석
-├── alert/       회귀 감지, 웹훅, AI 1차 분석
-├── backup/      백업 정책·실행·폴러
-└── mcp/         MCP 서버 (프로토콜 코어 + stdio/HTTP 전송)
+├── insight/     스냅샷 수집, 시점 비교, 활동 그래프, 파라미터/스키마 diff
+├── analysis/    실행계획 규칙 기반 분석 + AI 1차 분석 + 심층 진단
+├── alert/       회귀·이상·운영 감지, 웹훅, 플랜 변경 감지, DB팀 문의
+├── backup/      백업 정책·실행·복원 검증·원격 보관·신선도
+├── advisor/     운영 모범규칙 자동 점검 (일일 스윕)
+├── audit/       상태변경·로그인·월권 감사 기록
+├── finops/      미사용·중복 인덱스 등 낭비 신호
+├── mcp/         MCP 서버 (프로토콜 코어 + stdio/HTTP 전송) + 자연어 진단
+├── onlineddl/   gh-ost 온라인 스키마 변경 (MySQL)
+├── score/       통합 헬스 스코어
+├── security/    인증·인가, 비밀번호 암호화, API 토큰
+└── slo/         SLO/에러 버짓
 src/main/resources/static/   웹 콘솔 (의존성 0 정적 SPA)
 docs/            DESIGN, VERIFICATION(실측 기록), PRESENTATION, ROADMAP, ai-analysis-rules
 scripts/         dbtower-mcp.sh (MCP stdio 실행기)
 ```
+
+모듈 내부 패키지 규칙: 모듈 루트에는 다른 모듈이 쓰는 공개 API(서비스·record/DTO)만 두고,
+구현은 `internal/`(컨트롤러는 `internal/web`, JPA 엔티티는 `internal/domain`, 리포지토리는
+`internal/persistence`, 폴러/잡은 `internal/job`)에 숨긴다 — Modulith가 외부 접근을 차단한다.
+다른 모듈의 리포지토리·엔티티를 직접 참조하지 않는다(그 모듈의 공개 서비스로 우회).
+공개 API 타입의 시그니처·record 컴포넌트에 등장하는 타입은 루트에 남긴다.
 
 ## 아키텍처 원칙
 
@@ -42,8 +55,8 @@ scripts/         dbtower-mcp.sh (MCP stdio 실행기)
 
 ## 코드 컨벤션
 
-- Java 21 + Spring Boot 4. Lombok 미사용 — 값 객체는 record, JPA 엔티티는 명시적 생성자/게터
-  (@Data/@ToString은 lazy 연관관계 지뢰)
+- Java 21 + Spring Boot 4. 값 객체는 record. JPA 엔티티는 Lombok @Getter/@NoArgsConstructor까지만 —
+  @Data/@ToString/@Setter 금지 (lazy 연관관계 지뢰, 무분별한 가변성)
 - 주석은 "왜"를 설명할 때만, 한국어로
 - 이모지 금지 — 코드/문서/커밋 메시지 전부
 - 커밋 메시지는 한국어, 제목은 변경의 의도가 드러나게

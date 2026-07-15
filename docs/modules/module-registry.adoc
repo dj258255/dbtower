@@ -1,0 +1,15 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`io.dbtower.registry`
+|Spring components
+|_Services_
+
+* `i.d.r.RegistryService`
+
+_Repositories_
+
+* `i.d.r.DatabaseInstanceRepository`
+|Aggregate roots
+|* `i.d.r.DatabaseInstance`
+|===

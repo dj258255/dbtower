@@ -1,0 +1,33 @@
+@startuml
+title <size:24>Analysis</size>
+
+set separator none
+top to bottom direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Component>
+
+System_Boundary("DbtowerApplication_boundary", "DbtowerApplication", $tags="") {
+  Container_Boundary("DbtowerApplication.DbtowerApplication_boundary", "DbtowerApplication", $tags="") {
+    Component(DbtowerApplication.DbtowerApplication.Registry, "Registry", $techn="Module", $descr="", $tags="", $link="")
+    Component(DbtowerApplication.DbtowerApplication.Operator, "Operator", $techn="Module", $descr="", $tags="", $link="")
+    Component(DbtowerApplication.DbtowerApplication.Analysis, "Analysis", $techn="Module", $descr="", $tags="", $link="")
+  }
+
+}
+
+Rel(DbtowerApplication.DbtowerApplication.Operator, DbtowerApplication.DbtowerApplication.Registry, "listens to", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Analysis, DbtowerApplication.DbtowerApplication.Operator, "depends on", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Analysis, DbtowerApplication.DbtowerApplication.Registry, "depends on", $techn="", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml

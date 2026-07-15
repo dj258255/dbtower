@@ -1,9 +1,10 @@
 package io.dbtower.insight;
 
-import io.dbtower.operator.ColumnSchema;
-import io.dbtower.operator.IndexSchema;
-import io.dbtower.operator.SchemaSnapshot;
-import io.dbtower.operator.TableSchema;
+import io.dbtower.insight.internal.SchemaDiffService;
+import io.dbtower.operator.model.ColumnSchema;
+import io.dbtower.operator.model.IndexSchema;
+import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.TableSchema;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

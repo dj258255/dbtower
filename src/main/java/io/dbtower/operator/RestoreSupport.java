@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
  * stdout(복원 후 카운트)과 stderr(실패 원인)를 함께 캡처해야 한다. 여기에 임시 대상 이름 생성과
  * docker 컨테이너 파싱(아카이브 복사에 필요)을 모아 둔다.
  */
-final class RestoreSupport {
+public final class RestoreSupport {
 
     private RestoreSupport() {
     }
@@ -31,12 +31,12 @@ final class RestoreSupport {
     private static final Pattern FIRST_INT = Pattern.compile("-?\\d+");
 
     /** 원본과 절대 겹치지 않는 임시 대상 이름 — 소문자/숫자/밑줄만. 밀리초까지 넣어 연속 호출도 충돌하지 않게. */
-    static String verifyTargetName() {
+    public static String verifyTargetName() {
         return "dbtower_verify_" + LocalDateTime.now().format(TS);
     }
 
     /** 생성한 이름이 식별자로 안전한지 최종 방어 — SQL 식별자/네임스페이스에 그대로 들어가는 자리라 심층 방어. */
-    static void requireSafeName(String name) {
+    public static void requireSafeName(String name) {
         if (name == null || !SAFE_NAME.matcher(name).matches()) {
             throw new OperatorException("복원 검증 임시 대상 이름이 안전하지 않습니다: " + name, null);
         }
@@ -47,7 +47,7 @@ final class RestoreSupport {
      * 아카이브를 컨테이너로 넣는 docker cp / 정리용 rm이 컨테이너 이름을 따로 필요로 하기 때문.
      * 값을 따로 받는 플래그(-e VAR 등)는 그 값까지 건너뛴다 — 값을 컨테이너로 오인하지 않게.
      */
-    static String dockerContainer(List<String> command) {
+    public static String dockerContainer(List<String> command) {
         if (command.size() < 3 || !command.get(0).equals("docker") || !command.get(1).equals("exec")) {
             throw new OperatorException("docker exec 명령이 아니라 컨테이너를 특정할 수 없습니다: " + command, null);
         }
@@ -68,14 +68,14 @@ final class RestoreSupport {
         throw new OperatorException("컨테이너 이름을 찾지 못했습니다: " + command, null);
     }
 
-    static List<String> concat(List<String> base, String... extra) {
+    public static List<String> concat(List<String> base, String... extra) {
         List<String> out = new ArrayList<>(base);
         out.addAll(Arrays.asList(extra));
         return out;
     }
 
     /** 복원 후 카운트 쿼리의 stdout에서 첫 정수를 뽑는다. 실패했거나 숫자가 없으면 -1(불명). */
-    static int parseCount(ExecResult result) {
+    public static int parseCount(ExecResult result) {
         if (!result.ok() || result.stdout() == null) {
             return -1;
         }
@@ -88,7 +88,7 @@ final class RestoreSupport {
      * 이 행을 지우면 남은 CREATE TABLE/INSERT가 연결의 기본 DB(= 임시 DB)로만 적재된다 —
      * 원본 DB를 절대 덮어쓰지 않기 위한 핵심 안전장치.
      */
-    static byte[] stripDatabaseSelection(Path dump) {
+    public static byte[] stripDatabaseSelection(Path dump) {
         try {
             List<String> lines = Files.readAllLines(dump, StandardCharsets.UTF_8);
             StringBuilder sb = new StringBuilder();
@@ -105,13 +105,13 @@ final class RestoreSupport {
         }
     }
 
-    record ExecResult(int exitCode, String stdout, String stderr) {
-        boolean ok() {
+    public record ExecResult(int exitCode, String stdout, String stderr) {
+        public boolean ok() {
             return exitCode == 0;
         }
 
         /** 실패 원인을 짧게 — stderr 우선, 없으면 stdout. 로그/응답에 싣기 좋게 뒷부분만. */
-        String errorTail() {
+        public String errorTail() {
             String s = (stderr == null || stderr.isBlank()) ? stdout : stderr;
             s = s == null ? "" : s.trim();
             return s.length() > 400 ? s.substring(s.length() - 400) : s;
@@ -122,7 +122,7 @@ final class RestoreSupport {
      * stdout/stderr를 함께 캡처하는 실행. stdin(덤프)이 클 수 있어 별도 스레드로 흘려보내고,
      * stderr도 별도 스레드로 읽는다 — 한 파이프가 차서 서로 막히는 교착을 피하기 위해서다.
      */
-    static ExecResult exec(List<String> command, Map<String, String> env, byte[] stdin) {
+    public static ExecResult exec(List<String> command, Map<String, String> env, byte[] stdin) {
         try {
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.environment().putAll(env);

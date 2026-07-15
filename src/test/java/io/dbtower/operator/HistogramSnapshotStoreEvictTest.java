@@ -1,5 +1,7 @@
 package io.dbtower.operator;
 
+import io.dbtower.operator.internal.HistogramSnapshotStore;
+
 import io.dbtower.registry.InstanceDeletedEvent;
 import org.junit.jupiter.api.Test;
 

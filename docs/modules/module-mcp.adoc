@@ -1,0 +1,9 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`io.dbtower.mcp`
+|Bean references
+|* `i.d.s.ApiTokenProvider` (in Security)
+* `i.d.a.AiAnalyzer` (in Analysis)
+* `i.d.r.RegistryService` (in Registry)
+|===

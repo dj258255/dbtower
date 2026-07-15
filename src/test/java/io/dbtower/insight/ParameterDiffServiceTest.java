@@ -1,6 +1,7 @@
 package io.dbtower.insight;
 
-import io.dbtower.operator.DbParameter;
+import io.dbtower.insight.internal.ParameterDiffService;
+import io.dbtower.operator.model.DbParameter;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

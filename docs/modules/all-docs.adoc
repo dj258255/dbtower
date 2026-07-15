@@ -1,35 +1,59 @@
 == DbtowerApplication
 plantuml::components.puml[,,format=svg]
 
-== Registry
-plantuml::module-registry.puml[,,format=svg]
-include::module-registry.adoc[]
+== Audit
+plantuml::module-audit.puml[,,format=svg]
+include::module-audit.adoc[]
 
 == Security
 plantuml::module-security.puml[,,format=svg]
 include::module-security.adoc[]
 
-== Analysis
-plantuml::module-analysis.puml[,,format=svg]
-include::module-analysis.adoc[]
+== Registry
+plantuml::module-registry.puml[,,format=svg]
+include::module-registry.adoc[]
 
-== Mcp
-plantuml::module-mcp.puml[,,format=svg]
-include::module-mcp.adoc[]
+== Onlineddl
+plantuml::module-onlineddl.puml[,,format=svg]
+include::module-onlineddl.adoc[]
 
 == Operator
 plantuml::module-operator.puml[,,format=svg]
 include::module-operator.adoc[]
 
+== Analysis
+plantuml::module-analysis.puml[,,format=svg]
+include::module-analysis.adoc[]
+
 == Backup
 plantuml::module-backup.puml[,,format=svg]
 include::module-backup.adoc[]
+
+== Slo
+plantuml::module-slo.puml[,,format=svg]
+include::module-slo.adoc[]
 
 == Insight
 plantuml::module-insight.puml[,,format=svg]
 include::module-insight.adoc[]
 
+== Mcp
+plantuml::module-mcp.puml[,,format=svg]
+include::module-mcp.adoc[]
+
+== Advisor
+plantuml::module-advisor.puml[,,format=svg]
+include::module-advisor.adoc[]
+
 == Alert
 plantuml::module-alert.puml[,,format=svg]
 include::module-alert.adoc[]
+
+== Finops
+plantuml::module-finops.puml[,,format=svg]
+include::module-finops.adoc[]
+
+== Score
+plantuml::module-score.puml[,,format=svg]
+include::module-score.adoc[]
 

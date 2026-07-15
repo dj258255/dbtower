@@ -1,5 +1,7 @@
 package io.dbtower.audit;
 
+import io.dbtower.audit.internal.domain.AuditEvent;
+import io.dbtower.audit.internal.persistence.AuditEventRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

@@ -1,5 +1,11 @@
 package io.dbtower.operator;
 
+import io.dbtower.operator.internal.AbstractJdbcOperator;
+import io.dbtower.operator.internal.MsSqlOperator;
+import io.dbtower.operator.internal.MySqlOperator;
+import io.dbtower.operator.internal.OracleOperator;
+import io.dbtower.operator.internal.PostgresOperator;
+
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.Test;

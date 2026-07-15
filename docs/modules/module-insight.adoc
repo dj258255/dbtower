@@ -1,0 +1,25 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`io.dbtower.insight`
+|Spring components
+|_Services_
+
+* `i.d.i.BaselineService`
+* `i.d.i.ComparisonService`
+
+_Repositories_
+
+* `i.d.i.QuerySnapshotRepository`
+|Bean references
+|* `i.d.r.DatabaseInstanceRepository` (in Registry)
+* `i.d.o.DbmsOperatorFactory` (in Operator)
+* `i.d.r.RegistryService` (in Registry)
+* `i.d.a.RuleBasedAnalyzer` (in Analysis)
+* `i.d.a.AiAnalyzer` (in Analysis)
+* `i.d.a.DeepAnalyzer` (in Analysis)
+|Aggregate roots
+|* `i.d.i.QuerySnapshot`
+|Events listened to
+|* `i.d.r.InstanceDeletedEvent` 
+|===

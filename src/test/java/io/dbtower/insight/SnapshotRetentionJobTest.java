@@ -1,6 +1,7 @@
 package io.dbtower.insight;
 
 import ch.qos.logback.classic.Level;
+import io.dbtower.insight.internal.job.SnapshotRetentionJob;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;

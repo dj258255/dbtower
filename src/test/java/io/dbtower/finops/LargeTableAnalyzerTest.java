@@ -1,7 +1,11 @@
 package io.dbtower.finops;
 
+import io.dbtower.finops.internal.LargeTableAnalyzer;
+import io.dbtower.finops.internal.WasteCandidate;
+import io.dbtower.finops.internal.WasteKind;
+
 import io.dbtower.operator.DbmsOperator;
-import io.dbtower.operator.TableStat;
+import io.dbtower.operator.model.TableStat;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.Test;

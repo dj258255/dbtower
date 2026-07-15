@@ -1,0 +1,38 @@
+@startuml
+title <size:24>Advisor</size>
+
+set separator none
+top to bottom direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Component>
+
+System_Boundary("DbtowerApplication_boundary", "DbtowerApplication", $tags="") {
+  Container_Boundary("DbtowerApplication.DbtowerApplication_boundary", "DbtowerApplication", $tags="") {
+    Component(DbtowerApplication.DbtowerApplication.Insight, "Insight", $techn="Module", $descr="", $tags="", $link="")
+    Component(DbtowerApplication.DbtowerApplication.Advisor, "Advisor", $techn="Module", $descr="", $tags="", $link="")
+    Component(DbtowerApplication.DbtowerApplication.Registry, "Registry", $techn="Module", $descr="", $tags="", $link="")
+    Component(DbtowerApplication.DbtowerApplication.Operator, "Operator", $techn="Module", $descr="", $tags="", $link="")
+  }
+
+}
+
+Rel(DbtowerApplication.DbtowerApplication.Operator, DbtowerApplication.DbtowerApplication.Registry, "listens to", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Advisor, DbtowerApplication.DbtowerApplication.Registry, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Advisor, DbtowerApplication.DbtowerApplication.Operator, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Advisor, DbtowerApplication.DbtowerApplication.Insight, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Insight, DbtowerApplication.DbtowerApplication.Registry, "listens to", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Insight, DbtowerApplication.DbtowerApplication.Registry, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Insight, DbtowerApplication.DbtowerApplication.Operator, "uses", $techn="", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml

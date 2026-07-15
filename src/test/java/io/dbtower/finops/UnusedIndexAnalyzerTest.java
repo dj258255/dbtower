@@ -1,8 +1,12 @@
 package io.dbtower.finops;
 
+import io.dbtower.finops.internal.UnusedIndexAnalyzer;
+import io.dbtower.finops.internal.WasteCandidate;
+import io.dbtower.finops.internal.WasteKind;
+
 import io.dbtower.advisor.Severity;
 import io.dbtower.operator.DbmsOperator;
-import io.dbtower.operator.IndexUsage;
+import io.dbtower.operator.model.IndexUsage;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.Test;

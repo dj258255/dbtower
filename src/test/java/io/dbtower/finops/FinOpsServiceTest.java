@@ -1,5 +1,12 @@
 package io.dbtower.finops;
 
+import io.dbtower.finops.internal.FinOpsAnalyzer;
+import io.dbtower.finops.internal.FinOpsCheck;
+import io.dbtower.finops.internal.FinOpsService;
+import io.dbtower.finops.internal.InstanceFinOpsReport;
+import io.dbtower.finops.internal.WasteCandidate;
+import io.dbtower.finops.internal.WasteKind;
+
 import io.dbtower.advisor.Severity;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;

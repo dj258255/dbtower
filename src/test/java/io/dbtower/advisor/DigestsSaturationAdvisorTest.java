@@ -1,6 +1,8 @@
 package io.dbtower.advisor;
 
-import io.dbtower.operator.DbParameter;
+import io.dbtower.advisor.internal.DigestsSaturationAdvisor;
+
+import io.dbtower.operator.model.DbParameter;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.Test;
 
