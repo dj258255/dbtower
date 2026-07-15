@@ -298,6 +298,35 @@ record TableDetail(String table, String engine, long rowCount, long dataBytes, l
 | 소소 잔여 | (1) Slow Query 타임스탬프 브라우저 로컬(KST) 표시 옵션 — 현재는 "(UTC)" 명기로 정직 처리, parseApiTime 재사용으로 변환 가능하나 capturedAt이 ISO가 아닌 기종(Mongo 원문 문자열)이 있어 기종별 파싱 필요. (2) Mongo 장기 조회 시간대별 샘플링 — 레퍼런스는 mongod.log 파싱 기반, 우리는 system.profile(순환 컬렉션) 기반이라 보존 창이 다름을 note로 정직 표기하는 것까지 | 낮은 우선순위 — 다른 조각과 겹칠 때 처리 |
 | 데이터 마스킹 (Phase 2 잔여, 진행 중) | analysis/QueryMasker(리터럴 전용 문자 스캐너 — 문자열 '...'·숫자·$$...$$는 ?로, 식별자·따옴표 식별자·$1·주석은 보존) 작성 완료. 남은 배선 4곳: RegressionDetector.java:110(d.queryText — 웹훅+AI 프롬프트 공통 상류), InquiryService submit 상단(req.sql 1회 마스킹 후 embed·본문·스키마 요약 공유), InsightController /ai-analysis의 req.sql (mask-ai-prompt 토글, 기본 false — AI 정확도 트레이드오프 명시), DiagnosisService:158-159(MCP arguments.sql + observation snippet). MySQL/PG 회귀 텍스트는 이미 정규화라 멱등, Oracle/Mongo·사용자 입력·LLM 작성 경로가 실수요 | 리터럴 치환 단위(이스케이프·달러 인용·16진·식별자 꼬리 숫자 보존), 문의 embed 실측에서 리터럴 가려짐, mask-ai-prompt 기본 false 확인 |
 
+## 심화 아크 5 — MCP 채널 루프·digest 위생 (레퍼런스 2부 대조, 2026-07-15)
+
+레퍼런스 발표 2부(MCP 활용 4장 + Lessons Learned 5장)를 장 단위로 대조한 결과. 대조 과정에서
+레퍼런스의 교훈 두 개(digest 포화·Prepared Statement 사각)가 **DBTower에도 실재함을 데모 DB로
+입증**했다 — 이 아크는 화면 패리티가 아니라 수집 신뢰도의 사각을 메우는 아크다.
+
+### 대조 결과 (9장)
+
+| 레퍼런스 장 | DBTower 현재 | 판정 |
+|---|---|---|
+| MCP 정의·제공 이유(웹 외 AI 에이전트 채널) | MCP 서버(stdio/HTTP) + 자연어 진단 + 웹 콘솔 MCP 카드 | 대응 |
+| MCP 제공 기능 6종(시점비교·WaitEvent·EXPLAIN·실시간지표·SchemaDiff·파티션) | 도구 13종(compare·wait_events·explain·health·activity·sessions·replication·schema_diff·partitions·query_stats·slow_queries·schema·list_instances)으로 6/6 커버 | 대응 (metrics 도구만 소소 잔여) |
+| Slack에서 MCP 활용(알럿 쓰레드 이모지 → AI 분석 → 댓글) | 자연어 진단은 웹 콘솔에만 — 알림 채널에서 진단을 트리거하는 루프 없음 | **갭 → 아래 명세 1** |
+| 단계별 보안·인증(요청 검증·내부망 격리·데이터 마스킹) | 요청 검증=세션·API 토큰·MCP ADMIN 게이트(완), 내부망 격리=배포 구성 영역(operations.md 가이드로), 마스킹=심화 아크 4 명세 진행 중 | 부분 대응 |
+| 메모리 영향도(max_digest_length 계산식) | 운영 지식 미문서화 | 명세 2에 흡수 |
+| digest 저장 건수 이슈(테이블 FULL 시 신규 쿼리 통계 소실) | **동일 사각 실재** — 같은 events_statements_summary_by_digest 소스라 포화 시 신규 쿼리 감지(회귀·NEW)가 조용히 무력화. 감시 없음. 실측: digests_size=10,000·Performance_schema_digest_lost 카운터로 감지 가능 확인 | **갭 → 명세 2** |
+| 해결 방안(사이즈 변경 + 80% 자동 truncate) | DBTower는 "대상 DB를 바꾸지 않는다" 원칙 — 자동 truncate 불가 판단. 경보 + 명령 안내(PITR·gh-ost와 같은 생성·안내 모델)까지 | 명세 2 (원칙 판단 포함) |
+| PostgreSQL digest(파스트리 기반·evict 자동) | PG는 포화 소실은 없으나 evict가 잦으면 시점 비교 신뢰도가 떨어짐 — pg_stat_statements_info.dealloc 실측 확인(감지 가능) | 명세 2 |
+| Prepared Statement 이슈(PI 통계 미표시·사용 자제 가이드) | **동일 사각 실측 입증**: PREPARE/EXECUTE 실행 시 digest에 `EXECUTE s1 USING @?`만 집계되고 내부 쿼리는 미집계 — PS 워크로드는 Top Query·회귀 감지에 익명 부하로만 보임. 감지·안내 없음 | **갭 → 명세 3** |
+
+### 착수 명세 (Opus)
+
+| 항목 | 명세 | 검증 기준 |
+|---|---|---|
+| 1. 알림 → 진단 루프 | 레퍼런스의 "알럿 쓰레드 이모지 → AI 분석 댓글"을 셀프호스트 제약(봇 등록·이벤트 수신 인프라 없음)에 맞게 두 단계로. **1단계(지금)**: 회귀·이상·운영 경보 웹훅에 콘솔 진단 딥링크 포함 — 신규 설정 `dbtower.base-url`(빈 값이면 링크 생략), URL은 `{base}/?instance={id}&diagnose={질문 프리필}` 형태로 자연어 진단 입력을 미리 채움. 클릭 한 번으로 "이 알림 원인 분석해줘"가 실행되는 흐름. **2단계(후속·선택 모듈)**: Slack Events API/Discord 봇 인바운드(이모지·멘션 수신 → DiagnosisService 호출 → 스레드 댓글). 외부 앱 등록·토큰·공개 엔드포인트가 필요해 셀프호스트 기본에서 제외하고 별도 모듈로 — 보안 3단계(채널·유저 화이트리스트, 마스킹 필수)를 함께 설계 | 1단계: 웹훅 실발사에서 딥링크 클릭 → 콘솔이 해당 인스턴스+질문 프리필로 열림. base-url 미설정 시 링크 없음 |
+| 2. digest 위생 Advisor (신규) | advisor에 수집 신뢰도 점검 추가. **MySQL**: (a) digest 포화율 = COUNT(events_statements_summary_by_digest)/@@performance_schema_digests_size ≥ 80% WARNING(레퍼런스의 80% 기준 차용, 단 truncate 대신 경보), (b) `Performance_schema_digest_lost` > 0 CRITICAL — "신규 쿼리 통계가 이미 소실되고 있음: 신규 쿼리 감지·회귀 감지가 부분 무력화" 명시, (c) @@max_digest_length ≤ 1024 WARNING — 앞부분이 같은 긴 쿼리들이 동일 digest로 합쳐져 Top Query가 뭉개지는 위험(메모리 영향 계산식 — digest_length×동시세션, history 3테이블 — 을 근거 문서에 수록). 조치는 안내만: TRUNCATE 명령·파라미터 변경 문안 생성(대상 변경 금지 원칙, PITR와 같은 모델). **PostgreSQL**: pg_stat_statements_info.dealloc을 스냅샷 차분으로 감시 — 증가 중이면 "통계 evict 진행 중: 저빈도 쿼리의 시점 비교 신뢰도 저하" INFO/WARNING, pg_stat_statements.max 대비 사용률 병기 | 데모 MySQL에서 digests_size를 작게 만들 수 없으므로(재기동 파라미터) lost=0·포화율 정상 케이스 + 임계 로직 단위 테스트. PG는 dealloc 차분 단위 + 라이브 수치 확인 |
+| 3. Prepared Statement 사각 감지 | 실측 근거: `PREPARE s1 FROM 'SELECT ... WHERE id > ?'` 후 EXECUTE 2회 → digest에는 `EXECUTE s1 USING @?`(COUNT 2)만 남고 내부 SELECT는 미집계(2026-07-15 데모 실측). 명세: (a) Advisor — performance_schema.prepared_statements_instances 행수·COUNT_EXECUTE 합이 전체 실행 대비 유의하면 "Top Query에 보이지 않는 PS 부하 존재" WARNING + prepared_statements_instances의 SQL_TEXT 상위를 근거로 첨부(이 테이블에는 원문이 있음 — digest 사각의 보완 소스), (b) 문서 — PS는 세션 로컬(MySQL/PG)이라 커넥션 풀에서 중복 캐싱되는 메모리 특성과 "짧은 커넥션에서 매번 prepare→execute→close는 역효과" 가이드(레퍼런스 교훈 수록), (c) binary protocol(JDBC useServerPrepStmts) 경로 실측 추가 | PS 워크로드 생성 → Advisor가 사각 경고 + prepared_statements_instances 원문 노출 실측. 단위: 임계 판정 |
+| 4. 소소: metrics MCP 도구 | GET /metrics(CPU·Connections)를 MCP 도구 `metrics`로 노출 — 레퍼런스 "모니터링 지표(Realtime Metrics)" 카드의 완전 대응. AI 진단이 "그 시각 CPU가 실제로 높았나"를 스스로 확인할 수 있게 됨(자연어 진단의 증거 수집 도구 확장) | tools/list에 metrics 노출, 자연어 진단이 CPU 질문에 이 도구를 호출하는 것 확인 |
+
 ## 프로덕션·셀프호스트 준비도 감사 (2026-07-14, 미착수 갭)
 
 > 병렬 감사 3축(온보딩·운영보안·라이선스/배포) 종합. "다른 사람/조직이 셀프호스트로 실제 운영할 수
