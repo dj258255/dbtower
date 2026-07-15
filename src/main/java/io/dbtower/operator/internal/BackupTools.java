@@ -16,5 +16,7 @@ public record BackupTools(String mysqldumpCommand, String pgDumpCommand, String 
                           String mysqlRestoreCommand, String pgRestoreCommand, String mongoRestoreCommand,
                           String mysqlBinlogCommand, String mongoOplogCommand,
                           String pgWalCommand, String oracleArchiveCommand,
+
+                          String pgBaseBackupCommand, String oracleRmanCommand,
                           String backupDir) {
 }

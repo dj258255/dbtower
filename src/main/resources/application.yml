@@ -113,6 +113,13 @@ dbtower:
     # Oracle 아카이브 로그 수집 — ARCHIVELOG 모드 게이트 + ALTER SYSTEM ARCHIVE LOG CURRENT 후
     # V$ARCHIVED_LOG 최신 파일(서버 절대경로)을 수집. 정석은 RMAN, 파일 복사도 공식 문서가 인정하는 방식.
     oracle-archivelog-command: "docker exec dbtower-oracle cat"
+    # PG 물리 전체(PHYSICAL) — 시점 복구의 진짜 앵커. replication 프로토콜이라 서버 설정 불변,
+    # tar를 stdout으로 받아 저장(-X none: WAL은 세그먼트 수집과 조합하는 것이 체인 정석).
+    pg-basebackup-command: "docker exec dbtower-postgres pg_basebackup -h localhost -U {user} -D - -Ft -X none"
+    # Oracle RMAN(정석) — 지정 시 LOG/PHYSICAL이 RMAN(BACKUP ARCHIVELOG NOT BACKED UP 1 TIMES / BACKUP DATABASE)으로.
+    # 데모 Oracle Free(26ai) 이미지에는 rman 바이너리가 없음을 실측 — 비워서 파일 수집 폴백/UNSUPPORTED 정직.
+    # RMAN 가용 환경 예: "docker exec -i <ctr> rman" (접속·스크립트는 stdin — 비밀번호 argv 금지 규칙 호환)
+    oracle-rman-command: ""
     # 복원 검증(A7) 명령 — 백업의 대칭. 임시/격리 대상에만 복원해 보고 원본은 건드리지 않는다.
     # 각 명령은 클라이언트 호출의 접두부만 정의하고(임시 DB 생성/적재/카운트/삭제 인자는 Operator가 덧붙임),
     # MySQL은 -e MYSQL_PWD로, PostgreSQL은 컨테이너 로컬 trust로 접속한다.

@@ -2025,3 +2025,37 @@ LOG 백업 1회 실행:
 SqlBak(FLUSH 후 마지막 이전 전부 복사), PostgreSQL 공식 Continuous Archiving(아카이브는 완전하고
 연속이어야 하며 archive_command가 재활용과 조율), Percona·Pythian(Mongo oplog 증분·oplogLimit),
 Oracle 공식 Managing Archived Redo Log Files(수동 아카이브·O/S 복사).
+
+## 75. 물리 백업(PHYSICAL) 타입 — PG pg_basebackup 실복원 e2e·Oracle RMAN 정석 경로
+
+배경: 74절까지의 정직한 한계 중 핵심 — "논리 덤프에는 로그를 재생할 수 없다"(PG·Oracle) — 를
+해소하는 마지막 조각. BackupType에 PHYSICAL(물리 전체)을 신설했다. 물리 백업이 시점 복구 체인의
+진짜 앵커다. MySQL·Mongo는 논리 FULL + 로그 재생이 공식 PITR 절차라 PHYSICAL을 정직하게
+UNSUPPORTED(XtraBackup/스냅샷 영역)로 안내한다. MSSQL의 .bak은 이미 물리다.
+
+- **PG PHYSICAL = pg_basebackup**: replication 프로토콜 클라이언트라 서버 설정 변경이 없다
+  (wal_level=replica·max_wal_senders 기본값 충분, REPLICATION 권한만). tar 포맷(-Ft)을 stdout
+  (-D -)으로 받아 기존 수집 모델 그대로 저장. -X none — WAL은 세그먼트 수집과 조합이 체인 정석.
+- **Oracle 정석 경로 = RMAN**: oracle-rman-command 지정 시 LOG는 BACKUP ARCHIVELOG ALL
+  **NOT BACKED UP 1 TIMES**(멱등을 RMAN 컨트롤파일 카탈로그가 보장 — 블록 검증 포함),
+  PHYSICAL은 BACKUP DATABASE PLUS ARCHIVELOG. 접속·스크립트는 stdin(비밀번호 argv 금지 호환).
+  **데모 Oracle Free(26ai) 이미지에는 rman 바이너리가 없음을 실측** — 미설정 시 파일 수집
+  폴백(LOG)/UNSUPPORTED 사유(PHYSICAL)로 정직 처리.
+- **pitr-window 앵커 확장**: PHYSICAL과 FULL 중 더 최근 성공을 앵커로. PITR 안내는 앵커 종류
+  (파일명 규약)로 분기 — 논리 앵커면 한계 명시+PHYSICAL 권고, 물리 앵커면 공식 절차.
+
+**PG 실제 시점 복원 e2e(8890)** — MSSQL STOPAT e2e(72절)의 PG판:
+- 시나리오: PHYSICAL(404MB tar) → 마커 A 삽입 → LOG → **목표 시점 기록** → 마커 B 삽입 → LOG.
+- pitr-window: 물리 앵커 인식·공식 절차 문안·logCount=2 확인.
+- 안내문 실제 실행: tar 해체 → WAL 배치 → recovery.signal + recovery_target_time → postgres:16
+  임시 컨테이너 기동. **함정 실측 2건**: (1) recovery 모드는 pg_wal 직접 배치가 아니라
+  restore_command가 필수("must specify restore_command" FATAL) — wal_archive 디렉터리 +
+  restore_command='cp .../%f %p' 모델로 문안 수정. (2) backup_label의 START WAL(세그먼트 58)이
+  요구하는 체인을 74절의 멱등 보충 수집이 이미 확보하고 있었다(58·59·5A 보유).
+- **결과**: 서버 로그 "recovery stopping before commit ... 11:23:38.887"(마커 B 삽입 직전 정지),
+  복원본 SELECT → **A만 존재**, 원본 → A·B. 목표 시점(11:23:37.77) 상태 정확 재현.
+- 단위 402건 그린(PG·Oracle 안내 앵커 분기 테스트로 갱신).
+
+이로써 5기종 로그 백업 판정: MySQL·MSSQL·Mongo = 정석 그대로, **PG = 물리 앵커+WAL+실복원까지
+정석 체인 완성**(연속성 무결 보장 옵션 pg_receivewal 스트리밍만 별도 모듈 잔여),
+**Oracle = RMAN 정석 경로 구현**(데모는 rman 부재로 파일 수집 폴백 — 공식 인정 방식).

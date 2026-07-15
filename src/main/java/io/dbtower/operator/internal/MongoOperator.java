@@ -580,6 +580,10 @@ public class MongoOperator implements DbmsOperator {
         if (policy.type() == BackupPolicy.BackupType.LOG) {
             return oplogBackup();
         }
+        if (policy.type() == BackupPolicy.BackupType.PHYSICAL) {
+            throw new UnsupportedOperationException(
+                    "MongoDB 물리 백업은 파일시스템 스냅샷/Percona hot backup 영역 — 공식 PITR는 mongodump + oplog 재생이라 물리가 필수는 아니다");
+        }
         Path out = Path.of(backupTools.backupDir(),
                 "mongo-%s-%s.archive".formatted(
                         BackupCommands.safeFileName(instance.getName()), BackupCommands.timestamp()));

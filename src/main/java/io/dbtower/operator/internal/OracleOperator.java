@@ -456,6 +456,17 @@ public class OracleOperator extends AbstractJdbcOperator {
         if (policy.type() == BackupPolicy.BackupType.LOG) {
             return archiveLogBackup();
         }
+        if (policy.type() == BackupPolicy.BackupType.PHYSICAL) {
+            // 물리 전체 = RMAN BACKUP DATABASE(블록 검증·컨트롤파일 카탈로그까지 정석 그 자체).
+            // Data Pump(FULL)는 논리라 아카이브 로그를 재생할 수 없다 — Oracle의 진짜 PITR 앵커는 이쪽.
+            if (backupTools.oracleRmanCommand() == null || backupTools.oracleRmanCommand().isBlank()) {
+                throw new UnsupportedOperationException(
+                        "물리 백업은 RMAN 클라이언트가 필요(dbtower.backup.oracle-rman-command 미설정) — "
+                                + "데모 Oracle Free(26ai) 이미지에는 rman 바이너리가 없음을 실측. "
+                                + "RMAN 가용 환경에서 명령을 지정하면 BACKUP DATABASE로 동작한다");
+            }
+            return rmanBackup("BACKUP DATABASE PLUS ARCHIVELOG;", "database");
+        }
         String dumpFile = "oracle-%s-%s.dmp"
                 .formatted(safeFileName(instance.getName()), backupTimestamp());
         String block = """
@@ -497,6 +508,11 @@ public class OracleOperator extends AbstractJdbcOperator {
                 throw new UnsupportedOperationException(
                         "NOARCHIVELOG 모드 — 아카이브 로그가 생성되지 않는다. 모드 전환은 mount 재기동이 "
                                 + "필요한 대상 서버 구성이라 우리가 바꾸지 않는다(ARCHIVELOG면 로그 백업 동작)");
+            }
+            // 정석 우선: RMAN 클라이언트가 지정돼 있으면 BACKUP ARCHIVELOG ALL NOT BACKED UP 1 TIMES —
+            // 멱등(이미 백업된 아카이브 스킵)을 RMAN 자신이 컨트롤파일 카탈로그로 보장한다(블록 검증 포함).
+            if (backupTools.oracleRmanCommand() != null && !backupTools.oracleRmanCommand().isBlank()) {
+                return rmanBackup("BACKUP ARCHIVELOG ALL NOT BACKED UP 1 TIMES;", "archivelog");
             }
             if (backupTools.oracleArchiveCommand() == null || backupTools.oracleArchiveCommand().isBlank()) {
                 throw new UnsupportedOperationException(
@@ -551,6 +567,49 @@ public class OracleOperator extends AbstractJdbcOperator {
         } catch (SQLException e) {
             throw new OperatorException("Oracle 아카이브 로그 백업 실패: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * RMAN 실행 (정석 경로) — 스크립트는 stdin으로 전달해 접속 문자열(비밀번호)이 argv에 노출되지
+     * 않게 한다(mongo --config /dev/stdin과 같은 규칙). 백업셋은 서버 측(FRA/컨트롤파일 카탈로그)에
+     * 생기고, RMAN 세션 로그를 로컬 산출물로 보존한다 — 성패는 로그의 종료코드로 판정된다.
+     */
+    private BackupResult rmanBackup(String rmanCommand, String kind) {
+        Path out = Path.of(backupTools.backupDir(),
+                "oracle-rman-%s-%s-%s.log".formatted(kind, safeFileName(instance.getName()), backupTimestamp()));
+        String script = "CONNECT TARGET %s/\"%s\"@%s:%d/%s\n%s\nEXIT;\n".formatted(
+                instance.getUsername(), instance.getPassword().replace("\"", ""),
+                instance.getHost(), instance.getPort(), instance.getDbName(), rmanCommand);
+        return io.dbtower.operator.BackupCommands.run(
+                renderCommand(backupTools.oracleRmanCommand()), Map.of(), out, script);
+    }
+
+    /**
+     * Oracle PITR 안내 (Phase 2) — 정석은 RMAN SET UNTIL TIME 복구다. 앵커가 RMAN 물리 백업셋이면
+     * 그 절차를, Data Pump 논리 덤프면 "아카이브 재생 불가" 한계를 명시한다(파일명 규약으로 판정).
+     */
+    @Override
+    public String pitrRestoreGuide(String fullLocation, List<String> logLocations, String targetTime) {
+        boolean rmanAnchor = fullLocation != null && fullLocation.contains("oracle-rman-database");
+        if (!rmanAnchor) {
+            return """
+                    -- Oracle 시점 복구 안내 (정직한 한계 포함)
+                    -- 주의: 현재 앵커(%s)는 Data Pump 논리 덤프라 아카이브 로그를 재생할 수 없다.
+                    -- 진짜 시점 복구가 필요하면 PHYSICAL 타입(RMAN BACKUP DATABASE)으로 백업하라.
+                    -- 수집된 아카이브 로그(%d개)는 RMAN 물리 백업과 조합할 때 쓰인다."""
+                    .formatted(fullLocation, logLocations.size());
+        }
+        return """
+                -- Oracle 시점 복구 안내 (RMAN 정석 절차 — 반드시 복구 전용 인스턴스/보조 DB에서)
+                RMAN> RUN {
+                  SET UNTIL TIME "TO_DATE('%s','YYYY-MM-DD HH24:MI:SS')";
+                  RESTORE DATABASE;
+                  RECOVER DATABASE;
+                }
+                RMAN> ALTER DATABASE OPEN RESETLOGS;
+                -- 백업셋·아카이브(%d개 수집분)는 RMAN 카탈로그(컨트롤파일)가 찾는다.
+                -- RESETLOGS 후에는 이전 백업 체인이 끊긴다 — 즉시 새 FULL을 받을 것."""
+                .formatted(targetTime, logLocations.size());
     }
 
     /** 이 아카이브 파일이 이미 로컬 산출물로 수집됐는가 — 파일명 접미로 판정(멱등 수집). */

@@ -72,6 +72,10 @@ public class MySqlOperator extends AbstractJdbcOperator {
         if (policy.type() == BackupPolicy.BackupType.LOG) {
             return binlogBackup();
         }
+        if (policy.type() == BackupPolicy.BackupType.PHYSICAL) {
+            throw new UnsupportedOperationException(
+                    "MySQL 물리 백업은 XtraBackup/Clone 플러그인 영역 — 공식 PITR는 논리 FULL(mysqldump) + binlog 재생이라 물리가 필수는 아니다");
+        }
         Path out = Path.of(backupTools.backupDir(),
                 "mysql-%s-%s.sql".formatted(safeFileName(instance.getName()), backupTimestamp()));
         // 비밀번호는 argv가 아니라 MYSQL_PWD 환경변수로 — ps로 노출되지 않게

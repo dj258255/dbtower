@@ -135,11 +135,18 @@ public class BackupService {
 
     public PitrWindow pitrWindow(Long instanceId, String targetTime) {
         var instance = registryService.findById(instanceId);
-        var full = runRepository.findTopByInstanceIdAndBackupTypeAndStatusOrderByStartedAtDesc(
+        // 앵커 = 가장 최근의 성공한 전체 백업 — PHYSICAL(물리)이 있으면 그것이 진짜 앵커다
+        // (PG·Oracle은 논리 덤프에 로그를 재생할 수 없다). 둘 다 있으면 더 최근 것.
+        var physical = runRepository.findTopByInstanceIdAndBackupTypeAndStatusOrderByStartedAtDesc(
+                instanceId, BackupPolicy.BackupType.PHYSICAL.name(), BackupRun.Status.SUCCESS);
+        var logical = runRepository.findTopByInstanceIdAndBackupTypeAndStatusOrderByStartedAtDesc(
                 instanceId, BackupPolicy.BackupType.FULL.name(), BackupRun.Status.SUCCESS);
+        var full = physical.isEmpty() ? logical
+                : logical.isEmpty() ? physical
+                : (physical.get().getStartedAt().isAfter(logical.get().getStartedAt()) ? physical : logical);
         if (full.isEmpty()) {
             return new PitrWindow(false, null, null, null, 0,
-                    "성공한 FULL 백업이 없어 시점 복구 불가 — 먼저 FULL 백업을 실행하세요"
+                    "성공한 전체(FULL/PHYSICAL) 백업이 없어 시점 복구 불가 — 먼저 전체 백업을 실행하세요"
                             + " (타입 기록은 V13부터라 이전 이력은 계산에서 제외)", null);
         }
         List<BackupRun> logs = runRepository

@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class PitrRestoreGuideTest {
 
-    private final BackupTools tools = new BackupTools("d", "d", "d", "r", "r", "r", "b", "o", "w", "a", "/tmp");
+    private final BackupTools tools = new BackupTools("d", "d", "d", "r", "r", "r", "b", "o", "w", "a", "pb", "rm", "/tmp");
 
     @Test
     void MySQL_안내는_FULL_적재_후_binlog를_stop_datetime까지_재생한다() {
@@ -53,21 +53,36 @@ class PitrRestoreGuideTest {
     }
 
     @Test
-    void PG_안내는_논리_덤프의_한계를_정직하게_말한다() {
-        // pg_dump 논리 덤프에는 WAL을 재생할 수 없다 — 절차를 지어내지 않고 물리 베이스백업 필요를 명시
+    void PG_안내는_앵커_종류로_분기한다_논리는_한계_물리는_공식_절차() {
         DatabaseInstance pg = new DatabaseInstance("p", DbmsType.POSTGRESQL, "h", 5432, "db", "u", "p");
         PostgresOperator op = new PostgresOperator(pg, Mockito.mock(ConnectionPools.class), tools);
-        String guide = op.pitrRestoreGuide("/b/full.sql", List.of("/b/wal1"), "2026-07-15 12:00:00");
-        assertThat(guide).contains("논리 덤프라 WAL을 재생할 수 없다");
-        assertThat(guide).contains("pg_basebackup");
-        assertThat(guide).contains("recovery_target_time = '2026-07-15 12:00:00'");
+
+        // 논리(pg_dump) 앵커 — 절차를 지어내지 않고 WAL 재생 불가 + PHYSICAL 권고
+        String logical = op.pitrRestoreGuide("/b/postgres-x-full.sql", List.of("/b/wal1"), "2026-07-15 12:00:00");
+        assertThat(logical).contains("논리 덤프라 WAL을 재생할 수 없다").contains("PHYSICAL");
+
+        // 물리(basebackup) 앵커 — 공식 PITR 절차(해체 + WAL 배치 + recovery_target_time)
+        String physical = op.pitrRestoreGuide("/b/postgres-basebackup-x.tar",
+                List.of("/b/wal1", "/b/wal2"), "2026-07-15 12:00:00");
+        assertThat(physical).contains("tar -xf /b/postgres-basebackup-x.tar");
+        assertThat(physical).contains("recovery.signal");
+        assertThat(physical).contains("recovery_target_time = '2026-07-15 12:00:00'");
     }
 
     @Test
-    void 미지원_기종은_지어내지_않고_미지원을_말한다() {
+    void Oracle_안내는_앵커_종류로_분기한다_논리는_한계_RMAN은_UNTIL_TIME() {
         DatabaseInstance oracle = new DatabaseInstance("o", DbmsType.ORACLE, "h", 1521, "FREE", "u", "p");
         OracleOperator op = new OracleOperator(oracle, Mockito.mock(ConnectionPools.class), tools);
-        assertThat(op.pitrRestoreGuide("/b/full.dmp", List.of(), "t"))
-                .contains("지원하지 않습니다");
+
+        // Data Pump 논리 앵커 — 아카이브 재생 불가 한계 명시
+        assertThat(op.pitrRestoreGuide("(server) DATA_PUMP_DIR/full.dmp", List.of(), "t"))
+                .contains("아카이브 로그를 재생할 수 없다").contains("PHYSICAL");
+
+        // RMAN 물리 앵커 — 정석 UNTIL TIME 절차 + RESETLOGS 경고
+        String rman = op.pitrRestoreGuide("./backups/oracle-rman-database-x.log",
+                List.of("a1", "a2"), "2026-07-15 12:00:00");
+        assertThat(rman).contains("SET UNTIL TIME \"TO_DATE('2026-07-15 12:00:00'");
+        assertThat(rman).contains("RESTORE DATABASE").contains("RECOVER DATABASE");
+        assertThat(rman).contains("RESETLOGS");
     }
 }

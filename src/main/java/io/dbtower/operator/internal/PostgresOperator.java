@@ -58,9 +58,32 @@ public class PostgresOperator extends AbstractJdbcOperator {
         if (policy.type() == BackupPolicy.BackupType.LOG) {
             return walBackup();
         }
+        if (policy.type() == BackupPolicy.BackupType.PHYSICAL) {
+            return physicalBackup();
+        }
         Path out = Path.of(backupTools.backupDir(),
                 "postgres-%s-%s.sql".formatted(safeFileName(instance.getName()), backupTimestamp()));
         return runCliBackup(renderCommand(backupTools.pgDumpCommand()),
+                Map.of("PGPASSWORD", instance.getPassword()), out);
+    }
+
+    /**
+     * 물리 전체 백업 (PHYSICAL) = pg_basebackup — PG 시점 복구의 진짜 앵커(공식 PITR 절차의 정석).
+     * pg_dump(논리)는 WAL을 재생할 수 없어서, "물리 베이스 + WAL 세그먼트 + recovery_target_time"이
+     * 완전한 체인이다. pg_basebackup은 replication 프로토콜 클라이언트라 서버 설정 변경이 필요 없다
+     * (wal_level=replica·max_wal_senders는 기본값으로 충분, REPLICATION 권한만) — tar 포맷(-Ft)을
+     * stdout(-D -)으로 받아 기존 수집 모델(stdout→파일) 그대로 저장한다. -X none: WAL은 세그먼트
+     * 수집(walBackup)과 조합하는 것이 체인의 정석이므로 베이스에 중복 포함하지 않는다.
+     */
+    private BackupResult physicalBackup() {
+        if (backupTools.pgBaseBackupCommand() == null || backupTools.pgBaseBackupCommand().isBlank()) {
+            throw new UnsupportedOperationException(
+                    "물리 백업 명령 미설정(dbtower.backup.pg-basebackup-command) — "
+                            + "pg_basebackup(-Ft -D - -X none, REPLICATION 권한)을 지정하면 동작한다");
+        }
+        Path out = Path.of(backupTools.backupDir(),
+                "postgres-basebackup-%s-%s.tar".formatted(safeFileName(instance.getName()), backupTimestamp()));
+        return runCliBackup(renderCommand(backupTools.pgBaseBackupCommand()),
                 Map.of("PGPASSWORD", instance.getPassword()), out);
     }
 
@@ -142,23 +165,41 @@ public class PostgresOperator extends AbstractJdbcOperator {
     }
 
     /**
-     * PG PITR 안내 (Phase 2) — <b>정직한 한계 명시가 본체</b>: DBTower의 PG FULL은 pg_dump(논리 덤프)라
-     * WAL을 그 위에 재생할 수 없다. PG의 시점 복구는 물리 베이스백업(pg_basebackup) + WAL 재생 조합이며,
-     * 수집한 WAL 세그먼트는 그 조합의 재료다. 지어낸 복원 절차 대신 사실을 안내한다.
+     * PG PITR 안내 (Phase 2) — 앵커가 물리(basebackup)면 공식 PITR 절차 그대로, 논리(pg_dump)면
+     * "WAL을 재생할 수 없다"는 한계 명시가 본체다(지어낸 절차 금지). 앵커 종류는 산출물 파일명
+     * 규약(postgres-basebackup-*)으로 판정한다.
      */
     @Override
     public String pitrRestoreGuide(String fullLocation, List<String> logLocations, String targetTime) {
+        boolean physicalAnchor = fullLocation != null && fullLocation.contains("basebackup");
+        if (!physicalAnchor) {
+            return """
+                    -- PostgreSQL 시점 복구 안내 (정직한 한계 포함)
+                    -- 주의: 현재 앵커(%s)는 pg_dump 논리 덤프라 WAL을 재생할 수 없다.
+                    -- 진짜 시점 복구가 필요하면 PHYSICAL 타입(pg_basebackup)으로 백업하라 — 그러면
+                    -- 이 안내문이 공식 PITR 절차(베이스 해체 + WAL 배치 + recovery_target_time)로 바뀐다.
+                    -- 수집된 WAL 세그먼트(%d개)는 물리 베이스와 조합할 때 쓰인다."""
+                    .formatted(fullLocation, logLocations.size());
+        }
         return """
-                -- PostgreSQL 시점 복구 안내 (정직한 한계 포함)
-                -- 주의: 현재 FULL(%s)은 pg_dump 논리 덤프라 WAL을 재생할 수 없다.
-                -- PG의 시점 복구는 물리 베이스백업 + WAL 조합이 정석이다:
-                -- 1) pg_basebackup -D <복구 디렉터리> -X none   (물리 베이스백업 — replication 권한)
-                -- 2) 수집된 WAL 세그먼트(%d개)를 <복구 디렉터리>/pg_wal 또는 restore_command 위치에 배치
-                --    %s
-                -- 3) recovery.signal 생성 + postgresql.conf: recovery_target_time = '%s'
-                -- 4) 서버 기동 → 목표 시점까지 재생 후 승격. (물리 FULL 타입 지원은 로드맵 잔여)"""
+                # PostgreSQL 시점 복구 안내 (공식 PITR 절차 — 반드시 격리된 복구 디렉터리에서. e2e 검증된 문안)
+                # 1) 물리 베이스백업 해체
+                mkdir -p /restore/data && tar -xf %s -C /restore/data && chmod 700 /restore/data
+                # 2) 수집된 WAL 세그먼트(%d개)를 아카이브 디렉터리에 배치
+                #    (pg_wal 직접 배치가 아니라 restore_command 모델 — recovery 모드는 restore_command가 필수임을 실측)
+                #    %s
+                mkdir -p /restore/data/wal_archive && cp <수집된 WAL들, 파일명은 세그먼트명> /restore/data/wal_archive/
+                # 3) 복구 지시 — recovery.signal + restore_command + 목표 시점
+                touch /restore/data/recovery.signal
+                cat >> /restore/data/postgresql.auto.conf <<'EOF'
+                restore_command = 'cp /restore/data/wal_archive/%%f %%p'
+                recovery_target_time = '%s'
+                recovery_target_action = 'promote'
+                EOF
+                # 4) 이 데이터 디렉터리로 서버 기동 → 목표 시점 직전 트랜잭션까지 재생 후 승격
+                #    (로그에 "recovery stopping before commit ..."이 정지 지점을 증언한다)"""
                 .formatted(fullLocation, logLocations.size(),
-                        String.join("\n                --    ", logLocations), targetTime);
+                        String.join("\n                #    ", logLocations), targetTime);
     }
 
     /**
