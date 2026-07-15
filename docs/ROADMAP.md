@@ -272,6 +272,31 @@ record TableDetail(String table, String engine, long rowCount, long dataBytes, l
   스크린샷(레퍼런스 이미지와 대비). 존재하지 않는 테이블명·주입 시도 문자열 → 명확한 거부.
 - 문서: VERIFICATION 절 추가, CHANGELOG, 블로그 14편 섹션(레퍼런스 패리티 대비표와 함께).
 
+## 심화 아크 4 — 레퍼런스 화면 패리티 총정리 (2026-07-15)
+
+레퍼런스 발표의 "문제 쿼리 식별" 화면 11장을 컬럼 단위로 전수 대조한 결과. 뼈대(3탭·시점 비교·
+증감/신규 감지·활용사례 3종 흐름)는 원래 동작했고, 이번 아크로 표·그래프까지 맞췄다.
+
+### 완료 (VERIFICATION 66~68절)
+
+| 레퍼런스 화면 | DBTower 구현 | 절 |
+|---|---|---|
+| 테이블 상세(CREATE TABLE·크기 통계·인덱스 카디널리티) | tableDetail 5기종, NATIVE/RECONSTRUCTED 출처 구분, PG는 pg_get_constraintdef로 FK·CHECK까지 | 66 |
+| 상위 SQL 표(Call/sec·Latency·Row Examined Avg) | Top Query 기본뷰 컬럼 교체, Call/sec는 스냅샷 차분(이력 없으면 "—") | 67 |
+| Slow Query 표(User@host·Lock_time·Rows_sent) | MySQL slow_log 확장, 타 기종 미확보는 "—", Captured는 (UTC) 명기 | 67 |
+| MongoDB Plan(IXSCAN/COLLSCAN) | system.profile planSummary 배지(초록/빨강) | 67 |
+| Monitoring 탭 CPU%·Connections 그래프 | PrometheusClient(query_range) + /metrics — node_exporter·기종 exporter, 미수집 사유 정직 표기 | 68 |
+| CPU 그래프 드래그로 시점 선택 | 드래그 차트 QPS ↔ CPU% 토글 (+ 이 작업이 프론트 UTC 스큐 버그를 발굴·수정) | 68 |
+
+### 남은 조각 — 착수 명세 (Opus)
+
+| 항목 | 명세 | 검증 기준 |
+|---|---|---|
+| 인스턴스 메타: 담당팀/Slack 라벨 + 콘솔 딥링크 | 레퍼런스 활용사례 화면의 "Slack Group: 팀명 / AWS Link: PI" 대응. 등록 정보에 선택 필드 2개(V12): `team_label`(자유 문자열 — **Phase 3 LBAC의 team_label과 같은 컬럼으로 설계해 이중 마이그레이션 방지**), `console_url`(자유 URL — Grafana 대시보드·AWS PI·내부 위키 등 조직이 쓰는 콘솔 아무거나). 상세 패널 상단에 "담당: {team} · 콘솔 열기 ↗" 표시, 회귀/문의 웹훅에도 라벨 포함(어느 팀 채널로 갈 문제인지). AWS SDK 연동이 아니라 **URL 일반화로 PI 딥링크 패리티를 흡수**한다 — RDS 쓰는 조직은 PI URL을, 셀프호스트는 Grafana URL을 넣으면 된다 | 등록 폼에 두 필드 입력 → 상세 패널·웹훅 메시지에 라벨·링크 표시. 미입력 시 표기 생략(강제 아님) |
+| CloudWatch 메트릭 소스 | RDS 등록 대상일 때만 의미. Phase 5 디스크 예측의 "RDS는 CloudWatch FreeStorageSpace 소스" 항목과 같은 축 — **소스 추상화(Prometheus | CloudWatch)를 Phase 5에서 함께 결정**, 지금 단독 착수하지 않는다(셀프호스트 P0와 무관, AWS SDK 의존 추가) | Phase 5 착수 시 재평가 |
+| 소소 잔여 | (1) Slow Query 타임스탬프 브라우저 로컬(KST) 표시 옵션 — 현재는 "(UTC)" 명기로 정직 처리, parseApiTime 재사용으로 변환 가능하나 capturedAt이 ISO가 아닌 기종(Mongo 원문 문자열)이 있어 기종별 파싱 필요. (2) Mongo 장기 조회 시간대별 샘플링 — 레퍼런스는 mongod.log 파싱 기반, 우리는 system.profile(순환 컬렉션) 기반이라 보존 창이 다름을 note로 정직 표기하는 것까지 | 낮은 우선순위 — 다른 조각과 겹칠 때 처리 |
+| 데이터 마스킹 (Phase 2 잔여, 진행 중) | analysis/QueryMasker(리터럴 전용 문자 스캐너 — 문자열 '...'·숫자·$$...$$는 ?로, 식별자·따옴표 식별자·$1·주석은 보존) 작성 완료. 남은 배선 4곳: RegressionDetector.java:110(d.queryText — 웹훅+AI 프롬프트 공통 상류), InquiryService submit 상단(req.sql 1회 마스킹 후 embed·본문·스키마 요약 공유), InsightController /ai-analysis의 req.sql (mask-ai-prompt 토글, 기본 false — AI 정확도 트레이드오프 명시), DiagnosisService:158-159(MCP arguments.sql + observation snippet). MySQL/PG 회귀 텍스트는 이미 정규화라 멱등, Oracle/Mongo·사용자 입력·LLM 작성 경로가 실수요 | 리터럴 치환 단위(이스케이프·달러 인용·16진·식별자 꼬리 숫자 보존), 문의 embed 실측에서 리터럴 가려짐, mask-ai-prompt 기본 false 확인 |
+
 ## 프로덕션·셀프호스트 준비도 감사 (2026-07-14, 미착수 갭)
 
 > 병렬 감사 3축(온보딩·운영보안·라이선스/배포) 종합. "다른 사람/조직이 셀프호스트로 실제 운영할 수
