@@ -53,6 +53,11 @@
 - 브랜딩 — 콘솔·로그인 헤더를 파비콘(favicon.svg) 로고 + "DBTower"로 통일하고 중복된 텍스트 "DB"
   마크 제거. 로그인 화면(미인증)에서도 파비콘이 뜨도록 SecurityConfig permitAll에 파비콘 자산 추가
 
+### Changed
+- 문제 쿼리 식별 표 컬럼 보강 — Top Query 기본뷰에 Call/sec(스냅샷 차분)·평균 Latency(ms)·Row Examined(Avg),
+  Slow Query에 User@host·Lock(ms)·Rows_sent(MySQL slow_log), MongoDB Slow Query에 Plan(IXSCAN/COLLSCAN,
+  system.profile planSummary) 컬럼 추가. 미확보 필드는 "—"로 정직 표기(Call/sec는 스냅샷 이력 없으면 "—")
+
 ### Fixed
 - 웹 콘솔 전체 백화 — 테이블 상세 추가 시 `const fmtBytes`가 기존 선언과 중복돼 app.js가 SyntaxError로
   파싱 중단, SPA가 아무것도 렌더하지 못하던 것을 수정(중복 제거, 음수 크기 "—" 표기는 헬퍼로 보존).

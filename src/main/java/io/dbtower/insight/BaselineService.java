@@ -87,6 +87,18 @@ public class BaselineService {
      * 현재 구간을 (지금 요일·시간대의) 베이스라인과 비교해 이상 쿼리 목록을 낸다.
      * 이상이 없어도(또는 이력 부족이어도) 예외 없이 빈/학습중 결과를 반환한다 — 폴러가 매 주기 안전히 호출한다.
      */
+    /**
+     * 최근 창(recent-minutes)의 쿼리별 현재 QPS — Top Query 표의 Call/sec 컬럼용.
+     * 누적 카운터는 단일 스냅샷으로 초당 호출을 낼 수 없어(창이 필요), 최근 두 스냅샷 배치의 차분으로 계산한다.
+     * 스냅샷 이력이 2배치 미만이면 빈 맵(화면은 "—"로 정직 표기 — 지어내지 않는다).
+     */
+    public Map<String, Double> recentQps(Long instanceId, LocalDateTime now) {
+        Map<String, Obs> window = currentWindow(instanceId, now.minusMinutes(recentMinutes), now);
+        Map<String, Double> qps = new HashMap<>();
+        window.forEach((queryId, obs) -> qps.put(queryId, obs.qps()));
+        return qps;
+    }
+
     public AnomalyScan detectAnomalies(Long instanceId, LocalDateTime now) {
         LocalDateTime currentFrom = now.minusMinutes(recentMinutes);
         DayOfWeek dow = now.getDayOfWeek();

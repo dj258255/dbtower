@@ -304,11 +304,14 @@ public class MongoOperator implements DbmsOperator {
                         .sort(Sorts.descending("millis"))
                         .limit(limit);
                 for (Document doc : docs) {
+                    // system.profile의 planSummary가 인덱스 사용 여부를 그대로 알려준다(예: "IXSCAN { a: 1 }", "COLLSCAN")
                     result.add(new SlowQuery(
                             queryText(doc.getString("ns"), doc.get("command", Document.class)),
                             ((Number) doc.getOrDefault("millis", 0)).doubleValue(),
                             ((Number) doc.getOrDefault("docsExamined", 0)).longValue(),
-                            String.valueOf(doc.get("ts"))));
+                            String.valueOf(doc.get("ts")),
+                            null, -1, -1,
+                            doc.getString("planSummary")));
                 }
                 return result;
             });

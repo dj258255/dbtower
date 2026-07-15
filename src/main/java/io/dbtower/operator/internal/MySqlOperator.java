@@ -361,7 +361,10 @@ public class MySqlOperator extends AbstractJdbcOperator {
     static final String SLOW_QUERIES_SQL = """
             SELECT CONVERT(sql_text USING utf8mb4) AS sql_text,
                    TIME_TO_SEC(query_time) * 1000 + MICROSECOND(query_time) / 1000 AS elapsed_ms,
+                   TIME_TO_SEC(lock_time) * 1000 + MICROSECOND(lock_time) / 1000 AS lock_ms,
                    rows_examined,
+                   rows_sent,
+                   CONVERT(user_host USING utf8mb4) AS user_host,
                    start_time
             FROM mysql.slow_log
             ORDER BY start_time DESC
@@ -377,7 +380,11 @@ public class MySqlOperator extends AbstractJdbcOperator {
                             rs.getString("sql_text"),
                             rs.getDouble("elapsed_ms"),
                             rs.getLong("rows_examined"),
-                            rs.getString("start_time")),
+                            rs.getString("start_time"),
+                            rs.getString("user_host"),
+                            rs.getDouble("lock_ms"),
+                            rs.getLong("rows_sent"),
+                            null),
                     limit);
         } catch (DataAccessException e) {
             throw new OperatorException("MySQL 슬로우 쿼리 조회 실패: " + e.getMessage(), e);

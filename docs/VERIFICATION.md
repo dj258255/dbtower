@@ -1758,3 +1758,32 @@ FK·CHECK가 원문 그대로 재조립됐고, idx 카디널리티는 customer_i
 리다이렉트돼 안 뜨던 것을 SecurityConfig permitAll에 파비콘 자산(svg·96png·apple-touch)을 추가해 해결.
 
 ![로그인 브랜드 — 파비콘 + DBTower, "DB" 박스 제거](images/webui/31-brand-login.png)
+
+## 67. 레퍼런스 "문제 쿼리 식별" 표 컬럼 패리티 (Top Query·Slow Query·Mongo Plan)
+
+배경: 레퍼런스 발표의 상위 SQL/슬로우 쿼리 화면과 컬럼 단위로 대조하니, 뼈대(3탭·시점 비교·증감/신규
+감지·활용사례 3종)는 이미 동작하나 표의 일부 컬럼이 빠져 있었다. 데이터는 내부에 있는데 노출만 안 된
+"진짜 갭" 3개를 닫았다(의도된 차이 — CPU%·AWS PI 딥링크는 exporter/Grafana 위임 — 는 그대로 둔다).
+
+- **Top Query 기본뷰 — Call/sec·Latency(ms)·Row Examined(Avg)**: 기존 Load/Calls/Total(ms) 대신
+  레퍼런스와 같은 컬럼으로. 평균 Latency=totalTimeMs/calls, 평균 Row=rowsExamined/calls는 창 없이 정확.
+  Call/sec는 누적 카운터라 단일 스냅샷으로 못 내므로 `BaselineService.recentQps`(최근 두 스냅샷 배치 차분)
+  로 산출, 이력 부족 시 null→"—"(지어내지 않음). QueryStatView에 avgLatencyMs·rowsExaminedAvg·callsPerSec 추가.
+- **Slow Query — User@host·Lock(ms)·Rows_sent**: MySQL mysql.slow_log에서 user_host·lock_time·rows_sent를
+  추가로 뽑아 SlowQuery record 확장. 다른 기종은 미확보라 null/-1→"—"(간편 생성자로 4-arg 호출부 무변경).
+- **MongoDB Slow Query — Plan(IXSCAN/COLLSCAN)**: system.profile의 planSummary를 SlowQuery.planSummary로
+  노출, COLLSCAN=빨강·IXSCAN=초록 배지. 인덱스 사용 여부를 표에서 바로 판별.
+
+**라이브 실측(8890, 재기동 후)**:
+- Top Query(MySQL): 컬럼 Load/Query/**Call/sec/Latency(ms)/Row Examined(Avg)**. 예 SHOW GLOBAL VARIABLES
+  Load 42.79%·Call/sec 0.06·Latency 1.67ms·RowExamined 623. 스냅샷 창 밖 쿼리는 Call/sec "—".
+- Slow(MySQL): User@host="root[root] @ localhost []", Query(ms)=581.15, Lock=0, Rows_sent=1, Plan="—".
+- Slow(MongoDB): **COLLSCAN(빨강, docsExamined 43,000)** · **IXSCAN { k: 1 }(초록, 500/100행)** · 관리명령 "—".
+  프로파일링 레벨2로 인덱스/풀스캔 쿼리를 실행해 planSummary 확보 후 확인.
+- 단위 383건 그린(SlowQuery 확장·QueryStatView 변경 반영, 회귀 없음).
+
+![Top Query — Call/sec·Latency·Row Examined(Avg)](images/webui/32-top-query-cols.png)
+
+![MySQL Slow Query — User@host·Lock·Rows_sent](images/webui/33-slow-mysql-cols.png)
+
+![MongoDB Slow Query — Plan(IXSCAN 초록·COLLSCAN 빨강)](images/webui/34-slow-mongo-plan.png)

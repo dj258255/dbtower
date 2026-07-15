@@ -490,16 +490,17 @@ async function runQuery() {
   closeDetail();
   const stats = await api(`/api/instances/${state.instance.id}/query-stats?limit=20`);
   const table = $("#top-table");
+  // Call/sec는 스냅샷 차분이라 이력 없으면 null → "—". Latency/Row Examined는 누적÷호출수(평균).
   table.querySelector("thead").innerHTML = `
-    <tr><th>Load</th><th>Query</th><th class="num">Calls</th>
-        <th class="num">Total(ms)</th><th class="num">Rows Examined</th></tr>`;
+    <tr><th>Load</th><th>Query</th><th class="num">Call/sec</th>
+        <th class="num">Latency(ms)</th><th class="num">Row Examined (Avg)</th></tr>`;
   table.querySelector("tbody").innerHTML = stats.map((q, idx) => `
     <tr data-idx="${idx}">
       <td class="num">${fmtNum(q.loadPct)}%</td>
       <td class="qtext" title="${esc(q.queryText)}">${esc(q.queryText)}</td>
-      <td class="num">${fmtNum(q.calls, 0)}</td>
-      <td class="num">${fmtNum(q.totalTimeMs)}</td>
-      <td class="num">${fmtNum(q.rowsExamined, 0)}</td>
+      <td class="num">${q.callsPerSec == null ? '<span class="muted">—</span>' : fmtNum(q.callsPerSec)}</td>
+      <td class="num">${fmtNum(q.avgLatencyMs)}</td>
+      <td class="num">${fmtNum(q.rowsExaminedAvg, 0)}</td>
     </tr>`).join("");
   bindRowClicks(stats.map((q) => ({ queryId: q.queryId, queryText: q.queryText })));
 }
@@ -908,15 +909,22 @@ async function runInquiry() {
 async function loadSlow() {
   const rows = await api(`/api/instances/${state.instance.id}/slow-queries?limit=20`);
   const table = $("#slow-table");
+  // 기종별로 확보 가능한 필드가 달라 미확보는 "—"로 표기(MySQL: User@host·Lock·Rows_sent, Mongo: Plan)
   table.querySelector("thead").innerHTML = `
-    <tr><th>Captured</th><th class="num">Elapsed(ms)</th><th class="num">Rows</th><th>Query</th></tr>`;
+    <tr><th>Captured</th><th>User@host</th><th class="num">Query(ms)</th><th class="num">Lock(ms)</th>
+        <th class="num">Rows_sent</th><th class="num">Rows_examined</th><th>Plan</th><th>Query</th></tr>`;
+  const dash = (v) => (v == null || v < 0) ? '<span class="muted">—</span>' : null;
   table.querySelector("tbody").innerHTML = rows.length ? rows.map((q) => `
     <tr>
       <td class="num">${esc(q.capturedAt ?? "-")}</td>
+      <td>${q.userHost ? esc(q.userHost) : '<span class="muted">—</span>'}</td>
       <td class="num">${fmtNum(q.elapsedMs)}</td>
+      <td class="num">${dash(q.lockMs) ?? fmtNum(q.lockMs)}</td>
+      <td class="num">${dash(q.rowsSent) ?? fmtNum(q.rowsSent, 0)}</td>
       <td class="num">${fmtNum(q.rowsExamined, 0)}</td>
+      <td>${q.planSummary ? `<span class="plan-badge ${/COLLSCAN/i.test(q.planSummary) ? "plan-bad" : "plan-ok"}">${esc(q.planSummary)}</span>` : '<span class="muted">—</span>'}</td>
       <td class="qtext" title="${esc(q.queryText)}">${esc(q.queryText)}</td>
-    </tr>`).join("") : '<tr><td colspan="4" class="muted">슬로우 쿼리가 없습니다.</td></tr>';
+    </tr>`).join("") : '<tr><td colspan="8" class="muted">슬로우 쿼리가 없습니다.</td></tr>';
 }
 
 // MCP 카드 — 도구 목록을 실제 /mcp 엔드포인트(tools/list)에서 받아와 그린다.

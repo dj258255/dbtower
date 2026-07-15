@@ -29,6 +29,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/instances/{id}")
@@ -62,18 +63,24 @@ public class InsightController {
      * load(점유율%) = 이 쿼리의 누적 수행시간 / 상위 N개 전체 수행시간.
      * 호출수가 아니라 "시간 점유율"로 랭킹해야 DB를 실제로 붙잡고 있는 쿼리가 보인다. (PMM QAN 방식)
      */
+    // callsPerSec는 스냅샷 차분으로만 낼 수 있어 이력이 없으면 null(화면 "—"). avg는 누적/호출수라 창이 필요 없다.
     public record QueryStatView(String queryId, String queryText, long calls,
-                                double totalTimeMs, long rowsExamined, double loadPct) {
+                                double totalTimeMs, long rowsExamined, double loadPct,
+                                double avgLatencyMs, double rowsExaminedAvg, Double callsPerSec) {
     }
 
     @GetMapping("/query-stats")
     public List<QueryStatView> queryStats(@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
         List<QueryStat> stats = operatorFactory.create(registryService.findById(id)).queryStats(limit);
         double totalTime = stats.stream().mapToDouble(QueryStat::totalTimeMs).sum();
+        Map<String, Double> qpsByQuery = baselineService.recentQps(id, LocalDateTime.now());
         return stats.stream()
                 .map(s -> new QueryStatView(s.queryId(), s.queryText(), s.calls(), s.totalTimeMs(),
                         s.rowsExamined(),
-                        totalTime == 0 ? 0 : Math.round(s.totalTimeMs() / totalTime * 10000) / 100.0))
+                        totalTime == 0 ? 0 : Math.round(s.totalTimeMs() / totalTime * 10000) / 100.0,
+                        s.calls() == 0 ? 0 : s.totalTimeMs() / s.calls(),          // 평균 Latency(ms)
+                        s.calls() == 0 ? 0 : (double) s.rowsExamined() / s.calls(), // 평균 Row Examined
+                        qpsByQuery.get(s.queryId())))                              // Call/sec — 이력 없으면 null
                 .toList();
     }
 
