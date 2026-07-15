@@ -53,12 +53,22 @@
 - 브랜딩 — 콘솔·로그인 헤더를 파비콘(favicon.svg) 로고 + "DBTower"로 통일하고 중복된 텍스트 "DB"
   마크 제거. 로그인 화면(미인증)에서도 파비콘이 뜨도록 SecurityConfig permitAll에 파비콘 자산 추가
 
+### Added
+- 모니터링 지표 통합 — Monitoring 탭에 CPU(%)·Connections 그래프 내장(Prometheus HTTP API 직접 조회,
+  insight/internal PrometheusClient + GET /api/instances/{id}/metrics). CPU는 node_exporter 호스트 수준,
+  Connections는 기종 exporter(MySQL threads_connected·PG numbackends). 미설정·미수집·미지원은 사유를
+  그대로 표기(기능 게이트 — Prometheus가 없어도 콘솔은 정상). compose에 node-exporter 추가.
+  시점 비교 드래그 그래프에 QPS ↔ CPU% 토글 — CPU 그래프 위에서 조회·비교 구간을 드래그로 선택
+
 ### Changed
 - 문제 쿼리 식별 표 컬럼 보강 — Top Query 기본뷰에 Call/sec(스냅샷 차분)·평균 Latency(ms)·Row Examined(Avg),
   Slow Query에 User@host·Lock(ms)·Rows_sent(MySQL slow_log), MongoDB Slow Query에 Plan(IXSCAN/COLLSCAN,
   system.profile planSummary) 컬럼 추가. 미확보 필드는 "—"로 정직 표기(Call/sec는 스냅샷 이력 없으면 "—")
 
 ### Fixed
+- 웹 콘솔 타임존 스큐 — 앱 JVM은 UTC 고정(C-6)인데 프론트가 브라우저 벽시계(KST 등)를 그대로 보내
+  활동 그래프·비교 조회가 9시간 미래의 빈 구간을 조회하던 것을 수정. 보낼 땐 toISOString(UTC),
+  받을 땐 Z를 부여해 진짜 instant로 — 차트 축·드래그 선택·입력 표시는 브라우저 로컬로 일관
 - 웹 콘솔 전체 백화 — 테이블 상세 추가 시 `const fmtBytes`가 기존 선언과 중복돼 app.js가 SyntaxError로
   파싱 중단, SPA가 아무것도 렌더하지 못하던 것을 수정(중복 제거, 음수 크기 "—" 표기는 헬퍼로 보존).
   Java 단위·curl API는 프론트 파싱을 안 거쳐 놓쳤고 브라우저 실물 확인이 잡음

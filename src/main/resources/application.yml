@@ -33,6 +33,11 @@ server:
   port: 8080
 
 dbtower:
+  # Prometheus HTTP API — Monitoring 탭 CPU·Connections 그래프와 (Phase 5) 디스크 예측의 시계열 소스.
+  # 미설정/연결 불가면 그래프만 "미수집"으로 정직 표기되고 나머지 기능엔 영향 없다(기능 게이트).
+  # 기본값은 데모 compose의 포트(19090) — datasource 기본값과 같은 데모 우선 원칙.
+  prometheus:
+    url: ${DBTOWER_PROMETHEUS_URL:http://localhost:19090}
   # 기종 정확성 (WS-C)
   oracle:
     # C-4: Oracle 통계(queryStats/slowQueries)를 볼 앱 스키마. 모니터 계정과 앱 스키마가 다를 때

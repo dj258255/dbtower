@@ -1787,3 +1787,42 @@ FK·CHECK가 원문 그대로 재조립됐고, idx 카디널리티는 customer_i
 ![MySQL Slow Query — User@host·Lock·Rows_sent](images/webui/33-slow-mysql-cols.png)
 
 ![MongoDB Slow Query — Plan(IXSCAN 초록·COLLSCAN 빨강)](images/webui/34-slow-mongo-plan.png)
+
+## 68. 모니터링 지표 통합 — CPU·Connections 그래프 내장 + CPU 그래프 드래그
+
+배경: 레퍼런스의 Monitoring 탭(CPU%·Connections·Query Activity)과 "CPU 그래프를 드래그해 시점을
+고른다"는 흐름 중, DBTower는 그래프를 Grafana 링크로만 위임하고 드래그 그래프도 QPS뿐이었다.
+exporter·Prometheus·Grafana가 이미 데모 스택에 있으므로 앱이 Prometheus HTTP API를 직접 조회해
+내장했다 — Phase 5(디스크 포화 예측)가 계획했던 PrometheusClient·node_exporter 기반이 이걸로 선구현됨.
+
+- **PrometheusClient**(insight/internal): query_range 조회. 기능 게이트 — 미설정(dbtower.prometheus.url
+  빈 값)·연결 불가·비정상 응답 전부 예외 없이 빈 결과("그래프 한 장 때문에 콘솔이 죽으면 안 된다").
+  단위 3건(미설정 게이트·연결 불가·URL 정규화).
+- **GET /api/instances/{id}/metrics**: CPU%(node_exporter, `100 - avg(rate(node_cpu_seconds_total{
+  mode="idle"}[3m]))*100` — 호스트 수준)·Connections(MySQL threads_connected · PG numbackends
+  {datname=해당 DB}). 미수집·미지원(MSSQL 등 표준 exporter 부재)은 사유를 note로 — 값을 지어내지 않는다.
+  PromQL 라벨 값은 따옴표·역슬래시 제거로 주입 차단.
+- **Monitoring 탭 Metric 카드**: CPU(%)·Connections 라인 차트 + "전체 화면으로 보기"(Grafana) 링크.
+- **시점 비교 CPU 드래그**: 드래그 차트에 QPS ↔ CPU% 토글 — 레퍼런스처럼 CPU 그래프 위에서 조회·비교
+  구간을 드래그로 선택한다.
+- compose에 node-exporter(19100) 추가, prometheus job `node` 수집.
+
+**함정 — 이 작업이 드러낸 기존 타임존 스큐 버그(중요)**: 앱 JVM은 C-6에서 의도적으로 UTC 고정인데
+(DbtowerApplication), 프론트가 브라우저 벽시계(KST)를 그대로 API에 보내 **활동 그래프·비교 조회가
+9시간 미래의 빈 구간을 조회**하고 있었다(metrics가 빈 결과를 돌려주는 원인을 파다 발견). 수정:
+(1) API로 보내는 시각은 `toApiTime`(toISOString, UTC)으로 변환 — 서버 LocalDateTime 파서가 Z를 무시하고
+UTC 벽시계를 읽으므로 JVM UTC 고정과 정합, (2) API가 주는 시각은 `parseApiTime`(Z 부여)으로 진짜
+instant화 — 차트 축·드래그 선택·입력 표시가 전부 브라우저 로컬로 일관. Slow Query Captured 헤더에
+"(UTC)" 명기(원문 문자열은 UTC 벽시계).
+
+**라이브 실측(8890, 데모 MySQL)**:
+- Metric 카드: CPU% 실선(node_exporter 기동 직후부터), Connections 3시간(1→7 변동), x축 KST 로컬 표기.
+- CPU 드래그 end-to-end: CPU% 토글 → 조회구간 드래그(12:46~12:52 KST 입력) → 비교구간 드래그(12:40~12:45)
+  → 비교 조회 성공 — "호출량 +75% / 평균 레이턴시 -5% / 읽은 행수 +113% / 신규 쿼리 10개", 하이라이트
+  주황·초록 2개. 입력은 KST, 전송은 UTC(03:46~03:52)로 정확 변환.
+- Prometheus 실측치: mysql threads_connected=7, pg numbackends(sample)=3, CPU 2.2~85%(rate 안정화 전 포함).
+- 단위 386건 그린.
+
+![Monitoring Metric 카드 — CPU%·Connections 내장 그래프](images/webui/35-metric-card.png)
+
+![시점 비교 — CPU 그래프 드래그 선택(조회 초록·비교 주황)](images/webui/36-compare-cpu-drag.png)

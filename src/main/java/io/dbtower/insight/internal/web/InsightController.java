@@ -7,6 +7,7 @@ import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.model.LatencyPercentile;
 import io.dbtower.operator.model.IndexAdvice;
 import io.dbtower.operator.model.DeadlockEvent;
+import io.dbtower.insight.internal.PrometheusClient;
 import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.DeepAnalyzer;
 import io.dbtower.analysis.DeepDiagnosis;
@@ -43,12 +44,14 @@ public class InsightController {
     private final DeepAnalyzer deepAnalyzer;
     private final QuerySnapshotRepository snapshotRepository;
     private final BaselineService baselineService;
+    private final PrometheusClient prometheusClient;
 
     public InsightController(RegistryService registryService, DbmsOperatorFactory operatorFactory,
                              ComparisonService comparisonService, RuleBasedAnalyzer analyzer,
                              AiAnalyzer aiAnalyzer, DeepAnalyzer deepAnalyzer,
                              QuerySnapshotRepository snapshotRepository,
-                             BaselineService baselineService) {
+                             BaselineService baselineService,
+                             PrometheusClient prometheusClient) {
         this.registryService = registryService;
         this.operatorFactory = operatorFactory;
         this.comparisonService = comparisonService;
@@ -57,6 +60,7 @@ public class InsightController {
         this.deepAnalyzer = deepAnalyzer;
         this.snapshotRepository = snapshotRepository;
         this.baselineService = baselineService;
+        this.prometheusClient = prometheusClient;
     }
 
     /**
@@ -277,6 +281,64 @@ public class InsightController {
                     calls == 0 ? 0 : Math.round(timeMs * 100.0 / calls) / 100.0));
         }
         return points;
+    }
+
+    public record MetricPoint(LocalDateTime time, double value) {
+    }
+
+    /** CPU·Connections 시계열 + 미수집 사유(정직 표기). 값이 있으면 note는 null. */
+    public record MetricsView(List<MetricPoint> cpu, String cpuNote,
+                              List<MetricPoint> connections, String connectionsNote) {
+    }
+
+    /**
+     * Monitoring 탭 Metric 그래프 (CPU%·Connections) — Prometheus exporter 시계열.
+     * CPU는 node_exporter의 호스트 수준 지표(데모 스택에선 DB 컨테이너들이 노드를 공유),
+     * Connections는 기종 exporter(MySQL threads_connected · PG numbackends). 표준 exporter가 없는
+     * 기종(MSSQL 등)과 미수집 상태는 값을 지어내지 않고 사유를 note로 돌려준다.
+     */
+    @GetMapping("/metrics")
+    public MetricsView metrics(
+            @PathVariable Long id,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+        var instance = registryService.findById(id);
+        if (!prometheusClient.configured()) {
+            String note = "Prometheus 미설정 — DBTOWER_PROMETHEUS_URL을 지정하면 수집됩니다";
+            return new MetricsView(List.of(), note, List.of(), note);
+        }
+        java.time.Instant f = from.atZone(java.time.ZoneId.systemDefault()).toInstant();
+        java.time.Instant t = to.atZone(java.time.ZoneId.systemDefault()).toInstant();
+        // 화면 폭 기준 ~200포인트가 되도록 step을 잡되 스크레이프 주기(15s) 밑으로는 내리지 않는다
+        int step = (int) Math.max(15, java.time.Duration.between(f, t).getSeconds() / 200);
+
+        List<MetricPoint> cpu = toMetricPoints(prometheusClient.queryRange(
+                "100 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[3m])) * 100", f, t, step));
+        String cpuNote = cpu.isEmpty() ? "node_exporter 미수집 — docker compose의 node-exporter 기동 필요(호스트 수준 CPU)" : null;
+
+        // 기종별 커넥션 지표 — PromQL 라벨 값엔 따옴표·역슬래시를 제거해 주입을 차단한다
+        String connQuery = switch (instance.getType()) {
+            case MYSQL -> "mysql_global_status_threads_connected";
+            case POSTGRESQL -> "sum(pg_stat_database_numbackends{datname=\""
+                    + instance.getDbName().replaceAll("[\"\\\\]", "") + "\"})";
+            default -> null;
+        };
+        if (connQuery == null) {
+            return new MetricsView(cpu, cpuNote, List.of(),
+                    instance.getType() + "은 표준 exporter가 없어 Connections 미지원(정직 표기)");
+        }
+        List<MetricPoint> conn = toMetricPoints(prometheusClient.queryRange(connQuery, f, t, step));
+        return new MetricsView(cpu, cpuNote, conn,
+                conn.isEmpty() ? "exporter 미수집 — 이 구간에 수집된 시계열이 없습니다" : null);
+    }
+
+    private List<MetricPoint> toMetricPoints(List<PrometheusClient.Point> points) {
+        return points.stream()
+                .map(p -> new MetricPoint(
+                        LocalDateTime.ofInstant(java.time.Instant.ofEpochSecond(p.epochSec()),
+                                java.time.ZoneId.systemDefault()),
+                        Math.round(p.value() * 100) / 100.0))
+                .toList();
     }
 
     /**

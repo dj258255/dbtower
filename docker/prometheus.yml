@@ -16,3 +16,8 @@ scrape_configs:
   - job_name: postgres
     static_configs:
       - targets: ["postgres-exporter:9187"]
+
+  # 호스트 수준(CPU·디스크) — 웹 콘솔 Monitoring 탭 CPU 그래프 + 디스크 예측(Phase 5)의 소스
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]

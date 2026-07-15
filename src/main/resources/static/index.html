@@ -77,10 +77,12 @@
       <button id="btn-compare" class="btn btn-accent">비교 조회</button>
     </div>
 
-    <!-- 활동 그래프 + 드래그 구간 선택 -->
+    <!-- 활동 그래프 + 드래그 구간 선택 (QPS ↔ CPU 토글 — 레퍼런스는 CPU 그래프에서 드래그) -->
     <div class="chart-head">
-      <span>그래프로 구간 선택하기 — QPS</span>
+      <span>그래프로 구간 선택하기 — <span id="chart-metric-label">QPS</span></span>
       <span class="chart-tools">
+        <button id="metric-qps" class="btn btn-small active">QPS</button>
+        <button id="metric-cpu" class="btn btn-small">CPU %</button>
         <button id="mode-target" class="btn btn-small btn-target">조회구간 드래그</button>
         <button id="mode-base" class="btn btn-small btn-base">비교구간 드래그</button>
       </span>
@@ -167,6 +169,20 @@
     </div>
 
     <div id="tab-monitor" class="tab-body" hidden>
+      <div class="monitor-card metric-card">
+        <h3>Metric <span class="hint">(Prometheus exporter 시계열 — CPU는 호스트 수준 node_exporter, Connections는 기종 exporter · 미수집은 사유를 그대로 표기)</span>
+          <a class="metric-full-link" href="http://localhost:13000" target="_blank" rel="noopener">전체 화면으로 보기 ↗</a></h3>
+        <div class="metric-chart-box">
+          <h4>CPU (%)</h4>
+          <svg id="cpu-chart" width="100%" height="140" preserveAspectRatio="none"></svg>
+          <div id="cpu-empty" class="muted center" hidden></div>
+        </div>
+        <div class="metric-chart-box">
+          <h4>Connections</h4>
+          <svg id="conn-chart" width="100%" height="140" preserveAspectRatio="none"></svg>
+          <div id="conn-empty" class="muted center" hidden></div>
+        </div>
+      </div>
       <div class="monitor-card diagnose-card">
         <h3>자연어 근본원인 진단 <span class="hint">(AI가 읽기 도구를 스스로 연쇄 호출해 원인을 서술 — 대상 DB는 바꾸지 않습니다)</span></h3>
         <div class="diagnose-input">

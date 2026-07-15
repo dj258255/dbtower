@@ -484,3 +484,10 @@ input[type="datetime-local"] {
 .td-stat { display: flex; justify-content: space-between; max-width: 340px; font-size: 12px; padding: 2px 0; }
 .td-idx-card { padding: 6px 8px; margin: 4px 0; background: var(--surface-2, #f9fafb); border-radius: 6px; font-size: 12px; }
 .td-note { font-size: 11px; margin-top: 6px; font-style: italic; }
+
+/* Monitoring 탭 Metric 카드 — CPU%·Connections 시계열 (레퍼런스의 모니터링 지표 통합 대응) */
+.metric-card h3 { display: flex; align-items: center; gap: 8px; }
+.metric-full-link { margin-left: auto; font-size: 12px; font-weight: 600; }
+.metric-chart-box { margin-top: 10px; }
+.metric-chart-box h4 { font-size: 12.5px; margin: 0 0 4px; color: var(--muted); }
+.metric-chart-box svg { display: block; background: #fff; border: 1px solid #eef0f3; border-radius: 6px; }

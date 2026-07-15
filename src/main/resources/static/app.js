@@ -25,6 +25,8 @@ const state = {
   instance: null,      // 선택된 인스턴스 {id, name, type, ...}
   instances: [],       // 등록된 인스턴스 전체 목록 (Schema Diff 드롭다운용)
   activity: [],        // [{time, qps, avgLatencyMs}]
+  metricsCpu: [],      // [{time, value}] — Prometheus CPU% (드래그 차트 CPU 모드 + Metric 카드)
+  chartMetric: "qps",  // 드래그 차트의 데이터: 'qps' | 'cpu'
   dragMode: null,      // 'target' | 'base'
   selections: {},      // {target: {from: Date, to: Date}, base: {...}}
   compareMode: false,  // 마지막 조회가 비교 조회였는지
@@ -44,6 +46,12 @@ const toLocalInput = (date) => {
   const p = (n) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}T${p(date.getHours())}:${p(date.getMinutes())}`;
 };
+// API로 보내는 시각 — 서버 JVM은 UTC 고정(DbtowerApplication)이라, 브라우저 벽시계(예: KST)를
+// 그대로 보내면 9시간 스큐로 빈 구간을 조회한다. 화면 입력은 로컬로 보여주되 호출 직전 UTC로 변환한다.
+const toApiTime = (v) => new Date(v).toISOString();
+// API가 주는 시각 — 서버 LocalDateTime은 UTC 벽시계인데 오프셋 표기가 없어, 그대로 new Date()에 넣으면
+// 브라우저 로컬로 오파싱된다. Z를 붙여 진짜 instant로 만들고, 표시는 브라우저 로컬로 통일한다.
+const parseApiTime = (s) => new Date(/Z$|[+-]\d\d:?\d\d$/.test(s) ? s : s + "Z");
 const fmtNum = (v, digits = 2) => v == null ? "-" : Number(v).toLocaleString("ko-KR", { maximumFractionDigits: digits });
 
 // 바이트를 사람이 읽는 단위로 (파티션 크기 등). 1024 진법, 소수 한 자리.
@@ -136,7 +144,7 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
-  await Promise.all([loadActivity(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks()]);
+  await Promise.all([loadActivity(), loadMetrics(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks()]);
 }
 
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
@@ -381,19 +389,78 @@ async function loadBackupFreshness() {
 // ---------- 활동 그래프 (드래그 구간 선택) ----------
 async function loadActivity() {
   const now = new Date();
-  const from = toLocalInput(new Date(now - 3 * 3600 * 1000)); // 최근 3시간
-  const to = toLocalInput(now);
+  const from = toApiTime(new Date(now - 3 * 3600 * 1000)); // 최근 3시간
+  const to = toApiTime(now);
   state.activity = await api(`/api/instances/${state.instance.id}/activity?from=${from}&to=${to}`);
   drawChart();
 }
 
+// Metric 그래프 (CPU%·Connections) — Prometheus exporter 시계열. 미수집은 사유를 그대로 보여준다.
+async function loadMetrics() {
+  const now = new Date();
+  const from = toApiTime(new Date(now - 3 * 3600 * 1000));
+  const to = toApiTime(now);
+  let m;
+  try {
+    m = await api(`/api/instances/${state.instance.id}/metrics?from=${from}&to=${to}`);
+  } catch (e) {
+    m = { cpu: [], cpuNote: `조회 실패: ${e.message}`, connections: [], connectionsNote: `조회 실패: ${e.message}` };
+  }
+  state.metricsCpu = m.cpu ?? [];
+  drawSimpleChart("#cpu-chart", "#cpu-empty", m.cpu ?? [], "#e5533d", m.cpuNote);
+  drawSimpleChart("#conn-chart", "#conn-empty", m.connections ?? [], "#6672f5", m.connectionsNote);
+  if (state.chartMetric === "cpu") drawChart();   // 드래그 차트가 CPU 모드면 새 데이터로 다시 그린다
+}
+
+// 단순 라인 차트 (Metric 카드용) — 드래그 차트와 달리 선택 하이라이트가 없다
+function drawSimpleChart(svgSel, emptySel, pts, color, note) {
+  const svg = $(svgSel);
+  const empty = $(emptySel);
+  const W = 1000, H = 140, padL = 46, padR = 10, padT = 10, padB = 20;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  if (!pts || pts.length < 2) {
+    svg.innerHTML = "";
+    empty.hidden = false;
+    empty.textContent = note ?? "이 구간에 수집된 시계열이 없습니다";
+    return;
+  }
+  empty.hidden = true;
+  const t0 = parseApiTime(pts[0].time).getTime();
+  const t1 = parseApiTime(pts[pts.length - 1].time).getTime();
+  const maxV = Math.max(...pts.map((p) => p.value), 1);
+  const x = (t) => padL + (t - t0) / Math.max(t1 - t0, 1) * (W - padL - padR);
+  const y = (v) => H - padB - v / maxV * (H - padT - padB);
+  const yTicks = [0, 0.5, 1].map((r) => {
+    const v = maxV * r;
+    return `<line x1="${padL}" y1="${y(v)}" x2="${W - padR}" y2="${y(v)}" stroke="#eef0f3"/>
+            <text x="${padL - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" fill="#7b8494">${fmtNum(v, v >= 10 ? 0 : 1)}</text>`;
+  }).join("");
+  const xTicks = [0, 1 / 3, 2 / 3, 1].map((r) => {
+    const d = new Date(t0 + (t1 - t0) * r);
+    const label = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    return `<text x="${x(d.getTime())}" y="${H - 6}" text-anchor="middle" font-size="10" fill="#7b8494">${label}</text>`;
+  }).join("");
+  const line = pts.map((p, i) =>
+    `${i === 0 ? "M" : "L"}${x(parseApiTime(p.time).getTime()).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
+  svg.innerHTML = `${yTicks}${xTicks}<path d="${line}" fill="none" stroke="${color}" stroke-width="1.8"/>`;
+}
+
 const CHART = { w: 1000, h: 180, padL: 46, padR: 10, padT: 12, padB: 22 };
 
+// 드래그 차트의 데이터 시리즈 — QPS(스냅샷 차분) 또는 CPU%(Prometheus). 레퍼런스는 CPU 그래프에서 드래그한다.
+// t는 parseApiTime을 거친 진짜 epoch(ms) — 축 라벨·드래그 선택이 브라우저 로컬로 일관되게 나온다.
+function chartSeries() {
+  if (state.chartMetric === "cpu") {
+    return (state.metricsCpu ?? []).map((p) => ({ t: parseApiTime(p.time).getTime(), v: p.value }));
+  }
+  return state.activity.map((p) => ({ t: parseApiTime(p.time).getTime(), v: p.qps }));
+}
+
 function chartScales() {
-  const pts = state.activity;
-  const t0 = new Date(pts[0].time).getTime();
-  const t1 = new Date(pts[pts.length - 1].time).getTime();
-  const maxQ = Math.max(...pts.map((p) => p.qps), 1);
+  const pts = chartSeries();
+  const t0 = pts[0].t;
+  const t1 = pts[pts.length - 1].t;
+  const maxQ = Math.max(...pts.map((p) => p.v), 1);
   const x = (t) => CHART.padL + (t - t0) / Math.max(t1 - t0, 1) * (CHART.w - CHART.padL - CHART.padR);
   const y = (q) => CHART.h - CHART.padB - q / maxQ * (CHART.h - CHART.padT - CHART.padB);
   const invX = (px) => t0 + (px - CHART.padL) / (CHART.w - CHART.padL - CHART.padR) * (t1 - t0);
@@ -402,11 +469,13 @@ function chartScales() {
 
 function drawChart() {
   const svg = $("#activity-chart");
-  const pts = state.activity;
+  const pts = chartSeries();
   svg.setAttribute("viewBox", `0 0 ${CHART.w} ${CHART.h}`);
   if (pts.length < 2) {
     svg.innerHTML = "";
     $("#chart-empty").hidden = false;
+    $("#chart-empty").textContent = state.chartMetric === "cpu"
+      ? "CPU 시계열이 없습니다 (node_exporter/Prometheus 미수집)" : "이 구간에 수집된 스냅샷이 없습니다";
     return;
   }
   $("#chart-empty").hidden = true;
@@ -432,7 +501,7 @@ function drawChart() {
   }).join("");
 
   const line = pts.map((p, i) =>
-    `${i === 0 ? "M" : "L"}${s.x(new Date(p.time).getTime()).toFixed(1)},${s.y(p.qps).toFixed(1)}`).join(" ");
+    `${i === 0 ? "M" : "L"}${s.x(p.t).toFixed(1)},${s.y(p.v).toFixed(1)}`).join(" ");
 
   svg.innerHTML = `
     ${yTicks}${xTicks}
@@ -452,7 +521,7 @@ function setupChartDrag() {
   };
 
   svg.addEventListener("pointerdown", (ev) => {
-    if (!state.dragMode || state.activity.length < 2) return;
+    if (!state.dragMode || chartSeries().length < 2) return;
     dragStart = pxOf(ev);
     svg.setPointerCapture(ev.pointerId);
   });
@@ -475,12 +544,23 @@ function setupChartDrag() {
 
   $("#mode-target").addEventListener("click", () => toggleDragMode("target"));
   $("#mode-base").addEventListener("click", () => toggleDragMode("base"));
+  $("#metric-qps").addEventListener("click", () => setChartMetric("qps"));
+  $("#metric-cpu").addEventListener("click", () => setChartMetric("cpu"));
 }
 
 function toggleDragMode(mode) {
   state.dragMode = state.dragMode === mode ? null : mode;
   $("#mode-target").classList.toggle("active", state.dragMode === "target");
   $("#mode-base").classList.toggle("active", state.dragMode === "base");
+}
+
+// 드래그 차트 메트릭 전환 — 구간 선택(드래그)은 어느 그래프에서든 동일하게 동작한다
+function setChartMetric(metric) {
+  state.chartMetric = metric;
+  $("#metric-qps").classList.toggle("active", metric === "qps");
+  $("#metric-cpu").classList.toggle("active", metric === "cpu");
+  $("#chart-metric-label").textContent = metric === "cpu" ? "CPU %" : "QPS";
+  drawChart();
 }
 
 // ---------- Top Query: 단순 조회 ----------
@@ -510,7 +590,7 @@ async function runCompare() {
   const p = (id) => $(id).value;
   if (!p("#base-from") || !p("#base-to") || !p("#target-from") || !p("#target-to")) return;
   closeDetail();
-  const qs = `baseFrom=${p("#base-from")}&baseTo=${p("#base-to")}&targetFrom=${p("#target-from")}&targetTo=${p("#target-to")}`;
+  const qs = `baseFrom=${toApiTime(p("#base-from"))}&baseTo=${toApiTime(p("#base-to"))}&targetFrom=${toApiTime(p("#target-from"))}&targetTo=${toApiTime(p("#target-to"))}`;
   let result;
   try {
     result = await api(`/api/instances/${state.instance.id}/compare?${qs}`);
@@ -911,7 +991,7 @@ async function loadSlow() {
   const table = $("#slow-table");
   // 기종별로 확보 가능한 필드가 달라 미확보는 "—"로 표기(MySQL: User@host·Lock·Rows_sent, Mongo: Plan)
   table.querySelector("thead").innerHTML = `
-    <tr><th>Captured</th><th>User@host</th><th class="num">Query(ms)</th><th class="num">Lock(ms)</th>
+    <tr><th>Captured (UTC)</th><th>User@host</th><th class="num">Query(ms)</th><th class="num">Lock(ms)</th>
         <th class="num">Rows_sent</th><th class="num">Rows_examined</th><th>Plan</th><th>Query</th></tr>`;
   const dash = (v) => (v == null || v < 0) ? '<span class="muted">—</span>' : null;
   table.querySelector("tbody").innerHTML = rows.length ? rows.map((q) => `
