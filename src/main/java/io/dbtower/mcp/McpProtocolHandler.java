@@ -121,6 +121,15 @@ public final class McpProtocolHandler {
                 args -> get("/api/instances/" + args.get("instanceId").asLong() + "/activity"
                         + "?from=" + enc(args.get("from").asText()) + "&to=" + enc(args.get("to").asText()))));
 
+        // 심화 아크 5 — "그 시각 CPU가 실제로 높았나"를 AI가 스스로 확인하는 증거 수집 도구
+        tools.put("metrics", new Tool(
+                "호스트 CPU%·DB Connections 시계열(Prometheus exporter) — 부하 원인 진단 시 시스템 자원 관점의 증거. "
+                        + "미수집이면 사유가 note로 온다(지어내지 않음).",
+                schema(Map.of("instanceId", intProp("대상 인스턴스 id"),
+                        "from", strProp("시작 (ISO LocalDateTime)"), "to", strProp("끝"))),
+                args -> get("/api/instances/" + args.get("instanceId").asLong() + "/metrics"
+                        + "?from=" + enc(args.get("from").asText()) + "&to=" + enc(args.get("to").asText()))));
+
         tools.put("explain", new Tool(
                 "실행계획 + 규칙 기반 비효율 지적. SQL의 파라미터 자리(?, $1)는 실제 값으로 치환해서 넘겨야 한다.",
                 schema(Map.of("instanceId", intProp("대상 인스턴스 id"), "sql", strProp("실행계획을 볼 SQL"))),

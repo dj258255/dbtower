@@ -96,6 +96,10 @@ async function loadInstances() {
       </div>
       <div class="instance-host">${esc(i.host)}:${i.port} / ${esc(i.dbName)}
         <span class="health-ms" id="healthms-${i.id}"></span></div>
+      ${i.teamLabel || i.consoleUrl ? `<div class="instance-meta">
+        ${i.teamLabel ? `<span class="team-badge" title="담당 팀/Slack">${esc(i.teamLabel)}</span>` : ""}
+        ${i.consoleUrl && /^https?:\/\//.test(i.consoleUrl) ? `<a class="console-link" href="${esc(i.consoleUrl)}" target="_blank" rel="noopener" title="콘솔 딥링크(PI·Grafana 등)">콘솔 ↗</a>` : ""}
+      </div>` : ""}
     </div>`).join("");
 
   box.querySelectorAll(".instance-card").forEach((card) => {
@@ -117,8 +121,25 @@ async function loadInstances() {
     });
   });
   // 첫 인스턴스 자동 선택 — 진입 즉시 대시보드가 차 있게
+  // 진단 딥링크 (심화 아크 5) — 알림의 "진단" 링크로 열리면 해당 인스턴스를 선택하고
+  // Monitoring 탭의 자연어 진단 입력을 프리필한다(실행은 사람이 — 열리자마자 AI를 돌리지 않는다)
+  const params = new URLSearchParams(location.search);
+  const deepId = params.get("instance");
+  const deepQ = params.get("diagnose");
+  const target = deepId ? list.find((i) => String(i.id) === deepId) : null;
   const first = box.querySelector(".instance-card");
-  if (first) selectInstance(list[0], first);
+  if (target) {
+    selectInstance(target, box.querySelector(`.instance-card[data-id="${target.id}"]`) ?? first);
+    if (deepQ) {
+      document.querySelector('.tab[data-tab="monitor"]').click();
+      const input = $("#diagnose-question");
+      input.value = deepQ;
+      input.scrollIntoView({ block: "center" });
+      input.focus();
+    }
+  } else if (first) {
+    selectInstance(list[0], first);
+  }
   // 헬스는 카드 렌더 후 비동기로 채운다 — 죽은 인스턴스가 목록 로딩을 막지 않게
   list.forEach(async (i) => {
     try {

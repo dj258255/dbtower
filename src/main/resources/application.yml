@@ -33,6 +33,9 @@ server:
   port: 8080
 
 dbtower:
+  # 웹 콘솔의 외부 접근 주소 (심화 아크 5 — 알림 → 진단 딥링크). 설정하면 회귀 알림에
+  # "콘솔에서 진단" 링크(인스턴스 선택 + 자연어 진단 질문 프리필)가 붙는다. 빈 값이면 링크 생략.
+  base-url: ${DBTOWER_BASE_URL:}
   # Prometheus HTTP API — Monitoring 탭 CPU·Connections 그래프와 (Phase 5) 디스크 예측의 시계열 소스.
   # 미설정/연결 불가면 그래프만 "미수집"으로 정직 표기되고 나머지 기능엔 영향 없다(기능 게이트).
   # 기본값은 데모 compose의 포트(19090) — datasource 기본값과 같은 데모 우선 원칙.

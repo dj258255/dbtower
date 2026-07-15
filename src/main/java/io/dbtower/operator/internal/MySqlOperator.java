@@ -1,6 +1,7 @@
 package io.dbtower.operator.internal;
 
 import io.dbtower.operator.model.BackupPolicy;
+import io.dbtower.operator.model.StatsHealth;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.model.ColumnSchema;
 import io.dbtower.operator.ConnectionPools;
@@ -890,5 +891,38 @@ public class MySqlOperator extends AbstractJdbcOperator {
     /** 문자열을 최대 길이로 자른다(초과분은 버림) — 데드락 텍스트 컷 공통 규칙. */
     private static String cut(String s, int max) {
         return s.length() > max ? s.substring(0, max) : s;
+    }
+
+    /**
+     * 통계 수집 건강 실측 (심화 아크 5) — digest 테이블 포화율·소실 카운터·PS 사각의 세 재료.
+     * Performance_schema_digest_lost > 0이면 신규 쿼리 통계가 이미 소실 중(신규 쿼리 감지 부분 무력화),
+     * prepared_statements_instances는 digest에 안 잡히는 PS 실행(EXECUTE 문으로만 집계)의 보완 소스다
+     * — 이 테이블에는 SQL 원문이 남는다. 전부 읽기 전용 카탈로그 조회.
+     */
+    @Override
+    public StatsHealth statsHealth() {
+        try {
+            Long rows = jdbc().queryForObject(
+                    "SELECT COUNT(*) FROM performance_schema.events_statements_summary_by_digest", Long.class);
+            Long limit = jdbc().queryForObject("SELECT @@performance_schema_digests_size", Long.class);
+            Long lost = jdbc().queryForObject(
+                    "SELECT VARIABLE_VALUE FROM performance_schema.global_status "
+                            + "WHERE VARIABLE_NAME = 'Performance_schema_digest_lost'", Long.class);
+            // PS 실행은 digest에 EXECUTE 문으로만 남아 Top Query에서 익명 부하가 된다(실측 근거는 VERIFICATION)
+            Map<String, Object> ps = jdbc().queryForMap(
+                    "SELECT COUNT(*) AS cnt, COALESCE(SUM(COUNT_EXECUTE), 0) AS execs "
+                            + "FROM performance_schema.prepared_statements_instances");
+            return new StatsHealth(
+                    rows == null ? -1 : rows,
+                    limit == null ? -1 : limit,
+                    lost == null ? -1 : lost,
+                    ((Number) ps.get("cnt")).longValue(),
+                    ((Number) ps.get("execs")).longValue(),
+                    true,
+                    "digest=events_statements_summary_by_digest, 소실=Performance_schema_digest_lost, "
+                            + "PS=prepared_statements_instances");
+        } catch (DataAccessException e) {
+            throw new OperatorException("MySQL 통계 수집 건강 조회 실패: " + e.getMessage(), e);
+        }
     }
 }

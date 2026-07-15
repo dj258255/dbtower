@@ -49,7 +49,7 @@ public class DiagnosisService {
     static final Set<String> READ_ONLY_TOOLS = Set.of(
             "list_instances", "health", "query_stats", "slow_queries", "compare",
             "activity", "explain", "wait_events", "replication", "sessions",
-            "schema", "schema_diff");
+            "schema", "schema_diff", "metrics");
 
     /** 도구 결과를 다음 프롬프트에 넣을 때 상한 — 큰 결과가 컨텍스트를 폭주시키지 않게 자른다. */
     private static final int OBSERVATION_CAP = 6000;

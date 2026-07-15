@@ -41,7 +41,7 @@ class RegressionDetectorTest {
     @BeforeEach
     void setUp() {
         detector = new RegressionDetector(instanceRepository, comparisonService, notifier, aiAnalyzer,
-                new QueryMasker(true, false), planChangeTracker, 5, 15, 30);
+                new QueryMasker(true, false), planChangeTracker, 5, 15, 30, "");
         DatabaseInstance instance = new DatabaseInstance(
                 "test-db", DbmsType.MYSQL, "127.0.0.1", 3306, "sample", "root", "pw");
         when(instanceRepository.findAll()).thenReturn(List.of(instance));

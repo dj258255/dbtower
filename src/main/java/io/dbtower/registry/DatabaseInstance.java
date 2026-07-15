@@ -69,6 +69,22 @@ public class DatabaseInstance {
     @Column(nullable = false)
     private boolean collectionEnabled = true;
 
+    /**
+     * 담당 팀/Slack 채널 라벨 (심화 아크 4 — 레퍼런스 "Slack Group" 대응). 웹훅 알림·상세 패널에
+     * "이 DB는 누구 소관인가"를 표시한다. Phase 3 LBAC(팀 스코핑)가 같은 컬럼을 재사용할 예정.
+     * null=미지정(강제 아님 — 표기만 생략).
+     */
+    @Column(length = 100)
+    private String teamLabel;
+
+    /**
+     * 콘솔 딥링크 (레퍼런스 "AWS Link: Performance Insight" 대응) — 조직이 쓰는 외부 콘솔 URL.
+     * RDS면 PI, 셀프호스트면 Grafana, 혹은 내부 위키 — AWS SDK 연동 대신 URL 일반화로 흡수한다.
+     * http/https만 허용(등록 API에서 검증) — 화면 링크(href)로 들어가므로 스킴 제한이 곧 방어선.
+     */
+    @Column(length = 500)
+    private String consoleUrl;
+
     public DatabaseInstance(String name, DbmsType type, String host, int port,
                             String dbName, String username, String password) {
         this(name, type, host, port, dbName, username, password, false);
@@ -105,5 +121,11 @@ public class DatabaseInstance {
     /** 수집 활성/격리 토글 (Phase F). 문제 인스턴스를 삭제하지 않고 관제에서 잠시 뺀다. */
     public void setCollectionEnabled(boolean enabled) {
         this.collectionEnabled = enabled;
+    }
+
+    /** 담당 라벨·콘솔 링크 갱신 (심화 아크 4) — 접속 정보와 별개의 메타라 updateConnection과 분리. */
+    public void updateMeta(String teamLabel, String consoleUrl) {
+        this.teamLabel = teamLabel;
+        this.consoleUrl = consoleUrl;
     }
 }

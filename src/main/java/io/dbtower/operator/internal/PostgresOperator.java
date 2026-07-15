@@ -1,6 +1,7 @@
 package io.dbtower.operator.internal;
 
 import io.dbtower.operator.model.BackupPolicy;
+import io.dbtower.operator.model.StatsHealth;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.model.ColumnSchema;
 import io.dbtower.operator.ConnectionPools;
@@ -1292,6 +1293,37 @@ public class PostgresOperator extends AbstractJdbcOperator {
                     : new ReplicationState("STANDALONE", 0, "복제 구성 없음");
         } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 복제 상태 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 통계 수집 건강 실측 (심화 아크 5) — PG는 digest 포화 소실이 없는 대신 pg_stat_statements.max
+     * 초과 시 덜 쓰인 쿼리를 evict한다. dealloc(누적 evict 횟수)이 증가 중이면 저빈도 쿼리의
+     * 시점 비교·베이스라인 신뢰도가 떨어진다. pg_stat_statements_info는 PG13+ — 없으면 -1(위장 금지).
+     * PS 사각(ps*)은 PG에 해당 없음(-1): 정규화가 파스 트리 기반이라 PS도 동일 queryid로 집계된다.
+     */
+    @Override
+    public StatsHealth statsHealth() {
+        try {
+            Long rows = jdbc().queryForObject("SELECT COUNT(*) FROM pg_stat_statements", Long.class);
+            Long max = jdbc().queryForObject(
+                    "SELECT setting::bigint FROM pg_settings WHERE name = 'pg_stat_statements.max'", Long.class);
+            long dealloc;
+            try {
+                Long d = jdbc().queryForObject("SELECT dealloc FROM pg_stat_statements_info", Long.class);
+                dealloc = d == null ? -1 : d;
+            } catch (DataAccessException e) {
+                dealloc = -1;   // PG12 이하 — 뷰 자체가 없어 미확보로 정직 표기
+            }
+            return new StatsHealth(
+                    rows == null ? -1 : rows,
+                    max == null ? -1 : max,
+                    dealloc,
+                    -1, -1,
+                    true,
+                    "stats=pg_stat_statements, evict=pg_stat_statements_info.dealloc(누적)");
+        } catch (DataAccessException e) {
+            throw new OperatorException("PostgreSQL 통계 수집 건강 조회 실패: " + e.getMessage(), e);
         }
     }
 }

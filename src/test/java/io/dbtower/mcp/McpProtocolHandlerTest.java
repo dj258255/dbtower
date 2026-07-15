@@ -44,7 +44,7 @@ class McpProtocolHandlerTest {
     }
 
     @Test
-    void 도구_13종이_이름과_입력_스키마를_갖고_노출된다() throws Exception {
+    void 도구_14종이_이름과_입력_스키마를_갖고_노출된다() throws Exception {
         ObjectNode response = handler.handle(parse(
                 "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}"));
 
@@ -58,12 +58,12 @@ class McpProtocolHandlerTest {
         assertTrue(names.containsAll(List.of(
                 "list_instances", "health", "query_stats", "slow_queries",
                 "compare", "activity", "explain", "wait_events", "replication", "sessions",
-                "schema", "partitions", "schema_diff")));
+                "schema", "partitions", "schema_diff", "metrics")));
         // 파티션 조회(partitions, D5)는 읽기라 MCP로 노출한다 — 조회 기능이라 MCP 노출이 자연스럽다
         assertTrue(names.contains("partitions"), "파티션 조회는 MCP 도구로 노출한다");
         // 세션 조회(sessions)는 읽기라 노출하지만, 세션 종료(kill)는 위험해 MCP 도구로 만들지 않는다
         assertFalse(names.contains("kill_session"), "kill은 MCP로 노출하지 않는다");
-        assertEquals(13, names.size());
+        assertEquals(14, names.size());   // 심화 아크 5 — metrics(CPU·Connections) 추가
     }
 
     @Test

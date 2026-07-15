@@ -291,6 +291,8 @@ record TableDetail(String table, String engine, long rowCount, long dataBytes, l
 
 ### 남은 조각 — 착수 명세 (Opus)
 
+> 인스턴스 메타(팀 라벨·console_url V12)와 데이터 마스킹은 **구현 완료**(VERIFICATION 70·71절). CloudWatch·소소 잔여만 남음.
+
 | 항목 | 명세 | 검증 기준 |
 |---|---|---|
 | 인스턴스 메타: 담당팀/Slack 라벨 + 콘솔 딥링크 | 레퍼런스 활용사례 화면의 "Slack Group: 팀명 / AWS Link: PI" 대응. 등록 정보에 선택 필드 2개(V12): `team_label`(자유 문자열 — **Phase 3 LBAC의 team_label과 같은 컬럼으로 설계해 이중 마이그레이션 방지**), `console_url`(자유 URL — Grafana 대시보드·AWS PI·내부 위키 등 조직이 쓰는 콘솔 아무거나). 상세 패널 상단에 "담당: {team} · 콘솔 열기 ↗" 표시, 회귀/문의 웹훅에도 라벨 포함(어느 팀 채널로 갈 문제인지). AWS SDK 연동이 아니라 **URL 일반화로 PI 딥링크 패리티를 흡수**한다 — RDS 쓰는 조직은 PI URL을, 셀프호스트는 Grafana URL을 넣으면 된다 | 등록 폼에 두 필드 입력 → 상세 패널·웹훅 메시지에 라벨·링크 표시. 미입력 시 표기 생략(강제 아님) |
@@ -299,6 +301,8 @@ record TableDetail(String table, String engine, long rowCount, long dataBytes, l
 | 데이터 마스킹 (Phase 2 잔여, 진행 중) | analysis/QueryMasker(리터럴 전용 문자 스캐너 — 문자열 '...'·숫자·$$...$$는 ?로, 식별자·따옴표 식별자·$1·주석은 보존) 작성 완료. 남은 배선 4곳: RegressionDetector.java:110(d.queryText — 웹훅+AI 프롬프트 공통 상류), InquiryService submit 상단(req.sql 1회 마스킹 후 embed·본문·스키마 요약 공유), InsightController /ai-analysis의 req.sql (mask-ai-prompt 토글, 기본 false — AI 정확도 트레이드오프 명시), DiagnosisService:158-159(MCP arguments.sql + observation snippet). MySQL/PG 회귀 텍스트는 이미 정규화라 멱등, Oracle/Mongo·사용자 입력·LLM 작성 경로가 실수요 | 리터럴 치환 단위(이스케이프·달러 인용·16진·식별자 꼬리 숫자 보존), 문의 embed 실측에서 리터럴 가려짐, mask-ai-prompt 기본 false 확인 |
 
 ## 심화 아크 5 — MCP 채널 루프·digest 위생 (레퍼런스 2부 대조, 2026-07-15)
+
+> **구현 완료** (VERIFICATION 70·71절): 데이터 마스킹 배선 4곳, StatsCollectionAdvisor(digest 포화·소실·PS 사각 실측 + PG dealloc), 알림 진단 딥링크(dbtower.base-url·질문 프리필), metrics MCP 도구(14종). 인스턴스 팀 라벨+console_url(V12)도 함께 완료. 잔여: Slack/Discord 봇 인바운드(후속 선택 모듈), Slow KST 표시·Mongo 샘플링(소소). 아래 명세는 기록.
 
 레퍼런스 발표 2부(MCP 활용 4장 + Lessons Learned 5장)를 장 단위로 대조한 결과. 대조 과정에서
 레퍼런스의 교훈 두 개(digest 포화·Prepared Statement 사각)가 **DBTower에도 실재함을 데모 DB로

@@ -7,6 +7,7 @@ import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.TableDetail;
+import io.dbtower.operator.model.StatsHealth;
 import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.model.ReplicationSlot;
@@ -165,6 +166,15 @@ public interface DbmsOperator {
      */
     default TableDetail tableDetail(String tableName) {
         return TableDetail.unsupported(tableName, "이 기종은 테이블 상세를 아직 지원하지 않습니다");
+    }
+
+    /**
+     * 쿼리 통계 수집 자체의 건강 상태 (심화 아크 5) — digest/statements 테이블 포화·소실(evict)·
+     * Prepared Statement 사각을 실측한다. "수집이 조용히 거짓말하고 있지 않은가"가 관심사라,
+     * 지원 기종(MySQL·PostgreSQL)이 아니면 위장 없이 unsupported를 돌려준다.
+     */
+    default StatsHealth statsHealth() {
+        return StatsHealth.unsupported("이 기종은 통계 수집 건강 점검을 지원하지 않습니다");
     }
 
     /**

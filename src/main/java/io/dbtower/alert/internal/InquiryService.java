@@ -93,6 +93,10 @@ public class InquiryService {
         List<WebhookNotifier.Embed.Field> fields = new java.util.ArrayList<>();
         fields.add(new WebhookNotifier.Embed.Field("요청자", principal, true));
         fields.add(new WebhookNotifier.Embed.Field("인스턴스", instance.getName() + " (" + instance.getType() + ")", true));
+        // 담당 팀 — 문의가 어느 팀 소관 DB에 대한 것인지 embed 자체가 말하게 한다(심화 아크 4)
+        if (hasText(instance.getTeamLabel())) {
+            fields.add(new WebhookNotifier.Embed.Field("담당", instance.getTeamLabel(), true));
+        }
         fields.add(new WebhookNotifier.Embed.Field("쿼리", codeBlock("sql", blankToDash(req.sql())), false));
         if (hasText(schemaSummary)) {
             fields.add(new WebhookNotifier.Embed.Field("관련 테이블 구조", codeBlock("", schemaSummary), false));

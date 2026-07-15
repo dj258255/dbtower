@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -38,7 +39,12 @@ public class RegistryController {
             @NotBlank String username,
             @NotBlank String password,
             // TLS 강제(선택) — 미지정(null)이면 false. 기존 IaC 페이로드 하위 호환
-            Boolean useTls) {
+            Boolean useTls,
+            // 담당 팀/Slack 라벨(선택) — 알림·상세에 "누구 소관인가" 표기 (심화 아크 4)
+            @Size(max = 100) String teamLabel,
+            // 콘솔 딥링크(선택) — 화면 href로 들어가므로 http/https만 허용(javascript: 등 스킴 주입 방지)
+            @Size(max = 500) @Pattern(regexp = "https?://.+", message = "consoleUrl은 http(s) URL만 허용합니다")
+            String consoleUrl) {
         boolean tls() {
             return Boolean.TRUE.equals(useTls);
         }
@@ -46,10 +52,11 @@ public class RegistryController {
 
     /** 응답에 접속 정보(계정)는 노출하지 않는다 */
     public record InstanceResponse(Long id, String name, DbmsType type, String host, int port, String dbName,
-                                   boolean useTls, boolean collectionEnabled) {
+                                   boolean useTls, boolean collectionEnabled,
+                                   String teamLabel, String consoleUrl) {
         static InstanceResponse from(DatabaseInstance i) {
             return new InstanceResponse(i.getId(), i.getName(), i.getType(), i.getHost(), i.getPort(), i.getDbName(),
-                    i.isUseTls(), i.isCollectionEnabled());
+                    i.isUseTls(), i.isCollectionEnabled(), i.getTeamLabel(), i.getConsoleUrl());
         }
     }
 
@@ -60,10 +67,11 @@ public class RegistryController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public InstanceResponse register(@Valid @RequestBody RegisterRequest req) {
-        DatabaseInstance saved = registryService.register(new DatabaseInstance(
+        DatabaseInstance instance = new DatabaseInstance(
                 req.name(), req.type(), req.host(), req.port(), req.dbName(), req.username(), req.password(),
-                req.tls()));
-        return InstanceResponse.from(saved);
+                req.tls());
+        instance.updateMeta(req.teamLabel(), req.consoleUrl());
+        return InstanceResponse.from(registryService.register(instance));
     }
 
     /**
@@ -74,7 +82,7 @@ public class RegistryController {
     public InstanceResponse upsert(@Valid @RequestBody RegisterRequest req) {
         DatabaseInstance saved = registryService.upsert(
                 req.name(), req.type(), req.host(), req.port(), req.dbName(), req.username(), req.password(),
-                req.tls());
+                req.tls(), req.teamLabel(), req.consoleUrl());
         return InstanceResponse.from(saved);
     }
 

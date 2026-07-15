@@ -54,6 +54,15 @@
   마크 제거. 로그인 화면(미인증)에서도 파비콘이 뜨도록 SecurityConfig permitAll에 파비콘 자산 추가
 
 ### Added
+- 데이터 마스킹 — 외부(웹훅·MCP 응답)로 나가는 SQL의 리터럴만 ?로 가림(식별자·구조 보존, 정규화
+  텍스트엔 멱등). 회귀 알림·문의·MCP 에코 4곳 배선, AI 프롬프트는 mask-ai-prompt(기본 false) 토글
+- 통계 수집 건강 Advisor — MySQL digest 포화율(80%)·Performance_schema_digest_lost(신규 쿼리 감지
+  무력화)·Prepared Statement 익명 부하(digest 미집계 실측 근거), PG pg_stat_statements evict(dealloc)
+  감시. 조치는 명령 안내까지만(대상 DB 변경 금지)
+- 인스턴스 팀 라벨·콘솔 딥링크(V12) — team_label(Phase 3 LBAC와 컬럼 공유)·console_url(http/https만
+  허용, 스킴 주입 차단). 카드 배지·회귀 알림·문의 embed에 담당 표기
+- 알림 → 진단 딥링크 — dbtower.base-url 설정 시 회귀 알림에 콘솔 링크(인스턴스 선택+자연어 진단
+  질문 프리필). metrics MCP 도구(14종째) — AI 진단이 CPU·Connections를 스스로 확인
 - 모니터링 지표 통합 — Monitoring 탭에 CPU(%)·Connections 그래프 내장(Prometheus HTTP API 직접 조회,
   insight/internal PrometheusClient + GET /api/instances/{id}/metrics). CPU는 node_exporter 호스트 수준,
   Connections는 기종 exporter(MySQL threads_connected·PG numbackends). 미설정·미수집·미지원은 사유를

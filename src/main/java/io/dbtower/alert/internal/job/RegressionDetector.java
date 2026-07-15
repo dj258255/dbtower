@@ -40,6 +40,7 @@ public class RegressionDetector {
     private final WebhookNotifier notifier;
     private final AiAnalyzer aiAnalyzer;
     private final QueryMasker queryMasker;
+    private final String baseUrl;
 
     private final int recentMinutes;
     private final int baselineMinutes;
@@ -58,7 +59,8 @@ public class RegressionDetector {
                               PlanChangeTracker planChangeTracker,
                               @Value("${dbtower.regression.recent-minutes:5}") int recentMinutes,
                               @Value("${dbtower.regression.baseline-minutes:15}") int baselineMinutes,
-                              @Value("${dbtower.regression.cooldown-minutes:30}") int cooldownMinutes) {
+                              @Value("${dbtower.regression.cooldown-minutes:30}") int cooldownMinutes,
+                              @Value("${dbtower.base-url:}") String baseUrl) {
         this.instanceRepository = instanceRepository;
         this.comparisonService = comparisonService;
         this.notifier = notifier;
@@ -68,6 +70,7 @@ public class RegressionDetector {
         this.recentMinutes = recentMinutes;
         this.baselineMinutes = baselineMinutes;
         this.cooldownMinutes = cooldownMinutes;
+        this.baseUrl = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
     }
 
     // HA 분산 락(Phase A5): 한 시점에 한 노드만 회귀 감지를 돌린다.
@@ -163,11 +166,28 @@ public class RegressionDetector {
         StringBuilder message = new StringBuilder();
         message.append("[DBTower 회귀 감지] instance=").append(instance.getName())
                 .append(" (최근 ").append(recentMinutes).append("분 vs 직전 ").append(baselineMinutes).append("분)\n");
+        // 담당 팀/콘솔 링크 — "어느 팀 채널로 갈 문제인가"를 알림 자체가 말하게 한다(심화 아크 4)
+        if (instance.getTeamLabel() != null && !instance.getTeamLabel().isBlank()) {
+            message.append("담당: ").append(instance.getTeamLabel()).append("\n");
+        }
+        if (instance.getConsoleUrl() != null && !instance.getConsoleUrl().isBlank()) {
+            message.append("콘솔: ").append(instance.getConsoleUrl()).append("\n");
+        }
         findings.forEach(f -> message.append("- ").append(f).append("\n"));
 
         // AI 1차 분석은 감지 묶음당 1회만 — 비용과 알림 지연을 묶어서 관리
         aiAnalyzer.analyze(message.toString())
                 .ifPresent(analysis -> message.append("\nAI 1차 분석: ").append(analysis));
+
+        // 진단 딥링크 (심화 아크 5) — 레퍼런스의 "알럿 쓰레드에서 분석"을 셀프호스트 제약에 맞게:
+        // 클릭 한 번으로 콘솔이 해당 인스턴스 + 자연어 진단 질문 프리필 상태로 열린다
+        if (!baseUrl.isBlank()) {
+            String question = java.net.URLEncoder.encode(
+                    "방금 회귀 알림이 온 이유를 분석해줘: " + findings.get(0),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            message.append("\n진단: ").append(baseUrl).append("/?instance=").append(instance.getId())
+                    .append("&diagnose=").append(question);
+        }
 
         log.info("회귀 감지 알림 instance={} findings={}", instance.getName(), findings.size());
         notifier.send(message.toString());
