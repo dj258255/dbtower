@@ -22,6 +22,7 @@ import io.dbtower.registry.DatabaseInstance;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.ConnectionCallback;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.CallableStatement;
 import java.sql.Connection;
@@ -510,26 +511,55 @@ public class OracleOperator extends AbstractJdbcOperator {
                 // 최신 파일 수집은 가능하다. 운영 DB는 로그 스위치가 자연 발생하므로 수집은 유효하다.
                 LOG.info("Oracle ARCHIVE LOG CURRENT 생략(경계 없이 기존 아카이브 수집): {}", e.getMessage());
             }
-            String archived;
+            // 정석(현업 스크립트): 최신 하나가 아니라 미수집 아카이브 전부를 보충 수집한다(멱등) —
+            // 주기 사이에 로그 스위치가 여러 번 일어나면 체인에 구멍이 나기 때문. 첫 실행 폭주 방지 상한 50.
+            List<String> archives = new ArrayList<>();
             try (ResultSet rs = st.executeQuery(
                     "SELECT name FROM (SELECT name FROM v$archived_log WHERE name IS NOT NULL "
-                            + "ORDER BY completion_time DESC) WHERE ROWNUM = 1")) {
-                if (!rs.next() || rs.getString(1) == null) {
-                    throw new OperatorException(
-                            "아카이브된 로그가 아직 없습니다 — 로그 스위치(서버 활동 또는 CDB에서 ARCHIVE LOG CURRENT) 후 생성됩니다");
+                            + "ORDER BY completion_time ASC) WHERE ROWNUM <= 50")) {
+                while (rs.next()) {
+                    archives.add(rs.getString(1));
                 }
-                archived = rs.getString(1);
             }
-            // 수집 명령은 접두부 템플릿 + 서버 관점 절대경로 인자(다른 기종과 같은 모델)
-            String baseName = archived.substring(archived.lastIndexOf('/') + 1);
-            Path out = Path.of(backupTools.backupDir(),
-                    "oracle-archivelog-%s-%s-%s".formatted(
-                            safeFileName(instance.getName()), backupTimestamp(), safeFileName(baseName)));
-            List<String> cmd = new ArrayList<>(renderCommand(backupTools.oracleArchiveCommand()));
-            cmd.add(archived);
-            return runCliBackup(cmd, Map.of(), out);
+            if (archives.isEmpty()) {
+                throw new OperatorException(
+                        "아카이브된 로그가 아직 없습니다 — 로그 스위치(서버 활동 또는 CDB에서 ARCHIVE LOG CURRENT) 후 생성됩니다");
+            }
+            long totalBytes = 0;
+            String lastLocation = null;
+            int collected = 0;
+            for (String archived : archives) {
+                // 수집 명령은 접두부 템플릿 + 서버 관점 절대경로 인자(다른 기종과 같은 모델)
+                String baseName = safeFileName(archived.substring(archived.lastIndexOf('/') + 1));
+                if (alreadyCollected(baseName)) {
+                    continue;
+                }
+                Path out = Path.of(backupTools.backupDir(),
+                        "oracle-archivelog-%s-%s-%s".formatted(
+                                safeFileName(instance.getName()), backupTimestamp(), baseName));
+                List<String> cmd = new ArrayList<>(renderCommand(backupTools.oracleArchiveCommand()));
+                cmd.add(archived);
+                BackupResult one = runCliBackup(cmd, Map.of(), out);
+                totalBytes += Math.max(0, one.bytes());
+                lastLocation = one.location();
+                collected++;
+            }
+            if (collected == 0) {
+                throw new OperatorException("수집할 새 아카이브 로그가 없습니다(전부 이미 수집됨)");
+            }
+            return new BackupResult(lastLocation, totalBytes);
         } catch (SQLException e) {
             throw new OperatorException("Oracle 아카이브 로그 백업 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /** 이 아카이브 파일이 이미 로컬 산출물로 수집됐는가 — 파일명 접미로 판정(멱등 수집). */
+    private boolean alreadyCollected(String baseName) {
+        try (var stream = Files.list(Path.of(backupTools.backupDir()))) {
+            return stream.anyMatch(p -> p.getFileName().toString().startsWith("oracle-archivelog")
+                    && p.getFileName().toString().endsWith("-" + baseName));
+        } catch (java.io.IOException e) {
+            return false;   // 조회 실패면 재수집(중복이 유실보다 낫다)
         }
     }
 

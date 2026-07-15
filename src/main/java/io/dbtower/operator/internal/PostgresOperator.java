@@ -88,19 +88,57 @@ public class PostgresOperator extends AbstractJdbcOperator {
                     "WAL 수집 명령 미설정(dbtower.backup.pg-wal-command) — 상시 아카이빙이 필요하면 "
                             + "pg_receivewal(스트리밍)이 정석이다");
         }
-        String closed;
+        String justClosed;
         try {
-            closed = jdbc().queryForObject("SELECT pg_walfile_name(pg_switch_wal())", String.class);
+            justClosed = jdbc().queryForObject("SELECT pg_walfile_name(pg_switch_wal())", String.class);
         } catch (DataAccessException e) {
             // superuser 아님 등 권한 부족 — 실패가 아니라 "이 계정으론 못 한다"를 정직하게
             throw new UnsupportedOperationException(
                     "pg_switch_wal 실행 불가(superuser 또는 EXECUTE grant 필요): " + e.getMessage());
         }
-        Path out = Path.of(backupTools.backupDir(),
-                "postgres-wal-%s-%s-%s".formatted(safeFileName(instance.getName()), backupTimestamp(), closed));
-        List<String> cmd = new ArrayList<>(renderCommand(backupTools.pgWalCommand()));
-        cmd.add(closed);
-        return runCliBackup(cmd, Map.of("PGPASSWORD", instance.getPassword()), out);
+        // 정석과의 위치(문헌 확인): 무결한 연속 아카이브의 정석은 archive_command/pg_receivewal이다 —
+        // 서버와 수집이 조율돼 세그먼트가 아카이브 확인 전에 재활용되지 않는다. 이 원샷 수집은 조율이
+        // 없어, 주기 사이에 채워진 세그먼트가 재활용되면 구멍이 날 수 있다. 그래서 (1) pg_ls_waldir로
+        // 방금 닫힌 것 이하의 미수집 세그먼트를 전부 보충 수집하고(멱등), (2) 그래도 남는 재활용 경합
+        // 한계는 감추지 않는다 — 세그먼트 이름이 순차 hex라 수집본만으로 갭 검출이 가능하다.
+        List<String> candidates;
+        try {
+            candidates = jdbc().query(
+                    "SELECT name FROM pg_ls_waldir() WHERE name ~ '^[0-9A-F]{24}$' AND name <= ? ORDER BY name",
+                    (rs, i) -> rs.getString("name"), justClosed);
+        } catch (DataAccessException e) {
+            candidates = List.of(justClosed);   // pg_ls_waldir 권한 부족(pg_monitor 필요) — 방금 닫힌 것만
+        }
+        long totalBytes = 0;
+        String lastLocation = null;
+        int collected = 0;
+        for (String segment : candidates) {
+            if (alreadyCollected("postgres-wal", segment)) {
+                continue;
+            }
+            Path out = Path.of(backupTools.backupDir(),
+                    "postgres-wal-%s-%s-%s".formatted(safeFileName(instance.getName()), backupTimestamp(), segment));
+            List<String> cmd = new ArrayList<>(renderCommand(backupTools.pgWalCommand()));
+            cmd.add(segment);
+            BackupResult one = runCliBackup(cmd, Map.of("PGPASSWORD", instance.getPassword()), out);
+            totalBytes += Math.max(0, one.bytes());
+            lastLocation = one.location();
+            collected++;
+        }
+        if (collected == 0) {
+            throw new OperatorException("수집할 새 WAL 세그먼트가 없습니다(전부 이미 수집됨)");
+        }
+        return new BackupResult(lastLocation, totalBytes);
+    }
+
+    /** 이 세그먼트가 이미 로컬 산출물로 수집됐는가 — 파일명 접미(-<segment>)로 판정(멱등 수집). */
+    private boolean alreadyCollected(String prefix, String segment) {
+        try (var stream = Files.list(Path.of(backupTools.backupDir()))) {
+            return stream.anyMatch(p -> p.getFileName().toString().startsWith(prefix)
+                    && p.getFileName().toString().endsWith("-" + segment));
+        } catch (java.io.IOException e) {
+            return false;   // 조회 실패면 재수집(중복이 유실보다 낫다)
+        }
     }
 
     /**

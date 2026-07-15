@@ -108,12 +108,45 @@ public class MySqlOperator extends AbstractJdbcOperator {
         if (logs.size() < 2) {
             throw new OperatorException("FLUSH 후에도 binlog가 2개 미만 — 수집할 닫힌 파일이 없습니다");
         }
-        String closed = logs.get(logs.size() - 2);   // 마지막은 방금 새로 열린 파일, 그 앞이 방금 닫힌 파일
-        Path out = Path.of(backupTools.backupDir(),
-                "mysql-binlog-%s-%s-%s".formatted(safeFileName(instance.getName()), backupTimestamp(), closed));
-        List<String> cmd = new ArrayList<>(renderCommand(backupTools.mysqlBinlogCommand()));
-        cmd.add(closed);
-        return runCliBackup(cmd, Map.of("MYSQL_PWD", instance.getPassword()), out);
+        // 정석(공식 문서·현업 스크립트): "마지막(쓰는 중) 파일 이전 전부"를 수집한다 — 최신 하나만 가져가면
+        // 주기 사이에 회전(max_binlog_size)한 파일이 빠져 체인에 조용한 구멍이 난다. 이미 수집한 파일은
+        // 로컬 산출물 존재로 판정해 건너뛴다(멱등) — 서버는 건드리지 않는다(PURGE는 우리 몫이 아니다).
+        List<String> closedLogs = logs.subList(0, logs.size() - 1);
+        long totalBytes = 0;
+        String lastLocation = null;
+        int collected = 0;
+        for (String logName : closedLogs) {
+            if (alreadyCollected("mysql-binlog", logName)) {
+                continue;
+            }
+            Path out = Path.of(backupTools.backupDir(),
+                    "mysql-binlog-%s-%s-%s".formatted(safeFileName(instance.getName()), backupTimestamp(), logName));
+            List<String> cmd = new ArrayList<>(renderCommand(backupTools.mysqlBinlogCommand()));
+            cmd.add(logName);
+            BackupResult one = runCliBackup(cmd, Map.of("MYSQL_PWD", instance.getPassword()), out);
+            totalBytes += Math.max(0, one.bytes());
+            lastLocation = one.location();
+            collected++;
+        }
+        if (collected == 0) {
+            throw new OperatorException("수집할 새 binlog가 없습니다(전부 이미 수집됨) — 다음 회전 후 다시 생깁니다");
+        }
+        if (collected > 1) {
+            LOG.info("binlog 체인 보충 수집 instance={} files={} (주기 사이 회전분 포함)",
+                    instance.getName(), collected);
+        }
+        // location은 순수 경로 유지(원격 업로드·검증이 파일 경로로 사용) — 최신 파일, bytes는 이번 수집 합계
+        return new BackupResult(lastLocation, totalBytes);
+    }
+
+    /** 이 로그 파일이 이미 로컬 산출물로 수집됐는가 — 파일명 접미(-<logName>)로 판정(멱등 수집의 근거). */
+    private boolean alreadyCollected(String prefix, String logName) {
+        try (var stream = Files.list(Path.of(backupTools.backupDir()))) {
+            return stream.anyMatch(p -> p.getFileName().toString().startsWith(prefix)
+                    && p.getFileName().toString().endsWith("-" + logName));
+        } catch (java.io.IOException e) {
+            return false;   // 디렉터리 조회 실패면 재수집(중복 파일이 유실보다 낫다)
+        }
     }
 
     /** PITR 안내 (Phase 2) — FULL 적재 후 binlog들을 목표 시점까지 재생하는 명령 문안. 실행은 사람이. */
