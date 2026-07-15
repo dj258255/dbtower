@@ -35,7 +35,17 @@
 // CSRF 쿠키(XSRF-TOKEN)를 폼 히든 필드로 — 서버가 GET 응답에서 심어준 값을 되돌려주는 표준 패턴
 const token = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
 if (token) document.getElementById("csrf-field").value = decodeURIComponent(token[1]);
-if (location.search.includes("error")) document.getElementById("login-error").hidden = false;
+const params = new URLSearchParams(location.search);
+if (params.has("error")) {
+  const box = document.getElementById("login-error");
+  if (params.get("error") === "locked") {
+    // retryAfter는 숫자만 신뢰 — Number로 강제해 XSS 여지를 없앤다(문자열 삽입 금지)
+    const secs = Math.max(0, parseInt(params.get("retryAfter"), 10) || 0);
+    const mins = Math.ceil(secs / 60);
+    box.textContent = "로그인 시도가 너무 많습니다 — 약 " + mins + "분 후 다시 시도하세요";
+  }
+  box.hidden = false;
+}
 </script>
 </body>
 </html>

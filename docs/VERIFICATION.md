@@ -1636,3 +1636,30 @@ UI: Monitoring 탭에 데드락 카드(배지=획득 방식, victim·리소스·
 - AI 규칙 번들: `.dockerignore` 예외 검증 — `busybox`에 `COPY docs/ai-analysis-rules.md`가 성공(파일이
   빌드 컨텍스트에 포함됨을 확인, 이전엔 제외돼 COPY 불가였다).
 - 전체 테스트 그린(신규 단위 1건 포함).
+
+## 64. 프로덕션 아크 — Phase 1 단일노드 하드닝 (플랫폼 자신을 지킨다)
+
+배경: Phase 0의 준비도 감사가 드러낸 패턴 — DBTower는 "대상을 향한" 기능은 갖췄으나 "플랫폼 자신을
+향한" 기능이 비어 있다(대상 TLS는 있고 웹 HTTPS는 없고, 대상 원격 백업은 있고 메타 자기 백업은 없고,
+로그인 감사는 있고 로그인 잠금은 없다). 그 platform-facing 절반을 채운다.
+
+- **로그인 브루트포스 방어**: `LoginAttemptGuard`(계정별 연속 실패 카운트, 임계 초과 시 잠금) +
+  `LoginLockFilter`(인증 앞에서 잠긴 계정 차단). 실패는 인증 이벤트로 세고 성공하면 리셋, 대소문자
+  우회 방지. 설정 `dbtower.security.login-lock.{max-attempts:10, lock-minutes:15}`. 한계(정직):
+  인메모리라 노드별 독립 — 완전 분산은 Phase 3 공유 세션과 재검토. login.html이 잠금 시 남은 시간을 표시.
+- **메타 DB 자기 백업**: `MetaBackupJob`(@Scheduled+@SchedulerLock) — 이미지 번들 pg_dump로 메타 DB를
+  스스로 덤프({backup.dir}/meta/), 원격 보관 켜지면 meta/ 네임스페이스로 오프사이트. 비밀번호는
+  PGPASSWORD 환경변수(argv 금지). pg_dump 없거나 메타가 PG 아니면 조용히 스킵(기능 게이트).
+- **TLS(리버스 프록시)**: application-docker.yml에 `forward-headers-strategy: framework` +
+  세션·CSRF 쿠키 Secure 토글(`DBTOWER_COOKIE_SECURE`). 인증서 갱신을 앱에 넣지 않고 프록시 종단.
+- **로깅·커뮤니티**: 스프링 부트 네이티브 롤링 파일(LOGGING_FILE_NAME 시, 50MB/14일/500MB 상한) —
+  커스텀 logback의 janino 의존을 피함. CONTRIBUTING·CODE_OF_CONDUCT·이슈/PR 템플릿, README 시스템 요구사항 절.
+
+**라이브 실측(dev 프로필, H2, 8899)**:
+- 로그인 잠금: admin에 잘못된 비번으로 연속 시도 → 1~10회는 `?error`(일반 실패), **11회째는
+  `?error=locked&retryAfter=899`** 로 필터가 차단(약 15분 잠금). 단위 5건(임계·리셋·대소문자 우회) + 라이브.
+  잠금 화면 스크린샷: gitblog login-lock.png.
+- **라이브가 테스트를 이긴 순간**: application.yml에 `dbtower.security` 블록을 새로 추가했다가 기존
+  블록과 YAML 중복 키가 됐는데, 테스트는 별도 test application.yml을 써서 통과했고 **실제 jar 부팅에서만
+  SnakeYAML이 duplicate key로 거부**했다(line 37/172). 기존 블록에 병합해 해소, 실 부팅 UP 확인.
+- 잔여(정직): actuator 메트릭 토큰 인가 + API 토큰 메타DB 영속화(V11)는 Phase 1 후속으로 미구현.

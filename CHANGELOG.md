@@ -20,6 +20,14 @@
   없으면 기동을 거부한다(이전엔 prod 프로필만 막아 docker 경로가 평문 저장으로 뚫려 있었음, CWE-312).
   compose 수준 `${DBTOWER_ENCRYPTION_KEY:?}` 이중 방어
 - 커밋됐던 바이너리 H2 DB(data/dbhub.mv.db, USERS/PASSWORD 테이블) 저장소에서 제거 + data/ gitignore
+- 로그인 브루트포스 방어 — 계정별 연속 실패 시 잠금(기본 10회/15분), 잠긴 계정은 인증 앞에서 차단.
+  로그인 화면에 남은 시간 표시
+- 리버스 프록시 HTTPS 종단 지원 — forward-headers-strategy + 세션·CSRF 쿠키 Secure 토글(DBTOWER_COOKIE_SECURE)
+
+### Added
+- 플랫폼 메타 DB 자기 백업 — pg_dump로 관제탑 자신의 상태 저장소를 주기 백업(로컬 + 원격 meta/),
+  대상 DB만 백업하던 사각을 메움. PG 아니면 조용히 스킵
+- CONTRIBUTING·CODE_OF_CONDUCT·이슈/PR 템플릿, README 시스템 요구사항 절, 스프링 부트 네이티브 롤링 파일 로깅
 
 ### Changed
 - AI 분석 규칙 파일을 이미지에 번들(.dockerignore 예외 + Dockerfile COPY) — 이전엔 docs 제외로

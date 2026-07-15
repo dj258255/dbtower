@@ -1,5 +1,7 @@
 package io.dbtower.security;
 
+import io.dbtower.security.internal.LoginAttemptGuard;
+import io.dbtower.security.internal.LoginLockFilter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,13 +40,28 @@ import java.io.IOException;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    /**
+     * TLS 종단(리버스 프록시) 뒤에 둘 때 쿠키에 Secure 플래그를 붙인다 (Phase 1).
+     * 세션 쿠키는 server.servlet.session.cookie.secure로, CSRF 쿠키는 여기서 — 둘 다 같은 스위치.
+     * 기본 false(평문 HTTP 개발/데모). 프록시로 HTTPS 종단 시 dbtower.security.cookie-secure=true.
+     */
+    @org.springframework.beans.factory.annotation.Value("${dbtower.security.cookie-secure:false}")
+    private boolean cookieSecure;
+
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
+    private CookieCsrfTokenRepository csrfCookieRepository() {
+        CookieCsrfTokenRepository repo = CookieCsrfTokenRepository.withHttpOnlyFalse();
+        repo.setCookieCustomizer(c -> c.secure(cookieSecure));
+        return repo;
+    }
+
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http, ApiTokenFilter tokenFilter) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http, ApiTokenFilter tokenFilter,
+                                           LoginAttemptGuard loginAttemptGuard) throws Exception {
         // Bearer 토큰 요청은 쿠키 세션이 없으므로 CSRF 보호 대상이 아니다
         RequestMatcher bearerRequests = request -> {
             String h = request.getHeader("Authorization");
@@ -53,9 +70,12 @@ public class SecurityConfig {
 
         http
                 .csrf(csrf -> csrf
-                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                        .csrfTokenRepository(csrfCookieRepository())
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
                         .ignoringRequestMatchers(bearerRequests))
+                // 잠긴 계정의 로그인 시도는 인증 앞에서 차단(브루트포스 방어)
+                .addFilterBefore(new LoginLockFilter(loginAttemptGuard, "/login"),
+                        UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(tokenFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(new CsrfCookieFilter(), UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth

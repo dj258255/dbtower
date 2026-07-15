@@ -81,6 +81,14 @@ public class RemoteBackupStore {
      * 던지지 않는다(로컬 백업 성공을 업로드 실패가 뒤집으면 안 된다).
      */
     public Optional<String> upload(Long instanceId, String localLocation) {
+        return uploadTo("instance-%d".formatted(instanceId), localLocation);
+    }
+
+    /**
+     * 임의 키 프리픽스로 업로드 — 대상 인스턴스 백업은 instance-{id}/, 플랫폼 메타 백업은 meta/ 처럼
+     * 네임스페이스를 나눈다. 실패해도 예외를 밖으로 던지지 않는다(로컬 백업 성공을 업로드가 뒤집지 않게).
+     */
+    public Optional<String> uploadTo(String keyPrefix, String localLocation) {
         if (!enabled || localLocation == null || localLocation.isBlank()) {
             return Optional.empty();
         }
@@ -91,13 +99,13 @@ public class RemoteBackupStore {
                 return Optional.empty();
             }
             ensureBucket();
-            String key = "instance-%d/%s".formatted(instanceId, file.getFileName());
+            String key = "%s/%s".formatted(keyPrefix, file.getFileName());
             s3.putObject(PutObjectRequest.builder().bucket(bucket).key(key).build(), file);
             String remote = "s3://%s/%s".formatted(bucket, key);
-            log.info("백업 원격 보관 완료 instance={} {} ({} bytes)", instanceId, remote, Files.size(file));
+            log.info("백업 원격 보관 완료 {} ({} bytes)", remote, Files.size(file));
             return Optional.of(remote);
         } catch (Exception e) {
-            log.warn("백업 원격 보관 실패(로컬 백업은 유효) instance={} cause={}", instanceId, e.getMessage());
+            log.warn("백업 원격 보관 실패(로컬 백업은 유효) key={} cause={}", keyPrefix, e.getMessage());
             return Optional.empty();
         }
     }

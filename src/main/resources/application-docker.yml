@@ -7,7 +7,20 @@
 #   하는 형태로 덮어쓴다(Dockerfile 이 mysqldump/pg_dump/mongodump 를 번들 = 배터리 포함).
 #   비밀번호는 argv 금지 원칙 유지 — MySQL=MYSQL_PWD, PostgreSQL=PGPASSWORD 환경변수(각 Operator 가 주입),
 #   MongoDB=--config /dev/stdin(표준입력).
+server:
+  # TLS 는 리버스 프록시(Caddy/nginx)가 종단하는 걸 기본으로 한다 — 인증서 갱신을 앱에 넣지 않는다.
+  #   프록시 뒤에서 scheme/host 를 보존해 secure-cookie·리다이렉트가 올바르게 동작하게 한다.
+  forward-headers-strategy: framework
+  servlet:
+    session:
+      cookie:
+        # 프록시가 HTTPS 로 종단하면 true 로(평문 HTTP 데모는 false). CSRF 쿠키는 dbtower.security.cookie-secure 와 같은 스위치.
+        secure: ${DBTOWER_COOKIE_SECURE:false}
+
 dbtower:
+  security:
+    # 세션·CSRF 쿠키 Secure 플래그(프록시 HTTPS 종단 시 true). server.servlet.session.cookie.secure 와 함께 켠다.
+    cookie-secure: ${DBTOWER_COOKIE_SECURE:false}
   backup:
     # 컨테이너 안의 볼륨 마운트 지점(docker-compose.app.yml 에서 named volume 으로 영속)
     dir: /app/backups

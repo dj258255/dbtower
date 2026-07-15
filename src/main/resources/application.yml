@@ -67,6 +67,10 @@ dbtower:
     # 0 이하면 보존 무제한(정리 안 함).
     retention-days: 7
     retention-sweep-ms: 3600000   # 보존 정리 주기(1시간) — 수집보다 훨씬 뜸해도 충분하다
+  meta-backup:
+    enabled: true          # 플랫폼 메타 DB(자기 자신) 자기 백업 — pg_dump가 없거나 메타가 PG가 아니면 조용히 스킵
+    interval-ms: 86400000  # 자기 백업 주기(기본 24시간)
+    retention-count: 7     # 로컬 보존 개수(최신 N개만)
   backup:
     dir: ./backups
     # 원격 보관(3-2-1의 오프사이트) — S3 호환(AWS S3·MinIO·R2). 자격증명은 환경변수로만
@@ -171,6 +175,12 @@ dbtower:
     # 미설정이면 평문 저장으로 기동하되 WARN 로그로 경고 (fail-open 근거는 SecretCipher 주석)
     encryption-key: ${DBTOWER_ENCRYPTION_KEY:}
     rules-path: docs/ai-analysis-rules.md
+    # 로그인 브루트포스 방어 — 계정별 연속 실패 임계·잠금 시간
+    login-lock:
+      max-attempts: 10
+      lock-minutes: 15
+    # 세션·CSRF 쿠키 Secure 플래그(프록시 HTTPS 종단 시 true). application-docker.yml에서 override
+    cookie-secure: false
 # 웹훅 URL은 비밀값 — 환경변수 DBTOWER_WEBHOOK_URL로만 주입 (Discord/Slack 자동 판별)
 
 management:
@@ -178,3 +188,13 @@ management:
     web:
       exposure:
         include: health, info, prometheus
+
+# 로깅 (Phase 1): 기본은 콘솔(컨테이너 표준출력 = docker logs·수집기 친화). LOGGING_FILE_NAME 또는
+# LOGGING_FILE_PATH(스프링 부트 표준) 환경변수를 주면 롤링 파일 로깅이 켜진다 — 아래 정책이 적용된다.
+# JSON 구조화 로깅은 범위 밖(수집기에서 파싱).
+logging:
+  logback:
+    rollingpolicy:
+      max-file-size: 50MB
+      max-history: 14
+      total-size-cap: 500MB
