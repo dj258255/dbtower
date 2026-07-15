@@ -1,5 +1,6 @@
 package io.dbtower.alert.internal;
 
+import io.dbtower.analysis.QueryMasker;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
 import org.springframework.security.core.Authentication;
@@ -25,12 +26,14 @@ public class InquiryService {
     private final RegistryService registryService;
     private final WebhookNotifier notifier;
     private final ReferencedSchemaService referencedSchema;
+    private final QueryMasker queryMasker;
 
     public InquiryService(RegistryService registryService, WebhookNotifier notifier,
-                          ReferencedSchemaService referencedSchema) {
+                          ReferencedSchemaService referencedSchema, QueryMasker queryMasker) {
         this.registryService = registryService;
         this.notifier = notifier;
         this.referencedSchema = referencedSchema;
+        this.queryMasker = queryMasker;
     }
 
     /** 문의 요청 본문 — plan/findings/aiAnalysis/note는 선택(분석을 안 돌리고도 문의 가능) */
@@ -54,9 +57,13 @@ public class InquiryService {
         String principal = currentPrincipal();
         // 진단의 핵심 재료 — 참조 테이블의 컬럼·인덱스 구조를 함께 붙인다(심화 아크 2).
         // 대상 조회 실패가 문의 자체를 막지 않게 격리한다(구조가 없어도 쿼리·플랜은 보낸다).
+        // 파싱은 원문으로(FROM·JOIN 추출 정확도), 외부 발신 렌더링은 마스킹본으로 — 문의 창의 SQL은
+        // 사용자가 직접 친 원문이라 실값(고객 이메일·ID 등)이 그대로 실려 오는 대표 경로다.
         String schemaSummary = safeSchemaSummary(instanceId, req.sql());
-        notifier.sendEmbed(format(instance, req, principal, schemaSummary),
-                buildEmbed(instance, req, principal, schemaSummary));
+        InquiryRequest masked = new InquiryRequest(queryMasker.apply(req.sql()),
+                req.plan(), req.findings(), req.aiAnalysis(), req.note());
+        notifier.sendEmbed(format(instance, masked, principal, schemaSummary),
+                buildEmbed(instance, masked, principal, schemaSummary));
         return new InquiryResult(true, null);
     }
 

@@ -2,6 +2,7 @@ package io.dbtower.mcp.internal;
 
 import com.sun.net.httpserver.HttpServer;
 import io.dbtower.mcp.McpProtocolHandler;
+import io.dbtower.analysis.QueryMasker;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -93,7 +94,7 @@ class DiagnosisServiceTest {
                 "{\"action\":\"final\",\"answer\":\"신규 LIKE '%foo%' 풀스캔이 IO 대기를 유발해 느려졌다.\","
                         + "\"rootCause\":\"인덱스 없는 후위 와일드카드 LIKE 풀스캔\",\"confidence\":\"high\"}");
 
-        DiagnosisService svc = new DiagnosisService(handler, ai, true, "mock",
+        DiagnosisService svc = new DiagnosisService(handler, ai, true, "mock", new QueryMasker(true, false),
                 "docs/ai-analysis-rules.md", 5);
         DiagnosisService.DiagnosisResult r = svc.diagnose(1, "POSTGRESQL", "orders-prod",
                 "어제 오후에 왜 느려졌어?");
@@ -127,7 +128,7 @@ class DiagnosisServiceTest {
                 "{\"action\":\"final\",\"answer\":\"세션 종료는 할 수 없어 조회 결과만으로 답한다.\","
                         + "\"rootCause\":\"미상\",\"confidence\":\"low\"}");
 
-        DiagnosisService svc = new DiagnosisService(handler, ai, true, "mock",
+        DiagnosisService svc = new DiagnosisService(handler, ai, true, "mock", new QueryMasker(true, false),
                 "docs/ai-analysis-rules.md", 5);
         DiagnosisService.DiagnosisResult r = svc.diagnose(1, "MYSQL", "db1", "느린 세션 죽여줘");
 
@@ -147,7 +148,7 @@ class DiagnosisServiceTest {
                 "판단 결과입니다:\n```json\n{\"action\":\"final\",\"answer\":\"근거 부족으로 모른다.\","
                         + "\"rootCause\":\"미상\",\"confidence\":\"low\"}\n```\n이상입니다.");
 
-        DiagnosisService svc = new DiagnosisService(handler, ai, true, "mock",
+        DiagnosisService svc = new DiagnosisService(handler, ai, true, "mock", new QueryMasker(true, false),
                 "docs/ai-analysis-rules.md", 5);
         DiagnosisService.DiagnosisResult r = svc.diagnose(1, "MYSQL", "db1", "왜?");
 
@@ -159,7 +160,7 @@ class DiagnosisServiceTest {
     void AI_백엔드가_없으면_비활성_결과를_정직하게_돌려준다() {
         McpProtocolHandler handler = new McpProtocolHandler(baseUrl);
         DiagnosisService svc = new DiagnosisService(handler, (s, u) -> Optional.empty(),
-                false, "off", "docs/ai-analysis-rules.md", 5);
+                false, "off", new QueryMasker(true, false), "docs/ai-analysis-rules.md", 5);
         DiagnosisService.DiagnosisResult r = svc.diagnose(1, "MYSQL", "db1", "왜 느려?");
 
         assertFalse(r.aiEnabled());
@@ -183,7 +184,7 @@ class DiagnosisServiceTest {
                 // 강제 종합 턴
                 "{\"action\":\"final\",\"answer\":\"근거가 부분적이라 확실치 않다.\",\"rootCause\":\"미상\",\"confidence\":\"low\"}");
 
-        DiagnosisService svc = new DiagnosisService(handler, ai, true, "mock",
+        DiagnosisService svc = new DiagnosisService(handler, ai, true, "mock", new QueryMasker(true, false),
                 "docs/ai-analysis-rules.md", 2);
         DiagnosisService.DiagnosisResult r = svc.diagnose(1, "MYSQL", "db1", "왜?");
 

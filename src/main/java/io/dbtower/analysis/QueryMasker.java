@@ -40,6 +40,15 @@ public class QueryMasker {
     }
 
     /**
+     * AI 프롬프트 전용 — 기본은 원문(마스킹하면 리터럴 기반 판정, 예: IN절 개수·상수 분포 진단의
+     * 정확도가 떨어지는 트레이드오프가 있어 명시적 선택으로 둔다). enabled와 mask-ai-prompt가
+     * 둘 다 켜져 있을 때만 가린다.
+     */
+    public String applyForAiPrompt(String sql) {
+        return (enabled && maskAiPrompt) ? maskLiterals(sql) : sql;
+    }
+
+    /**
      * 순수 알고리즘 — 문자열/숫자 리터럴만 {@code ?}로 치환하고 식별자·키워드·구조·플레이스홀더는 보존.
      * Spring 없이도 테스트 가능하도록 static.
      */
@@ -191,7 +200,8 @@ public class QueryMasker {
     private static int dollarTagEnd(String s, int i) {
         int n = s.length();
         int j = i + 1;
-        while (j < n && (isIdentPart(s.charAt(j)))) {   // 태그는 [A-Za-z0-9_$] (숫자 시작은 위에서 배제됨)
+        // 태그 문자에서 $는 제외 — 포함하면 닫는 $까지 소비해 태그 종료를 영영 못 만난다
+        while (j < n && (isIdentStart(s.charAt(j)) || isDigit(s.charAt(j)))) {
             j++;
         }
         if (j < n && s.charAt(j) == '$') {

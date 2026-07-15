@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.dbtower.analysis.AiAnalyzer;
+import io.dbtower.analysis.QueryMasker;
 import io.dbtower.mcp.McpProtocolHandler;
 import io.dbtower.security.ApiTokenProvider;
 import org.slf4j.Logger;
@@ -63,6 +64,7 @@ public class DiagnosisService {
     private final McpProtocolHandler handler;
     private final AiTurn ai;
     private final boolean aiEnabled;
+    private final QueryMasker queryMasker;
     private final String backend;
     private final Path rulesPath;
     private final int maxSteps;
@@ -72,20 +74,22 @@ public class DiagnosisService {
     public DiagnosisService(@Value("${server.port:8080}") int port,
                             ApiTokenProvider tokens,
                             AiAnalyzer analyzer,
+                            QueryMasker queryMasker,
                             @Value("${dbtower.ai.rules-path:docs/ai-analysis-rules.md}") String rulesPath,
                             @Value("${dbtower.ai.diagnose-max-steps:5}") int maxSteps) {
         this(new McpProtocolHandler("http://localhost:" + port, tokens.token()),
-                analyzer::complete, analyzer.isEnabled(), analyzer.backend(), rulesPath, maxSteps);
+                analyzer::complete, analyzer.isEnabled(), analyzer.backend(), queryMasker, rulesPath, maxSteps);
     }
 
     // 테스트 생성자 — 스크립트된 AI와 (목 REST를 가리키는) 실제 MCP 핸들러를 주입해
     // 오케스트레이션(도구 연쇄·화이트리스트·최종 종합)을 AI 백엔드 없이 결정론적으로 검증한다.
     DiagnosisService(McpProtocolHandler handler, AiTurn ai, boolean aiEnabled,
-                     String backend, String rulesPath, int maxSteps) {
+                     String backend, QueryMasker queryMasker, String rulesPath, int maxSteps) {
         this.handler = handler;
         this.ai = ai;
         this.aiEnabled = aiEnabled;
         this.backend = backend;
+        this.queryMasker = queryMasker;
         this.rulesPath = Path.of(rulesPath);
         this.maxSteps = Math.max(1, maxSteps);
     }
@@ -148,7 +152,7 @@ public class DiagnosisService {
             if (!READ_ONLY_TOOLS.contains(tool)) {
                 // 읽기 전용 화이트리스트 밖 요청 — 실행하지 않고 거부 사유를 다시 AI에 알린다
                 String msg = "거부됨: '" + tool + "'는 읽기 전용 화이트리스트에 없습니다. 허용 도구만 사용하라.";
-                traces.add(new ToolCallTrace(step, tool, argsText(arguments), reason, msg, true));
+                traces.add(new ToolCallTrace(step, tool, maskedArgs(arguments), reason, msg, true));
                 transcript.append("\n\n[도구 호출 #").append(step).append("] ").append(tool)
                         .append(" → ").append(msg);
                 log.warn("D3 진단 — 화이트리스트 밖 도구 요청 거부: {}", tool);
@@ -158,10 +162,10 @@ public class DiagnosisService {
             String observation = callTool(tool, arguments);
             String snippet = observation.length() > OBSERVATION_CAP
                     ? observation.substring(0, OBSERVATION_CAP) + "…(생략)" : observation;
-            traces.add(new ToolCallTrace(step, tool, argsText(arguments), reason, snippet, false));
-            log.info("D3 진단 step {} — tool={} args={} reason={}", step, tool, argsText(arguments), reason);
+            traces.add(new ToolCallTrace(step, tool, maskedArgs(arguments), reason, snippet, false));
+            log.info("D3 진단 step {} — tool={} args={} reason={}", step, tool, maskedArgs(arguments), reason);
             transcript.append("\n\n[도구 호출 #").append(step).append("] tool=").append(tool)
-                    .append(" arguments=").append(argsText(arguments))
+                    .append(" arguments=").append(maskedArgs(arguments))
                     .append("\n[결과]\n").append(snippet);
         }
 
@@ -266,6 +270,20 @@ public class DiagnosisService {
 
     private static String argsText(JsonNode arguments) {
         return arguments == null || arguments.isMissingNode() ? "{}" : arguments.toString();
+    }
+
+    /**
+     * 응답·트랜스크립트에 에코되는 도구 인자 — sql 필드의 리터럴만 가린다(도구 실행 자체는 원문으로 —
+     * EXPLAIN은 ?를 실행할 수 없다). 실행계획 결과(observation)는 가리지 않는다: rows·cost 숫자가
+     * 진단의 본체라 리터럴 마스킹이 플랜을 훼손한다(트레이드오프를 숨기지 않고 명시).
+     */
+    private String maskedArgs(JsonNode arguments) {
+        if (arguments != null && arguments.isObject() && arguments.path("sql").isTextual()) {
+            ObjectNode copy = arguments.deepCopy();
+            copy.put("sql", queryMasker.apply(arguments.get("sql").asText()));
+            return copy.toString();
+        }
+        return argsText(arguments);
     }
 
     private static String textOrNull(JsonNode node, String field) {

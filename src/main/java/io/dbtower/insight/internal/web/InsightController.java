@@ -9,6 +9,7 @@ import io.dbtower.operator.model.IndexAdvice;
 import io.dbtower.operator.model.DeadlockEvent;
 import io.dbtower.insight.internal.PrometheusClient;
 import io.dbtower.analysis.AiAnalyzer;
+import io.dbtower.analysis.QueryMasker;
 import io.dbtower.analysis.DeepAnalyzer;
 import io.dbtower.analysis.DeepDiagnosis;
 import io.dbtower.analysis.RuleBasedAnalyzer;
@@ -45,13 +46,15 @@ public class InsightController {
     private final QuerySnapshotRepository snapshotRepository;
     private final BaselineService baselineService;
     private final PrometheusClient prometheusClient;
+    private final QueryMasker queryMasker;
 
     public InsightController(RegistryService registryService, DbmsOperatorFactory operatorFactory,
                              ComparisonService comparisonService, RuleBasedAnalyzer analyzer,
                              AiAnalyzer aiAnalyzer, DeepAnalyzer deepAnalyzer,
                              QuerySnapshotRepository snapshotRepository,
                              BaselineService baselineService,
-                             PrometheusClient prometheusClient) {
+                             PrometheusClient prometheusClient,
+                             QueryMasker queryMasker) {
         this.registryService = registryService;
         this.operatorFactory = operatorFactory;
         this.comparisonService = comparisonService;
@@ -61,6 +64,7 @@ public class InsightController {
         this.snapshotRepository = snapshotRepository;
         this.baselineService = baselineService;
         this.prometheusClient = prometheusClient;
+        this.queryMasker = queryMasker;
     }
 
     /**
@@ -368,13 +372,15 @@ public class InsightController {
         DatabaseInstance instance = registryService.findById(id);
         String plan = operatorFactory.create(instance).explain(req.sql());
         List<String> findings = analyzer.analyze(instance.getType(), plan);
+        // AI 프롬프트 마스킹은 mask-ai-prompt(기본 false)로만 켠다 — 리터럴을 가리면
+        // IN절 개수·상수 분포 같은 판정 정확도가 떨어지는 트레이드오프가 있어 명시적 선택.
         String context = """
                 [%s] 아래 쿼리와 실행계획을 판단 기준에 따라 분석해줘.
                 SQL:
                 %s
                 실행계획:
                 %s
-                규칙 기반 지적: %s""".formatted(instance.getType(), req.sql(), plan,
+                규칙 기반 지적: %s""".formatted(instance.getType(), queryMasker.applyForAiPrompt(req.sql()), plan,
                 findings.isEmpty() ? "(없음)" : String.join(" / ", findings));
         return new AiAnalysisResponse(plan, findings, aiAnalyzer.analyze(context).orElse(null));
     }

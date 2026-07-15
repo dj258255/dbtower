@@ -3,6 +3,7 @@ package io.dbtower.alert.internal.job;
 import io.dbtower.alert.internal.PlanChangeTracker;
 import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.analysis.AiAnalyzer;
+import io.dbtower.analysis.QueryMasker;
 import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.QueryDiff;
 import io.dbtower.registry.DatabaseInstance;
@@ -38,6 +39,7 @@ public class RegressionDetector {
     private final ComparisonService comparisonService;
     private final WebhookNotifier notifier;
     private final AiAnalyzer aiAnalyzer;
+    private final QueryMasker queryMasker;
 
     private final int recentMinutes;
     private final int baselineMinutes;
@@ -52,6 +54,7 @@ public class RegressionDetector {
                               ComparisonService comparisonService,
                               WebhookNotifier notifier,
                               AiAnalyzer aiAnalyzer,
+                              QueryMasker queryMasker,
                               PlanChangeTracker planChangeTracker,
                               @Value("${dbtower.regression.recent-minutes:5}") int recentMinutes,
                               @Value("${dbtower.regression.baseline-minutes:15}") int baselineMinutes,
@@ -60,6 +63,7 @@ public class RegressionDetector {
         this.comparisonService = comparisonService;
         this.notifier = notifier;
         this.aiAnalyzer = aiAnalyzer;
+        this.queryMasker = queryMasker;
         this.planChangeTracker = planChangeTracker;
         this.recentMinutes = recentMinutes;
         this.baselineMinutes = baselineMinutes;
@@ -107,7 +111,9 @@ public class RegressionDetector {
                                   LocalDateTime now) {
         List<String> findings = new ArrayList<>();
         for (QueryDiff d : result.queries()) {
-            String text = d.queryText() == null ? d.queryId() : d.queryText();
+            // 외부(웹훅)로 나가는 유일한 SQL 지점 — 리터럴을 가린다. MySQL/PG 정규화 텍스트에는
+            // 멱등이고, Oracle(V$SQL 원문)·Mongo(명령 JSON)의 실값이 실제 보호 대상이다.
+            String text = d.queryText() == null ? d.queryId() : queryMasker.apply(d.queryText());
             String shortText = text.length() > 90 ? text.substring(0, 90) + "..." : text;
 
             if (d.newQuery() && d.targetQps() >= 0.1 && underCooldown(instance, d, "new", now)) {

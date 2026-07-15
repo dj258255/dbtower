@@ -1,6 +1,7 @@
 package io.dbtower.alert;
 
 import io.dbtower.alert.internal.PlanChangeTracker;
+import io.dbtower.analysis.QueryMasker;
 import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.alert.internal.job.RegressionDetector;
 import io.dbtower.analysis.AiAnalyzer;
@@ -40,7 +41,7 @@ class RegressionDetectorTest {
     @BeforeEach
     void setUp() {
         detector = new RegressionDetector(instanceRepository, comparisonService, notifier, aiAnalyzer,
-                planChangeTracker, 5, 15, 30);
+                new QueryMasker(true, false), planChangeTracker, 5, 15, 30);
         DatabaseInstance instance = new DatabaseInstance(
                 "test-db", DbmsType.MYSQL, "127.0.0.1", 3306, "sample", "root", "pw");
         when(instanceRepository.findAll()).thenReturn(List.of(instance));

@@ -1,6 +1,7 @@
 package io.dbtower.alert;
 
 import io.dbtower.alert.internal.InquiryService;
+import io.dbtower.analysis.QueryMasker;
 import io.dbtower.alert.internal.ReferencedSchemaService;
 import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.registry.DatabaseInstance;
@@ -28,7 +29,7 @@ class InquiryServiceTest {
     private final RegistryService registryService = Mockito.mock(RegistryService.class);
     private final WebhookNotifier notifier = Mockito.mock(WebhookNotifier.class);
     private final ReferencedSchemaService referencedSchema = Mockito.mock(ReferencedSchemaService.class);
-    private final InquiryService service = new InquiryService(registryService, notifier, referencedSchema);
+    private final InquiryService service = new InquiryService(registryService, notifier, referencedSchema, new QueryMasker(true, false));
 
     private void stubInstance() {
         DatabaseInstance instance = new DatabaseInstance(
@@ -67,7 +68,9 @@ class InquiryServiceTest {
         assertTrue(msg.contains("prod-orders"), "인스턴스명 포함");
         assertTrue(msg.contains("MYSQL"), "기종 포함");
         assertTrue(msg.contains("alice"), "요청자 포함");
-        assertTrue(msg.contains("SELECT * FROM orders WHERE user_id = 42"), "쿼리 포함");
+        // 리터럴(42)은 외부 발신 직전 마스킹된다 — 구조는 보존, 값은 ?
+        assertTrue(msg.contains("SELECT * FROM orders WHERE user_id = ?"), "마스킹된 쿼리 포함");
+        assertFalse(msg.contains("user_id = 42"), "리터럴은 가려진다");
         assertTrue(msg.contains("풀 테이블 스캔 의심"), "규칙 지적 포함");
         assertTrue(msg.contains("user_id 인덱스를 검토하세요"), "AI 분석 포함");
         assertTrue(msg.contains("주문 조회가 느립니다"), "비고 포함");
@@ -112,7 +115,7 @@ class InquiryServiceTest {
         ArgumentCaptor<WebhookNotifier.Embed> embedCaptor = ArgumentCaptor.forClass(WebhookNotifier.Embed.class);
         verify(notifier).sendEmbed(captor.capture(), embedCaptor.capture());
         String msg = captor.getValue();
-        assertTrue(msg.contains("SELECT 1"));
+        assertTrue(msg.contains("SELECT ?"));   // 숫자 리터럴 1도 마스킹 대상
         // 선택 항목이 없으면 해당 섹션 헤더 자체가 없다
         assertFalse(msg.contains("실행계획:"));
         assertFalse(msg.contains("규칙 지적:"));
