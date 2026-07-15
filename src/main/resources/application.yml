@@ -24,6 +24,12 @@ spring:
           # JVM 기본 TZ 고정(DbtowerApplication)과 짝을 이뤄, 노드 서버 TZ가 달라도 메타 DB에
           # 저장/조회되는 시각이 UTC로 일관된다. 저장 컬럼 타입(Instant) 변경은 범위 밖.
           time_zone: UTC
+  session:
+    # 공유 세션(Phase 3) — 세션을 메타 DB에 저장(재시작·다중 노드 생존). Servlet 세션 저장소를 JDBC로.
+    store-type: jdbc
+    jdbc:
+      # 스키마의 단일 권위는 Flyway(V15)이므로 자동 생성을 끈다
+      initialize-schema: never
   flyway:
     # 이미 테이블·데이터가 있는 DB에 Flyway를 도입할 때의 표준 절차 —
     # 기존 스키마를 V1(베이스라인)으로 표시만 하고 건너뛴다(비파괴). 빈 DB에는 V1부터 전부 실행된다.

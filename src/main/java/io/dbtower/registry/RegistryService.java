@@ -1,6 +1,9 @@
 package io.dbtower.registry;
 
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -54,13 +57,60 @@ public class RegistryService {
         return repository.save(existing);
     }
 
+    /**
+     * 팀 스코프(LBAC, Phase 3) 강제 지점 — 모든 모듈이 인스턴스를 이 두 메서드로 얻으므로 여기가
+     * <b>단일 경계</b>다(컨트롤러마다 뿌리지 않는다). 스코프 규칙:
+     * <ul>
+     *   <li>인증 없음(백그라운드 폴러·잡) = 전역 — 수집·경보는 팀과 무관하게 전체를 지켜야 한다</li>
+     *   <li>ROLE_ADMIN(서비스 토큰 포함) = 전역 — 관리자가 자기 눈을 가리면 관리가 안 된다</li>
+     *   <li>TEAM_라벨 authority 보유 = 그 팀 인스턴스 + 라벨 없는 전역 인스턴스만</li>
+     *   <li>라벨 없는 사용자 = 전역(하위 호환)</li>
+     * </ul>
+     * 스코프 밖 단건 조회는 403이 아니라 <b>404와 동일한 예외</b> — 존재 자체를 노출하지 않는다.
+     */
     public List<DatabaseInstance> findAll() {
-        return repository.findAll();
+        String team = currentTeamScope();
+        List<DatabaseInstance> all = repository.findAll();
+        if (team == null) {
+            return all;
+        }
+        return all.stream().filter(i -> inScope(i, team)).toList();
     }
 
     public DatabaseInstance findById(Long id) {
-        return repository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("등록되지 않은 인스턴스: " + id));
+        DatabaseInstance instance = repository.findById(id)
+                .orElseThrow(() -> new InstanceNotFoundException(id));
+        String team = currentTeamScope();
+        if (team != null && !inScope(instance, team)) {
+            throw new InstanceNotFoundException(id);   // 미등록과 같은 메시지 — 존재 노출 방지
+        }
+        return instance;
+    }
+
+    /** 라벨 없는 인스턴스는 전역(모든 팀이 봄), 라벨이 있으면 같은 팀만. */
+    private static boolean inScope(DatabaseInstance instance, String team) {
+        return instance.getTeamLabel() == null || instance.getTeamLabel().isBlank()
+                || team.equals(instance.getTeamLabel());
+    }
+
+    /** 현재 요청 주체의 팀 스코프 — null이면 전역(폴러·ADMIN·라벨 없는 사용자). */
+    private static String currentTeamScope() {
+        Authentication auth =
+                SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            return null;
+        }
+        boolean admin = false;
+        String team = null;
+        for (GrantedAuthority a : auth.getAuthorities()) {
+            String name = a.getAuthority();
+            if ("ROLE_ADMIN".equals(name)) {
+                admin = true;
+            } else if (name.startsWith("TEAM_")) {
+                team = name.substring("TEAM_".length());
+            }
+        }
+        return admin ? null : team;
     }
 
     public HealthStatus health(Long id) {

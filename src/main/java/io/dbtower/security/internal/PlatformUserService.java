@@ -44,8 +44,14 @@ public class PlatformUserService implements UserDetailsService {
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         PlatformUser user = repository.findByUsername(username)
                 .orElseThrow(() -> new UsernameNotFoundException("없는 사용자: " + username));
-        return new User(user.getUsername(), user.getPasswordHash(),
-                List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole().name())));
+        // 팀 스코프(LBAC)는 authority로 실어 나른다 — 강제 지점(RegistryService)이 security 모듈을
+        // 참조하지 않고 SecurityContext만 읽으면 되게(모듈 경계 유지). 라벨 변경은 재로그인부터 적용.
+        List<SimpleGrantedAuthority> authorities = new java.util.ArrayList<>();
+        authorities.add(new SimpleGrantedAuthority("ROLE_" + user.getRole().name()));
+        if (user.getTeamLabel() != null && !user.getTeamLabel().isBlank()) {
+            authorities.add(new SimpleGrantedAuthority("TEAM_" + user.getTeamLabel()));
+        }
+        return new User(user.getUsername(), user.getPasswordHash(), authorities);
     }
 
     @Bean

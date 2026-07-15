@@ -54,6 +54,10 @@
   마크 제거. 로그인 화면(미인증)에서도 파비콘이 뜨도록 SecurityConfig permitAll에 파비콘 자산 추가
 
 ### Added
+- 팀 스코핑(LBAC, Phase 3) — 사용자에 팀 라벨(V14)을 달면 그 팀 인스턴스 + 라벨 없는 전역만 보인다.
+  강제는 단일 경계(RegistryService.findAll/findById), 스코프는 로그인 authority로 부여(폴러·ADMIN은
+  전역). 스코프 밖 단건은 미등록과 같은 404(존재 노출 방지). ADMIN이 PATCH로 팀 지정
+- 공유 세션(spring-session-jdbc, V15) — 세션을 메타 DB에 저장해 앱 재시작·다중 노드에서 로그인 생존
 - 로그 백업 5기종 전부 실동작 + PITR(Phase 2 완결) — MySQL binlog(FLUSH 경계), PostgreSQL WAL
   세그먼트(pg_switch_wal — wal_level·권한 게이트), MongoDB oplog(데모를 단일노드 replSet으로 전환),
   Oracle 아카이브 로그(ARCHIVELOG 게이트 + V$ARCHIVED_LOG 수집, PDB에선 ARCHIVE LOG CURRENT가

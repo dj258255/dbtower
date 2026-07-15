@@ -478,8 +478,8 @@ record TableDetail(String table, String engine, long rowCount, long dataBytes, l
 
 | 항목 | 상태 | 구현 명세 (Opus) | 검증 기준 |
 |---|---|---|---|
-| per-instance 접근 스코핑 | 미구현 | 라벨 기반(LBAC, PMM 선례) — role explosion(팀마다 롤 양산) 회피. V11: `database_instance.team_label`(nullable=전역), `platform_user.team_label`(+ ADMIN은 전역 관리 유지, 팀 스코프 롤 신설 여부는 구현 시 결정). 강제 지점은 **한 곳**: `RegistryService.findById/findAll`에 현재 인증 주체의 스코프 필터(모든 모듈이 registry를 경유하므로 단일 경계 — 컨트롤러마다 뿌리지 않는다). MCP·Bearer 토큰에도 동일 적용(토큰-팀 매핑). **함정**: 스코프 밖 인스턴스는 403이 아니라 404(존재 노출 방지) | 팀A 유저가 팀B 인스턴스 조회 404, 전역 ADMIN 전체 조회, MCP 동일 경계 테스트 |
-| 공유 세션 + 완전 HA | 미구현 | 세션: **spring-session-jdbc**(메타DB 재사용 — ShedLock과 같은 "새 인프라 없이" 논리, Redis는 규모 커지면 승급). 의존성 +V12(스키마는 spring-session 표준 DDL). 로그인 rate-limit 카운터도 세션 스토어로 이관 검토(Phase 1의 정직 표기 해소). 메타DB 복제는 앱 범위 밖 — operations.md에 소유 계층(CloudNativePG·RDS Multi-AZ) 가이드로. LB 뒤 2노드 구성 예시 compose 추가 | 2노드+LB에서 한 노드 kill 후 같은 세션 쿠키로 무중단 사용 e2e |
+| per-instance 접근 스코핑 | **완료(77절)** | 라벨 기반(LBAC, PMM 선례) — role explosion(팀마다 롤 양산) 회피. V11: `database_instance.team_label`(nullable=전역), `platform_user.team_label`(+ ADMIN은 전역 관리 유지, 팀 스코프 롤 신설 여부는 구현 시 결정). 강제 지점은 **한 곳**: `RegistryService.findById/findAll`에 현재 인증 주체의 스코프 필터(모든 모듈이 registry를 경유하므로 단일 경계 — 컨트롤러마다 뿌리지 않는다). MCP·Bearer 토큰에도 동일 적용(토큰-팀 매핑). **함정**: 스코프 밖 인스턴스는 403이 아니라 404(존재 노출 방지) | 팀A 유저가 팀B 인스턴스 조회 404, 전역 ADMIN 전체 조회, MCP 동일 경계 테스트 |
+| 공유 세션 + 완전 HA | **부분 완료(77절 — 공유 세션)** | 세션: **spring-session-jdbc**(메타DB 재사용 — ShedLock과 같은 "새 인프라 없이" 논리, Redis는 규모 커지면 승급). 의존성 +V12(스키마는 spring-session 표준 DDL). 로그인 rate-limit 카운터도 세션 스토어로 이관 검토(Phase 1의 정직 표기 해소). 메타DB 복제는 앱 범위 밖 — operations.md에 소유 계층(CloudNativePG·RDS Multi-AZ) 가이드로. LB 뒤 2노드 구성 예시 compose 추가 | 2노드+LB에서 한 노드 kill 후 같은 세션 쿠키로 무중단 사용 e2e |
 
 ### Phase 4 — 스케일 잔여 (수천 대)
 

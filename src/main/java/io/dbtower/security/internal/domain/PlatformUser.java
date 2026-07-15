@@ -43,9 +43,22 @@ public class PlatformUser {
     @Column(nullable = false)
     private Role role;
 
+    /**
+     * 팀 라벨(LBAC, Phase 3·V14) — 지정되면 이 사용자는 같은 라벨의 인스턴스(+ 라벨 없는 전역
+     * 인스턴스)만 본다. null = 스코프 없음(전역 — 기존 사용자 하위 호환). ADMIN은 라벨과 무관하게
+     * 전역(관리자가 자기 눈을 가리면 관리가 안 된다). 라벨 변경은 다음 로그인부터 적용된다
+     * (스코프가 인증 authority에 실리므로).
+     */
+    @Column(length = 100)
+    private String teamLabel;
+
     public PlatformUser(String username, String passwordHash, Role role) {
         this.username = username;
         this.passwordHash = passwordHash;
         this.role = role;
+    }
+
+    public void updateTeamLabel(String teamLabel) {
+        this.teamLabel = teamLabel;
     }
 }

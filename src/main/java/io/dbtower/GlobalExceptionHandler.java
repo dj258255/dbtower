@@ -1,5 +1,6 @@
 package io.dbtower;
 
+import io.dbtower.registry.InstanceNotFoundException;
 import io.dbtower.operator.OperatorException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,10 +17,20 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    /** 잘못된 요청(미등록 인스턴스, 스냅샷 부족, SELECT 아닌 explain 등) */
+    /** 잘못된 요청(스냅샷 부족, SELECT 아닌 explain 등) */
     @ExceptionHandler(IllegalArgumentException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Map<String, String> badRequest(IllegalArgumentException e) {
+        return Map.of("error", e.getMessage());
+    }
+
+    /**
+     * 인스턴스 없음(Phase 3) — 미등록과 팀 스코프 밖(LBAC)이 같은 404·같은 메시지다.
+     * 403으로 구분하면 "그 id가 존재한다"는 사실이 새기 때문(존재 노출 방지).
+     */
+    @ExceptionHandler(InstanceNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public Map<String, String> instanceNotFound(InstanceNotFoundException e) {
         return Map.of("error", e.getMessage());
     }
 
