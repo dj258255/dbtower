@@ -165,7 +165,7 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
-  await Promise.all([loadActivity(), loadMetrics(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks()]);
+  await Promise.all([loadActivity(), loadMetrics(), loadBackupInfo(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks()]);
 }
 
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
@@ -1043,6 +1043,39 @@ async function loadSlow() {
       <td>${q.planSummary ? `<span class="plan-badge ${/COLLSCAN/i.test(q.planSummary) ? "plan-bad" : "plan-ok"}">${esc(q.planSummary)}</span>` : '<span class="muted">—</span>'}</td>
       <td class="qtext" title="${esc(q.queryText)}">${esc(q.queryText)}</td>
     </tr>`).join("") : '<tr><td colspan="8" class="muted">슬로우 쿼리가 없습니다.</td></tr>';
+}
+
+// 백업/PITR 카드 (Phase 2) — 이력(타입·상태·검증)과 복원 가능 창·문안을 보여준다.
+// UNSUPPORTED는 실패가 아니라 "기종이 못 하는 것" — 색으로 구분해 위장하지 않는다.
+async function loadBackupInfo() {
+  const id = state.instance.id;
+  try {
+    const [runs, pitr] = await Promise.all([
+      api(`/api/instances/${id}/backup-runs`),
+      api(`/api/instances/${id}/pitr-window`),
+    ]);
+    $("#pitr-window").className = "pitr-window";
+    $("#pitr-window").innerHTML = pitr.available
+      ? `<span class="pitr-ok">복원 가능 창</span> ${esc(String(pitr.fullAt).replace("T", " "))} ~ ${
+          pitr.lastLogAt ? esc(String(pitr.lastLogAt).replace("T", " ")) : "(FULL 시점만)"} · 로그 ${pitr.logCount}개
+         <div class="muted">${esc(pitr.note ?? "")}</div>`
+      : `<span class="pitr-none">시점 복구 불가</span> <span class="muted">${esc(pitr.note ?? "")}</span>`;
+    $("#pitr-guide").textContent = pitr.restoreGuide ?? "(문안 없음)";
+    const table = $("#backup-table");
+    table.querySelector("thead").innerHTML =
+      `<tr><th>시각 (UTC)</th><th>타입</th><th>상태</th><th>검증</th><th>산출물/사유</th></tr>`;
+    const badge = (s) => `<span class="bk-badge bk-${esc(s)}">${esc(s)}</span>`;
+    table.querySelector("tbody").innerHTML = runs.length ? runs.map((r) => `
+      <tr>
+        <td class="num">${esc(String(r.startedAt).replace("T", " ").slice(0, 19))}</td>
+        <td>${r.backupType ? esc(r.backupType) : '<span class="muted">—</span>'}</td>
+        <td>${badge(r.status)}</td>
+        <td>${r.verifyStatus ? esc(r.verifyStatus) : '<span class="muted">—</span>'}</td>
+        <td class="qtext" title="${esc(r.detail ?? "")}">${esc((r.detail ?? "").slice(0, 90))}</td>
+      </tr>`).join("") : '<tr><td colspan="5" class="muted">백업 이력이 없습니다.</td></tr>';
+  } catch (e) {
+    $("#pitr-window").textContent = `조회 실패: ${e.message}`;
+  }
 }
 
 // MCP 카드 — 도구 목록을 실제 /mcp 엔드포인트(tools/list)에서 받아와 그린다.

@@ -577,11 +577,24 @@ public class OracleOperator extends AbstractJdbcOperator {
     private BackupResult rmanBackup(String rmanCommand, String kind) {
         Path out = Path.of(backupTools.backupDir(),
                 "oracle-rman-%s-%s-%s.log".formatted(kind, safeFileName(instance.getName()), backupTimestamp()));
+        // 접속 자격증명은 RMAN 스크립트(stdin) 한 줄에 들어간다 — 개행/따옴표가 섞이면 그 줄을 벗어나
+        // 임의 RMAN 명령을 주입할 수 있다(CONNECT 다음 줄이 곧 실행 스크립트라 특히 위험). 그래서
+        // 스크립트에 넣기 전에 제어문자·따옴표를 거부한다(조용히 제거해 인증을 어긋나게 하지 않고 명확히 실패).
+        String user = requireSingleLineNoQuote(instance.getUsername(), "username");
+        String password = requireSingleLineNoQuote(instance.getPassword(), "password");
         String script = "CONNECT TARGET %s/\"%s\"@%s:%d/%s\n%s\nEXIT;\n".formatted(
-                instance.getUsername(), instance.getPassword().replace("\"", ""),
-                instance.getHost(), instance.getPort(), instance.getDbName(), rmanCommand);
+                user, password, instance.getHost(), instance.getPort(), instance.getDbName(), rmanCommand);
         return io.dbtower.operator.BackupCommands.run(
                 renderCommand(backupTools.oracleRmanCommand()), Map.of(), out, script);
+    }
+
+    /** RMAN 스크립트 한 줄에 안전히 들어갈 값만 허용 — 개행·캐리지리턴·NUL·큰따옴표가 있으면 주입 위험이라 거부. */
+    private static String requireSingleLineNoQuote(String value, String field) {
+        if (value == null || value.chars().anyMatch(c -> c == '\n' || c == '\r' || c == '\0' || c == '"')) {
+            throw new OperatorException(
+                    "RMAN 접속에 쓸 수 없는 " + field + " — 개행·따옴표가 포함되면 스크립트 주입 위험으로 거부한다");
+        }
+        return value;
     }
 
     /**

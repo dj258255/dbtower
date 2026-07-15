@@ -208,6 +208,18 @@
         <div id="finops-summary" class="advisors-summary"></div>
         <div id="finops-result" class="advisors-result muted">분석 중...</div>
       </div>
+      <div class="monitor-card backup-card">
+        <h3>백업 / 시점 복구 <span class="hint">(이력·복원 가능 창 — 실행은 API/폴러, 복원 문안 생성까지만: 실행은 사람이)</span></h3>
+        <div id="pitr-window" class="pitr-window muted">조회 중...</div>
+        <details class="pitr-guide-box"><summary>복원 명령 문안 보기 (생성·안내 — 실행은 사람)</summary>
+          <pre id="pitr-guide" class="codeblock"></pre></details>
+        <div class="table-scroll">
+          <table class="qtable" id="backup-table">
+            <thead></thead>
+            <tbody><tr><td class="muted">조회 중...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
       <div class="monitor-card session-card">
         <h3>세션 / 블로킹 <span class="hint">(지금 누가 누구를 막고 있나 — blockedBy가 있으면 강조)</span></h3>
         <div class="table-scroll">
