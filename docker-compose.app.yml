@@ -23,8 +23,11 @@ services:
       DBTOWER_DB_PASSWORD: ${DBTOWER_DB_PASSWORD:?meta DB 비밀번호를 .env 에 설정하세요}
       # 관리자 초기 비밀번호(미설정 시 앱이 랜덤 생성 후 로그로 1회 안내)
       DBTOWER_ADMIN_PASSWORD: ${DBTOWER_ADMIN_PASSWORD:-}
-      # 등록 대상 DB 비밀번호를 저장 시 암호화(AES-256-GCM). base64 32바이트. 미설정 시 평문 저장(WARN).
-      DBTOWER_ENCRYPTION_KEY: ${DBTOWER_ENCRYPTION_KEY:-}
+      # 등록 대상 DB 비밀번호를 저장 시 암호화(AES-256-GCM). base64 32바이트. [필수] — 미설정 시
+      # docker 프로필이 fail-closed로 기동 거부(평문 저장 방지, CWE-312). 생성: openssl rand -base64 32
+      DBTOWER_ENCRYPTION_KEY: ${DBTOWER_ENCRYPTION_KEY:?암호화 키가 필요합니다 — .env에 DBTOWER_ENCRYPTION_KEY 설정 (openssl rand -base64 32)}
+      # AI 1차 분석용 Anthropic API 키(선택). 미설정 시 AI 분석 비활성(규칙 기반 지적까지).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # 이상 감지 알림 웹훅(선택). 미설정 시 알림 비활성.
       DBTOWER_WEBHOOK_URL: ${DBTOWER_WEBHOOK_URL:-}
       # 백업 원격 보관(선택, 3-2-1 오프사이트) — S3 호환(AWS S3·MinIO·R2).

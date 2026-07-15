@@ -1,0 +1,29 @@
+DBTower
+Copyright 2026 dj258255
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes third-party software with its own license terms. When
+DBTower is distributed as a container image, the image bundles the following
+components; their licenses govern that redistribution:
+
+Bundled JDBC drivers (runtime dependencies)
+- MySQL Connector/J (com.mysql:mysql-connector-j)
+  GPL v2 with the Universal FOSS Exception. Redistribution within an
+  open-source product is permitted under that exception.
+- Oracle JDBC (com.oracle.database.jdbc:ojdbc11)
+  Oracle Free Use Terms and Conditions (proprietary). Redistribution is
+  subject to Oracle's notice and use terms.
+- Microsoft JDBC Driver for SQL Server (com.microsoft.sqlserver:mssql-jdbc) — MIT
+- PostgreSQL JDBC (org.postgresql:postgresql) — BSD-2-Clause
+- MongoDB Java Driver (org.mongodb:mongodb-driver-sync) — Apache-2.0
+
+Bundled command-line tools in the container image (see Dockerfile)
+- mysql client / mysqldump (default-mysql-client, MariaDB) — GPL v2
+- pg_dump / psql (PostgreSQL client, PGDG) — PostgreSQL License
+- mongodump / mongorestore (MongoDB Database Tools) — Apache-2.0 (tooling)
+
+Other notable dependencies (Apache-2.0 unless noted): Spring Boot, Spring
+Modulith, Flyway, ShedLock, AWS SDK for Java v2, Micrometer, Anthropic Java SDK.
+
+The full text of each license is available from the respective project.

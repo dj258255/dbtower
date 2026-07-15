@@ -1,5 +1,7 @@
 package io.dbtower.security;
 
+import io.dbtower.security.internal.SecretCipherHolder;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,9 +29,12 @@ import java.util.Base64;
  * (기동마다 새로 만들면 그만인 API 토큰과 달리, 암호화 키는 저장된 데이터와 운명을 같이한다).
  * 대신 WARN 로그로 평문 저장 상태임을 명확히 알린다.
  *
- * <p>A-3: 단, 운영 프로필(prod)이 활성인데 키가 없으면 대상 DB 비밀번호가 전량 평문으로 저장되는
- * 사고이므로 조용한 평문 폴백을 <b>거부하고 기동을 실패</b>시킨다(fail-closed). 운영에서 fail-open은
- * 사일런트 정보 노출(CWE-312)이라 dev의 하위호환 편의보다 우선한다. dev/기본 프로필은 기존대로 WARN+평문.
+ * <p>A-3 / Phase 0: 배포 프로필(prod·docker)이 활성인데 키가 없으면 대상 DB 비밀번호가 전량 평문으로
+ * 저장되는 사고이므로 조용한 평문 폴백을 <b>거부하고 기동을 실패</b>시킨다(fail-closed). 셀프호스트는
+ * docker 프로필로 뜨는데 예전엔 prod만 막아 이 경로가 뚫려 있었다(CWE-312). 운영에서 fail-open은
+ * 사일런트 정보 노출이라 dev의 하위호환 편의보다 우선한다. dev/test/기본(blank) 프로필은 기존대로
+ * WARN+평문(로컬 개발·테스트 컨텍스트 부팅 편의). 셀프호스트 경로는 docker-compose.app.yml의
+ * ${DBTOWER_ENCRYPTION_KEY:?}가 compose 수준에서 한 번 더 막는다(이중 방어).
  */
 @Component
 public class SecretCipher {
@@ -46,15 +51,15 @@ public class SecretCipher {
     /** null이면 암호화 비활성(키 미설정) */
     private final SecretKey key;
 
-    /** 스프링 주입 경로 — 암호화 키와 활성 프로필(spring.profiles.active)을 함께 받아 prod fail-closed를 판정한다. */
+    /** 스프링 주입 경로 — 암호화 키와 활성 프로필(spring.profiles.active)을 함께 받아 배포 프로필 fail-closed를 판정한다. */
     @Autowired
     public SecretCipher(@Value("${dbtower.security.encryption-key:}") String encodedKey,
                         @Value("${spring.profiles.active:}") String activeProfiles) {
         if (encodedKey == null || encodedKey.isBlank()) {
-            // 운영 프로필에서는 조용한 평문 폴백을 막는다 — 키 없이 뜨면 대상 DB 비밀번호가 전량 평문이 된다
-            if (isProdProfile(activeProfiles)) {
+            // 배포 프로필(prod·docker)에서는 조용한 평문 폴백을 막는다 — 키 없이 뜨면 대상 DB 비밀번호가 전량 평문이 된다
+            if (isFailClosedProfile(activeProfiles)) {
                 throw new IllegalStateException(
-                        "운영 프로필(prod)에서 DBTOWER_ENCRYPTION_KEY가 없습니다 — 인스턴스 비밀번호 평문 저장을 막기 위해 "
+                        "배포 프로필(" + activeProfiles + ")에서 DBTOWER_ENCRYPTION_KEY가 없습니다 — 인스턴스 비밀번호 평문 저장을 막기 위해 "
                                 + "기동을 거부합니다. base64 인코딩 32바이트 키를 설정하세요 (예: openssl rand -base64 32)");
             }
             this.key = null;
@@ -83,13 +88,19 @@ public class SecretCipher {
         this(encodedKey, "");
     }
 
-    /** spring.profiles.active(콤마 구분)에 prod가 포함되는지 — 대소문자 무시. 미설정이면 false(dev/기본). */
-    private static boolean isProdProfile(String activeProfiles) {
+    /**
+     * spring.profiles.active(콤마 구분)에 배포 프로필(prod·docker)이 포함되는지 — 대소문자 무시.
+     * 미설정(blank)·dev·test는 false(평문 폴백 유지) — 로컬 개발·테스트 컨텍스트 부팅 편의.
+     * blank까지 fail-closed로 잡으면 키를 안 주는 다수의 @SpringBootTest 컨텍스트가 못 뜬다.
+     */
+    private static final java.util.Set<String> FAIL_CLOSED_PROFILES = java.util.Set.of("prod", "docker");
+
+    private static boolean isFailClosedProfile(String activeProfiles) {
         if (activeProfiles == null || activeProfiles.isBlank()) {
             return false;
         }
         for (String p : activeProfiles.split(",")) {
-            if (p.trim().equalsIgnoreCase("prod")) {
+            if (FAIL_CLOSED_PROFILES.contains(p.trim().toLowerCase())) {
                 return true;
             }
         }

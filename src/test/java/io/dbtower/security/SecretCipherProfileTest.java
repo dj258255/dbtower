@@ -7,8 +7,9 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * A-3: 암호화 fail-closed 경계를 못 박는다. 운영 프로필(prod)에서 키가 없으면 조용한 평문 저장 대신
- * 기동을 거부해야 하고, dev/기본 프로필은 하위호환을 위해 WARN+평문 폴백을 그대로 유지해야 한다.
+ * A-3 / Phase 0: 암호화 fail-closed 경계를 못 박는다. 배포 프로필(prod·docker)에서 키가 없으면
+ * 조용한 평문 저장 대신 기동을 거부해야 하고, dev/test/기본 프로필은 하위호환·테스트 부팅 편의를 위해
+ * WARN+평문 폴백을 그대로 유지해야 한다. (셀프호스트는 docker 프로필이라 여기가 진짜 방어선)
  */
 class SecretCipherProfileTest {
 
@@ -17,6 +18,14 @@ class SecretCipherProfileTest {
         assertThatThrownBy(() -> new SecretCipher("", "prod"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("prod");
+    }
+
+    @Test
+    void docker_프로필에_키가_없으면_기동을_거부한다() {
+        // 셀프호스트 경로 — 예전엔 prod만 막아 이 경로가 평문으로 뚫려 있었다(CWE-312)
+        assertThatThrownBy(() -> new SecretCipher("", "docker"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("docker");
     }
 
     @Test

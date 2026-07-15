@@ -50,6 +50,9 @@ RUN set -eux; \
 RUN useradd -r -u 1001 -m dbtower
 WORKDIR /app
 COPY --from=build /app.jar /app/dbtower.jar
+# AI 1차 분석의 판단 기준(dbtower.security.rules-path=docs/ai-analysis-rules.md, 작업 디렉터리 /app 기준).
+# 이미지에 포함하지 않으면 AiAnalyzer가 빈 프롬프트로 판정해 "일관 판정" 가치가 사라진다.
+COPY docs/ai-analysis-rules.md /app/docs/ai-analysis-rules.md
 # 백업 산출물 기본 위치(application.yml dbtower.backup.dir=./backups) — 볼륨 마운트 지점
 RUN mkdir -p /app/backups && chown -R dbtower:dbtower /app
 USER 1001
