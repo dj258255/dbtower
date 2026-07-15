@@ -68,9 +68,10 @@ public class InsightController {
      * 호출수가 아니라 "시간 점유율"로 랭킹해야 DB를 실제로 붙잡고 있는 쿼리가 보인다. (PMM QAN 방식)
      */
     // callsPerSec는 스냅샷 차분으로만 낼 수 있어 이력이 없으면 null(화면 "—"). avg는 누적/호출수라 창이 필요 없다.
+    // plan은 MongoDB만 채워진다(system.profile planSummary) — 화면은 값이 있을 때만 Plan 컬럼을 그린다.
     public record QueryStatView(String queryId, String queryText, long calls,
                                 double totalTimeMs, long rowsExamined, double loadPct,
-                                double avgLatencyMs, double rowsExaminedAvg, Double callsPerSec) {
+                                double avgLatencyMs, double rowsExaminedAvg, Double callsPerSec, String plan) {
     }
 
     @GetMapping("/query-stats")
@@ -84,7 +85,8 @@ public class InsightController {
                         totalTime == 0 ? 0 : Math.round(s.totalTimeMs() / totalTime * 10000) / 100.0,
                         s.calls() == 0 ? 0 : s.totalTimeMs() / s.calls(),          // 평균 Latency(ms)
                         s.calls() == 0 ? 0 : (double) s.rowsExamined() / s.calls(), // 평균 Row Examined
-                        qpsByQuery.get(s.queryId())))                              // Call/sec — 이력 없으면 null
+                        qpsByQuery.get(s.queryId()),                               // Call/sec — 이력 없으면 null
+                        s.plan()))
                 .toList();
     }
 

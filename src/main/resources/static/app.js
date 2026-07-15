@@ -393,6 +393,10 @@ async function loadActivity() {
   const to = toApiTime(now);
   state.activity = await api(`/api/instances/${state.instance.id}/activity?from=${from}&to=${to}`);
   drawChart();
+  // Monitoring 탭 Metric 카드의 Query Activity — 같은 데이터를 병치(스냅샷 차분 QPS)
+  drawSimpleChart("#qps-chart", "#qps-empty",
+    state.activity.map((p) => ({ time: p.time, value: p.qps })), "#22a06b",
+    "이 구간에 수집된 스냅샷이 없습니다");
 }
 
 // Metric 그래프 (CPU%·Connections) — Prometheus exporter 시계열. 미수집은 사유를 그대로 보여준다.
@@ -571,9 +575,11 @@ async function runQuery() {
   const stats = await api(`/api/instances/${state.instance.id}/query-stats?limit=20`);
   const table = $("#top-table");
   // Call/sec는 스냅샷 차분이라 이력 없으면 null → "—". Latency/Row Examined는 누적÷호출수(평균).
+  // Plan 컬럼은 값이 있는 기종(MongoDB — profiler가 계획 요약을 저장)에서만 그린다.
+  const hasPlan = stats.some((q) => q.plan);
   table.querySelector("thead").innerHTML = `
     <tr><th>Load</th><th>Query</th><th class="num">Call/sec</th>
-        <th class="num">Latency(ms)</th><th class="num">Row Examined (Avg)</th></tr>`;
+        <th class="num">Latency(ms)</th><th class="num">Row Examined (Avg)</th>${hasPlan ? "<th>Plan</th>" : ""}</tr>`;
   table.querySelector("tbody").innerHTML = stats.map((q, idx) => `
     <tr data-idx="${idx}">
       <td class="num">${fmtNum(q.loadPct)}%</td>
@@ -581,6 +587,7 @@ async function runQuery() {
       <td class="num">${q.callsPerSec == null ? '<span class="muted">—</span>' : fmtNum(q.callsPerSec)}</td>
       <td class="num">${fmtNum(q.avgLatencyMs)}</td>
       <td class="num">${fmtNum(q.rowsExaminedAvg, 0)}</td>
+      ${hasPlan ? `<td>${q.plan ? `<span class="plan-badge ${/COLLSCAN/i.test(q.plan) ? "plan-bad" : "plan-ok"}">${esc(q.plan)}</span>` : '<span class="muted">—</span>'}</td>` : ""}
     </tr>`).join("");
   bindRowClicks(stats.map((q) => ({ queryId: q.queryId, queryText: q.queryText })));
 }
@@ -612,13 +619,23 @@ async function runCompare() {
     <span class="summary-item muted">조회 ${esc($("#target-from").value.replace("T", " "))} ~ ${esc($("#target-to").value.slice(11))}
       / 비교 ${esc($("#base-from").value.replace("T", " "))} ~ ${esc($("#base-to").value.slice(11))}</span>`;
 
-  // 표: target QPS 내림차순, 신규 쿼리 하이라이트
-  const rows = [...result.queries].sort((a, b) => b.targetQps - a.targetQps);
+  // Load(시간 점유율%) = qps×avgMs / Σ(qps×avgMs) — 구간별로 따로 계산해 증감까지 보여준다(레퍼런스 첫 컬럼).
+  const loadShare = (rows, qpsKey, msKey) => {
+    const total = rows.reduce((s, q) => s + q[qpsKey] * q[msKey], 0);
+    return (q) => total === 0 ? 0 : Math.round(q[qpsKey] * q[msKey] / total * 10000) / 100;
+  };
+  const targetLoad = loadShare(result.queries, "targetQps", "targetAvgMs");
+  const baseLoad = loadShare(result.queries, "baseQps", "baseAvgMs");
+  const loadPctChange = (b, t) => b === 0 ? null : Math.round((t - b) / b * 10000) / 100;
+
+  // 표: target 부하(Load) 내림차순, 신규 쿼리 하이라이트
+  const rows = [...result.queries].sort((a, b) => targetLoad(b) - targetLoad(a));
   const table = $("#top-table");
   table.querySelector("thead").innerHTML = `
-    <tr><th>Query</th><th class="num">QPS</th><th class="num">Latency(ms)</th><th class="num">Rows/call</th></tr>`;
+    <tr><th class="num">Load</th><th>Query</th><th class="num">QPS</th><th class="num">Latency(ms)</th><th class="num">Rows/call</th></tr>`;
   table.querySelector("tbody").innerHTML = rows.map((q, idx) => `
     <tr data-idx="${idx}" class="${q.newQuery ? "new-query" : ""}">
+      <td>${deltaCell(baseLoad(q), targetLoad(q), loadPctChange(baseLoad(q), targetLoad(q)))}</td>
       <td class="qtext" title="${esc(q.queryText)}">${q.newQuery ? '<span class="badge-new">NEW</span>' : ""}${esc(q.queryText)}</td>
       <td>${deltaCell(q.baseQps, q.targetQps, q.qpsChangePct)}</td>
       <td>${deltaCell(q.baseAvgMs, q.targetAvgMs, q.latencyChangePct)}</td>

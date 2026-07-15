@@ -287,6 +287,7 @@ record TableDetail(String table, String engine, long rowCount, long dataBytes, l
 | MongoDB Plan(IXSCAN/COLLSCAN) | system.profile planSummary 배지(초록/빨강) | 67 |
 | Monitoring 탭 CPU%·Connections 그래프 | PrometheusClient(query_range) + /metrics — node_exporter·기종 exporter, 미수집 사유 정직 표기 | 68 |
 | CPU 그래프 드래그로 시점 선택 | 드래그 차트 QPS ↔ CPU% 토글 (+ 이 작업이 프론트 UTC 스큐 버그를 발굴·수정) | 68 |
+| 비교뷰 Load 증감·Monitoring QPS 병치·Mongo 집계 Plan | 최종 전수 재검증에서 나온 마지막 3건 마감 | 69 |
 
 ### 남은 조각 — 착수 명세 (Opus)
 

@@ -64,6 +64,9 @@
 - 문제 쿼리 식별 표 컬럼 보강 — Top Query 기본뷰에 Call/sec(스냅샷 차분)·평균 Latency(ms)·Row Examined(Avg),
   Slow Query에 User@host·Lock(ms)·Rows_sent(MySQL slow_log), MongoDB Slow Query에 Plan(IXSCAN/COLLSCAN,
   system.profile planSummary) 컬럼 추가. 미확보 필드는 "—"로 정직 표기(Call/sec는 스냅샷 이력 없으면 "—")
+- 화면 패리티 마감 3건 — 비교뷰에 Load(시간 점유율) 증감 첫 컬럼 + Load 내림차순 정렬,
+  Monitoring Metric 카드에 Query Activity(QPS) 그래프 병치, MongoDB Top Query(집계)에 Plan 배지
+  (QueryStat.plan — Mongo profiler만 채움, 값이 있을 때만 컬럼 렌더)
 
 ### Fixed
 - 웹 콘솔 타임존 스큐 — 앱 JVM은 UTC 고정(C-6)인데 프론트가 브라우저 벽시계(KST 등)를 그대로 보내

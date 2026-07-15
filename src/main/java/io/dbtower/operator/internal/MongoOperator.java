@@ -122,7 +122,10 @@ public class MongoOperator implements DbmsOperator {
                         Accumulators.sum("totalMs", new Document("$ifNull", List.of("$millis", 0L))),
                         Accumulators.sum("docsExamined", new Document("$ifNull", List.of("$docsExamined", 0L))),
                         Accumulators.first("ns", "$ns"),
-                        Accumulators.first("command", "$command")),
+                        Accumulators.first("command", "$command"),
+                        // BSON 비교에서 null < 문자열이므로 max는 "이 그룹에 planSummary가 하나라도 있으면 그 값".
+                        // 구간 내 플랜이 갈렸으면(plan flip) 그중 하나만 보인다 — 대표값이지 최근값이 아님.
+                        Accumulators.max("planSummary", "$planSummary")),
                 Aggregates.sort(Sorts.descending("totalMs")),
                 Aggregates.limit(limit));
         try {
@@ -134,7 +137,8 @@ public class MongoOperator implements DbmsOperator {
                             queryText(doc.getString("ns"), doc.get("command", Document.class)),
                             ((Number) doc.getOrDefault("calls", 0)).longValue(),
                             ((Number) doc.getOrDefault("totalMs", 0)).doubleValue(),
-                            ((Number) doc.getOrDefault("docsExamined", 0)).longValue()));
+                            ((Number) doc.getOrDefault("docsExamined", 0)).longValue(),
+                            doc.getString("planSummary")));
                 }
                 return stats;
             });
