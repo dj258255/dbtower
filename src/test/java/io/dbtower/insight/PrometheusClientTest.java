@@ -1,4 +1,4 @@
-package io.dbtower.insight.internal;
+package io.dbtower.insight;
 
 import org.junit.jupiter.api.Test;
 

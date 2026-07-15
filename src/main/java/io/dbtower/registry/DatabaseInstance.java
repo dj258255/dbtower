@@ -123,9 +123,18 @@ public class DatabaseInstance {
         this.collectionEnabled = enabled;
     }
 
-    /** 담당 라벨·콘솔 링크 갱신 (심화 아크 4) — 접속 정보와 별개의 메타라 updateConnection과 분리. */
-    public void updateMeta(String teamLabel, String consoleUrl) {
+    /**
+     * 이 DB가 올라간 호스트의 node_exporter를 가리키는 Prometheus 라벨 셀렉터 (Phase 5, V16 —
+     * 예: instance="db-node-3:9100"). 디스크는 DB가 아니라 호스트 자원이라 별도 매핑이 필요하다.
+     * null = 미지정(전 노드 집계 — 단일 노드 데모에선 그 자체로 정확).
+     */
+    @Column(length = 200)
+    private String nodeFilter;
+
+    /** 담당 라벨·콘솔 링크·노드 매핑 갱신 — 접속 정보와 별개의 운영 메타라 updateConnection과 분리. */
+    public void updateMeta(String teamLabel, String consoleUrl, String nodeFilter) {
         this.teamLabel = teamLabel;
         this.consoleUrl = consoleUrl;
+        this.nodeFilter = nodeFilter;
     }
 }

@@ -106,6 +106,13 @@ services:
   node-exporter:
     image: prom/node-exporter:v1.8.1
     container_name: dbtower-node-exporter
+    # 정석 구성(node_exporter 공식 Docker 가이드): 호스트 루트를 읽기전용으로 /host에 걸고
+    # --path.rootfs로 지정해야 컨테이너 자기 자신(overlay)이 아니라 호스트 디스크가 보인다.
+    # macOS Docker Desktop은 파일 공유 계층(virtiofs)을 거치지만 avail/size는 실제 호스트 볼륨 값.
+    command:
+      - '--path.rootfs=/host'
+    volumes:
+      - /:/host:ro
     ports:
       - "19100:9100"
 

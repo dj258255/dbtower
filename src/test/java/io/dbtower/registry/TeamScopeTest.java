@@ -32,7 +32,7 @@ class TeamScopeTest {
 
     private static DatabaseInstance withTeam(String name, String team) {
         DatabaseInstance i = new DatabaseInstance(name, DbmsType.MYSQL, "h", 3306, "db", "u", "p");
-        i.updateMeta(team, null);
+        i.updateMeta(team, null, null);
         return i;
     }
 

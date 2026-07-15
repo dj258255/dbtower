@@ -1,4 +1,4 @@
-package io.dbtower.insight.internal;
+package io.dbtower.insight;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -40,6 +40,34 @@ public class PrometheusClient {
 
     public boolean configured() {
         return !baseUrl.isBlank();
+    }
+
+    /**
+     * 즉시값(instant) 조회 — 단일 값을 낳는 PromQL 전제(호출부가 min/max/avg로 접어 보낸다).
+     * 실패·빈 결과는 null — 호출부가 "미수집"으로 정직 표기(Phase 5 디스크 예측의 게이트).
+     */
+    public Double queryScalar(String promql) {
+        if (!configured()) {
+            return null;
+        }
+        try {
+            String url = baseUrl + "/api/v1/query?query=" + URLEncoder.encode(promql, StandardCharsets.UTF_8);
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(5)).GET().build();
+            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() != 200) {
+                return null;
+            }
+            JsonNode result = mapper.readTree(res.body()).path("data").path("result");
+            if (!result.isArray() || result.isEmpty()) {
+                return null;
+            }
+            return result.get(0).path("value").get(1).asDouble();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**

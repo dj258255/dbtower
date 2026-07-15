@@ -9,6 +9,9 @@
 ## [Unreleased]
 
 ### Added
+- 디스크 포화 예측(Phase 5) — node_exporter 선형 추세로 "며칠 뒤 차는가"(ETA≤3일 치명/≤14일 경고,
+  추세 없어도 여유<10% 경고). 인스턴스-노드 매핑 node_filter(V16, label="value" 셀렉터만 허용해
+  PromQL 주입 방지), Prometheus 미설정 시 조용히 스킵. node-exporter compose를 정석(rootfs 마운트)으로
 - LICENSE(Apache-2.0) + NOTICE — 번들 JDBC 드라이버(MySQL GPLv2+FOSS Exception·Oracle 독점 등)·
   이미지 번들 CLI 재배포 고지. 이전엔 라이선스 부재로 법적 재사용 불가였음
 - DB팀 문의를 Discord 리치 embed로 — 필드 구조화(요청자·쿼리 sql 코드블록·실행계획·규칙·AI 분석),

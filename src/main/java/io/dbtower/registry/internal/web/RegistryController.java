@@ -44,7 +44,14 @@ public class RegistryController {
             @Size(max = 100) String teamLabel,
             // 콘솔 딥링크(선택) — 화면 href로 들어가므로 http/https만 허용(javascript: 등 스킴 주입 방지)
             @Size(max = 500) @Pattern(regexp = "https?://.+", message = "consoleUrl은 http(s) URL만 허용합니다")
-            String consoleUrl) {
+            String consoleUrl,
+            // 호스트 매핑(선택, Phase 5) — 이 DB가 올라간 노드의 node_exporter를 가리키는 Prometheus
+            // 라벨 셀렉터(예: instance="db-node-3:9100"). 디스크 포화 예측이 사용. PromQL 셀렉터에
+            // 그대로 삽입되므로 label="value" 나열 형식만 허용(중괄호·연산자 주입 방지)
+            @Size(max = 200)
+            @Pattern(regexp = "[a-zA-Z_][a-zA-Z0-9_]*(=~?|!=|!~)\"[^\"{}]*\"(,[a-zA-Z_][a-zA-Z0-9_]*(=~?|!=|!~)\"[^\"{}]*\")*",
+                    message = "nodeFilter는 label=\"value\" 형식의 Prometheus 셀렉터만 허용합니다")
+            String nodeFilter) {
         boolean tls() {
             return Boolean.TRUE.equals(useTls);
         }
@@ -53,10 +60,10 @@ public class RegistryController {
     /** 응답에 접속 정보(계정)는 노출하지 않는다 */
     public record InstanceResponse(Long id, String name, DbmsType type, String host, int port, String dbName,
                                    boolean useTls, boolean collectionEnabled,
-                                   String teamLabel, String consoleUrl) {
+                                   String teamLabel, String consoleUrl, String nodeFilter) {
         static InstanceResponse from(DatabaseInstance i) {
             return new InstanceResponse(i.getId(), i.getName(), i.getType(), i.getHost(), i.getPort(), i.getDbName(),
-                    i.isUseTls(), i.isCollectionEnabled(), i.getTeamLabel(), i.getConsoleUrl());
+                    i.isUseTls(), i.isCollectionEnabled(), i.getTeamLabel(), i.getConsoleUrl(), i.getNodeFilter());
         }
     }
 
@@ -70,7 +77,7 @@ public class RegistryController {
         DatabaseInstance instance = new DatabaseInstance(
                 req.name(), req.type(), req.host(), req.port(), req.dbName(), req.username(), req.password(),
                 req.tls());
-        instance.updateMeta(req.teamLabel(), req.consoleUrl());
+        instance.updateMeta(req.teamLabel(), req.consoleUrl(), req.nodeFilter());
         return InstanceResponse.from(registryService.register(instance));
     }
 
@@ -82,7 +89,7 @@ public class RegistryController {
     public InstanceResponse upsert(@Valid @RequestBody RegisterRequest req) {
         DatabaseInstance saved = registryService.upsert(
                 req.name(), req.type(), req.host(), req.port(), req.dbName(), req.username(), req.password(),
-                req.tls(), req.teamLabel(), req.consoleUrl());
+                req.tls(), req.teamLabel(), req.consoleUrl(), req.nodeFilter());
         return InstanceResponse.from(saved);
     }
 
