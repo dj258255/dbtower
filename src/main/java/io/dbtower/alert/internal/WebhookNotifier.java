@@ -62,7 +62,7 @@ public class WebhookNotifier {
     }
 
     /**
-     * 리치 embed 알림 (KDMS류 문의 카드). Discord는 embeds 페이로드로, Slack·미설정은 fallbackText로
+     * 리치 embed 알림 (구조화 문의 카드). Discord는 embeds 페이로드로, Slack·미설정은 fallbackText로
      * 보낸다 — 웹훅도 이기종이라 "잘 꾸며주는 쪽"과 "확실히 도착하는 쪽"을 URL이 결정한다.
      * 레이트리밋은 텍스트 경로와 같은 윈도우를 쓴다(embed라고 도배가 허용되는 건 아니므로).
      */

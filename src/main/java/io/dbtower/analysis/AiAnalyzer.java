@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit;
  * 회귀 감지 결과에 대한 AI 1차 분석 (확장3).
  *
  * 판단을 통째로 LLM에 맡기지 않는다 — docs/ai-analysis-rules.md의 기종별 판단 기준을
- * 시스템 프롬프트로 넣어, 같은 입력에 일관된 판정이 나오게 한다. (당근 KDMS와 같은 접근)
+ * 시스템 프롬프트로 넣어, 같은 입력에 일관된 판정이 나오게 한다.
  *
  * 백엔드는 환경에 맞게 자동 선택된다:
  * - api: ANTHROPIC_API_KEY가 있으면 Anthropic Java SDK (운영 구성)

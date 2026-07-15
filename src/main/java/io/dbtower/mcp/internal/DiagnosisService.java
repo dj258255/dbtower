@@ -23,7 +23,7 @@ import java.util.Set;
 /**
  * 자연어 근본원인 진단 (Phase D3) — 단발 분석(AiAnalyzer)을 "도구 사용 루프"로 승격한다.
  *
- * KDMS 사례("CPU 100% → AI가 모니터링+Wait Event 동시 조회 → 원인 진단")·pganalyze의
+ * 운영 사례("CPU 100% → AI가 모니터링+Wait Event 동시 조회 → 원인 진단")·pganalyze의
  * "AI-assisted but developer-driven" 모델을 따른다. 사람이 질문을 던지면, AI가 어떤 MCP 도구를
  * 어떤 인자로 부를지 스스로 정하고(JSON), 서버가 그 도구를 실제로 실행해(McpProtocolHandler →
  * 자기 REST) 결과를 다시 AI에 돌려주는 루프를 최대 N스텝 돈 뒤 근본원인을 종합한다.
