@@ -2,7 +2,9 @@ package io.dbtower.security;
 
 import io.dbtower.security.internal.LoginAttemptGuard;
 import io.dbtower.security.internal.LoginLockFilter;
+import io.dbtower.security.internal.MetricsTokenFilter;
 import jakarta.servlet.FilterChain;
+import org.springframework.beans.factory.annotation.Value;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -45,8 +47,12 @@ public class SecurityConfig {
      * 세션 쿠키는 server.servlet.session.cookie.secure로, CSRF 쿠키는 여기서 — 둘 다 같은 스위치.
      * 기본 false(평문 HTTP 개발/데모). 프록시로 HTTPS 종단 시 dbtower.security.cookie-secure=true.
      */
-    @org.springframework.beans.factory.annotation.Value("${dbtower.security.cookie-secure:false}")
+    @Value("${dbtower.security.cookie-secure:false}")
     private boolean cookieSecure;
+
+    /** Prometheus 스크레이프 경로 보호 토큰(선택). 미설정이면 /actuator/prometheus는 현행대로 열림. */
+    @Value("${dbtower.metrics.token:}")
+    private String metricsToken;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -73,6 +79,9 @@ public class SecurityConfig {
                         .csrfTokenRepository(csrfCookieRepository())
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
                         .ignoringRequestMatchers(bearerRequests))
+                // Prometheus 스크레이프 경로 선택적 토큰 보호(미설정이면 통과 + 기동 WARN)
+                .addFilterBefore(new MetricsTokenFilter(metricsToken),
+                        UsernamePasswordAuthenticationFilter.class)
                 // 잠긴 계정의 로그인 시도는 인증 앞에서 차단(브루트포스 방어)
                 .addFilterBefore(new LoginLockFilter(loginAttemptGuard, "/login"),
                         UsernamePasswordAuthenticationFilter.class)

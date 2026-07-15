@@ -1662,4 +1662,10 @@ UI: Monitoring 탭에 데드락 카드(배지=획득 방식, victim·리소스·
 - **라이브가 테스트를 이긴 순간**: application.yml에 `dbtower.security` 블록을 새로 추가했다가 기존
   블록과 YAML 중복 키가 됐는데, 테스트는 별도 test application.yml을 써서 통과했고 **실제 jar 부팅에서만
   SnakeYAML이 duplicate key로 거부**했다(line 37/172). 기존 블록에 병합해 해소, 실 부팅 UP 확인.
-- 잔여(정직): actuator 메트릭 토큰 인가 + API 토큰 메타DB 영속화(V11)는 Phase 1 후속으로 미구현.
+- **actuator 메트릭 토큰**: `MetricsTokenFilter` — `dbtower.metrics.token` 설정 시 /actuator/prometheus에
+  Bearer/`?token` 검사. 라이브: 토큰 없음/틀림 → 401, 맞음 → 200, /actuator/health는 항상 200.
+  (초기 구현은 sendError가 에러 디스패치를 타 302가 됐는데, setStatus로 깨끗한 401로 교정 — 스크레이퍼 대응)
+- **API 토큰 재시작 생존**: V11 `platform_setting` + `SettingStore.getOrCreate`("있으면 읽고 없으면 생성·저장").
+  미설정 시 예전엔 매 기동 랜덤이라 MCP 연동이 재시작마다 깨졌다. 라이브: h2 파일 DB로 두 번 부팅해
+  `/api/security/mcp-token`을 각각 조회 → **두 부팅 모두 동일 토큰(04dc1b88…)**. 단위: getOrCreate 재조회 동일값.
+- Phase 1 완료 5/5. 총 단위 372건 그린.

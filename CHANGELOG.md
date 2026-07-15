@@ -23,6 +23,9 @@
 - 로그인 브루트포스 방어 — 계정별 연속 실패 시 잠금(기본 10회/15분), 잠긴 계정은 인증 앞에서 차단.
   로그인 화면에 남은 시간 표시
 - 리버스 프록시 HTTPS 종단 지원 — forward-headers-strategy + 세션·CSRF 쿠키 Secure 토글(DBTOWER_COOKIE_SECURE)
+- Prometheus 스크레이프 경로(/actuator/prometheus) 선택적 토큰 보호(DBTOWER_METRICS_TOKEN) — 미설정 시 현행+기동 WARN
+- API 토큰 재시작 생존 — 미설정 시 매 기동 랜덤 재생성되던 것을 메타DB(platform_setting, V11)에 저장해
+  재시작에도 동일 유지(MCP 연동이 재시작마다 깨지던 문제 해소)
 
 ### Added
 - 플랫폼 메타 DB 자기 백업 — pg_dump로 관제탑 자신의 상태 저장소를 주기 백업(로컬 + 원격 meta/),
