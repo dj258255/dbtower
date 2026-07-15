@@ -1609,3 +1609,30 @@ UI: Monitoring 탭에 데드락 카드(배지=획득 방식, victim·리소스·
 - 회귀 없음: 전체 스위트 BUILD SUCCESSFUL, 기존 기능 정상.
 
 정직 잔여: 저장 컬럼의 Instant 전환·쿨다운 메타DB 외부화·대규모 보존 배치 삭제는 범위 밖(로드맵에 문서화).
+
+## 63. 프로덕션 아크 — Phase 0 배포 블로커 (라이선스·암호화·데이터·AI)
+
+배경: 셀프호스트 준비도 감사(ROADMAP "프로덕션 로드맵")에서 "남이 못 쓰던 이유" P0 넷을 없앴다. 전부
+배포·법적·보안 블로커라 기능은 그대로지만 없으면 배포가 성립하지 않는 것들이다.
+
+- **라이선스**: Apache-2.0 전문을 LICENSE로, 번들 재배포 고지를 NOTICE로(mysql-connector-j=GPLv2+FOSS
+  Exception, ojdbc11=Oracle Free Use Terms, mssql-jdbc=MIT, postgresql=BSD-2, mongo-driver=Apache-2.0,
+  이미지 번들 CLI mysqldump/pg_dump/mongodump). 이전엔 저작권 기본값(All Rights Reserved)이라 법적으로
+  아무도 쓸 수 없었다.
+- **암호화 fail-closed 확대**: `SecretCipher`의 판정을 prod 전용 → **배포 프로필 집합{prod, docker}**로.
+  셀프호스트는 docker 프로필로 뜨는데 예전엔 prod만 막아 이 경로가 평문 저장으로 뚫려 있었다(CWE-312).
+  blank/dev/test는 유지(키 없이 뜨는 다수 @SpringBootTest 컨텍스트 부팅을 깨지 않기 위해). compose에
+  `${DBTOWER_ENCRYPTION_KEY:?}`로 compose 수준 fail-fast 이중 방어. `.env.example` 키 항목 [필수] 승격.
+- **커밋된 바이너리 DB 제거**: `data/dbhub.mv.db`(2.3MB, USERS/PASSWORD 테이블 든 옛 H2) git rm +
+  `.gitignore`에 `data/`.
+- **AI 배선**: `.dockerignore`가 docs 전체를 제외해 이미지에서 `ai-analysis-rules.md`가 빈 프롬프트였다 →
+  `!docs`+`docs/*`+`!docs/ai-analysis-rules.md` 예외 + `Dockerfile`에 `COPY docs/ai-analysis-rules.md`.
+  compose에 `ANTHROPIC_API_KEY` env + `.env.example` [선택] 항목.
+
+**라이브 실측**:
+- fail-closed: `SPRING_PROFILES_ACTIVE=docker` + 키 미설정으로 jar 기동 → exit 1로 거부, 로그:
+  `IllegalStateException: 배포 프로필(docker)에서 DBTOWER_ENCRYPTION_KEY가 없습니다 — 인스턴스 비밀번호
+  평문 저장을 막기 위해 기동을 거부합니다`. 단위 `SecretCipherProfileTest.docker_프로필에_키가_없으면_기동을_거부한다` 추가.
+- AI 규칙 번들: `.dockerignore` 예외 검증 — `busybox`에 `COPY docs/ai-analysis-rules.md`가 성공(파일이
+  빌드 컨텍스트에 포함됨을 확인, 이전엔 제외돼 COPY 불가였다).
+- 전체 테스트 그린(신규 단위 1건 포함).

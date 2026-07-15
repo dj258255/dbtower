@@ -12,6 +12,9 @@
 
 ## 2. 아키텍처
 
+> 아래 그림은 MVP 시점(모듈 5개·3기종)의 기록이다. 현재는 모듈 14개·5기종 —
+> 최신 그림은 [architecture-detail.svg](architecture-detail.svg), 모듈 경계는 docs/modules/ 참고.
+
 ```
 [Web/curl] ──REST──> [Spring Boot API]
                         ├── registry   : 이기종 인스턴스 등록/헬스 (PG 'dbtower' DB에 메타 저장 — 자신도 관리 대상으로 등록)
@@ -31,7 +34,8 @@
 ### 3.1 인터페이스 경계 — DbmsOperator
 
 플랫폼의 모든 기능은 `health / queryStats / slowQueries / explain / backup / replicationState`
-여섯 개 연산에만 의존한다. 기종 분기는 팩토리 한 곳에만 존재한다.
+여섯 개 연산에서 출발했다(이후 wait event·세션·파라미터·스키마 등으로 확장 — 현재 목록은
+DbmsOperator 인터페이스가 권위). 기종 분기는 팩토리 한 곳에만 존재한다.
 
 - 이렇게 나눈 이유: 운영 작업의 "무엇"(백업하라)과 "어떻게"(mysqldump vs BACKUP DATABASE)를 분리.
   새 DBMS 지원이 구현체 1개 추가로 끝나는지가 이 설계의 성공 기준
@@ -73,7 +77,8 @@
 - explain은 SELECT만 허용 (관리 플랫폼이 임의 DML 실행 금지)
 - MSSQL 실행계획은 쿼리 재실행 대신 플랜 캐시 조회 (운영 부하 방지)
 - 수집 실패는 인스턴스 단위로 격리 (한 대상 장애가 전체 수집을 막지 않음)
-- 접속 계정은 API 응답에 노출하지 않음. 저장 암호화는 TODO(운영이라면 Vault/KMS)
+- 접속 계정은 API 응답에 노출하지 않음. 저장 암호화는 Phase A2에서 구현(AES-256-GCM,
+  VERIFICATION 21절) — 다음 단계는 Vault 동적 계정
 
 ## 4. 성능 개선 아크 (측정 → 개선 → 수치 검증)
 

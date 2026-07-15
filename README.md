@@ -239,7 +239,8 @@ cp .env.example .env                     # DBTOWER_DB_PASSWORD 등을 채운다
 echo "DBTOWER_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> .env
 
 docker compose -f docker-compose.app.yml up -d   # 앱 + 전용 메타 DB
-open http://localhost:8080                        # admin / (.env 의 DBTOWER_ADMIN_PASSWORD)
+open http://localhost:8080   # admin / .env의 DBTOWER_ADMIN_PASSWORD (비웠다면 최초 기동 로그의 랜덤 비밀번호:
+                             #   docker compose -f docker-compose.app.yml logs dbtower | grep 비밀번호)
 ```
 
 이미지는 [GHCR](https://github.com/dj258255/dbtower/pkgs/container/dbtower)에서 pull하거나
@@ -314,7 +315,7 @@ POST /mcp                          MCP (Streamable HTTP) — 도구 13종
 
 - [PRESENTATION.md](docs/PRESENTATION.md) — 문제 정의부터 설계·실측·교훈까지 전체 서사
 - [DESIGN.md](docs/DESIGN.md) — 인터페이스 경계, 시점 비교 데이터 모델
-- [VERIFICATION.md](docs/VERIFICATION.md) — 52개 절의 실측 기록 (명령·출력·스크린샷)
+- [VERIFICATION.md](docs/VERIFICATION.md) — 62개 절의 실측 기록 (명령·출력·스크린샷)
 - [ai-analysis-rules.md](docs/ai-analysis-rules.md) — 기종별 실행계획 판단 규칙: 근거와 예외
 - [operations.md](docs/operations.md) — 운영 규칙: 통계 소스의 함정과 대응 (digest 포화·PS 가시성·AAS)
 - [least-privilege.md](docs/least-privilege.md) — 기종별 최소 권한 모니터링 계정 (실측 확정)

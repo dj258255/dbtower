@@ -6,6 +6,37 @@
 셀프호스트 이미지는 GHCR에 게시된다: `ghcr.io/dj258255/dbtower`. 태그를 push하면
 `.github/workflows/release.yml`이 게시 전 테스트를 게이트로 걸고 멀티아치(amd64+arm64) 이미지를 올린다.
 
+## [Unreleased]
+
+### Added
+- LICENSE(Apache-2.0) + NOTICE — 번들 JDBC 드라이버(MySQL GPLv2+FOSS Exception·Oracle 독점 등)·
+  이미지 번들 CLI 재배포 고지. 이전엔 라이선스 부재로 법적 재사용 불가였음
+- DB팀 문의를 Discord 리치 embed로 — 필드 구조화(요청자·쿼리 sql 코드블록·실행계획·규칙·AI 분석),
+  한도(256/1024/25) 경계 절단, Slack·미설정 텍스트 폴백, 레이트리밋 윈도우 공유
+- 프로젝트 아이콘·파비콘 세트, 진단 흐름 다이어그램(식별→분석→문의) README 추가
+
+### Security
+- 암호화 fail-closed를 배포 프로필 전체로 — 셀프호스트(docker 프로필)에서 DBTOWER_ENCRYPTION_KEY가
+  없으면 기동을 거부한다(이전엔 prod 프로필만 막아 docker 경로가 평문 저장으로 뚫려 있었음, CWE-312).
+  compose 수준 `${DBTOWER_ENCRYPTION_KEY:?}` 이중 방어
+- 커밋됐던 바이너리 H2 DB(data/dbhub.mv.db, USERS/PASSWORD 테이블) 저장소에서 제거 + data/ gitignore
+
+### Changed
+- AI 분석 규칙 파일을 이미지에 번들(.dockerignore 예외 + Dockerfile COPY) — 이전엔 docs 제외로
+  셀프호스트 이미지에서 AI 판정이 빈 프롬프트였음. compose에 ANTHROPIC_API_KEY 배선
+- Spring Modulith internal 캡슐화 — 14개 모듈 전부 루트에는 공개 API(서비스·record)만 남기고
+  구현을 internal/{web,domain,persistence,job}로 은닉. operator는 record 21종을 model/(@NamedInterface)로.
+  타 모듈의 repository·entity 직접 참조 제거, ModularityTests가 경계 강제. docs/modules Documenter 재생성
+- 문서 정리 — 중복 "ROADMAP 2.md"·손상된 PHASE-D-PLAN.md·보일러플레이트 HELP.md 삭제,
+  AGENTS.md 모듈 트리 14개·Lombok 실제 정책 반영, README 로그인 안내 정합, DESIGN/HARDENING/
+  deepening-spec에 완료 배너, ROADMAP에 프로덕션 로드맵(Phase 0~5)·셀프호스트 준비도 감사 추가
+
+### 업그레이드 노트 (암호화 fail-closed)
+- 기존에 DBTOWER_ENCRYPTION_KEY 없이(평문 저장) docker로 운영하던 경우, 이번 버전부터 기동이 거부된다.
+  절차: (1) `openssl rand -base64 32`로 키 생성해 .env에 설정 → (2) 기동 → (3) 기존 인스턴스는 평문으로
+  저장돼 있으므로, 각 인스턴스를 웹 UI(또는 PUT /api/instances)에서 한 번 재저장하면 새 키로 암호화된다.
+  (평문 행은 하위호환으로 계속 읽히지만, 키 설정 후 재저장 전까지는 암호화되지 않은 상태)
+
 ## [1.1.0] - 2026-07-07
 
 v1.0.0으로 만들 만큼 만들었다 싶었는데, 실제로 쓰다 보니 필요한 게 계속 보였다. 심화 네 아크로
