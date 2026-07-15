@@ -14,6 +14,16 @@ spring:
     # 컨텍스트 부팅용이므로, 스키마는 종전대로 Hibernate create-drop이 만든다.
     # 실제 스키마 검증은 본 설정의 ddl-auto=validate가 PostgreSQL 기동 시점에 수행한다.
     enabled: false
+  # SPRING_SESSION은 엔티티가 아니라 Flyway(V15) 소유라 H2 create-drop이 만들지 않는다.
+  # @EnableJdbcHttpSession은 Boot의 initialize-schema를 우회하므로, 테스트에선 spring-session이
+  # 제공하는 H2 스키마 스크립트를 sql.init으로 직접 주입한다(운영은 Flyway가 만든다).
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:org/springframework/session/jdbc/schema-h2.sql
+      # 인메모리 H2(DB_CLOSE_DELAY=-1)가 테스트 컨텍스트 간 공유돼 스크립트가 재실행되면
+      # "already exists"가 난다 — 세션 테이블 생성은 멱등으로 취급(있으면 통과).
+      continue-on-error: true
 
 dbtower:
   snapshot:
