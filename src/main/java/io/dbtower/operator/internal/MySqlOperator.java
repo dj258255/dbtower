@@ -18,6 +18,7 @@ import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
+import io.dbtower.operator.model.TableDetail;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.operator.model.WaitEvent;
 
@@ -43,7 +44,7 @@ import java.util.regex.Pattern;
  *
  * 통계 소스: performance_schema.events_statements_summary_by_digest
  * 주의 — digest는 max_digest_length(기본 1024B)까지만 정규화되므로, 앞부분이 같은 긴 쿼리들이
- * 하나로 뭉개질 수 있다. docker-compose에서 4096으로 늘려 운영한다. (당근 KDMS 사례와 동일 이슈)
+ * 하나로 뭉개질 수 있다. docker-compose에서 4096으로 늘려 운영한다.
  */
 public class MySqlOperator extends AbstractJdbcOperator {
 
@@ -404,6 +405,62 @@ public class MySqlOperator extends AbstractJdbcOperator {
         } catch (DataAccessException e) {
             throw new OperatorException("MySQL 테이블 통계 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    @Override
+    public TableDetail tableDetail(String tableName) {
+        String table = TableDetailSupport.requireIdentifier(tableName);
+        try {
+            // 기본 통계 — TABLE_ROWS·AVG_ROW_LENGTH는 InnoDB 통계 기반 추정치
+            Object[] head = jdbc().query("""
+                    SELECT ENGINE, TABLE_ROWS, DATA_LENGTH, INDEX_LENGTH, AVG_ROW_LENGTH, CREATE_TIME
+                    FROM information_schema.TABLES
+                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+                    """,
+                    rs -> rs.next() ? new Object[]{rs.getString(1), rs.getLong(2), rs.getLong(3),
+                            rs.getLong(4), rs.getLong(5), rs.getString(6)} : null,
+                    instance.getDbName(), table);
+            if (head == null) {
+                return TableDetail.unsupported(table, "테이블을 찾을 수 없습니다: " + table);
+            }
+            List<TableDetail.IndexDetail> indexes = mysqlIndexes(table);
+            // SHOW CREATE TABLE — 식별자는 위에서 검증했고 백틱으로 감싼다(파라미터 바인딩 불가 자리)
+            String ddl = jdbc().query("SHOW CREATE TABLE `" + instance.getDbName() + "`.`" + table + "`",
+                    rs -> rs.next() ? rs.getString(2) : null);
+            return new TableDetail(table, (String) head[0], (Long) head[1], (Long) head[2], (Long) head[3],
+                    (Long) head[4], (String) head[5], ddl, TableDetail.DdlSource.NATIVE, indexes,
+                    "행수·평균 행 길이는 InnoDB 통계 추정, 카디널리티는 STATISTICS 기준");
+        } catch (DataAccessException e) {
+            throw new OperatorException("MySQL 테이블 상세 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /** 인덱스 상세 — 복합 인덱스는 SEQ_IN_INDEX 위치별로 CARDINALITY가 누적되므로 마지막(최대)값이 전체 고유값 */
+    private List<TableDetail.IndexDetail> mysqlIndexes(String table) {
+        record IdxRow(String name, String column, boolean unique, String type, long cardinality) {
+        }
+        List<IdxRow> rows = jdbc().query("""
+                SELECT INDEX_NAME, COLUMN_NAME, NON_UNIQUE, INDEX_TYPE, IFNULL(CARDINALITY, 0)
+                FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+                ORDER BY INDEX_NAME, SEQ_IN_INDEX
+                """,
+                (rs, i) -> new IdxRow(rs.getString(1), rs.getString(2),
+                        rs.getInt(3) == 0, rs.getString(4), rs.getLong(5)),
+                instance.getDbName(), table);
+        Map<String, TableDetail.IndexDetail> byName = new java.util.LinkedHashMap<>();
+        for (IdxRow r : rows) {
+            byName.merge(r.name(),
+                    new TableDetail.IndexDetail(r.name(), List.of(r.column()), r.unique(), r.type(), r.cardinality()),
+                    (a, b) -> {
+                        List<String> cols = new ArrayList<>(a.columns());
+                        cols.addAll(b.columns());
+                        long card = Math.max(a.cardinality() == null ? 0 : a.cardinality(),
+                                b.cardinality() == null ? 0 : b.cardinality());
+                        return new TableDetail.IndexDetail(a.name(), List.copyOf(cols), a.unique(), a.type(), card);
+                    });
+        }
+        return List.copyOf(byName.values());
     }
 
     @Override

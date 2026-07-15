@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * DB팀 문의 엔드포인트 (Phase B8) — 당근 KDMS 3단계("DB팀 문의")의 마지막 조각.
+ * DB팀 문의 엔드포인트 (Phase B8) — 식별→분석→문의 3단계의 마지막 조각.
  *
  * 컨트롤러를 insight가 아니라 alert 모듈에 둔 이유는 InquiryService 주석 참고(순환 회피).
  * 인가: SecurityConfig의 anyRequest().authenticated()에 걸린다 — 문의는 협업 기능이라
@@ -39,6 +39,16 @@ public class InquiryController {
         return referencedSchema.describe(id, req.sql());
     }
 
+    /** 테이블 하나의 상세 — 테이블 상세 정보(CREATE TABLE·기본 통계·인덱스 카디널리티, 심화 아크 3) */
+    @PostMapping("/api/instances/{id}/table-detail")
+    public io.dbtower.operator.model.TableDetail tableDetail(@PathVariable Long id,
+                                                             @RequestBody TableRequest req) {
+        return referencedSchema.tableDetail(id, req.table());
+    }
+
     public record SqlRequest(String sql) {
+    }
+
+    public record TableRequest(String table) {
     }
 }

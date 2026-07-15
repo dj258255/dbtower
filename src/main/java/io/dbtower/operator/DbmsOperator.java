@@ -6,6 +6,7 @@ import io.dbtower.operator.model.TableBloat;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.TableDetail;
 import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.model.ReplicationSlot;
@@ -156,6 +157,17 @@ public interface DbmsOperator {
     SchemaSnapshot describeSchema();
 
     /**
+     * 테이블 하나의 상세 정보 (심화 아크 3) — describeSchema(구조 요약·diff용)와 달리 진단 첨부용 풀 뷰:
+     * DDL(SHOW CREATE TABLE류)·크기 통계(데이터/인덱스/평균 행)·인덱스 카디널리티까지.
+     * 읽기 전용(카탈로그·메타데이터 조회만). 기종별 가용성 차이는 TableDetail의 ddlSource·note로
+     * 정직하게 구분한다(NATIVE/RECONSTRUCTED/UNSUPPORTED — 지어내지 않는다).
+     * tableName은 각 구현이 식별자 검증 후 사용한다(주입 방어 — 임의 문자열을 SQL에 잇지 않는다).
+     */
+    default TableDetail tableDetail(String tableName) {
+        return TableDetail.unsupported(tableName, "이 기종은 테이블 상세를 아직 지원하지 않습니다");
+    }
+
+    /**
      * 인스턴스 설정 파라미터 전량 (B6 파라미터 드리프트) — "왜 저 장비만 느리지"의 단골 원인인
      * 설정값 차이(max_connections·work_mem 등)를 같은 역할의 두 장비 사이에서 추적하는 원천.
      * 읽기 전용(설정 카탈로그 조회만 — 설정을 바꾸지 않는다).
@@ -177,7 +189,7 @@ public interface DbmsOperator {
     /**
      * 파티션 목록 조회 (D5 파티션 조회) — "이 인스턴스의 어떤 테이블이 어떻게 쪼개져 있고, 각 조각이
      * 얼마나 큰가"를 이기종 통합으로 본다. <b>조회만</b> 한다 — 파티션 생성·삭제·자동 관리는 범위 밖이고
-     * 대상 DB를 바꾸지 않는다(읽기 전용 카탈로그 조회). KDMS가 MCP로 제공한 6기능 중 마지막 조각.
+     * 대상 DB를 바꾸지 않는다(읽기 전용 카탈로그 조회). MCP로 제공하는 조회 기능 중 하나.
      *
      * 기종별 소스(MySQL=information_schema.PARTITIONS, PostgreSQL=선언적 파티셔닝 카탈로그,
      * Oracle=user_tab_partitions, SQL Server=sys.partitions+파티션 스킴/함수)와 필드 의미는

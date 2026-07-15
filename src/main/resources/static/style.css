@@ -1,4 +1,4 @@
-/* DBTower 웹 콘솔 — 의존성 없는 정적 SPA (KDMS Database Insight 화면 구도를 참고한 라이트 어드민) */
+/* DBTower 웹 콘솔 — 의존성 없는 정적 SPA (라이트 어드민) */
 :root {
   --bg: #f5f6f8;
   --panel: #ffffff;
@@ -6,7 +6,7 @@
   --text: #1e232a;
   --muted: #7b8494;
   --primary: #4f5ef7;       /* 조회(파랑) */
-  --target: #22a06b;        /* 조회 구간(초록) — KDMS의 초록 하이라이트 */
+  --target: #22a06b;        /* 조회 구간(초록) */
   --base: #f08c2d;          /* 비교 구간(주황) */
   --up: #d6404f;            /* 증가(빨강) */
   --down: #2f6fdb;          /* 감소(파랑) */
@@ -465,3 +465,14 @@ input[type="datetime-local"] {
 .schema-idx, .schema-cols { margin-top: 3px; font-size: 12px; line-height: 1.5; word-break: break-word; }
 .schema-cols { color: var(--text-muted, #6b7280); }
 .idx-u { color: #6366f1; font-weight: 600; margin: 0 1px; }
+
+/* 테이블 상세 정보 아코디언 (심화 아크 3) */
+.td-toggle { margin-left: 8px; padding: 1px 8px; font-size: 11px; }
+.td-detail { margin-top: 8px; padding-left: 4px; border-left: 2px solid var(--border, #e5e7eb); }
+.td-block { margin: 8px 0; }
+.td-h { font-weight: 600; font-size: 12px; margin-bottom: 4px; }
+.td-badge { font-size: 10px; color: #b45309; background: #fef3c7; padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
+.td-ddl { font-size: 11.5px; max-height: 320px; overflow: auto; }
+.td-stat { display: flex; justify-content: space-between; max-width: 340px; font-size: 12px; padding: 2px 0; }
+.td-idx-card { padding: 6px 8px; margin: 4px 0; background: var(--surface-2, #f9fafb); border-radius: 6px; font-size: 12px; }
+.td-note { font-size: 11px; margin-top: 6px; font-style: italic; }

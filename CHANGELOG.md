@@ -28,6 +28,10 @@
   재시작에도 동일 유지(MCP 연동이 재시작마다 깨지던 문제 해소)
 
 ### Added
+- 테이블 상세 정보(5기종) — CREATE TABLE 전문·기본 통계(엔진·행수·데이터/인덱스 크기·평균 행 길이·
+  생성 시각)·인덱스 정보(타입·카디널리티)를 상세 패널 아코디언과 API로. DDL은 NATIVE(MySQL SHOW CREATE
+  TABLE·Oracle DBMS_METADATA)/RECONSTRUCTED(PG·MSSQL 카탈로그 재구성)/UNSUPPORTED로 출처를 정직 구분,
+  미확보 카디널리티는 표시하지 않음. 식별자 주입 방어. POST /api/instances/{id}/table-detail
 - 문의에 참조 테이블 구조 첨부 — 쿼리의 FROM·JOIN 테이블(조인 대상 포함)의 컬럼·인덱스·대략 행수를
   인덱스 중심으로 요약해 Discord/Slack 문의와 사이트 상세 패널에 표시(진단 핵심 재료). 존재하지 않는
   참조는 notFound로 정직 표기. POST /api/instances/{id}/referenced-schema

@@ -19,6 +19,7 @@ import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
+import io.dbtower.operator.model.TableDetail;
 import io.dbtower.operator.model.TableSchema;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.operator.model.WaitEvent;
@@ -476,6 +477,85 @@ public class MongoOperator implements DbmsOperator {
             });
         } catch (Exception e) {
             throw new OperatorException("MongoDB 컬렉션 통계 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 컬렉션 상세 (D-테이블 상세) — MongoDB는 스키마리스라 CREATE TABLE 같은 네이티브 DDL이 없다.
+     * 그래서 "DDL" 자리에 컬렉션 옵션(validator 등)과 인덱스 정의를 JSON으로 담는다(ddlSource=NATIVE지만
+     * note로 "테이블 DDL이 아님"을 명시). 기본 통계는 tableStats와 같은 $collStats storageStats에서 뽑고,
+     * 인덱스는 listIndexes로 나열한다. 읽기 전용.
+     */
+    @Override
+    public TableDetail tableDetail(String tableName) {
+        TableDetailSupport.requireIdentifier(tableName); // 컬렉션명 검증
+        try {
+            return withClient(client -> {
+                // 존재 확인 — 없는 컬렉션은 통계·인덱스가 빈 값으로 나와 오해를 부르므로 명시적 미지원으로
+                boolean exists = false;
+                for (String n : db(client).listCollectionNames()) {
+                    if (n.equals(tableName)) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    return TableDetail.unsupported(tableName, "컬렉션을 찾을 수 없습니다: " + tableName);
+                }
+
+                // 기본 통계 — tableStats와 동일한 storageStats 소스
+                Document stats = db(client).getCollection(tableName)
+                        .aggregate(List.of(new Document("$collStats",
+                                new Document("storageStats", new Document()))))
+                        .first();
+                Document storage = stats == null ? new Document()
+                        : stats.get("storageStats", new Document());
+                long rowCount = ((Number) storage.getOrDefault("count", 0)).longValue();
+                long dataBytes = ((Number) storage.getOrDefault("size", 0)).longValue();
+                long indexBytes = ((Number) storage.getOrDefault("totalIndexSize", 0)).longValue();
+                // avgObjSize는 빈 컬렉션에선 없다 — 지어내지 않고 -1(미상)로 둔다
+                long avgRowBytes = storage.get("avgObjSize") instanceof Number avg ? avg.longValue() : -1;
+                // wiredTiger 섹션이 있으면 스토리지 엔진을 밝히고, 없으면 null(추정 안 함)
+                String engine = storage.get("wiredTiger") != null ? "WiredTiger" : null;
+
+                // 인덱스 — IndexDetail과 "DDL"용 원본 정의를 한 번의 순회에서 함께 모은다
+                List<TableDetail.IndexDetail> indexes = new ArrayList<>();
+                List<Document> indexDocs = new ArrayList<>();
+                for (Document idx : db(client).getCollection(tableName).listIndexes()) {
+                    indexDocs.add(idx);
+                    Document key = idx.get("key", new Document());
+                    boolean unique = idx.getBoolean("unique", false);
+                    // 타입은 key 값에서 추론 — 문자열(text/hashed/2dsphere)이면 그 값을, 숫자(1/-1)면 btree
+                    String type = "btree";
+                    for (Object v : key.values()) {
+                        if (v instanceof String s) {
+                            type = s;
+                            break;
+                        }
+                    }
+                    indexes.add(new TableDetail.IndexDetail(idx.getString("name"),
+                            new ArrayList<>(key.keySet()), unique, type,
+                            null)); // Mongo는 인덱스별 카디널리티가 없다 → 정직하게 null
+                }
+
+                // "DDL" — 스키마리스라 CREATE TABLE이 없으므로 컬렉션 옵션 + 인덱스 정의를 JSON으로 구성
+                Document collInfo = db(client).listCollections()
+                        .filter(Filters.eq("name", tableName)).first();
+                Document options = collInfo == null ? null : collInfo.get("options", Document.class);
+                Document ddlDoc = new Document();
+                if (options != null && !options.isEmpty()) {
+                    ddlDoc.append("options", options); // validator 등 — 비어 있으면 인덱스 정의만 남긴다
+                }
+                ddlDoc.append("indexes", indexDocs);
+                String ddl = ddlDoc.toJson(PRETTY);
+
+                return new TableDetail(tableName, engine, rowCount, dataBytes, indexBytes, avgRowBytes,
+                        null, // createdAt — MongoDB는 컬렉션 생성 시각을 쉽게 주지 않는다
+                        ddl, TableDetail.DdlSource.NATIVE, indexes,
+                        "스키마리스 — 컬렉션 옵션·인덱스 정의(테이블 DDL 아님)");
+            });
+        } catch (Exception e) {
+            throw new OperatorException("MongoDB 컬렉션 상세 조회 실패: " + e.getMessage(), e);
         }
     }
 

@@ -20,6 +20,7 @@ import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableBloat;
+import io.dbtower.operator.model.TableDetail;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.operator.model.WaitEvent;
 
@@ -544,6 +545,215 @@ public class PostgresOperator extends AbstractJdbcOperator {
         } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 테이블 통계 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 테이블 상세 (심화 아크 3 — 테이블 상세 정보). 기본 통계 + 인덱스(타입·카디널리티) +
+     * 재구성 DDL을 한 번에. 전부 읽기 전용이고, 테이블명은 가능한 자리마다 파라미터 바인딩한다. 다만
+     * reconstructDdl은 식별자를 텍스트로 이어 붙이므로 requireIdentifier로 먼저 검증한다(주입 방어).
+     *
+     * PostgreSQL 특유의 한계를 값과 note에 정직히 반영한다:
+     * - engine: 테이블별 스토리지 엔진 개념이 없다 → null
+     * - createdAt: 카탈로그에 테이블 생성 시각을 저장하지 않는다 → null
+     * - ddl: SHOW CREATE TABLE이 없어 카탈로그(information_schema·pg_constraint·pg_indexes)로 재구성
+     *   → RECONSTRUCTED(원문 위장 금지). FK/CHECK/트리거/파티션 정의는 생략한 근사.
+     * - cardinality: 인덱스별 네이티브 카디널리티가 없어 선두 컬럼 pg_stats.n_distinct로 추정
+     */
+    @Override
+    public TableDetail tableDetail(String tableName) {
+        TableDetailSupport.requireIdentifier(tableName);
+        try {
+            // 기본 통계 — reltuples(통계 추정 행수), pg_table_size(TOAST 포함 데이터), pg_indexes_size.
+            // to_regclass가 아니라 pg_class JOIN으로 잡되 시스템 스키마는 제외한다(describeSchema와 동일 원칙).
+            String statsSql = """
+                    SELECT c.oid,
+                           c.reltuples::bigint AS row_count,
+                           pg_table_size(c.oid)   AS data_bytes,
+                           pg_indexes_size(c.oid) AS index_bytes
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE c.relname = ?
+                      AND c.relkind IN ('r', 'p')
+                      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                    LIMIT 1
+                    """;
+            BasicStats stats = jdbc().query(statsSql, rs -> {
+                if (!rs.next()) {
+                    return null;
+                }
+                return new BasicStats(
+                        rs.getLong("row_count"),
+                        rs.getLong("data_bytes"),
+                        rs.getLong("index_bytes"));
+            }, tableName);
+            if (stats == null) {
+                return TableDetail.unsupported(tableName, "테이블을 찾을 수 없습니다: " + tableName);
+            }
+            // reltuples가 0 이하(미ANALYZE 등)면 나눗셈 불가 → -1(미확보)로 정직 표기
+            long avgRowBytes = stats.rowCount() > 0 ? stats.dataBytes() / stats.rowCount() : -1;
+
+            // 인덱스 — indkey를 unnest WITH ORDINALITY로 펼쳐 컬럼 순서를 보존(describeSchema와 같은 패턴).
+            // 카디널리티 재료: 선두 컬럼(indkey[0], int2vector는 0-베이스)의 pg_stats.n_distinct와 reltuples.
+            // pg_stats가 없으면(ANALYZE 전) LEFT JOIN으로 n_distinct는 NULL → 카디널리티 미확보.
+            String indexSql = """
+                    SELECT i.relname AS index_name,
+                           ix.indisunique AS is_unique,
+                           am.amname AS index_type,
+                           a.attname AS column_name,
+                           st.n_distinct::float8 AS n_distinct,
+                           c.reltuples::float8 AS reltuples
+                    FROM pg_index ix
+                    JOIN pg_class c ON c.oid = ix.indrelid
+                    JOIN pg_class i ON i.oid = ix.indexrelid
+                    JOIN pg_am am ON am.oid = i.relam
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
+                    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
+                    LEFT JOIN pg_stats st ON st.schemaname = n.nspname
+                          AND st.tablename = c.relname
+                          AND st.attname = (SELECT a2.attname FROM pg_attribute a2
+                                            WHERE a2.attrelid = c.oid AND a2.attnum = ix.indkey[0])
+                    WHERE c.relname = ?
+                      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                    ORDER BY i.relname, k.ord
+                    """;
+            List<IndexRow> indexRows = jdbc().query(indexSql,
+                    (rs, i) -> new IndexRow(
+                            rs.getString("index_name"),
+                            rs.getBoolean("is_unique"),
+                            rs.getString("index_type"),
+                            rs.getString("column_name"),
+                            rs.getObject("n_distinct", Double.class),
+                            rs.getDouble("reltuples")),
+                    tableName);
+            List<TableDetail.IndexDetail> indexes = groupIndexes(indexRows);
+
+            // DDL 재구성 재료 — 컬럼(information_schema), PK(pg_constraint contype='p'), 인덱스 정의(pg_indexes)
+            List<TableDetailSupport.ColumnDef> columns = jdbc().query("""
+                    SELECT column_name, data_type,
+                           character_maximum_length, numeric_precision, numeric_scale,
+                           is_nullable, column_default
+                    FROM information_schema.columns
+                    WHERE table_name = ?
+                      AND table_schema NOT IN ('pg_catalog', 'information_schema')
+                    ORDER BY ordinal_position
+                    """,
+                    (rs, i) -> new TableDetailSupport.ColumnDef(
+                            rs.getString("column_name"),
+                            formatType(rs.getString("data_type"),
+                                    rs.getObject("character_maximum_length", Integer.class),
+                                    rs.getObject("numeric_precision", Integer.class),
+                                    rs.getObject("numeric_scale", Integer.class)),
+                            "YES".equalsIgnoreCase(rs.getString("is_nullable")),
+                            rs.getString("column_default")),
+                    tableName);
+            List<String> pkColumns = jdbc().query("""
+                    SELECT a.attname
+                    FROM pg_constraint con
+                    JOIN pg_class c ON c.oid = con.conrelid
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord) ON true
+                    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
+                    WHERE c.relname = ?
+                      AND con.contype = 'p'
+                      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                    ORDER BY k.ord
+                    """,
+                    (rs, i) -> rs.getString("attname"),
+                    tableName);
+            // pg_indexes.indexdef는 이미 완성된 CREATE INDEX 텍스트라 그대로 재료로 넘긴다
+            List<String> indexDefs = jdbc().query("""
+                    SELECT indexdef
+                    FROM pg_indexes
+                    WHERE tablename = ?
+                      AND schemaname NOT IN ('pg_catalog', 'information_schema')
+                    ORDER BY indexname
+                    """,
+                    (rs, i) -> rs.getString("indexdef"),
+                    tableName);
+            String ddl = TableDetailSupport.reconstructDdl(tableName, columns, pkColumns, indexDefs);
+
+            String note = "PostgreSQL은 테이블별 스토리지 엔진·생성 시각 개념이 없어 engine/createdAt은 미제공. "
+                    + "카디널리티는 선두 컬럼 n_distinct 추정. "
+                    + "DDL은 SHOW CREATE TABLE이 없어 카탈로그로 재구성한 근사(FK·CHECK·트리거·파티션 정의 생략).";
+            return new TableDetail(tableName, null, stats.rowCount(), stats.dataBytes(), stats.indexBytes(),
+                    avgRowBytes, null, ddl, TableDetail.DdlSource.RECONSTRUCTED, indexes, note);
+        } catch (DataAccessException e) {
+            throw new OperatorException("PostgreSQL 테이블 상세 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /** tableDetail 기본 통계 한 행 — reltuples 기반 추정 행수와 데이터/인덱스 바이트. */
+    private record BasicStats(long rowCount, long dataBytes, long indexBytes) {
+    }
+
+    /** unnest로 펼친 인덱스-컬럼 한 행(인덱스별 여러 행으로 나옴). n_distinct/reltuples는 인덱스당 동일. */
+    private record IndexRow(String indexName, boolean unique, String type, String column,
+                            Double nDistinct, double reltuples) {
+    }
+
+    /** 인덱스-컬럼 행들을 인덱스 단위로 묶는다(컬럼 순서 보존, 카디널리티는 선두 컬럼 통계로 인덱스당 1회 계산). */
+    private static List<TableDetail.IndexDetail> groupIndexes(List<IndexRow> rows) {
+        java.util.LinkedHashMap<String, IndexAcc> byIndex = new java.util.LinkedHashMap<>();
+        for (IndexRow r : rows) {
+            IndexAcc acc = byIndex.computeIfAbsent(r.indexName(),
+                    k -> new IndexAcc(r.unique(), r.type(), r.nDistinct(), r.reltuples()));
+            acc.columns.add(r.column());
+        }
+        List<TableDetail.IndexDetail> out = new java.util.ArrayList<>();
+        for (Map.Entry<String, IndexAcc> e : byIndex.entrySet()) {
+            IndexAcc a = e.getValue();
+            out.add(new TableDetail.IndexDetail(e.getKey(), a.columns, a.unique, a.type,
+                    estimateCardinality(a.nDistinct, a.reltuples)));
+        }
+        return out;
+    }
+
+    /** 인덱스 하나의 누적 상자 — 컬럼 순서 목록과 카디널리티 추정 재료(선두 컬럼 n_distinct·reltuples). */
+    private static final class IndexAcc {
+        final boolean unique;
+        final String type;
+        final Double nDistinct;
+        final double reltuples;
+        final List<String> columns = new java.util.ArrayList<>();
+
+        IndexAcc(boolean unique, String type, Double nDistinct, double reltuples) {
+            this.unique = unique;
+            this.type = type;
+            this.nDistinct = nDistinct;
+            this.reltuples = reltuples;
+        }
+    }
+
+    /**
+     * 선두 컬럼 n_distinct로 인덱스 카디널리티를 추정한다 — PostgreSQL은 인덱스별 네이티브 카디널리티가 없다.
+     * n_distinct 의미론(pg_stats): 0 이상이면 절대 고유값 수, 음수면 전체 행수 대비 <b>음의 비율</b>이라
+     * (-n_distinct × reltuples)로 환산한다. pg_stats 행이 없으면(ANALYZE 전) NULL → 미확보로 정직히 null.
+     */
+    private static Long estimateCardinality(Double nDistinct, double reltuples) {
+        if (nDistinct == null) {
+            return null;
+        }
+        if (nDistinct >= 0) {
+            return Math.round(nDistinct);
+        }
+        return Math.round(-nDistinct * reltuples);
+    }
+
+    /**
+     * information_schema 타입명에 길이/정밀도를 붙여 재구성 DDL 가독성을 높인다(근사라 완벽할 필요는 없다).
+     * 문자형은 (length), numeric/decimal은 (precision[,scale])만 다룬다 — 나머지는 data_type 원문 그대로.
+     */
+    private static String formatType(String dataType, Integer charLen, Integer numPrecision, Integer numScale) {
+        if (charLen != null && charLen > 0) {
+            return dataType + "(" + charLen + ")";
+        }
+        if (numPrecision != null && ("numeric".equals(dataType) || "decimal".equals(dataType))) {
+            return (numScale != null && numScale > 0)
+                    ? dataType + "(" + numPrecision + ", " + numScale + ")"
+                    : dataType + "(" + numPrecision + ")";
+        }
+        return dataType;
     }
 
     @Override

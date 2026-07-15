@@ -17,6 +17,7 @@ import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
+import io.dbtower.operator.model.TableDetail;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.operator.model.WaitEvent;
 
@@ -40,6 +41,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -505,6 +507,134 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 스키마 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 테이블 상세 (심화 아크 3) — 기본 통계 + 인덱스 + 재구성 DDL을 한 번에. "값과 출처의 정직"이 원칙이다.
+     *
+     * <p>engine=null: SQL Server에는 MySQL의 InnoDB 같은 스토리지 엔진 개념이 없어 정직하게 null이다.
+     *
+     * <p>cardinality=null: 인덱스별 고유값은 DBCC SHOW_STATISTICS로만 얻는데 무겁고 기본 노출이 아니라
+     * (권한·부하) 여기서 뽑지 않는다 — 지어내지 않고 미확보(null)로 둔다.
+     *
+     * <p>DDL은 RECONSTRUCTED: SQL Server에는 SHOW CREATE TABLE이 없어 카탈로그(INFORMATION_SCHEMA)에서
+     * 근사 CREATE TABLE을 재구성한다. 제약조건(FK/CHECK)·트리거·계산열 등은 담지 않는 근사다.
+     *
+     * <p>테이블명은 sys 뷰/INFORMATION_SCHEMA에 문자열 파라미터로 바인딩한다(주입 방어). 읽기 전용.
+     */
+    @Override
+    public TableDetail tableDetail(String tableName) {
+        String table = TableDetailSupport.requireIdentifier(tableName);
+        // 기본 통계: tableStats와 동일한 집계(used_page_count는 8KB 페이지 → 바이트 환산), create_date는 생성 시각.
+        String statsSql = """
+                SELECT CONVERT(varchar(30), t.create_date, 126) AS created_at,
+                       SUM(CASE WHEN ps.index_id IN (0, 1) THEN ps.row_count ELSE 0 END) AS row_count,
+                       SUM(CASE WHEN ps.index_id IN (0, 1) THEN ps.used_page_count ELSE 0 END) * 8192 AS data_bytes,
+                       SUM(CASE WHEN ps.index_id > 1 THEN ps.used_page_count ELSE 0 END) * 8192 AS index_bytes
+                FROM sys.tables t
+                JOIN sys.dm_db_partition_stats ps ON ps.object_id = t.object_id
+                WHERE t.name = ?
+                GROUP BY t.create_date
+                """;
+        // 인덱스: 힙(index_id=0, name NULL)은 제외하고 키 컬럼만(INCLUDE 컬럼은 인덱스 키가 아니라 제외). type_desc=CLUSTERED 등.
+        String indexSql = """
+                SELECT i.name AS index_name, i.type_desc AS index_type, i.is_unique, c.name AS column_name
+                FROM sys.indexes i
+                JOIN sys.tables t ON t.object_id = i.object_id
+                JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+                JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                WHERE t.name = ? AND i.index_id > 0 AND i.name IS NOT NULL AND ic.is_included_column = 0
+                ORDER BY i.name, ic.key_ordinal
+                """;
+        // DDL 재구성용 컬럼 — describeSchema와 같은 방식으로 DATA_TYPE에 길이/정밀도를 붙여 기종 표기에 가깝게.
+        String columnsSql = """
+                SELECT COLUMN_NAME,
+                       DATA_TYPE + COALESCE('(' + CASE
+                           WHEN CHARACTER_MAXIMUM_LENGTH = -1 THEN 'max'
+                           WHEN CHARACTER_MAXIMUM_LENGTH IS NOT NULL
+                               THEN CONVERT(varchar, CHARACTER_MAXIMUM_LENGTH)
+                           WHEN DATA_TYPE IN ('decimal','numeric')
+                               THEN CONVERT(varchar, NUMERIC_PRECISION) + ',' + CONVERT(varchar, NUMERIC_SCALE)
+                           ELSE NULL END + ')', '') AS COLUMN_TYPE,
+                       IS_NULLABLE, COLUMN_DEFAULT
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = ?
+                ORDER BY ORDINAL_POSITION
+                """;
+        // PK 컬럼 — TABLE_CONSTRAINTS(PRIMARY KEY)에 KEY_COLUMN_USAGE를 붙여 키 순서대로.
+        String pkSql = """
+                SELECT kcu.COLUMN_NAME
+                FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+                       ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME AND kcu.TABLE_NAME = tc.TABLE_NAME
+                WHERE tc.TABLE_NAME = ? AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+                ORDER BY kcu.ORDINAL_POSITION
+                """;
+        try {
+            BasicStats stats = jdbc().query(statsSql, rs -> {
+                if (!rs.next()) {
+                    return null; // JOIN 결과가 없으면 그 이름의 테이블이 없다는 뜻
+                }
+                return new BasicStats(
+                        rs.getString("created_at"),
+                        rs.getLong("row_count"),
+                        rs.getLong("data_bytes"),
+                        rs.getLong("index_bytes"));
+            }, table);
+            if (stats == null) {
+                return TableDetail.unsupported(table, "테이블을 찾을 수 없습니다: " + table);
+            }
+            // avgRowBytes = data_bytes / row_count. 0행이면 0으로 나눌 수 없어 -1(미확보).
+            long avgRowBytes = stats.rowCount() > 0 ? stats.dataBytes() / stats.rowCount() : -1;
+
+            // 인덱스 행(컬럼 단위)을 인덱스명으로 접어 컬럼 순서를 보존한다. cardinality는 위 사유로 전부 null.
+            List<IndexRow> rows = jdbc().query(indexSql, (rs, i) -> new IndexRow(
+                    rs.getString("index_name"), rs.getString("index_type"),
+                    rs.getBoolean("is_unique"), rs.getString("column_name")), table);
+            LinkedHashMap<String, List<String>> indexColumns = new LinkedHashMap<>();
+            LinkedHashMap<String, IndexRow> indexMeta = new LinkedHashMap<>();
+            for (IndexRow r : rows) {
+                indexColumns.computeIfAbsent(r.name(), k -> new ArrayList<>()).add(r.column());
+                indexMeta.putIfAbsent(r.name(), r);
+            }
+            List<TableDetail.IndexDetail> indexes = new ArrayList<>();
+            for (var e : indexColumns.entrySet()) {
+                IndexRow m = indexMeta.get(e.getKey());
+                indexes.add(new TableDetail.IndexDetail(
+                        e.getKey(), e.getValue(), m.unique(), m.type(), null)); // cardinality=null (미확보 정직)
+            }
+
+            List<TableDetailSupport.ColumnDef> columns = jdbc().query(columnsSql, (rs, i) ->
+                    new TableDetailSupport.ColumnDef(
+                            rs.getString("COLUMN_NAME"),
+                            rs.getString("COLUMN_TYPE"),
+                            "YES".equalsIgnoreCase(rs.getString("IS_NULLABLE")),
+                            rs.getString("COLUMN_DEFAULT")), table);
+            List<String> pkColumns = jdbc().queryForList(pkSql, String.class, table);
+            // 인덱스 정의는 참고용 주석 라인으로만 덧붙인다(재구성 CREATE TABLE 본문 밖).
+            List<String> indexDefs = new ArrayList<>();
+            for (TableDetail.IndexDetail idx : indexes) {
+                indexDefs.add("-- index: " + idx.name() + " (" + String.join(", ", idx.columns()) + ")"
+                        + (idx.unique() ? " UNIQUE" : "") + " " + idx.type());
+            }
+            String ddl = TableDetailSupport.reconstructDdl(table, columns, pkColumns, indexDefs);
+
+            String note = "SQL Server는 스토리지 엔진 개념이 없어 engine=null. "
+                    + "카디널리티는 SQL Server 기본 노출이 아니라 미확보(DBCC SHOW_STATISTICS는 무거워 조회 안 함). "
+                    + "DDL은 SHOW CREATE TABLE이 없어 카탈로그에서 재구성한 근사이며 제약조건(FK/CHECK)·트리거는 생략됨.";
+            return new TableDetail(table, null, stats.rowCount(), stats.dataBytes(), stats.indexBytes(),
+                    avgRowBytes, stats.createdAt(), ddl, TableDetail.DdlSource.RECONSTRUCTED, indexes, note);
+        } catch (DataAccessException e) {
+            throw new OperatorException("MSSQL 테이블 상세 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /** tableDetail 기본 통계 결과 한 줄 — 메서드 로컬 값 객체. */
+    private record BasicStats(String createdAt, long rowCount, long dataBytes, long indexBytes) {
+    }
+
+    /** 인덱스 컬럼 단위 행 — 인덱스명으로 접기 전 원자료. */
+    private record IndexRow(String name, String type, boolean unique, String column) {
     }
 
     /** 파라미터 — sys.configurations(name/value_in_use). 실제 적용값 기준. 단위 없어 unit=null */

@@ -5,6 +5,7 @@ import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.model.ColumnSchema;
 import io.dbtower.operator.model.IndexSchema;
 import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.TableDetail;
 import io.dbtower.operator.model.TableSchema;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.registry.RegistryService;
@@ -50,6 +51,11 @@ public class ReferencedSchemaService {
 
     /** notFound = SQL엔 있으나 스키마에 없던 후보(CTE·별칭·상한 밖·오탈자). truncated = 스키마 상한에 걸림 */
     public record ReferencedSchema(List<RefTable> tables, List<String> notFound, boolean truncated) {
+    }
+
+    /** 테이블 하나의 상세(DDL·통계·인덱스 카디널리티) — 상세 패널 아코디언·문의 첨부의 원천(심화 아크 3) */
+    public TableDetail tableDetail(Long instanceId, String table) {
+        return operatorFactory.create(registryService.findById(instanceId)).tableDetail(table);
     }
 
     public ReferencedSchema describe(Long instanceId, String sql) {

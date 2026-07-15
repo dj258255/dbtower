@@ -14,6 +14,7 @@ import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
+import io.dbtower.operator.model.TableDetail;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.operator.model.WaitEvent;
 
@@ -26,7 +27,10 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -281,6 +285,108 @@ public class OracleOperator extends AbstractJdbcOperator {
         } catch (DataAccessException e) {
             throw new OperatorException("Oracle 테이블 통계 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 테이블 상세 (심화 아크 3) — 기본 통계 + 인덱스(네이티브 카디널리티) + 원문 DDL. 읽기 전용.
+     *
+     * Oracle 식별자는 보통 대문자로 저장되고 user_* 카탈로그의 table_name도 대문자다. 그래서 검증한
+     * 테이블명을 대문자로 올려 카탈로그·DBMS_METADATA 조회에 쓴다(소문자로 만든 테이블은 이 경로 밖 —
+     * 흔치 않아 감수). 응답에 노출하는 table은 요청 원문을 유지한다.
+     *
+     * engine=null: Oracle은 테이블별 스토리지 엔진 개념이 없다. num_rows·avg_row_len은 옵티마이저 통계라
+     * DBMS_STATS 수집 이후에만 채워진다(tableStats와 같은 caveat). DDL은 DBMS_METADATA로 원문(NATIVE)을
+     * 얻되, 권한 부족 등으로 실패하면 통계·인덱스는 살리고 ddl만 비운다(부분 성공 — 위장 없이 정직하게).
+     */
+    @Override
+    public TableDetail tableDetail(String tableName) {
+        String table = TableDetailSupport.requireIdentifier(tableName);
+        String t = table.toUpperCase(); // user_* 뷰는 대문자 식별자로 저장
+        try {
+            // 기본 통계 — 세그먼트 바이트 합은 tableStats와 동일한 서브쿼리(데이터/인덱스 분리),
+            // 생성 시각은 user_objects.created(TABLE 객체)를 TO_CHAR로 문자열화
+            String headSql = """
+                    SELECT NVL(t.num_rows, 0) AS row_count,
+                           NVL((SELECT SUM(s.bytes) FROM user_segments s
+                                 WHERE s.segment_name = t.table_name), 0) AS data_bytes,
+                           NVL((SELECT SUM(s.bytes) FROM user_indexes i
+                                 JOIN user_segments s ON s.segment_name = i.index_name
+                                 WHERE i.table_name = t.table_name), 0) AS index_bytes,
+                           NVL(t.avg_row_len, 0) AS avg_row_bytes,
+                           (SELECT TO_CHAR(o.created, 'YYYY-MM-DD HH24:MI:SS') FROM user_objects o
+                             WHERE o.object_type = 'TABLE' AND o.object_name = t.table_name) AS created_at
+                    FROM user_tables t
+                    WHERE t.table_name = ?
+                    """;
+            Object[] head = jdbc().query(headSql,
+                    rs -> rs.next() ? new Object[]{rs.getLong("row_count"), rs.getLong("data_bytes"),
+                            rs.getLong("index_bytes"), rs.getLong("avg_row_bytes"), rs.getString("created_at")} : null,
+                    t);
+            if (head == null) {
+                return TableDetail.unsupported(table, "테이블을 찾을 수 없습니다: " + table);
+            }
+            List<TableDetail.IndexDetail> indexes = oracleIndexes(t);
+
+            String baseNote = "Oracle는 테이블별 스토리지 엔진 개념이 없어 engine=null. "
+                    + "행수·평균 행 길이는 옵티마이저 통계(DBMS_STATS 수집 후에만 채워짐) 기준 추정, "
+                    + "카디널리티는 DISTINCT_KEYS(네이티브)";
+            String ddl;
+            TableDetail.DdlSource ddlSource;
+            String note;
+            try {
+                // DBMS_METADATA.GET_DDL은 '함수'라 인자가 바인딩 가능하다(SHOW CREATE 같은 식별자 연결이 아님).
+                // 결과는 CLOB — ojdbc는 getString으로 CLOB 전문을 문자열로 내주므로 그대로 읽는다(DDL 크기는 무난).
+                ddl = jdbc().query("SELECT DBMS_METADATA.GET_DDL('TABLE', ?) FROM dual",
+                        rs -> rs.next() ? rs.getString(1) : null, t);
+                ddlSource = TableDetail.DdlSource.NATIVE;
+                note = baseNote;
+            } catch (DataAccessException e) {
+                // DBMS_METADATA 실패(권한 등)는 전체를 실패시키지 않는다 — 통계·인덱스는 살리고 DDL만 비운다
+                ddl = null;
+                ddlSource = TableDetail.DdlSource.UNSUPPORTED;
+                note = baseNote + ". DDL 원문 조회 실패(DBMS_METADATA 권한 부족 추정): " + e.getMessage();
+            }
+            return new TableDetail(table, null, (Long) head[0], (Long) head[1], (Long) head[2],
+                    (Long) head[3], (String) head[4], ddl, ddlSource, indexes, note);
+        } catch (DataAccessException e) {
+            throw new OperatorException("Oracle 테이블 상세 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 인덱스 상세 — user_indexes + user_ind_columns. index_type(NORMAL/BITMAP 등)을 type으로,
+     * uniqueness='UNIQUE'를 unique로 환산한다. 카디널리티는 DISTINCT_KEYS — 옵티마이저가 수집한
+     * 네이티브 고유값이라 별도 근사가 필요 없다(선두 컬럼 n_distinct 추정 같은 우회가 불필요). 복합
+     * 인덱스는 column_position 순으로 컬럼을 모은다. upperTable은 이미 대문자로 올린 식별자다.
+     */
+    private List<TableDetail.IndexDetail> oracleIndexes(String upperTable) {
+        record IdxRow(String name, String column, boolean unique, String type, long cardinality) {
+        }
+        List<IdxRow> rows = jdbc().query("""
+                SELECT i.index_name, ic.column_name, i.uniqueness, i.index_type,
+                       NVL(i.distinct_keys, 0) AS cardinality
+                FROM user_indexes i
+                JOIN user_ind_columns ic ON ic.index_name = i.index_name
+                WHERE i.table_name = ?
+                ORDER BY i.index_name, ic.column_position
+                """,
+                (rs, i) -> new IdxRow(rs.getString("index_name"), rs.getString("column_name"),
+                        "UNIQUE".equalsIgnoreCase(rs.getString("uniqueness")), rs.getString("index_type"),
+                        rs.getLong("cardinality")),
+                upperTable);
+        Map<String, TableDetail.IndexDetail> byName = new LinkedHashMap<>();
+        for (IdxRow r : rows) {
+            byName.merge(r.name(),
+                    new TableDetail.IndexDetail(r.name(), List.of(r.column()), r.unique(), r.type(), r.cardinality()),
+                    (a, b) -> {
+                        List<String> cols = new ArrayList<>(a.columns());
+                        cols.addAll(b.columns());
+                        // distinct_keys는 인덱스 단위 값이라 모든 행이 같다 — 첫 값을 유지
+                        return new TableDetail.IndexDetail(a.name(), List.copyOf(cols), a.unique(), a.type(),
+                                a.cardinality());
+                    });
+        }
+        return List.copyOf(byName.values());
     }
 
     /**

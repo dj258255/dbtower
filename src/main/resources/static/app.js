@@ -1,6 +1,6 @@
 // DBTower 웹 콘솔 — 프레임워크 없는 정적 SPA.
 // 백엔드가 본질인 프로젝트라 프론트는 의존성 0으로 얇게 유지한다 (java -jar 하나로 화면까지).
-// 화면 구도는 당근 KDMS Database Insight를 참고: 인스턴스 선택 -> 그래프 드래그로 구간 선택
+// 화면 구도 참고: 인스턴스 선택 -> 그래프 드래그로 구간 선택
 // -> Top Query 증감(NEW 뱃지) -> 쿼리 클릭 -> 실행계획 + AI 분석.
 
 const $ = (sel) => document.querySelector(sel);
@@ -56,7 +56,7 @@ const fmtBytes = (v) => {
   return `${u === 0 ? n : n.toFixed(1)} ${units[u]}`;
 };
 
-// 증감 셀: "target값 (▲ diff)" — KDMS 표기. changePct가 null(base 0)이면 화살표 생략
+// 증감 셀: "target값 (▲ diff)" 표기. changePct가 null(base 0)이면 화살표 생략
 function deltaCell(base, target, changePct, digits = 2) {
   const t = fmtNum(target, digits);
   if (changePct == null) return `<span class="num">${t}</span>`;
@@ -649,12 +649,75 @@ function renderReferencedSchema(data) {
       : '<span class="muted">없음</span>';
     const cols = (t.columns ?? []).map((c) => `${esc(c.name)} <span class="muted">${esc(c.type)}${c.nullable ? "?" : ""}</span>`).join(", ");
     html += `<div class="finding-item schema-table"><b>${esc(t.name)}</b>${rows}
+      <button class="btn btn-small td-toggle" data-table="${esc(t.name)}">상세 보기</button>
       <div class="schema-idx">idx: ${idx}</div>
-      <div class="schema-cols">cols: ${cols}</div></div>`;
+      <div class="schema-cols">cols: ${cols}</div>
+      <div class="td-detail" hidden></div></div>`;
   }
   if ((data.notFound ?? []).length) {
     html += `<div class="finding-item muted">구조 미확보: ${esc(data.notFound.join(", "))}${data.truncated ? " (스키마 상한 초과 가능)" : ""}</div>`;
   }
+  // 렌더 직후 "상세 보기" 버튼에 아코디언 토글을 건다(테이블별 table-detail 조회)
+  queueMicrotask(() => {
+    document.querySelectorAll("#schema-result .td-toggle").forEach((btn) => {
+      btn.addEventListener("click", () => toggleTableDetail(btn));
+    });
+  });
+  return html;
+}
+
+// 테이블 상세 정보 — CREATE TABLE·기본 통계·인덱스 카디널리티를 아코디언으로 펼친다.
+async function toggleTableDetail(btn) {
+  const box = btn.parentElement.querySelector(".td-detail");
+  if (!box.hidden) { box.hidden = true; btn.textContent = "상세 보기"; return; }
+  box.hidden = false; btn.textContent = "접기";
+  if (box.dataset.loaded) return;
+  box.innerHTML = '<div class="muted">테이블 상세 조회 중...</div>';
+  try {
+    const d = await api(`/api/instances/${state.instance.id}/table-detail`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ table: btn.dataset.table }),
+    });
+    box.innerHTML = renderTableDetail(d);
+    box.dataset.loaded = "1";
+  } catch (e) {
+    box.innerHTML = `<div class="finding-item">상세 조회 실패: ${esc(e.message)}</div>`;
+  }
+}
+
+const fmtBytes = (n) => n < 0 ? "—" : n < 1024 ? `${n} B`
+  : n < 1048576 ? `${(n / 1024).toFixed(1)} KB`
+  : n < 1073741824 ? `${(n / 1048576).toFixed(2)} MB` : `${(n / 1073741824).toFixed(2)} GB`;
+
+function renderTableDetail(d) {
+  const src = { NATIVE: "", RECONSTRUCTED: '<span class="td-badge">카탈로그 재구성(근사)</span>', UNSUPPORTED: '<span class="td-badge">미지원</span>' };
+  let html = "";
+  // 스키마 정보 (DDL)
+  if (d.ddl) {
+    html += `<div class="td-block"><div class="td-h">스키마 정보 ${src[d.ddlSource] ?? ""}</div><pre class="codeblock td-ddl">${esc(d.ddl)}</pre></div>`;
+  }
+  // 기본 통계
+  const stat = (k, v) => `<div class="td-stat"><span class="muted">${k}</span><span>${v}</span></div>`;
+  html += `<div class="td-block"><div class="td-h">기본 통계</div>
+    ${d.engine ? stat("엔진", esc(d.engine)) : ""}
+    ${stat("행 수", d.rowCount < 0 ? "—" : d.rowCount.toLocaleString())}
+    ${stat("데이터 크기", fmtBytes(d.dataBytes))}
+    ${stat("인덱스 크기", fmtBytes(d.indexBytes))}
+    ${stat("평균 행 길이", d.avgRowBytes < 0 ? "—" : fmtBytes(d.avgRowBytes))}
+    ${d.createdAt ? stat("생성 시각", esc(d.createdAt)) : ""}</div>`;
+  // 인덱스 정보
+  const idxs = d.indexes ?? [];
+  if (idxs.length) {
+    html += '<div class="td-block"><div class="td-h">인덱스 정보</div>';
+    for (const i of idxs) {
+      html += `<div class="td-idx-card"><b>${esc(i.name)}</b>${i.unique ? ' <span class="idx-u">UNIQUE</span>' : ""}
+        <div class="muted">컬럼: ${esc((i.columns ?? []).join(", "))}</div>
+        <div class="muted">타입: ${esc(i.type ?? "—")}</div>
+        <div class="muted">카디널리티: ${i.cardinality != null ? Number(i.cardinality).toLocaleString() : "—"}</div></div>`;
+    }
+    html += "</div>";
+  }
+  if (d.note) html += `<div class="muted td-note">${esc(d.note)}</div>`;
   return html;
 }
 
