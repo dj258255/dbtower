@@ -65,8 +65,59 @@ public class SecurityConfig {
         return repo;
     }
 
+    /** 외부 접근 주소(리버스 프록시 뒤면 그것, 없으면 로컬 포트) — OAuth resource_metadata URL의 베이스. */
+    @Value("${dbtower.base-url:}")
+    private String baseUrl;
+
+    @Value("${server.port:8080}")
+    private int serverPort;
+
+    /**
+     * /mcp 미인증 응답 — 401 + WWW-Authenticate: Bearer resource_metadata="...".
+     * MCP 클라이언트는 이 헤더를 보고 protected-resource 메타데이터를 따라가 OAuth 로그인 플로우를
+     * 자동으로 시작한다(RFC 9728 / MCP Authorization). 헤더가 없으면 클라이언트는 그냥 정적 토큰이
+     * 없다고 판단하고 멈춘다 — 이 한 줄이 "브라우저 로그인 창이 뜨는" 흐름의 방아쇠다.
+     */
+    private org.springframework.security.web.AuthenticationEntryPoint mcpAuthEntryPoint() {
+        String base = (baseUrl == null || baseUrl.isBlank())
+                ? "http://localhost:" + serverPort : baseUrl.replaceAll("/+$", "");
+        String metadata = base + "/.well-known/oauth-protected-resource";
+        return (request, response, authException) -> {
+            // setStatus(sendError 아님) — sendError는 컨테이너 에러 디스패치를 유발해 요청이 필터를
+            // 다시 타고(폼 로그인 체인으로) 302 리다이렉트로 덮이던 실측 함정. setStatus는 그대로 커밋된다.
+            response.setHeader("WWW-Authenticate",
+                    "Bearer resource_metadata=\"" + metadata + "\"");
+            response.setStatus(HttpStatus.UNAUTHORIZED.value());
+        };
+    }
+
+    /**
+     * MCP 전용 필터 체인 (@Order(1)) — /mcp는 stateless 리소스 서버라 브라우저 앱 체인과 분리한다.
+     * 폼 로그인·세션·CSRF가 없어야 미인증 응답이 302 로그인 리다이렉트가 아니라 <b>깨끗한 401 +
+     * WWW-Authenticate</b>가 되고, 그래야 MCP 클라이언트가 resource_metadata를 따라가 OAuth
+     * discovery를 시작한다. 인증은 두 Bearer 필터(정적 api-token / OAuth 액세스 토큰)가 담당.
+     */
     @Bean
+    @org.springframework.core.annotation.Order(1)
+    public SecurityFilterChain mcpFilterChain(HttpSecurity http, ApiTokenFilter tokenFilter,
+                                              io.dbtower.security.internal.OAuthTokenFilter oauthTokenFilter)
+            throws Exception {
+        http
+                .securityMatcher("/mcp")
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(s -> s.sessionCreationPolicy(
+                        org.springframework.security.config.http.SessionCreationPolicy.STATELESS))
+                .addFilterBefore(tokenFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(oauthTokenFilter, UsernamePasswordAuthenticationFilter.class)
+                .authorizeHttpRequests(auth -> auth.anyRequest().hasRole("ADMIN"))
+                .exceptionHandling(e -> e.authenticationEntryPoint(mcpAuthEntryPoint()));
+        return http.build();
+    }
+
+    @Bean
+    @org.springframework.core.annotation.Order(2)
     public SecurityFilterChain filterChain(HttpSecurity http, ApiTokenFilter tokenFilter,
+                                           io.dbtower.security.internal.OAuthTokenFilter oauthTokenFilter,
                                            LoginAttemptGuard loginAttemptGuard) throws Exception {
         // Bearer 토큰 요청은 쿠키 세션이 없으므로 CSRF 보호 대상이 아니다
         RequestMatcher bearerRequests = request -> {
@@ -80,6 +131,9 @@ public class SecurityConfig {
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
                         // 봇 인바운드는 외부 서버(Discord)가 호출 — 세션·CSRF 대신 Ed25519 서명이 인증
                         .ignoringRequestMatchers("/api/inbound/discord")
+                        // OAuth 등록·토큰은 외부 MCP 클라이언트가 쿠키 없이 호출(공개 클라이언트) — CSRF 제외.
+                        // authorize는 브라우저 GET이라 CSRF 대상이 아니고, 인가 코드+PKCE가 위조를 막는다.
+                        .ignoringRequestMatchers("/oauth/register", "/oauth/token")
                         .ignoringRequestMatchers(bearerRequests))
                 // Prometheus 스크레이프 경로 선택적 토큰 보호(미설정이면 통과 + 기동 WARN)
                 .addFilterBefore(new MetricsTokenFilter(metricsToken),
@@ -88,6 +142,7 @@ public class SecurityConfig {
                 .addFilterBefore(new LoginLockFilter(loginAttemptGuard, "/login"),
                         UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(tokenFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(oauthTokenFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(new CsrfCookieFilter(), UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
                         // 로그인 화면도 브랜드 아이콘을 보여주므로 파비콘 자산 일체를 미인증 허용(민감정보 아님)
@@ -95,10 +150,15 @@ public class SecurityConfig {
                                 "/favicon.ico", "/favicon.svg", "/favicon-96x96.png", "/apple-touch-icon.png").permitAll()
                         // Prometheus 수집 경로 — 네트워크 레벨 제한 전제 (docs/operations.md)
                         .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
+                        // OAuth discovery·등록·토큰은 미인증 허용(클라이언트가 로그인 전에 부른다).
+                        // authorize는 authenticated() — 미로그인이면 기존 폼 로그인으로 유도되고, 로그인 후 재생된다.
+                        .requestMatchers("/.well-known/oauth-authorization-server",
+                                "/.well-known/oauth-protected-resource",
+                                "/oauth/register", "/oauth/token").permitAll()
+                        .requestMatchers("/oauth/authorize").authenticated()
                         // 봇 인바운드 — 인증은 요청 서명(Ed25519)+채널·유저 화이트리스트가 담당(컨트롤러에서 검증).
                         // 공개키 미설정이면 컨트롤러가 404로 기능 자체를 숨긴다(기능 게이트)
                         .requestMatchers("/api/inbound/discord").permitAll()
-                        .requestMatchers("/mcp").hasRole("ADMIN")
                         .requestMatchers("/api/security/**").hasRole("ADMIN")
                         .requestMatchers("/api/audit/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/instances").hasRole("ADMIN")
@@ -125,18 +185,20 @@ public class SecurityConfig {
                 .formLogin(form -> form
                         .loginPage("/login.html")
                         .loginProcessingUrl("/login")
-                        .defaultSuccessUrl("/", true)
+                        // alwaysUse=false: 저장된 요청(예: OAuth /oauth/authorize)이 있으면 로그인 후 그곳으로
+                        // 재생하고, 없으면 "/". OAuth 브라우저 로그인 플로우가 이 재생에 의존한다.
+                        .defaultSuccessUrl("/", false)
                         .failureUrl("/login.html?error")
                         .permitAll())
                 .logout(logout -> logout
                         .logoutUrl("/logout")
                         .logoutSuccessUrl("/login.html"))
-                // API·MCP 호출은 401(SPA가 로그인으로 보냄), 그 외 브라우저 페이지는 로그인 리다이렉트
+                // /api/ 미인증은 순수 401(SPA가 로그인으로 보냄), 그 외 브라우저 페이지
+                //   (예: /oauth/authorize)는 로그인 리다이렉트. /mcp는 전용 체인(@Order 1)이 처리.
                 .exceptionHandling(e -> e
                         .defaultAuthenticationEntryPointFor(
                                 new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
-                                request -> request.getRequestURI().startsWith("/api/")
-                                        || request.getRequestURI().startsWith("/mcp"))
+                                request -> request.getRequestURI().startsWith("/api/"))
                         .defaultAuthenticationEntryPointFor(
                                 new LoginUrlAuthenticationEntryPoint("/login.html"),
                                 request -> true));
