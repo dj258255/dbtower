@@ -31,8 +31,6 @@
 - DB팀 문의를 Discord 리치 embed로 — 필드 구조화(요청자·쿼리 sql 코드블록·실행계획·규칙·AI 분석),
   한도(256/1024/25) 경계 절단, Slack·미설정 텍스트 폴백, 레이트리밋 윈도우 공유
 - 프로젝트 아이콘·파비콘 세트, 진단 흐름 다이어그램(식별→분석→문의) README 추가
-
-### Added
 - MCP OAuth 2.1 인가 서버(V20) — MCP 클라이언트가 브라우저 로그인으로 토큰 자동 발급.
   RFC 9728/8414 discovery + RFC 7591 동적 클라이언트 등록 + PKCE(S256) + refresh 회전, 기존
   로그인·유저 재사용. /mcp 전용 stateless 체인으로 401+WWW-Authenticate 자동 discovery
