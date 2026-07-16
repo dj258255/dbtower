@@ -33,11 +33,15 @@ import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.HealthStatus;
+import org.bson.BsonTimestamp;
 import org.bson.Document;
 import org.bson.json.JsonWriterSettings;
 
+import java.nio.file.Files;
+
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -598,6 +602,13 @@ public class MongoOperator implements DbmsOperator {
      * 로그 백업 (Phase 2) = local.oplog.rs 덤프. oplog는 복제셋의 변경 로그라 "FULL + oplog"가
      * 시점 복구의 재료다. mongodump --oplog는 --db와 함께 못 쓰므로 oplog 컬렉션을 직접 덤프한다.
      *
+     * <b>ts 증분</b>: 매번 전체 oplog를 뜨는 대신, 직전 산출물 파일명의 ts 마커(-tsT_I) 이후만
+     * --query {"ts":{"$gte":...}}로 받는다 — 파일시스템이 장부(binlog 보충 수집과 같은 원칙).
+     * $gt가 아니라 <b>$gte</b>인 이유: 직전 덤프의 마지막 엔트리를 일부러 겹쳐 받아, 아카이브를
+     * 이어 붙였을 때 겹침 엔트리의 존재가 "체인에 구멍이 없다"의 증거가 되게 한다.
+     * oplog는 순환(capped) 컬렉션 — 직전 마커가 이미 밀려났으면(가장 오래된 엔트리 > 마커) 체인이
+     * 끊긴 것이므로 조용히 전체를 다시 뜨지 않고 <b>명확히 실패</b>시킨다(FULL을 새로 떠야 체인 재시작).
+     *
      * 게이트(정직): oplog.rs는 복제셋에만 존재한다 — standalone이면 UNSUPPORTED로 사유를 남긴다.
      * 복제셋 전환은 대상 서버 구성이라 우리가 하지 않는다(단일 노드도 replSet 전환으로 사용 가능 안내).
      * 판정은 replicationState()(replSetGetStatus, 에러 76=NoReplicationEnabled)를 재사용한다.
@@ -612,14 +623,72 @@ public class MongoOperator implements DbmsOperator {
             throw new UnsupportedOperationException(
                     "oplog 덤프 명령 미설정(dbtower.backup.mongo-oplog-command)");
         }
+        BsonTimestamp newest = oplogEdgeTs(-1);
+        if (newest == null) {
+            throw new OperatorException("oplog가 비어 있다 — 복제셋 초기화 직후인지 확인");
+        }
+        List<String> cmd = new ArrayList<>(BackupCommands.render(backupTools.mongoOplogCommand(), instance));
+        long[] last = lastCollectedTs();
+        if (last != null) {
+            BsonTimestamp oldest = oplogEdgeTs(1);
+            if (oldest != null && chainBroken(oldest.getTime(), oldest.getInc(), last[0], last[1])) {
+                throw new OperatorException(
+                        ("oplog 순환으로 직전 수집 지점(ts%d_%d)이 이미 밀려났다 — 체인 구멍. "
+                                + "FULL 백업을 새로 떠서 체인을 다시 시작해야 한다(순환 전에 수집되도록 주기 단축 검토)")
+                                .formatted(last[0], last[1]));
+            }
+            cmd.add("--query");
+            cmd.add(oplogQuery(last[0], last[1]));
+        }
+        // 파일명 마커 = 덤프 시작 시점의 최신 ts — 덤프 중 유입분은 다음 증분($gte)이 겹쳐 받는다(안전 방향)
         Path out = Path.of(backupTools.backupDir(),
-                "mongo-oplog-%s-%s.archive".formatted(
-                        BackupCommands.safeFileName(instance.getName()), BackupCommands.timestamp()));
-        return BackupCommands.run(
-                BackupCommands.render(backupTools.mongoOplogCommand(), instance),
-                Map.of(),
-                out,
+                "mongo-oplog-%s-%s-ts%d_%d.archive".formatted(
+                        BackupCommands.safeFileName(instance.getName()), BackupCommands.timestamp(),
+                        newest.getTime(), newest.getInc()));
+        return BackupCommands.run(cmd, Map.of(), out,
                 BackupCommands.yamlEntry("password", instance.getPassword()));
+    }
+
+    /** oplog의 가장자리 ts — direction -1이면 최신, +1이면 가장 오래된 엔트리($natural 정렬). */
+    private BsonTimestamp oplogEdgeTs(int direction) {
+        return withClient(c -> {
+            Document d = c.getDatabase("local").getCollection("oplog.rs")
+                    .find().sort(new Document("$natural", direction)).limit(1).first();
+            return d == null ? null : d.get("ts", BsonTimestamp.class);
+        });
+    }
+
+    /** 직전 산출물 파일명의 ts 마커 중 최대 — 없으면 null(첫 수집 = 전체 덤프). 파일시스템이 장부. */
+    private long[] lastCollectedTs() {
+        String prefix = "mongo-oplog-" + BackupCommands.safeFileName(instance.getName()) + "-";
+        try (var stream = Files.list(Path.of(backupTools.backupDir()))) {
+            return stream.map(p -> p.getFileName().toString())
+                    .filter(n -> n.startsWith(prefix))
+                    .map(MongoOperator::parseTsMarker)
+                    .filter(Objects::nonNull)
+                    .max((a, b) -> a[0] != b[0] ? Long.compare(a[0], b[0]) : Long.compare(a[1], b[1]))
+                    .orElse(null);
+        } catch (Exception e) {
+            return null; // 백업 디렉터리 미존재 등 — 첫 수집으로 취급
+        }
+    }
+
+    private static final Pattern TS_MARKER = Pattern.compile(".*-ts(\\d+)_(\\d+)\\.archive$");
+
+    /** 파일명에서 ts 마커 파싱 — 규약(-tsT_I.archive) 밖(마커 도입 전 산출물)은 null. */
+    static long[] parseTsMarker(String fileName) {
+        var m = TS_MARKER.matcher(fileName);
+        return m.matches() ? new long[]{Long.parseLong(m.group(1)), Long.parseLong(m.group(2))} : null;
+    }
+
+    /** mongodump --query 문안 — 공백 없는 압축 JSON(argv 공백 분리와 무관하게 안전, 값은 숫자만). */
+    static String oplogQuery(long t, long i) {
+        return "{\"ts\":{\"$gte\":{\"$timestamp\":{\"t\":%d,\"i\":%d}}}}".formatted(t, i);
+    }
+
+    /** 체인 구멍 판정 — 가장 오래된 oplog 엔트리가 직전 마커보다 새로우면 그 사이가 이미 덮어써졌다. */
+    static boolean chainBroken(long oldestT, long oldestI, long lastT, long lastI) {
+        return oldestT > lastT || (oldestT == lastT && oldestI > lastI);
     }
 
     /**
