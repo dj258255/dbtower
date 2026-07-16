@@ -78,12 +78,12 @@ class OpsAlertDetectorEvictTest {
 
         detector.detect();                 // 최초 알림 → send 1
         detector.detect();                 // 쿨다운(30m) 안이라 조용
-        verify(notifier, times(1)).send(anyString());
+        verify(notifier, times(1)).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
 
         detector.onInstanceDeleted(new InstanceDeletedEvent(1L)); // 쿨다운 키 제거
 
         detector.detect();                 // 쿨다운이 비워졌으므로 다시 울린다 → send 2
-        verify(notifier, times(2)).send(anyString());
+        verify(notifier, times(2)).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -97,6 +97,6 @@ class OpsAlertDetectorEvictTest {
         // (evict가 없었다면 5→8 델타로 "데드락 발생 +3"을 보냈을 것이다.)
         when(operator.deadlockCount()).thenReturn(Optional.of(8L));
         detector.detect();
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 }

@@ -78,21 +78,35 @@ public class OAuthService {
     }
 
     /**
-     * redirect_uri 화이트리스트 형식 — 오픈 리다이렉트 방지. MCP 클라이언트의 콜백은 통상
-     * 루프백(http://127.0.0.1:PORT/...·http://localhost:...) 또는 커스텀 스킴이다.
-     * 원격 http는 거부(피싱 콜백 차단), https는 허용.
+     * redirect_uri 화이트리스트 — 오픈 리다이렉트/인가 코드 탈취 방지(보안 리뷰 반영).
+     * 문자열 prefix 검사는 <b>userinfo 우회</b>에 뚫린다: "http://localhost:8080@evil.com/"은
+     * startsWith("http://localhost:")를 통과하지만 실제 호스트는 evil.com이다. 그래서 java.net.URI로
+     * 파싱해 <b>구조 요소</b>(스킴·호스트)를 검사하고, userinfo·fragment가 있으면 거부한다.
+     * 규칙: https(호스트 필수), 루프백 http(127.0.0.1·localhost·[::1]), http/https 아닌 커스텀 스킴(네이티브 앱).
      */
     static boolean isAllowedRedirect(String uri) {
         if (uri == null || uri.isBlank()) {
             return false;
         }
-        if (uri.startsWith("http://127.0.0.1:") || uri.startsWith("http://localhost:")
-                || uri.startsWith("https://")) {
-            return true;
+        java.net.URI u;
+        try {
+            u = new java.net.URI(uri);
+        } catch (java.net.URISyntaxException e) {
+            return false;
         }
-        // 커스텀 스킴(네이티브 앱, 예: cursor://) — 단, http/https는 위에서만 허용(원격 평문 http 차단)
-        return uri.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*")
-                && !uri.startsWith("http://") && !uri.startsWith("https://");
+        if (u.getUserInfo() != null || u.getFragment() != null) {
+            return false; // user:pass@host·#frag 트릭 차단
+        }
+        String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase();
+        String host = u.getHost() == null ? "" : u.getHost().toLowerCase();
+        if ("https".equals(scheme)) {
+            return !host.isEmpty();
+        }
+        if ("http".equals(scheme)) {
+            return host.equals("127.0.0.1") || host.equals("localhost") || host.equals("[::1]");
+        }
+        // 커스텀 스킴(네이티브 앱, 예: cursor://) — http/https는 위에서만 허용(원격 평문 http 차단)
+        return scheme.matches("[a-z][a-z0-9+.-]*");
     }
 
     // ---------- 인가 코드 발급 (PKCE) ----------

@@ -47,4 +47,16 @@ class OAuthServiceTest {
         assertFalse(OAuthService.isAllowedRedirect(""));
         assertFalse(OAuthService.isAllowedRedirect(null));
     }
+
+    @Test
+    void userinfo_우회로_호스트를_속이는_redirect는_거부된다() {
+        // 보안 리뷰(CRITICAL): prefix 검사는 "localhost:" 뒤에 @evil.com이 붙는 걸 못 잡는다.
+        // 실제 호스트는 evil.com이므로 인가 코드가 공격자에게 새는 벡터 — URI 파싱으로 거부해야 한다.
+        assertFalse(OAuthService.isAllowedRedirect("http://localhost:8080@evil.com/"));
+        assertFalse(OAuthService.isAllowedRedirect("http://127.0.0.1:80@evil.com/"));
+        assertFalse(OAuthService.isAllowedRedirect("http://localhost:@evil.com/"));
+        assertFalse(OAuthService.isAllowedRedirect("https://good.com@evil.com/"));
+        // fragment 트릭도 거부
+        assertFalse(OAuthService.isAllowedRedirect("https://app.example.com/cb#@evil.com"));
+    }
 }

@@ -59,7 +59,7 @@ class RegressionDetectorTest {
 
     private String notifiedMessage() {
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(notifier).send(captor.capture());
+        verify(notifier).sendEmbed(captor.capture(), org.mockito.ArgumentMatchers.any());
         return captor.getValue();
     }
 
@@ -75,7 +75,7 @@ class RegressionDetectorTest {
         // +199%는 임계 미달 — 조용해야 한다
         stubDiffs(new QueryDiff("q1", "Q", 1.0, 2.99, 199.0, 1, 1, 0.0, 0, 0, null, false));
         detector.detect();
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
 
         // +200%는 알림
         stubDiffs(new QueryDiff("q2", "Q", 1.0, 3.0, 200.0, 1, 1, 0.0, 0, 0, null, false));
@@ -99,7 +99,7 @@ class RegressionDetectorTest {
         stubDiffs(new QueryDiff("q1", "Q", 0, 2.0, null, 0, 3.0, null, 0, 0, null, true));
         detector.detect();
         detector.detect(); // 쿨다운 30분 안의 재감지
-        verify(notifier, times(1)).send(anyString());
+        verify(notifier, times(1)).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -107,6 +107,6 @@ class RegressionDetectorTest {
         when(comparisonService.compare(any(), any(), any(), any(), any()))
                 .thenThrow(new IllegalArgumentException("배치가 2개 이상 필요합니다"));
         assertDoesNotThrow(detector::detect);
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 }

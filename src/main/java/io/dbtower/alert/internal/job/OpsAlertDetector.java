@@ -367,6 +367,9 @@ public class OpsAlertDetector {
         message.append("[DBTower 운영 경보] instance=").append(instance.getName()).append("\n");
         findings.forEach(f -> message.append("- ").append(f).append("\n"));
         log.info("운영 경보 instance={} findings={}", instance.getName(), findings.size());
-        notifier.send(message.toString());
+        // 운영 경보는 지금-위험 신호라 빨강. 텍스트(Slack·미설정)는 폴백으로 그대로 나간다.
+        notifier.sendEmbed(message.toString(), io.dbtower.alert.internal.AlertEmbeds.forDetection(
+                "운영 경보", io.dbtower.alert.internal.AlertEmbeds.RED, instance,
+                null, null, findings, null, null));
     }
 }

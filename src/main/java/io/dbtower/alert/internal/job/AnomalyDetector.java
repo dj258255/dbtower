@@ -90,14 +90,17 @@ public class AnomalyDetector {
             return; // 전부 쿨다운 중
         }
 
+        String context = scan.dayOfWeek() + "요일 " + scan.hour() + "시대 평소 기준, z>=" + scan.zThreshold();
         StringBuilder message = new StringBuilder();
         message.append("[DBTower 이상 감지(베이스라인)] instance=").append(instance.getName())
-                .append(" (").append(scan.dayOfWeek()).append("요일 ").append(scan.hour())
-                .append("시대 평소 기준, z>=").append(scan.zThreshold()).append(")\n");
+                .append(" (").append(context).append(")\n");
         lines.forEach(l -> message.append("- ").append(l).append("\n"));
 
         log.info("베이스라인 이상 감지 알림 instance={} anomalies={}", instance.getName(), lines.size());
-        notifier.send(message.toString());
+        // 이상 감지는 "평소와 다름" 신호라 보라. 베이스라인 맥락을 맥락 필드로 싣는다.
+        notifier.sendEmbed(message.toString(), io.dbtower.alert.internal.AlertEmbeds.forDetection(
+                "이상 감지", io.dbtower.alert.internal.AlertEmbeds.PURPLE, instance,
+                "베이스라인", context, lines, null, null));
     }
 
     private boolean underCooldown(Long instanceId, String queryId, LocalDateTime now) {

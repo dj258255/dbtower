@@ -1,5 +1,6 @@
 package io.dbtower.alert.internal.job;
 
+import io.dbtower.alert.internal.AlertEmbeds;
 import io.dbtower.alert.internal.PlanChangeTracker;
 import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.analysis.AiAnalyzer;
@@ -176,20 +177,27 @@ public class RegressionDetector {
         findings.forEach(f -> message.append("- ").append(f).append("\n"));
 
         // AI 1차 분석은 감지 묶음당 1회만 — 비용과 알림 지연을 묶어서 관리
-        aiAnalyzer.analyze(message.toString())
-                .ifPresent(analysis -> message.append("\nAI 1차 분석: ").append(analysis));
+        String analysis = aiAnalyzer.analyze(message.toString()).orElse(null);
+        if (analysis != null) {
+            message.append("\nAI 1차 분석: ").append(analysis);
+        }
 
         // 진단 딥링크 (심화 아크 5) — 레퍼런스의 "알럿 쓰레드에서 분석"을 셀프호스트 제약에 맞게:
         // 클릭 한 번으로 콘솔이 해당 인스턴스 + 자연어 진단 질문 프리필 상태로 열린다
+        String deeplink = null;
         if (!baseUrl.isBlank()) {
             String question = java.net.URLEncoder.encode(
                     "방금 회귀 알림이 온 이유를 분석해줘: " + findings.get(0),
                     java.nio.charset.StandardCharsets.UTF_8);
-            message.append("\n진단: ").append(baseUrl).append("/?instance=").append(instance.getId())
-                    .append("&diagnose=").append(question);
+            deeplink = baseUrl + "/?instance=" + instance.getId() + "&diagnose=" + question;
+            message.append("\n진단: ").append(deeplink);
         }
 
         log.info("회귀 감지 알림 instance={} findings={}", instance.getName(), findings.size());
-        notifier.send(message.toString());
+        // 리치 embed(문의 카드와 같은 결) — 회귀는 성능 신호라 앰버. Slack·미설정은 텍스트 폴백.
+        notifier.sendEmbed(message.toString(), AlertEmbeds.forDetection(
+                "회귀 감지", AlertEmbeds.AMBER, instance,
+                "구간", "최근 " + recentMinutes + "분 vs 직전 " + baselineMinutes + "분",
+                findings, analysis, deeplink));
     }
 }

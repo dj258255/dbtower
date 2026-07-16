@@ -74,7 +74,7 @@ class OpsAlertDetectorTest {
 
     private String notifiedMessage() {
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(notifier).send(captor.capture());
+        verify(notifier).sendEmbed(captor.capture(), org.mockito.ArgumentMatchers.any());
         return captor.getValue();
     }
 
@@ -83,7 +83,7 @@ class OpsAlertDetectorTest {
         // 임계(5s=5000ms) 이하 — 조용
         when(operator.activeSessions(anyInt())).thenReturn(List.of(idleTxn(101, 5000)));
         detector.detect();
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
 
         // 임계 초과 — 알림
         when(operator.activeSessions(anyInt())).thenReturn(List.of(idleTxn(102, 8000)));
@@ -98,19 +98,19 @@ class OpsAlertDetectorTest {
         when(operator.activeSessions(anyInt())).thenReturn(List.of(
                 new SessionInfo(200, "app", "active", null, null, "UPDATE t SET x=1", 999_999)));
         detector.detect();
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
     void 복제_지연은_임계_초과일_때만_알리고_STANDALONE은_스킵한다() {
         // STANDALONE(기본 스텁) — 조용
         detector.detect();
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
 
         // 임계(30s) 이하 — 조용
         when(operator.replicationState()).thenReturn(new ReplicationState("REPLICA", 30, "recovery"));
         detector.detect();
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
 
         // 임계 초과 — 알림
         when(operator.replicationState()).thenReturn(new ReplicationState("REPLICA", 120, "recovery"));
@@ -122,7 +122,7 @@ class OpsAlertDetectorTest {
     void 복제_lag_음수는_미지원_신호라_스킵한다() {
         when(operator.replicationState()).thenReturn(new ReplicationState("REPLICA", -1, "미지원"));
         detector.detect();
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -130,14 +130,14 @@ class OpsAlertDetectorTest {
         when(operator.activeSessions(anyInt())).thenReturn(List.of(idleTxn(101, 8000)));
         detector.detect();
         detector.detect(); // 쿨다운 30분 안의 재감지
-        verify(notifier, times(1)).send(anyString());
+        verify(notifier, times(1)).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
     void 감지_중_예외는_조용히_넘어간다() {
         when(operator.activeSessions(anyInt())).thenThrow(new RuntimeException("접속 실패"));
         assertDoesNotThrow(detector::detect);
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     // ---------- 데드락 (3차 아크 D-축) ----------
@@ -158,7 +158,7 @@ class OpsAlertDetectorTest {
         // 첫 관측: 직전 값이 없어 기준선만 저장(알림 없음) — 과거분을 새 데드락으로 오인하지 않는다
         when(operator.deadlockCount()).thenReturn(Optional.of(5L));
         detector.detect();
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
 
         // 카운터 증가: 델타만큼 새 데드락으로 알림
         when(operator.deadlockCount()).thenReturn(Optional.of(8L));
@@ -174,7 +174,7 @@ class OpsAlertDetectorTest {
         when(operator.deadlockCount()).thenReturn(Optional.of(5L));
         detector.detect();
         detector.detect(); // 값 불변 → 새 데드락 아님
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -184,7 +184,7 @@ class OpsAlertDetectorTest {
         // 첫 관측: 기준선 저장(알림 없음)
         when(operator.recentDeadlocks(anyInt())).thenReturn(List.of(deadlock("2026-07-07T10:00:00Z", "spid 51")));
         detector.detect();
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
 
         // 새 사건(다른 식별 문자열) → 알림
         when(operator.recentDeadlocks(anyInt())).thenReturn(List.of(deadlock("2026-07-07T10:05:00Z", "spid 77")));
@@ -196,7 +196,7 @@ class OpsAlertDetectorTest {
         // 같은 사건 반복 → 조용(반복 알림 방지)
         Mockito.reset(notifier);
         detector.detect();
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     private DeadlockEvent deadlock(String at, String victim) {
@@ -221,7 +221,7 @@ class OpsAlertDetectorTest {
     void 백업이_신선하면_조용하다() {
         // 기본 스텁이 FRESH — 다른 신호도 없음
         detector.detect();
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -247,7 +247,7 @@ class OpsAlertDetectorTest {
         // 기본 instance의 createdAt이 now(임계 창 안) — 첫 백업 전이라 오탐 방지로 조용
         when(backupFreshnessService.freshnessFor(any(DatabaseInstance.class))).thenReturn(noBackup());
         detector.detect();
-        verify(notifier, never()).send(anyString());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -270,7 +270,7 @@ class OpsAlertDetectorTest {
                 .thenReturn(stale(48, "VERIFIED"));
         detector.detect();
         detector.detect(); // 쿨다운 30분 안의 재감지
-        verify(notifier, times(1)).send(anyString());
+        verify(notifier, times(1)).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -323,7 +323,7 @@ class OpsAlertDetectorTest {
         detector.detect();
 
         verify(operatorFactory, times(2)).create(any());
-        verify(notifier, times(2)).send(anyString());
+        verify(notifier, times(2)).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -337,6 +337,6 @@ class OpsAlertDetectorTest {
 
         detector.detect();
 
-        verify(notifier, times(2)).send(anyString());
+        verify(notifier, times(2)).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
     }
 }

@@ -93,7 +93,17 @@ public class OAuthController {
 
     // ---------- (4)(5) 인가 — 로그인은 기존 폼 로그인이 이미 강제(SecurityConfig) ----------
 
-    @GetMapping("/oauth/authorize")
+    /**
+     * (4) 인가 요청 — 로그인된 사용자에게 동의 화면을 보여준다(코드는 여기서 발급하지 않는다).
+     *
+     * 보안 리뷰 반영 두 가지:
+     * - client_id·redirect_uri 화이트리스트 검증을 <b>어떤 리다이렉트보다 먼저</b> 한다(오픈 리다이렉트 방지) —
+     *   검증 실패는 리다이렉트로 흘리지 않고 400 직접 응답.
+     * - 코드 발급을 GET 응답이 아니라 <b>사용자가 명시적으로 승인하는 POST</b>로 옮긴다(동의 화면). GET만으로
+     *   코드를 내주면, 로그인된 사용자가 악성 authorize 링크를 클릭하는 것만으로 공격자 클라이언트에 코드가
+     *   발급된다(auth code injection). CSRF 보호되는 승인 폼이 이 CSRF-류 공격을 막는다.
+     */
+    @GetMapping(value = "/oauth/authorize", produces = MediaType.TEXT_HTML_VALUE)
     public void authorize(@RequestParam("response_type") String responseType,
                           @RequestParam("client_id") String clientId,
                           @RequestParam("redirect_uri") String redirectUri,
@@ -101,25 +111,102 @@ public class OAuthController {
                           @RequestParam(value = "code_challenge_method", defaultValue = "S256") String method,
                           @RequestParam(value = "state", required = false) String state,
                           Authentication authentication,
+                          org.springframework.security.web.csrf.CsrfToken csrf,
                           HttpServletResponse response) throws IOException {
-        // 여기 닿았다면 이미 인증됨(authorize는 SecurityConfig에서 authenticated() — 미로그인은 로그인 페이지로).
-        if (!"code".equals(responseType)) {
-            redirectError(response, redirectUri, "unsupported_response_type", state);
-            return;
-        }
         try {
-            oauth.requireClient(clientId, redirectUri); // client_id·redirect_uri 화이트리스트 검증
-            String code = oauth.issueCode(clientId, redirectUri, codeChallenge, method, authentication.getName());
-            String sep = redirectUri.contains("?") ? "&" : "?";
-            String location = redirectUri + sep + "code=" + enc(code)
-                    + (state != null ? "&state=" + enc(state) : "");
-            response.sendRedirect(location);
+            OAuthClient client = oauth.requireClient(clientId, redirectUri); // 화이트리스트 — 먼저, 리다이렉트 전에
+            if (!"code".equals(responseType)) {
+                // client/redirect는 검증됐으니 리다이렉트 오류가 안전하다
+                redirectError(response, redirectUri, "unsupported_response_type", state);
+                return;
+            }
+            renderConsent(response, client, clientId, redirectUri, codeChallenge, method, state,
+                    authentication.getName(), csrf);
         } catch (OAuthService.OAuthException e) {
-            // client/redirect가 검증 안 된 단계의 오류는 리다이렉트로 흘리지 않고 직접 응답(오픈 리다이렉트 방지)
             response.setStatus(400);
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.getWriter().write("{\"error\":\"" + e.error() + "\",\"error_description\":\"" + e.getMessage() + "\"}");
         }
+    }
+
+    /**
+     * (5) 사용자가 승인 폼을 제출 — 여기서만 코드를 발급한다(CSRF 보호됨: SecurityConfig가 이 POST를
+     * CSRF 대상으로 두고, 폼에 토큰이 실린다). 거부(deny)면 error=access_denied로 돌려보낸다.
+     */
+    @PostMapping("/oauth/authorize/decision")
+    public void decision(@RequestParam("client_id") String clientId,
+                         @RequestParam("redirect_uri") String redirectUri,
+                         @RequestParam("code_challenge") String codeChallenge,
+                         @RequestParam("code_challenge_method") String method,
+                         @RequestParam(value = "state", required = false) String state,
+                         @RequestParam("decision") String decision,
+                         Authentication authentication,
+                         HttpServletResponse response) throws IOException {
+        try {
+            oauth.requireClient(clientId, redirectUri); // 폼 위조 대비 재검증
+            if (!"approve".equals(decision)) {
+                redirectError(response, redirectUri, "access_denied", state);
+                return;
+            }
+            String code = oauth.issueCode(clientId, redirectUri, codeChallenge, method, authentication.getName());
+            String sep = redirectUri.contains("?") ? "&" : "?";
+            response.sendRedirect(redirectUri + sep + "code=" + enc(code)
+                    + (state != null ? "&state=" + enc(state) : ""));
+        } catch (OAuthService.OAuthException e) {
+            response.setStatus(400);
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.getWriter().write("{\"error\":\"" + e.error() + "\",\"error_description\":\"" + e.getMessage() + "\"}");
+        }
+    }
+
+    /** 동의 화면 — 어떤 클라이언트가 누구로 접근하려는지 보여주고 명시적 승인을 받는다(CSRF 토큰 포함). */
+    private void renderConsent(HttpServletResponse response, OAuthClient client, String clientId,
+                               String redirectUri, String codeChallenge, String method, String state,
+                               String username, org.springframework.security.web.csrf.CsrfToken csrf)
+            throws IOException {
+        String clientName = client.getClientName() == null || client.getClientName().isBlank()
+                ? clientId : client.getClientName();
+        String html = """
+                <!doctype html><html lang="ko"><head><meta charset="utf-8">
+                <title>DBTower 접근 승인</title><link rel="stylesheet" href="/style.css">
+                <style>body{display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;
+                background:#f4f6f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+                .card{background:#fff;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.08);padding:36px;max-width:420px}
+                h2{margin:0 0 6px;font-size:19px}.muted{color:#6b7280;font-size:13.5px;margin:0 0 22px}
+                .row{font-size:14px;margin:10px 0}.k{color:#6b7280}.v{font-weight:600}
+                .btns{display:flex;gap:10px;margin-top:26px}button{flex:1;padding:11px;border-radius:8px;border:0;
+                font-size:14px;font-weight:600;cursor:pointer}.approve{background:#4f5ef7;color:#fff}
+                .deny{background:#eef0f3;color:#374151}</style></head><body>
+                <form class="card" method="post" action="/oauth/authorize/decision">
+                <h2>접근 승인 요청</h2>
+                <p class="muted">아래 애플리케이션이 DBTower MCP 도구에 접근하려 합니다.</p>
+                <div class="row"><span class="k">애플리케이션</span> · <span class="v">%s</span></div>
+                <div class="row"><span class="k">로그인 계정</span> · <span class="v">%s</span></div>
+                <div class="row"><span class="k">콜백</span> · <span class="v">%s</span></div>
+                <input type="hidden" name="_csrf" value="%s">
+                <input type="hidden" name="client_id" value="%s">
+                <input type="hidden" name="redirect_uri" value="%s">
+                <input type="hidden" name="code_challenge" value="%s">
+                <input type="hidden" name="code_challenge_method" value="%s">
+                <input type="hidden" name="state" value="%s">
+                <div class="btns">
+                <button class="deny" type="submit" name="decision" value="deny">거부</button>
+                <button class="approve" type="submit" name="decision" value="approve">승인</button>
+                </div></form></body></html>"""
+                .formatted(esc(clientName), esc(username), esc(redirectUri), esc(csrf.getToken()),
+                        esc(clientId), esc(redirectUri), esc(codeChallenge), esc(method),
+                        esc(state == null ? "" : state));
+        response.setContentType(MediaType.TEXT_HTML_VALUE + ";charset=UTF-8");
+        response.getWriter().write(html);
+    }
+
+    /** HTML 속성/본문 삽입용 최소 이스케이프 — 사용자·클라이언트 문자열이 그대로 들어가므로 XSS 차단. */
+    private static String esc(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;").replace("'", "&#39;");
     }
 
     // ---------- (6) 토큰 발급/갱신 ----------
