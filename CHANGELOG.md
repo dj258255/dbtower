@@ -9,6 +9,9 @@
 ## [Unreleased]
 
 ### Added
+- 커넥션 온디맨드(Phase 4) — minimumIdle 0 + idleTimeout 하한 가드(수집 주기+30s) + 장기 미사용 풀
+  LRU 정리: 격리·저빈도 대상의 유휴 커넥션이 0으로 수렴(이전엔 대상마다 1개 영구 점유).
+  SLO 헬스 폴러가 격리를 무시하고 핑하던 구멍도 해소
 - query_snapshot 월별 RANGE 파티셔닝(V18) — 보존 정리가 벌크 DELETE(200만 행 1.9초+블로트)에서
   월 파티션 DROP(12.8ms·블로트 0)으로. 보존 잡이 파티션 선생성·DROP·걸친 구간 DELETE까지 관리,
   비파티션 환경은 DELETE 폴백(같은 계약 유지)
