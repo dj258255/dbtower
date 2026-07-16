@@ -39,13 +39,28 @@ public final class BackupCommands {
                 .toList();
     }
 
-    /** CLI를 실행해 stdout을 파일로 받는다. stdinContent가 있으면 표준입력으로 흘려보낸다(mongodump --config /dev/stdin용) */
+    /** 산출물 암호화(선택) — 기동 시 BackupArtifactCipher가 1회 등록한다(정적 관문 유지, 주석 참고). */
+    private static volatile BackupArtifactCipher cipher;
+
+    static void artifactCipher(BackupArtifactCipher c) {
+        cipher = c;
+    }
+
+    /**
+     * CLI를 실행해 stdout을 파일로 받는다. stdinContent가 있으면 표준입력으로 흘려보낸다(mongodump --config /dev/stdin용).
+     * 산출물 암호화 키가 설정돼 있으면 stdout을 AES-256-GCM으로 감싸 쓴다 — 파일명·체인 규약은 불변.
+     */
     public static BackupResult run(List<String> command, Map<String, String> env, Path outFile, String stdinContent) {
         try {
             Files.createDirectories(outFile.getParent());
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.environment().putAll(env);
-            pb.redirectOutput(outFile.toFile());
+            boolean encrypt = cipher != null && cipher.enabled();
+            if (encrypt) {
+                pb.redirectOutput(ProcessBuilder.Redirect.PIPE);
+            } else {
+                pb.redirectOutput(outFile.toFile());
+            }
             pb.redirectErrorStream(false);
             Process process = pb.start();
             if (stdinContent != null) {
@@ -55,9 +70,16 @@ public final class BackupCommands {
             } else {
                 process.getOutputStream().close();
             }
+            if (encrypt) {
+                // stdout을 현재 스레드에서 암호화 스트림으로 복사 — stderr는 종전과 같이 소량 가정(종료 후 수거)
+                try (var out = cipher.wrap(Files.newOutputStream(outFile))) {
+                    process.getInputStream().transferTo(out);
+                }
+            }
             String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
             int exit = process.waitFor();
             if (exit != 0) {
+                Files.deleteIfExists(outFile); // 실패 잔재가 체인 보충의 "이미 수집됨" 판정을 오염시키지 않게
                 throw new OperatorException("백업 명령 실패(exit=" + exit + "): " + stderr.trim(), null);
             }
             return new BackupResult(outFile.toString(), Files.size(outFile));

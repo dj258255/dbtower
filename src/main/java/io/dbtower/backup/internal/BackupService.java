@@ -8,12 +8,16 @@ import io.dbtower.backup.internal.persistence.BackupRunRepository;
 import io.dbtower.operator.model.BackupPolicy;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.DbmsOperatorFactory;
+import io.dbtower.operator.BackupArtifactCipher;
 import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.registry.RegistryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -27,15 +31,17 @@ public class BackupService {
     private final BackupPolicyRepository policyRepository;
     private final BackupRunRepository runRepository;
     private final RemoteBackupStore remoteStore;
+    private final BackupArtifactCipher artifactCipher;
 
     public BackupService(RegistryService registryService, DbmsOperatorFactory operatorFactory,
                          BackupPolicyRepository policyRepository, BackupRunRepository runRepository,
-                         RemoteBackupStore remoteStore) {
+                         RemoteBackupStore remoteStore, BackupArtifactCipher artifactCipher) {
         this.registryService = registryService;
         this.operatorFactory = operatorFactory;
         this.policyRepository = policyRepository;
         this.runRepository = runRepository;
         this.remoteStore = remoteStore;
+        this.artifactCipher = artifactCipher;
     }
 
     /** 정책 등록/수정 — 인스턴스당 하나 */
@@ -98,7 +104,30 @@ public class BackupService {
             location = target.getLocation() != null ? target.getLocation()
                     : locationFromDetail(target.getDetail());
         }
-        RestoreVerification verification = operatorFactory.create(instance).verifyRestore(location);
+        // 산출물 암호화(3-2-1-1-0) — 암호문이면 임시 평문으로 풀어 기존 검증 경로에 그대로 전달하고,
+        // 사용 즉시 지운다(평문 수명 최소화). GCM 태그 검증이 복호에 포함되므로 변조 산출물은 여기서
+        // 명확히 실패한다 — "복원해 본 백업"에 "변조 안 된 백업"까지 얹는 셈.
+        RestoreVerification verification;
+        Path artifact = Path.of(location);
+        if (artifactCipher.isEncrypted(artifact)) {
+            Path plain = null;
+            try {
+                plain = artifactCipher.decryptToTemp(artifact);
+                verification = operatorFactory.create(instance).verifyRestore(plain.toString());
+            } catch (IOException e) {
+                verification = RestoreVerification.failed("산출물 복호 실패(키 불일치·변조 의심): " + e.getMessage());
+            } finally {
+                if (plain != null) {
+                    try {
+                        Files.deleteIfExists(plain);
+                    } catch (IOException ignored) {
+                        // 임시 파일 삭제 실패는 검증 결과를 바꾸지 않는다 — OS tmp 정리에 맡긴다
+                    }
+                }
+            }
+        } else {
+            verification = operatorFactory.create(instance).verifyRestore(location);
+        }
         if (target != null) {
             target.recordVerification(verification.status().name(), LocalDateTime.now());
             runRepository.save(target);
