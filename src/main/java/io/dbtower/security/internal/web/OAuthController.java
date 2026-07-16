@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -111,7 +112,7 @@ public class OAuthController {
                           @RequestParam(value = "code_challenge_method", defaultValue = "S256") String method,
                           @RequestParam(value = "state", required = false) String state,
                           Authentication authentication,
-                          org.springframework.security.web.csrf.CsrfToken csrf,
+                          CsrfToken csrf,
                           HttpServletResponse response) throws IOException {
         try {
             OAuthClient client = oauth.requireClient(clientId, redirectUri); // 화이트리스트 — 먼저, 리다이렉트 전에
@@ -162,7 +163,7 @@ public class OAuthController {
     /** 동의 화면 — 어떤 클라이언트가 누구로 접근하려는지 보여주고 명시적 승인을 받는다(CSRF 토큰 포함). */
     private void renderConsent(HttpServletResponse response, OAuthClient client, String clientId,
                                String redirectUri, String codeChallenge, String method, String state,
-                               String username, org.springframework.security.web.csrf.CsrfToken csrf)
+                               String username, CsrfToken csrf)
             throws IOException {
         String clientName = client.getClientName() == null || client.getClientName().isBlank()
                 ? clientId : client.getClientName();

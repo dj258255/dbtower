@@ -1,5 +1,6 @@
 package io.dbtower.alert.internal.job;
 
+import io.dbtower.alert.internal.AlertEmbeds;
 import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.insight.BaselineService;
 import io.dbtower.registry.DatabaseInstance;
@@ -98,8 +99,8 @@ public class AnomalyDetector {
 
         log.info("베이스라인 이상 감지 알림 instance={} anomalies={}", instance.getName(), lines.size());
         // 이상 감지는 "평소와 다름" 신호라 보라. 베이스라인 맥락을 맥락 필드로 싣는다.
-        notifier.sendEmbed(message.toString(), io.dbtower.alert.internal.AlertEmbeds.forDetection(
-                "이상 감지", io.dbtower.alert.internal.AlertEmbeds.PURPLE, instance,
+        notifier.sendEmbed(message.toString(), AlertEmbeds.forDetection(
+                "이상 감지", AlertEmbeds.PURPLE, instance,
                 "베이스라인", context, lines, null, null));
     }
 

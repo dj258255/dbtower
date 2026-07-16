@@ -55,7 +55,7 @@ class AnomalyDetectorTest {
 
     private String notifiedMessage() {
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(notifier).sendEmbed(captor.capture(), org.mockito.ArgumentMatchers.any());
+        verify(notifier).sendEmbed(captor.capture(), any());
         return captor.getValue();
     }
 
@@ -74,7 +74,7 @@ class AnomalyDetectorTest {
         when(baselineService.detectAnomalies(any(), any()))
                 .thenReturn(new AnomalyScan(1L, 1, 14, 8, 3.0, List.of(), 3)); // 학습 중 3건뿐
         detector.detect();
-        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
+        verify(notifier, never()).sendEmbed(anyString(), any());
     }
 
     @Test
@@ -82,7 +82,7 @@ class AnomalyDetectorTest {
         stubScan(qpsSpike("q1"));
         detector.detect();
         detector.detect(); // 쿨다운 30분 안 재감지
-        verify(notifier, times(1)).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
+        verify(notifier, times(1)).sendEmbed(anyString(), any());
     }
 
     @Test
@@ -90,6 +90,6 @@ class AnomalyDetectorTest {
         when(baselineService.detectAnomalies(any(), any()))
                 .thenThrow(new RuntimeException("boom"));
         assertDoesNotThrow(detector::detect);
-        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
+        verify(notifier, never()).sendEmbed(anyString(), any());
     }
 }

@@ -16,6 +16,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -186,9 +188,10 @@ public class RegressionDetector {
         // 클릭 한 번으로 콘솔이 해당 인스턴스 + 자연어 진단 질문 프리필 상태로 열린다
         String deeplink = null;
         if (!baseUrl.isBlank()) {
-            String question = java.net.URLEncoder.encode(
-                    "방금 회귀 알림이 온 이유를 분석해줘: " + findings.get(0),
-                    java.nio.charset.StandardCharsets.UTF_8);
+            // 질문에 회귀 라인 전문을 넣으면 URL이 수백 자로 길어져 Discord가 마스킹 링크로 렌더하지 못한다
+            // (콘솔은 이미 해당 인스턴스로 열리고 알림에 내용이 있으니, 프리필은 짧은 지시로 충분).
+            String question = URLEncoder.encode(
+                    "방금 온 회귀 알림의 원인을 분석해줘", StandardCharsets.UTF_8);
             deeplink = baseUrl + "/?instance=" + instance.getId() + "&diagnose=" + question;
             message.append("\n진단: ").append(deeplink);
         }

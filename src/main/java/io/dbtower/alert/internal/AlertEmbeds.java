@@ -45,21 +45,37 @@ public final class AlertEmbeds {
         if (instance.getTeamLabel() != null && !instance.getTeamLabel().isBlank()) {
             fields.add(new Embed.Field("담당", instance.getTeamLabel(), true));
         }
-        // 지적은 불릿 한 덩어리 — Discord 필드 값 한도(1024)는 WebhookNotifier가 경계에서 자른다
+        // 지적은 불릿 한 덩어리 — 항목 사이에 빈 줄(\n\n)을 넣어 다닥다닥 붙지 않게 한다(가독성).
+        // Discord 필드 값 한도(1024)는 WebhookNotifier가 경계에서 자른다.
         StringBuilder bullets = new StringBuilder();
         for (String f : findings) {
-            bullets.append("• ").append(f).append('\n');
+            if (bullets.length() > 0) {
+                bullets.append("\n\n");
+            }
+            bullets.append("• ").append(f);
         }
-        fields.add(new Embed.Field("감지 내용", bullets.toString().strip(), false));
+        fields.add(new Embed.Field("감지 내용", bullets.toString(), false));
         if (analysis != null && !analysis.isBlank()) {
             fields.add(new Embed.Field("AI 1차 분석", analysis, false));
         }
+        // 링크는 Discord 마스킹 마크다운 [텍스트](url)로 — 날것의 URL 인코딩 문자열이 필드를 도배하지
+        // 않게 클릭 가능한 짧은 라벨로 렌더한다. Slack·미설정 폴백은 텍스트라 원본 URL이 그대로 나간다.
         if (instance.getConsoleUrl() != null && !instance.getConsoleUrl().isBlank()) {
-            fields.add(new Embed.Field("콘솔", instance.getConsoleUrl(), false));
+            fields.add(new Embed.Field("콘솔", link("콘솔 열기", instance.getConsoleUrl()), false));
         }
         if (deeplink != null && !deeplink.isBlank()) {
-            fields.add(new Embed.Field("진단 열기", deeplink, false));
+            fields.add(new Embed.Field("진단", link("콘솔에서 진단하기", deeplink), false));
         }
         return new Embed("DBTower " + kind + " — " + instance.getName(), color, fields);
+    }
+
+    /**
+     * Discord 마스킹 링크. 라벨의 대괄호와 URL의 괄호는 마크다운을 깨므로 이스케이프한다
+     * (URL의 ()는 %28/%29로 — 링크 파서가 닫는 괄호에서 잘리는 것 방지).
+     */
+    private static String link(String label, String url) {
+        String safeLabel = label.replace("[", "\\[").replace("]", "\\]");
+        String safeUrl = url.replace("(", "%28").replace(")", "%29");
+        return "[" + safeLabel + "](" + safeUrl + ")";
     }
 }

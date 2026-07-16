@@ -7,6 +7,7 @@ import java.security.Signature;
 import java.security.spec.EdECPoint;
 import java.security.spec.EdECPublicKeySpec;
 import java.security.spec.NamedParameterSpec;
+import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
 
 /**
@@ -31,7 +32,7 @@ public final class DiscordSignatureVerifier {
             PublicKey key = decodeRawPublicKey(HexFormat.of().parseHex(publicKeyHex));
             Signature sig = Signature.getInstance("Ed25519");
             sig.initVerify(key);
-            sig.update(timestamp.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            sig.update(timestamp.getBytes(StandardCharsets.UTF_8));
             sig.update(body);
             return sig.verify(HexFormat.of().parseHex(signatureHex));
         } catch (Exception e) {

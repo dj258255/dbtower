@@ -25,6 +25,11 @@ import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.core.annotation.Order;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.web.AuthenticationEntryPoint;
+import io.dbtower.security.internal.OAuthTokenFilter;
+
 
 import java.io.IOException;
 
@@ -78,7 +83,7 @@ public class SecurityConfig {
      * 자동으로 시작한다(RFC 9728 / MCP Authorization). 헤더가 없으면 클라이언트는 그냥 정적 토큰이
      * 없다고 판단하고 멈춘다 — 이 한 줄이 "브라우저 로그인 창이 뜨는" 흐름의 방아쇠다.
      */
-    private org.springframework.security.web.AuthenticationEntryPoint mcpAuthEntryPoint() {
+    private AuthenticationEntryPoint mcpAuthEntryPoint() {
         String base = (baseUrl == null || baseUrl.isBlank())
                 ? "http://localhost:" + serverPort : baseUrl.replaceAll("/+$", "");
         String metadata = base + "/.well-known/oauth-protected-resource";
@@ -98,15 +103,15 @@ public class SecurityConfig {
      * discovery를 시작한다. 인증은 두 Bearer 필터(정적 api-token / OAuth 액세스 토큰)가 담당.
      */
     @Bean
-    @org.springframework.core.annotation.Order(1)
+    @Order(1)
     public SecurityFilterChain mcpFilterChain(HttpSecurity http, ApiTokenFilter tokenFilter,
-                                              io.dbtower.security.internal.OAuthTokenFilter oauthTokenFilter)
+                                              OAuthTokenFilter oauthTokenFilter)
             throws Exception {
         http
                 .securityMatcher("/mcp")
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(s -> s.sessionCreationPolicy(
-                        org.springframework.security.config.http.SessionCreationPolicy.STATELESS))
+                        SessionCreationPolicy.STATELESS))
                 .addFilterBefore(tokenFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(oauthTokenFilter, UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth.anyRequest().hasRole("ADMIN"))
@@ -115,9 +120,9 @@ public class SecurityConfig {
     }
 
     @Bean
-    @org.springframework.core.annotation.Order(2)
+    @Order(2)
     public SecurityFilterChain filterChain(HttpSecurity http, ApiTokenFilter tokenFilter,
-                                           io.dbtower.security.internal.OAuthTokenFilter oauthTokenFilter,
+                                           OAuthTokenFilter oauthTokenFilter,
                                            LoginAttemptGuard loginAttemptGuard) throws Exception {
         // Bearer 토큰 요청은 쿠키 세션이 없으므로 CSRF 보호 대상이 아니다
         RequestMatcher bearerRequests = request -> {

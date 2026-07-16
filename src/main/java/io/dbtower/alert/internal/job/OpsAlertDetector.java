@@ -1,5 +1,6 @@
 package io.dbtower.alert.internal.job;
 
+import io.dbtower.alert.internal.AlertEmbeds;
 import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.backup.BackupFreshness;
 import io.dbtower.backup.BackupFreshnessService;
@@ -368,8 +369,8 @@ public class OpsAlertDetector {
         findings.forEach(f -> message.append("- ").append(f).append("\n"));
         log.info("운영 경보 instance={} findings={}", instance.getName(), findings.size());
         // 운영 경보는 지금-위험 신호라 빨강. 텍스트(Slack·미설정)는 폴백으로 그대로 나간다.
-        notifier.sendEmbed(message.toString(), io.dbtower.alert.internal.AlertEmbeds.forDetection(
-                "운영 경보", io.dbtower.alert.internal.AlertEmbeds.RED, instance,
+        notifier.sendEmbed(message.toString(), AlertEmbeds.forDetection(
+                "운영 경보", AlertEmbeds.RED, instance,
                 null, null, findings, null, null));
     }
 }

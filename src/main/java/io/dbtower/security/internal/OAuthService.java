@@ -9,6 +9,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -88,10 +90,10 @@ public class OAuthService {
         if (uri == null || uri.isBlank()) {
             return false;
         }
-        java.net.URI u;
+        URI u;
         try {
-            u = new java.net.URI(uri);
-        } catch (java.net.URISyntaxException e) {
+            u = new URI(uri);
+        } catch (URISyntaxException e) {
             return false;
         }
         if (u.getUserInfo() != null || u.getFragment() != null) {
