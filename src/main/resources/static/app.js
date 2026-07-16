@@ -1039,17 +1039,31 @@ async function runInquiry() {
 }
 
 // ---------- Slow Query / Monitoring ----------
+// Slow 시각 — 기종별 원문이 제각각(ISO·공백 구분·Mongo 원문 문자열)이라, 파싱 가능한 것만
+// 브라우저 로컬로 변환하고(툴팁에 UTC 원문 유지) 못 읽는 원문은 그대로 "(UTC)"로 정직 표기한다.
+function fmtSlowTime(s) {
+  if (!s) return "-";
+  const raw = String(s).trim();
+  const isoLike = raw.replace(" ", "T");
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(isoLike)) return `${esc(raw)} <span class="muted">(UTC)</span>`;
+  const d = parseApiTime(isoLike);
+  if (isNaN(d)) return `${esc(raw)} <span class="muted">(UTC)</span>`;
+  const p = (n) => String(n).padStart(2, "0");
+  const local = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  return `<span title="UTC 원문: ${esc(raw)}">${esc(local)}</span>`;
+}
+
 async function loadSlow() {
   const rows = await api(`/api/instances/${state.instance.id}/slow-queries?limit=20`);
   const table = $("#slow-table");
   // 기종별로 확보 가능한 필드가 달라 미확보는 "—"로 표기(MySQL: User@host·Lock·Rows_sent, Mongo: Plan)
   table.querySelector("thead").innerHTML = `
-    <tr><th>Captured (UTC)</th><th>User@host</th><th class="num">Query(ms)</th><th class="num">Lock(ms)</th>
+    <tr><th>Captured <span class="muted" title="브라우저 시간대로 변환 표시 — 원문(UTC)은 툴팁">(로컬)</span></th><th>User@host</th><th class="num">Query(ms)</th><th class="num">Lock(ms)</th>
         <th class="num">Rows_sent</th><th class="num">Rows_examined</th><th>Plan</th><th>Query</th></tr>`;
   const dash = (v) => (v == null || v < 0) ? '<span class="muted">—</span>' : null;
   table.querySelector("tbody").innerHTML = rows.length ? rows.map((q) => `
     <tr>
-      <td class="num">${esc(q.capturedAt ?? "-")}</td>
+      <td class="num">${fmtSlowTime(q.capturedAt)}</td>
       <td>${q.userHost ? esc(q.userHost) : '<span class="muted">—</span>'}</td>
       <td class="num">${fmtNum(q.elapsedMs)}</td>
       <td class="num">${dash(q.lockMs) ?? fmtNum(q.lockMs)}</td>
@@ -1058,6 +1072,14 @@ async function loadSlow() {
       <td>${q.planSummary ? `<span class="plan-badge ${/COLLSCAN/i.test(q.planSummary) ? "plan-bad" : "plan-ok"}">${esc(q.planSummary)}</span>` : '<span class="muted">—</span>'}</td>
       <td class="qtext" title="${esc(q.queryText)}">${esc(q.queryText)}</td>
     </tr>`).join("") : '<tr><td colspan="8" class="muted">슬로우 쿼리가 없습니다.</td></tr>';
+  // Mongo 보존 창 정직 표기 — system.profile은 순환(capped) 컬렉션이라 오래된 항목이 덮어써진다.
+  // 로그 파일 파싱 기반 도구와 보존 범위가 다름을 숨기지 않는다.
+  const note = $("#slow-source-note");
+  if (note) {
+    note.textContent = state.instance.type === "MONGODB"
+      ? "MongoDB는 system.profile(순환 컬렉션) 기반 — 컬렉션 크기만큼만 보존되며 오래된 항목은 덮어써집니다(로그 파일 파싱 방식과 보존 창이 다름)."
+      : "";
+  }
 }
 
 // 백업/PITR 카드 (Phase 2) — 이력(타입·상태·검증)과 복원 가능 창·문안을 보여준다.

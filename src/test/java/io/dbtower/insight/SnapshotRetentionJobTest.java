@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
+import io.dbtower.PartitionLifecycle;
 
 import java.time.LocalDateTime;
 
@@ -51,9 +51,9 @@ class SnapshotRetentionJobTest {
         jobLogger.setLevel(originalLevel);
     }
 
-    /** 파티션 카탈로그가 없는 환경 흉내 — queryForObject가 null이라 isPartitioned=false(DELETE 폴백 경로) */
-    private static JdbcTemplate plainJdbc() {
-        return Mockito.mock(JdbcTemplate.class);
+    /** 비파티션 환경 흉내 — isPartitioned=false(DELETE 폴백 경로). mock 기본 반환이 false */
+    private static PartitionLifecycle plainJdbc() {
+        return Mockito.mock(PartitionLifecycle.class);
     }
 
     @Test
