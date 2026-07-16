@@ -58,6 +58,11 @@ dbtower:
     # Advisor·스코어)가 공유하는데 2였을 때 3번째 동시 접근이 대기→타임아웃→허위 백오프/수집정지 경보를 냈다.
     max-per-instance: 6
     connection-timeout-ms: 5000   # 커넥션 획득 대기 상한(B-7, 경합 시 여유)
+    # 커넥션 온디맨드(Phase 4) — minimumIdle=0(코드 고정): 안 쓰는 대상에 유휴 커넥션을 꽂아두지 않는다.
+    idle-timeout-ms: 600000       # 유휴 커넥션 유지(하한 가드: 수집 주기+30s 미만이면 강제 상향 — 틱마다 재연결 방지)
+    max-lifetime-ms: 1800000      # 커넥션 최대 수명 — 방화벽/LB의 조용한 끊김보다 먼저 우리가 교체
+    evict-after-minutes: 30       # 이 시간 미사용 풀은 통째로 close(격리·저빈도 대상). 0 이하=끔
+    evict-sweep-ms: 300000        # 풀 정리 주기(5분)
   plan-snapshot:
     # plan_snapshot 보존(B-2) — 플랜 변경 감지가 append만 하고 삭제가 없어 무한 성장하던 것을,
     # (instance,query)별 최신 N개만 남긴다. 인덱스 조회는 최신만 보므로 옛 행은 읽히지 않고 쌓이기만 했다.

@@ -49,6 +49,12 @@ public class SloHealthPoller {
         LocalDateTime now = LocalDateTime.now();
         List<HealthSample> rows = new ArrayList<>();
         for (DatabaseInstance instance : instanceRepository.findAll()) {
+            // 수집 격리(Phase F)는 헬스 핑에도 적용한다 — 격리의 목적이 "문제 대상을 두드리지 않기"인데
+            // SLO 핑이 60초마다 계속 나가면 격리가 무의미하다(커넥션 온디맨드의 풀 정리도 막는다).
+            // 격리 기간의 가용성 이력은 공백으로 남는다 — down으로 지어내지 않고 "관제에서 뺀 기간"으로 정직하게.
+            if (!instance.isCollectionEnabled()) {
+                continue;
+            }
             // health()는 대상이 죽어 있어도 예외를 삼키고 down으로 돌려준다 — down도 가용성 이력의 일부라 그대로 기록한다.
             HealthStatus health = registryService.health(instance.getId());
             rows.add(new HealthSample(instance.getId(), now, health.up(), health.pingMillis()));
