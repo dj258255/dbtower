@@ -29,7 +29,7 @@ class InquiryServiceTest {
     private final RegistryService registryService = Mockito.mock(RegistryService.class);
     private final WebhookNotifier notifier = Mockito.mock(WebhookNotifier.class);
     private final ReferencedSchemaService referencedSchema = Mockito.mock(ReferencedSchemaService.class);
-    private final InquiryService service = new InquiryService(registryService, notifier, referencedSchema, new QueryMasker(true, false));
+    private final InquiryService service = new InquiryService(registryService, notifier, referencedSchema, new QueryMasker(true, false), "");
 
     private void stubInstance() {
         DatabaseInstance instance = new DatabaseInstance(
@@ -63,7 +63,7 @@ class InquiryServiceTest {
 
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<WebhookNotifier.Embed> embedCaptor = ArgumentCaptor.forClass(WebhookNotifier.Embed.class);
-        verify(notifier).sendEmbed(captor.capture(), embedCaptor.capture());
+        verify(notifier).sendEmbed(captor.capture(), org.mockito.ArgumentMatchers.any(), embedCaptor.capture());
         String msg = captor.getValue();
         assertTrue(msg.contains("prod-orders"), "인스턴스명 포함");
         assertTrue(msg.contains("MYSQL"), "기종 포함");
@@ -99,7 +99,7 @@ class InquiryServiceTest {
         assertFalse(result.sent());
         assertTrue(result.reason().contains("DBTOWER_WEBHOOK_URL"));
         verify(notifier, never()).send(anyString());
-        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any());
+        verify(notifier, never()).sendEmbed(anyString(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -113,7 +113,7 @@ class InquiryServiceTest {
         assertTrue(result.sent());
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<WebhookNotifier.Embed> embedCaptor = ArgumentCaptor.forClass(WebhookNotifier.Embed.class);
-        verify(notifier).sendEmbed(captor.capture(), embedCaptor.capture());
+        verify(notifier).sendEmbed(captor.capture(), org.mockito.ArgumentMatchers.any(), embedCaptor.capture());
         String msg = captor.getValue();
         assertTrue(msg.contains("SELECT ?"));   // 숫자 리터럴 1도 마스킹 대상
         // 선택 항목이 없으면 해당 섹션 헤더 자체가 없다

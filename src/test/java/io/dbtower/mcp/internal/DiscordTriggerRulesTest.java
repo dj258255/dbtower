@@ -17,23 +17,23 @@ class DiscordTriggerRulesTest {
 
     @Test
     void 트리거_이모지_화이트리스트_모두_충족해야_반응한다() {
-        assertTrue(DiscordTriggerRules.shouldReact("🔍", "🔍", "chan-1", "user-1", "bot-9", CH, USR));
+        assertTrue(DiscordTriggerRules.shouldReact("🔍", Set.of("🔍", "🔎"), "chan-1", "user-1", "bot-9", CH, USR));
         // 다른 이모지
-        assertFalse(DiscordTriggerRules.shouldReact("👍", "🔍", "chan-1", "user-1", "bot-9", CH, USR));
+        assertFalse(DiscordTriggerRules.shouldReact("👍", Set.of("🔍", "🔎"), "chan-1", "user-1", "bot-9", CH, USR));
         // 화이트리스트 밖 채널·유저
-        assertFalse(DiscordTriggerRules.shouldReact("🔍", "🔍", "other", "user-1", "bot-9", CH, USR));
-        assertFalse(DiscordTriggerRules.shouldReact("🔍", "🔍", "chan-1", "other", "bot-9", CH, USR));
+        assertFalse(DiscordTriggerRules.shouldReact("🔍", Set.of("🔍", "🔎"), "other", "user-1", "bot-9", CH, USR));
+        assertFalse(DiscordTriggerRules.shouldReact("🔍", Set.of("🔍", "🔎"), "chan-1", "other", "bot-9", CH, USR));
     }
 
     @Test
     void 봇_자신의_반응은_무시한다_루프_방지() {
-        assertFalse(DiscordTriggerRules.shouldReact("🔍", "🔍", "chan-1", "bot-9", "bot-9", CH, USR));
+        assertFalse(DiscordTriggerRules.shouldReact("🔍", Set.of("🔍", "🔎"), "chan-1", "bot-9", "bot-9", CH, USR));
     }
 
     @Test
     void 화이트리스트는_기본_거부다() {
-        assertFalse(DiscordTriggerRules.shouldReact("🔍", "🔍", "chan-1", "user-1", "bot-9", Set.of(), USR));
-        assertFalse(DiscordTriggerRules.shouldReact("🔍", "🔍", "chan-1", "user-1", "bot-9", CH, Set.of()));
+        assertFalse(DiscordTriggerRules.shouldReact("🔍", Set.of("🔍", "🔎"), "chan-1", "user-1", "bot-9", Set.of(), USR));
+        assertFalse(DiscordTriggerRules.shouldReact("🔍", Set.of("🔍", "🔎"), "chan-1", "user-1", "bot-9", CH, Set.of()));
     }
 
     @Test

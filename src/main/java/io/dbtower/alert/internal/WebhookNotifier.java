@@ -1,5 +1,6 @@
 package io.dbtower.alert.internal;
 
+import io.dbtower.alert.AlertMessageIndex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,6 +13,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 
 /**
  * 웹훅 알림 어댑터. 웹훅도 이기종이다 — URL을 보고 Discord/Slack 포맷을 고른다.
@@ -39,10 +41,15 @@ public class WebhookNotifier {
     private final Deque<Long> sentWindow = new ArrayDeque<>();
     private int suppressed = 0;
 
+    /** Discord 알림 메시지 id ↔ 인스턴스 매핑 인덱스(Gateway 봇 이모지 트리거용). 테스트에선 null 가능. */
+    private final AlertMessageIndex messageIndex;
+
     public WebhookNotifier(@Value("${DBTOWER_WEBHOOK_URL:}") String webhookUrl,
-                           @Value("${dbtower.alert.rate-per-minute:12}") int ratePerMinute) {
+                           @Value("${dbtower.alert.rate-per-minute:12}") int ratePerMinute,
+                           AlertMessageIndex messageIndex) {
         this.webhookUrl = webhookUrl;
         this.ratePerMinute = Math.max(1, ratePerMinute);
+        this.messageIndex = messageIndex;
     }
 
     /**
@@ -67,10 +74,19 @@ public class WebhookNotifier {
      * 레이트리밋은 텍스트 경로와 같은 윈도우를 쓴다(embed라고 도배가 허용되는 건 아니므로).
      */
     public void sendEmbed(String fallbackText, Embed embed) {
-        sendEmbedAt(fallbackText, embed, System.currentTimeMillis());
+        sendEmbed(fallbackText, (Long) null, embed);
     }
 
-    void sendEmbedAt(String fallbackText, Embed embed, long now) {
+    /**
+     * instanceId를 함께 주면 Discord 발사 후 그 메시지 id를 인스턴스에 매핑해둔다(Gateway 봇이 반응 때
+     * 특권 인텐트 없이 대상 인스턴스를 조회하게 — AlertMessageIndex 참고). null이면 매핑 안 함(문의 등).
+     * (fallback, instanceId, embed) 인자 순서 — 호출부 가독성(맥락 → 페이로드).
+     */
+    public void sendEmbed(String fallbackText, Long instanceId, Embed embed) {
+        sendEmbedAt(fallbackText, embed, instanceId, System.currentTimeMillis());
+    }
+
+    void sendEmbedAt(String fallbackText, Embed embed, Long instanceId, long now) {
         String decided = decide(fallbackText, now);
         if (decided == null) {
             return;
@@ -78,11 +94,11 @@ public class WebhookNotifier {
         // decide가 억제 요약을 덧붙였다면 그 꼬리를 분리해 embed에는 별도 알림줄로 싣는다
         String note = decided.length() > fallbackText.length()
                 ? decided.substring(fallbackText.length()).strip() : "";
-        deliverEmbed(decided, note, embed);
+        deliverEmbed(decided, note, embed, instanceId);
     }
 
     /** embed 한 장 — 제목·색·필드 목록. 필드 value가 비면 페이로드에서 제외된다. */
-    public record Embed(String title, int color, java.util.List<Field> fields) {
+    public record Embed(String title, int color, List<Field> fields) {
         public record Field(String name, String value, boolean inline) {
         }
     }
@@ -126,15 +142,46 @@ public class WebhookNotifier {
      * embed 실제 전송(package-private — 테스트에서 오버라이드해 관측).
      * Discord가 아니면(슬랙 등) embed 문법이 없으므로 textFallback(억제 요약 포함)을 그대로 보낸다.
      */
-    void deliverEmbed(String textFallback, String suppressedNote, Embed embed) {
+    void deliverEmbed(String textFallback, String suppressedNote, Embed embed, Long instanceId) {
         if (webhookUrl == null || webhookUrl.isBlank()) {
             log.info("[알림(webhook 미설정)] {}", textFallback);
             return;
         }
-        String payload = webhookUrl.contains("discord.com")
+        boolean discord = webhookUrl.contains("discord.com");
+        String payload = discord
                 ? discordEmbedPayload(embed, suppressedNote)
                 : "{\"text\": %s}".formatted(jsonString(textFallback));
-        postJson(payload);
+        // instanceId가 있고 Discord면 ?wait=true로 메시지 id를 받아 인덱스에 기록(Gateway 봇 이모지 트리거).
+        // 그 외엔 종전대로 fire-and-forget.
+        if (discord && instanceId != null && messageIndex != null) {
+            String id = postJsonReturningId(payload);
+            if (id != null) {
+                messageIndex.record(id, instanceId);
+            }
+        } else {
+            postJson(payload);
+        }
+    }
+
+    /** ?wait=true로 전송해 응답에서 메시지 id를 파싱한다(매핑 기록용). 실패는 null. */
+    private String postJsonReturningId(String payload) {
+        try {
+            String url = webhookUrl + (webhookUrl.contains("?") ? "&" : "?") + "wait=true";
+            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                    .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(5))
+                    .POST(HttpRequest.BodyPublishers.ofString(payload))
+                    .build();
+            HttpResponse<String> res = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() >= 300) {
+                log.warn("웹훅 발송 실패 status={} body={}", res.statusCode(), res.body());
+                return null;
+            }
+            return new com.fasterxml.jackson.databind.ObjectMapper().readTree(res.body()).path("id").asText(null);
+        } catch (Exception e) {
+            log.warn("웹훅 발송 실패(id 조회): {}", e.getMessage());
+            return null;
+        }
     }
 
     /**

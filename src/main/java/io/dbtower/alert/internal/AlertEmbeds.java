@@ -73,7 +73,7 @@ public final class AlertEmbeds {
      * Discord 마스킹 링크. 라벨의 대괄호와 URL의 괄호는 마크다운을 깨므로 이스케이프한다
      * (URL의 ()는 %28/%29로 — 링크 파서가 닫는 괄호에서 잘리는 것 방지).
      */
-    private static String link(String label, String url) {
+    static String link(String label, String url) {
         String safeLabel = label.replace("[", "\\[").replace("]", "\\]");
         String safeUrl = url.replace("(", "%28").replace(")", "%29");
         return "[" + safeLabel + "](" + safeUrl + ")";

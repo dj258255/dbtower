@@ -2,6 +2,7 @@ package io.dbtower.mcp.internal;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.dbtower.alert.AlertMessageIndex;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
 import jakarta.annotation.PostConstruct;
@@ -12,12 +13,15 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletionStage;
@@ -59,6 +63,7 @@ public class DiscordGatewayBot {
 
     private final RegistryService registryService;
     private final DiagnosisService diagnosisService;
+    private final AlertMessageIndex messageIndex;
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -68,7 +73,8 @@ public class DiscordGatewayBot {
     });
 
     private final String botToken;
-    private final String triggerEmoji;
+    private final Set<String> triggerEmojis;
+    private final boolean allowSelfReact;
     private final Set<String> channelAllowlist;
     private final Set<String> userAllowlist;
 
@@ -77,18 +83,25 @@ public class DiscordGatewayBot {
     private volatile Integer lastSequence;
     private volatile String botUserId;
     private final StringBuilder frame = new StringBuilder();
+    /** 진단·답글을 이미 한 메시지 id — 재접속 보충 스캔·중복 반응에서 두 번 처리하지 않게(멱등). */
+    private final Set<String> processed = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public DiscordGatewayBot(RegistryService registryService, DiagnosisService diagnosisService,
+                             AlertMessageIndex messageIndex,
                              @Value("${dbtower.inbound.discord.bot-token:}") String botToken,
-                             @Value("${dbtower.inbound.discord.trigger-emoji:🔍}") String triggerEmoji,
+                             @Value("${dbtower.inbound.discord.trigger-emoji:🔍,🔎}") String triggerEmoji,
                              @Value("${dbtower.inbound.discord.channel-allowlist:}") String channels,
-                             @Value("${dbtower.inbound.discord.user-allowlist:}") String users) {
+                             @Value("${dbtower.inbound.discord.user-allowlist:}") String users,
+                             @Value("${dbtower.inbound.discord.allow-self-react:false}") boolean allowSelfReact) {
         this.registryService = registryService;
         this.diagnosisService = diagnosisService;
+        this.messageIndex = messageIndex;
         this.botToken = botToken == null ? "" : botToken.trim();
-        this.triggerEmoji = triggerEmoji;
+        // 왼쪽(🔍 U+1F50D)·오른쪽(🔎 U+1F50E) 돋보기는 다른 유니코드 — 둘 다 트리거로 받는다(실측 함정)
+        this.triggerEmojis = csv(triggerEmoji);
         this.channelAllowlist = csv(channels);
         this.userAllowlist = csv(users);
+        this.allowSelfReact = allowSelfReact; // 테스트 훅 — true면 봇 자기 반응도 처리(전체 파이프라인 실증용, 기본 false)
     }
 
     private static Set<String> csv(String value) {
@@ -106,7 +119,7 @@ public class DiscordGatewayBot {
         }
         running.set(true);
         connect();
-        log.info("Discord Gateway 봇 시작 — 트리거 이모지 '{}' (알림에 이 이모지를 달면 진단이 붙는다)", triggerEmoji);
+        log.info("Discord Gateway 봇 시작 — 트리거 이모지 {} (알림에 이 이모지를 달면 진단이 붙는다)", triggerEmojis);
     }
 
     @PreDestroy
@@ -212,6 +225,9 @@ public class DiscordGatewayBot {
         if ("READY".equals(type)) {
             botUserId = d.path("user").path("id").asText();
             log.info("Discord Gateway READY — 봇 user={}", botUserId);
+            // 연결 시 보충 스캔 — Gateway는 연결 중의 이벤트만 주므로(재접속/기동 전 반응은 재생 안 됨),
+            // 화이트리스트 채널의 최근 메시지에 이미 달린 트리거 반응을 한 번 훑어 처리한다(멱등: 처리한 메시지 기억).
+            scheduler.execute(this::reconcileExistingReactions);
             return;
         }
         if ("MESSAGE_REACTION_ADD".equals(type)) {
@@ -219,39 +235,110 @@ public class DiscordGatewayBot {
             String channelId = d.path("channel_id").asText();
             String messageId = d.path("message_id").asText();
             String userId = d.path("user_id").asText();
-            if (DiscordTriggerRules.shouldReact(emoji, triggerEmoji, channelId, userId, botUserId,
-                    channelAllowlist, userAllowlist)) {
+            // allowSelfReact(테스트 훅)면 봇 자기 반응 배제를 끈다 — botUserId를 null로 넘겨 우회.
+            if (DiscordTriggerRules.shouldReact(emoji, triggerEmojis, channelId, userId,
+                    allowSelfReact ? null : botUserId, channelAllowlist, userAllowlist)) {
                 // 진단은 느리다 — 스케줄러 스레드를 막지 않게 워커로 넘긴다
                 scheduler.execute(() -> diagnoseAndReply(channelId, messageId));
+            } else {
+                // 트리거·화이트리스트에 안 걸린 반응 — 왜 무시됐는지 추적 가능하게 남긴다(설정 디버깅)
+                log.debug("반응 무시 emoji={} channel={} user={} (트리거·화이트리스트 밖)", emoji, channelId, userId);
             }
         }
     }
 
+    /**
+     * 연결 시 보충 스캔 — 화이트리스트 채널의 최근 메시지에서 트리거 이모지가 이미 달린 것을 찾아,
+     * 그 이모지를 화이트리스트 유저가 달았는지 확인하고 처리한다. 재접속마다 도는데, processed로
+     * 멱등을 보장해 같은 메시지를 두 번 진단하지 않는다(반응 이벤트 경로와도 공유).
+     */
+    private void reconcileExistingReactions() {
+        for (String channelId : channelAllowlist) {
+            try {
+                JsonNode messages = restGet("/channels/" + channelId + "/messages?limit=25");
+                if (messages == null || !messages.isArray()) {
+                    continue;
+                }
+                for (JsonNode msg : messages) {
+                    String messageId = msg.path("id").asText();
+                    if (processed.contains(messageId)) {
+                        continue;
+                    }
+                    for (JsonNode reaction : msg.path("reactions")) {
+                        String emoji = reaction.path("emoji").path("name").asText(null);
+                        if (emoji == null || !triggerEmojis.contains(emoji)) {
+                            continue;
+                        }
+                        if (reactedByAllowedUser(channelId, messageId, emoji)) {
+                            log.info("보충 스캔 — 기존 반응 {} 처리 message={}", emoji, messageId);
+                            diagnoseAndReply(channelId, messageId);
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("보충 스캔 실패 channel={} cause={}", channelId, e.getMessage());
+            }
+        }
+    }
+
+    /** 이 메시지의 이 이모지를 화이트리스트 유저가 달았는가 — 반응 이벤트가 없는 보충 경로에서 확인. */
+    private boolean reactedByAllowedUser(String channelId, String messageId, String emoji) throws Exception {
+        String enc = URLEncoder.encode(emoji, StandardCharsets.UTF_8);
+        JsonNode users = restGet("/channels/" + channelId + "/messages/" + messageId + "/reactions/" + enc);
+        if (users == null || !users.isArray()) {
+            return false;
+        }
+        for (JsonNode u : users) {
+            String uid = u.path("id").asText();
+            if ((allowSelfReact || !uid.equals(botUserId)) && (DiscordTriggerRules.allowed(userAllowlist, uid) || (allowSelfReact && uid.equals(botUserId)))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** 반응이 달린 알림 메시지를 조회해 대상 인스턴스를 알아내고, 진단 결과를 답글로 붙인다. */
     private void diagnoseAndReply(String channelId, String messageId) {
+        if (!processed.add(messageId)) {
+            return; // 이미 처리한 메시지 — 중복 반응·재접속 보충에서 두 번 진단하지 않는다
+        }
         try {
-            JsonNode message = restGet("/channels/" + channelId + "/messages/" + messageId);
-            if (message == null) {
-                return;
+            // 1차: 발사 시점 매핑(AlertMessageIndex) — 특권 인텐트 없이 대상 인스턴스를 바로 안다.
+            Long mappedId = messageIndex.instanceFor(messageId);
+            DatabaseInstance instance = null;
+            if (mappedId != null) {
+                instance = registryService.findAll().stream()
+                        .filter(i -> i.getId().equals(mappedId)).findFirst().orElse(null);
             }
-            String content = message.path("content").asText("");
-            String embedTitle = message.path("embeds").isArray() && message.path("embeds").size() > 0
-                    ? message.path("embeds").get(0).path("title").asText(null) : null;
-            String instanceName = DiscordTriggerRules.extractInstanceName(embedTitle, content);
-            if (instanceName == null) {
-                reply(channelId, messageId, "이 메시지에서 대상 인스턴스를 알 수 없어 진단을 시작하지 못했습니다.");
-                return;
-            }
-            DatabaseInstance instance = registryService.findAll().stream()
-                    .filter(i -> i.getName().equals(instanceName))
-                    .findFirst().orElse(null);
+            // 2차 폴백: embed 제목 파싱 — 인덱스에서 밀려났거나(재시작·오래된 알림) 매핑이 없을 때.
+            // 웹훅 embed를 읽으려면 Message Content 특권 인텐트가 필요하다(없으면 embed가 비어 실패).
             if (instance == null) {
-                reply(channelId, messageId, "등록되지 않은 인스턴스: " + instanceName);
+                JsonNode message = restGet("/channels/" + channelId + "/messages/" + messageId);
+                if (message == null) {
+                    return;
+                }
+                String content = message.path("content").asText("");
+                String embedTitle = message.path("embeds").isArray() && message.path("embeds").size() > 0
+                        ? message.path("embeds").get(0).path("title").asText(null) : null;
+                String instanceName = DiscordTriggerRules.extractInstanceName(embedTitle, content);
+                if (instanceName == null) {
+                    reply(channelId, messageId, "이 메시지에서 대상 인스턴스를 알 수 없어 진단을 시작하지 못했습니다 "
+                            + "(오래된 알림이면 봇 재시작으로 매핑이 비었을 수 있습니다 — 새 알림에 반응해 주세요).");
+                    return;
+                }
+                instance = registryService.findAll().stream()
+                        .filter(i -> i.getName().equals(instanceName))
+                        .findFirst().orElse(null);
+            }
+            if (instance == null) {
+                reply(channelId, messageId, "등록되지 않은 인스턴스입니다.");
                 return;
             }
+            String instanceName = instance.getName();
             reply(channelId, messageId, "**" + instanceName + "** 진단을 시작합니다… (잠시만요)");
             var result = diagnosisService.diagnose(instance.getId(), instance.getType().name(),
-                    instance.getName(), "방금 이 알림이 온 이유를 분석해줘");
+                    instanceName, "방금 이 알림이 온 이유를 분석해줘");
             reply(channelId, messageId, clip("[" + instanceName + "] " + result.answer()));
         } catch (Exception e) {
             log.warn("Discord 반응 진단 실패 channel={} msg={} cause={}", channelId, messageId, e.getMessage());
@@ -282,7 +369,7 @@ public class DiscordGatewayBot {
             String body = mapper.writeValueAsString(Map.of(
                     "content", content,
                     "message_reference", Map.of("message_id", messageId),
-                    "allowed_mentions", Map.of("parse", java.util.List.of())));
+                    "allowed_mentions", Map.of("parse", List.of())));
             HttpRequest req = HttpRequest.newBuilder(URI.create(API + "/channels/" + channelId + "/messages"))
                     .timeout(Duration.ofSeconds(10))
                     .header("Authorization", "Bot " + botToken)

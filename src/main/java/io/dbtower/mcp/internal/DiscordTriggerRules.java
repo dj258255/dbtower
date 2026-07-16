@@ -22,9 +22,9 @@ public final class DiscordTriggerRules {
      * 봇 자신의 반응이 아님. SQL·진단이 채팅방에 노출되는 채널이라 노출면을 명시적으로 좁힌다
      * (인바운드 슬래시 커맨드와 같은 원칙).
      */
-    public static boolean shouldReact(String emoji, String triggerEmoji, String channelId, String userId,
+    public static boolean shouldReact(String emoji, Set<String> triggerEmojis, String channelId, String userId,
                                       String botUserId, Set<String> channelAllowlist, Set<String> userAllowlist) {
-        if (emoji == null || !emoji.equals(triggerEmoji)) {
+        if (emoji == null || !triggerEmojis.contains(emoji)) {
             return false;
         }
         if (userId != null && userId.equals(botUserId)) {

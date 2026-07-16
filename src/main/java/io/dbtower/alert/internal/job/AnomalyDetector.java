@@ -99,7 +99,7 @@ public class AnomalyDetector {
 
         log.info("베이스라인 이상 감지 알림 instance={} anomalies={}", instance.getName(), lines.size());
         // 이상 감지는 "평소와 다름" 신호라 보라. 베이스라인 맥락을 맥락 필드로 싣는다.
-        notifier.sendEmbed(message.toString(), AlertEmbeds.forDetection(
+        notifier.sendEmbed(message.toString(), instance.getId(), AlertEmbeds.forDetection(
                 "이상 감지", AlertEmbeds.PURPLE, instance,
                 "베이스라인", context, lines, null, null));
     }

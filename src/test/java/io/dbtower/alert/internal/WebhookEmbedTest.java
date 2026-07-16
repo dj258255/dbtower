@@ -18,7 +18,7 @@ class WebhookEmbedTest {
         final List<Embed> embeds = new ArrayList<>();
 
         Capturing(int ratePerMinute) {
-            super("", ratePerMinute);
+            super("", ratePerMinute, null);
         }
 
         @Override
@@ -27,7 +27,7 @@ class WebhookEmbedTest {
         }
 
         @Override
-        void deliverEmbed(String textFallback, String suppressedNote, Embed embed) {
+        void deliverEmbed(String textFallback, String suppressedNote, Embed embed, Long instanceId) {
             embeds.add(embed);
         }
     }
@@ -37,15 +37,15 @@ class WebhookEmbedTest {
         Capturing n = new Capturing(2);
         long t = 1_000_000L;
         n.sendAt("텍스트1", t);
-        n.sendEmbedAt("폴백1", embed("문의"), t); // 여기까지 상한
-        n.sendEmbedAt("폴백2", embed("문의2"), t); // 억제
+        n.sendEmbedAt("폴백1", embed("문의"), null, t); // 여기까지 상한
+        n.sendEmbedAt("폴백2", embed("문의2"), null, t); // 억제
         assertThat(n.texts).hasSize(1);
         assertThat(n.embeds).hasSize(1);
     }
 
     @Test
     void discord_페이로드는_embeds와_멘션잠금을_담고_빈_필드는_뺀다() {
-        WebhookNotifier n = new WebhookNotifier("https://discord.com/api/webhooks/x", 12);
+        WebhookNotifier n = new WebhookNotifier("https://discord.com/api/webhooks/x", 12, null);
         var e = new WebhookNotifier.Embed("DB팀 문의", 0x6366F1, List.of(
                 new WebhookNotifier.Embed.Field("요청자", "alice", true),
                 new WebhookNotifier.Embed.Field("비고", "", false)));   // 빈 값 — 제외돼야 함
@@ -60,7 +60,7 @@ class WebhookEmbedTest {
 
     @Test
     void 필드_값은_디스코드_한도에서_잘리고_잘림_표시가_붙는다() {
-        WebhookNotifier n = new WebhookNotifier("https://discord.com/api/webhooks/x", 12);
+        WebhookNotifier n = new WebhookNotifier("https://discord.com/api/webhooks/x", 12, null);
         var e = new WebhookNotifier.Embed("t", 0, List.of(
                 new WebhookNotifier.Embed.Field("쿼리", "x".repeat(3000), false)));
         String payload = n.discordEmbedPayload(e, "");

@@ -43,7 +43,7 @@ class WebhookEmbedLiveFireTest {
                 new UsernamePasswordAuthenticationToken("beomsu", "n/a", List.of()));
 
         ReferencedSchemaService refSchema = Mockito.mock(ReferencedSchemaService.class);
-        InquiryService service = new InquiryService(registry, new WebhookNotifier(url, 12), refSchema, new QueryMasker(true, false));
+        InquiryService service = new InquiryService(registry, new WebhookNotifier(url, 12, null), refSchema, new QueryMasker(true, false), "");
 
         var result = service.submit(1L, new InquiryService.InquiryRequest(
                 "SELECT instance_id, captured_at, total_time_ms\nFROM query_snapshot\nWHERE query_id = 'a3f9c2'\nORDER BY captured_at DESC",

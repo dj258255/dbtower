@@ -3,10 +3,14 @@ package io.dbtower.alert.internal;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -27,13 +31,16 @@ public class InquiryService {
     private final WebhookNotifier notifier;
     private final ReferencedSchemaService referencedSchema;
     private final QueryMasker queryMasker;
+    private final String baseUrl;
 
     public InquiryService(RegistryService registryService, WebhookNotifier notifier,
-                          ReferencedSchemaService referencedSchema, QueryMasker queryMasker) {
+                          ReferencedSchemaService referencedSchema, QueryMasker queryMasker,
+                          @Value("${dbtower.base-url:}") String baseUrl) {
         this.registryService = registryService;
         this.notifier = notifier;
         this.referencedSchema = referencedSchema;
         this.queryMasker = queryMasker;
+        this.baseUrl = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
     }
 
     /** 문의 요청 본문 — plan/findings/aiAnalysis/note는 선택(분석을 안 돌리고도 문의 가능) */
@@ -62,7 +69,7 @@ public class InquiryService {
         String schemaSummary = safeSchemaSummary(instanceId, req.sql());
         InquiryRequest masked = new InquiryRequest(queryMasker.apply(req.sql()),
                 req.plan(), req.findings(), req.aiAnalysis(), req.note());
-        notifier.sendEmbed(format(instance, masked, principal, schemaSummary),
+        notifier.sendEmbed(format(instance, masked, principal, schemaSummary), instance.getId(),
                 buildEmbed(instance, masked, principal, schemaSummary));
         return new InquiryResult(true, null);
     }
@@ -88,9 +95,9 @@ public class InquiryService {
      * SQL·실행계획은 코드블록으로 감싸되, Discord 필드 한도(1024자) 안에서 코드블록이 닫히도록
      * 본문을 먼저 900자로 줄인다 — 한도 절단이 코드블록 백틱을 삼키면 이후 텍스트 전체가 코드로 렌더된다.
      */
-    private static WebhookNotifier.Embed buildEmbed(DatabaseInstance instance, InquiryRequest req,
-                                                    String principal, String schemaSummary) {
-        List<WebhookNotifier.Embed.Field> fields = new java.util.ArrayList<>();
+    private WebhookNotifier.Embed buildEmbed(DatabaseInstance instance, InquiryRequest req,
+                                             String principal, String schemaSummary) {
+        List<WebhookNotifier.Embed.Field> fields = new ArrayList<>();
         fields.add(new WebhookNotifier.Embed.Field("요청자", principal, true));
         fields.add(new WebhookNotifier.Embed.Field("인스턴스", instance.getName() + " (" + instance.getType() + ")", true));
         // 담당 팀 — 문의가 어느 팀 소관 DB에 대한 것인지 embed 자체가 말하게 한다(심화 아크 4)
@@ -114,6 +121,13 @@ public class InquiryService {
         }
         if (hasText(req.note())) {
             fields.add(new WebhookNotifier.Embed.Field("비고", req.note().strip(), false));
+        }
+        // 진단 딥링크(감지 알림과 같은 결) — 클릭하면 콘솔이 이 인스턴스+문의 SQL 진단 질문 프리필로 열린다.
+        // base-url 미설정이면 링크 생략. 질문은 짧게(URL 단축 — Discord 마스킹 링크 렌더 조건).
+        if (!baseUrl.isBlank()) {
+            String question = URLEncoder.encode("이 쿼리가 왜 느린지 분석해줘", StandardCharsets.UTF_8);
+            String deeplink = baseUrl + "/?instance=" + instance.getId() + "&diagnose=" + question;
+            fields.add(new WebhookNotifier.Embed.Field("진단", AlertEmbeds.link("콘솔에서 진단하기", deeplink), false));
         }
         return new WebhookNotifier.Embed("DBTower DB팀 문의", EMBED_COLOR, fields);
     }

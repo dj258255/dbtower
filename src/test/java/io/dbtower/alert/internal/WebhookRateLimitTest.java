@@ -18,7 +18,7 @@ class WebhookRateLimitTest {
         final List<String> delivered = new ArrayList<>();
 
         Capturing(int ratePerMinute) {
-            super("", ratePerMinute); // URL 없음 — deliver를 오버라이드하므로 무관
+            super("", ratePerMinute, null); // URL 없음 — deliver를 오버라이드하므로 무관
         }
 
         @Override

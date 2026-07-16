@@ -198,7 +198,7 @@ public class RegressionDetector {
 
         log.info("회귀 감지 알림 instance={} findings={}", instance.getName(), findings.size());
         // 리치 embed(문의 카드와 같은 결) — 회귀는 성능 신호라 앰버. Slack·미설정은 텍스트 폴백.
-        notifier.sendEmbed(message.toString(), AlertEmbeds.forDetection(
+        notifier.sendEmbed(message.toString(), instance.getId(), AlertEmbeds.forDetection(
                 "회귀 감지", AlertEmbeds.AMBER, instance,
                 "구간", "최근 " + recentMinutes + "분 vs 직전 " + baselineMinutes + "분",
                 findings, analysis, deeplink));
