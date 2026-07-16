@@ -382,6 +382,8 @@ input[type="datetime-local"] {
 .advisor-status-CANDIDATES { color: var(--up); }
 .advisor-status-UNSUPPORTED { color: var(--base); }
 .advisor-status-ERROR { color: var(--muted); }
+.advisor-check.status-SHARED { opacity: 0.62; }
+.advisor-status-SHARED { color: #4f5ef7; }
 /* FinOps 낭비 종류 배지 — 후보 한 줄에서 종류(미사용 인덱스 등)를 작은 알약으로 */
 .finops-kind { font-size: 11px; font-weight: 600; color: var(--muted); background: #eef0f3; border-radius: 4px; padding: 1px 6px; }
 .advisor-finding { border-left: 3px solid var(--line); background: #fafbfc; border-radius: 4px; padding: 7px 10px; margin-top: 8px; }
@@ -500,6 +502,11 @@ input[type="datetime-local"] {
 }
 .console-link { font-size: 11.5px; font-weight: 600; color: var(--primary); text-decoration: none; }
 .console-link:hover { text-decoration: underline; }
+/* 서버 공유 배지 (Phase 4) — 같은 host:port에 등록된 DB 묶음 표시. 서버 전역 경보 dedup의 시각 단서 */
+.server-shared-badge {
+  font-size: 10px; font-weight: 700; padding: 0 6px; border-radius: 9px; cursor: help;
+  background: #fff4e5; color: #b26a00; border: 1px solid #ffe0b2; white-space: nowrap;
+}
 
 /* 백업/PITR 카드 — 상태 3값과 복원 가능 창 (Phase 2) */
 .pitr-window { margin: 6px 0 10px; font-size: 13px; }

@@ -84,7 +84,19 @@ async function loadInstances() {
     box.innerHTML = '<div class="muted">등록된 인스턴스가 없습니다 — POST /api/instances 로 등록하세요.</div>';
     return;
   }
-  box.innerHTML = list.map((i) => `
+  // 서버 공유 인지 (Phase 4): 같은 host:port에 등록된 DB들은 같은 서버 — 서버 전역 경보(복제·세션·
+  // 데드락)가 그룹당 1회로 dedup되므로, 어느 카드들이 한 서버인지 눈에 보여야 경보를 옳게 해석한다.
+  const serverCount = {};
+  list.forEach((i) => {
+    const key = `${i.host.toLowerCase()}:${i.port}`;
+    serverCount[key] = (serverCount[key] || 0) + 1;
+  });
+  box.innerHTML = list.map((i) => {
+    const serverKey = `${i.host.toLowerCase()}:${i.port}`;
+    const sharedNames = serverCount[serverKey] > 1
+      ? list.filter((o) => o.id !== i.id && `${o.host.toLowerCase()}:${o.port}` === serverKey).map((o) => o.name)
+      : [];
+    return `
     <div class="instance-card" data-id="${i.id}">
       <div class="instance-name">
         <span class="type-badge type-${esc(i.type)}">${esc(i.type)}</span>
@@ -95,12 +107,15 @@ async function loadInstances() {
           ${i.collectionEnabled ? "수집중" : "격리됨"}</button>
       </div>
       <div class="instance-host">${esc(i.host)}:${i.port} / ${esc(i.dbName)}
+        ${sharedNames.length ? `<span class="server-shared-badge"
+          title="같은 서버(${esc(serverKey)})에 등록된 다른 인스턴스: ${esc(sharedNames.join(", "))} — 서버 전역 경보(복제·세션·데드락)는 그룹당 1회">서버 공유 ×${serverCount[serverKey]}</span>` : ""}
         <span class="health-ms" id="healthms-${i.id}"></span></div>
       ${i.teamLabel || i.consoleUrl ? `<div class="instance-meta">
         ${i.teamLabel ? `<span class="team-badge" title="담당 팀/Slack">${esc(i.teamLabel)}</span>` : ""}
         ${i.consoleUrl && /^https?:\/\//.test(i.consoleUrl) ? `<a class="console-link" href="${esc(i.consoleUrl)}" target="_blank" rel="noopener" title="콘솔 딥링크(PI·Grafana 등)">콘솔 ↗</a>` : ""}
       </div>` : ""}
-    </div>`).join("");
+    </div>`;
+  }).join("");
 
   box.querySelectorAll(".instance-card").forEach((card) => {
     card.addEventListener("click", () => selectInstance(list.find((i) => i.id == card.dataset.id), card));
@@ -171,7 +186,7 @@ async function selectInstance(instance, card) {
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
 // 읽고 조언만 하는 진단이라 VIEWER도 조회 가능. 각 Advisor는 OK/위반/미지원/오류로 정직하게 표기한다.
 const SEV_LABEL = { CRITICAL: "치명", WARNING: "경고", INFO: "정보" };
-const STATUS_LABEL = { OK: "통과", VIOLATIONS: "지적", UNSUPPORTED: "미지원", ERROR: "오류" };
+const STATUS_LABEL = { OK: "통과", VIOLATIONS: "지적", UNSUPPORTED: "미지원", ERROR: "오류", SHARED: "서버 공유" };
 
 async function loadAdvisors() {
   const summary = $("#advisors-summary");

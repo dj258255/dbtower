@@ -59,6 +59,11 @@ public class DiskForecastAdvisor implements Advisor {
     }
 
     @Override
+    public boolean hostScoped() {
+        return true;   // 판정 대상이 DB가 아니라 호스트 디스크 — 같은 호스트 공유 인스턴스엔 스윕당 1회
+    }
+
+    @Override
     public List<AdvisorFinding> inspect(DatabaseInstance instance, DbmsOperator operator) {
         if (!prometheus.configured()) {
             return List.of();   // 기능 게이트 — Prometheus 없으면 조용히 스킵(지어내지 않는다)

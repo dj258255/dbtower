@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Advisor 오케스트레이션 (Phase D2) — 등록된 Advisor 전부를 한 인스턴스에 적용해 리포트를 만든다.
@@ -41,9 +42,23 @@ public class AdvisorService {
 
     /** 인스턴스 하나에 전 Advisor를 적용한다. operator는 supports=true인 Advisor가 있을 때만 만든다. */
     public InstanceAdvisorReport inspect(DatabaseInstance instance) {
+        return inspect(instance, Map.of());
+    }
+
+    /**
+     * 스윕용 dedup 지원 (Phase 4 — 서버 공유 인지): sharedBy에 담긴 Advisor(id → 이미 같은 호스트를
+     * 점검한 인스턴스 이름)는 실행하지 않고 SHARED로 표기한다. 온디맨드 단건 점검(REST·헬스 스코어)은
+     * 빈 맵으로 들어와 전부 실행된다 — dedup은 반복 탐침·중복 지적에만, 위험 귀속에는 하지 않는다.
+     */
+    public InstanceAdvisorReport inspect(DatabaseInstance instance, Map<String, String> sharedBy) {
         List<AdvisorCheck> checks = new ArrayList<>();
         DbmsOperator operator = null;
         for (Advisor advisor : advisors) {
+            String coveredBy = sharedBy.get(advisor.id());
+            if (coveredBy != null) {
+                checks.add(AdvisorCheck.shared(advisor, coveredBy));
+                continue;
+            }
             if (!advisor.supports(instance.getType())) {
                 checks.add(AdvisorCheck.unsupported(advisor));
                 continue;

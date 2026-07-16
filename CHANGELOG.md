@@ -9,6 +9,10 @@
 ## [Unreleased]
 
 ### Added
+- 서버 공유 인지(Phase 4 호스트 그룹핑) — 같은 host:port에 등록된 DB들의 서버 전역 신호(유휴
+  트랜잭션·복제·데드락)를 그룹당 1회만 감지·경보(공유 인스턴스 명시), 호스트 스코프 Advisor(디스크
+  예측)는 스윕에서 호스트당 1회(나머지 SHARED 표기), 콘솔 카드에 "서버 공유 ×N" 배지.
+  위험 귀속(헬스 스코어·온디맨드 점검)은 dedup하지 않는다
 - 디스크 포화 예측(Phase 5) — node_exporter 선형 추세로 "며칠 뒤 차는가"(ETA≤3일 치명/≤14일 경고,
   추세 없어도 여유<10% 경고). 인스턴스-노드 매핑 node_filter(V16, label="value" 셀렉터만 허용해
   PromQL 주입 방지), Prometheus 미설정 시 조용히 스킵. node-exporter compose를 정석(rootfs 마운트)으로

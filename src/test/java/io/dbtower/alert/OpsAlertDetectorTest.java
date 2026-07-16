@@ -282,4 +282,61 @@ class OpsAlertDetectorTest {
         detector.detect();
         assertTrue(notifiedMessage().contains("백업 신선도 초과"));
     }
+
+    // ---------- 서버 공유 인지 (Phase 4) ----------
+
+    private DatabaseInstance instanceOn(long id, String name, String serverKey) {
+        DatabaseInstance m = Mockito.mock(DatabaseInstance.class);
+        when(m.getId()).thenReturn(id);
+        when(m.getName()).thenReturn(name);
+        when(m.serverKey()).thenReturn(serverKey);
+        when(m.getCreatedAt()).thenReturn(java.time.LocalDateTime.now());
+        when(m.isCollectionEnabled()).thenReturn(true);
+        return m;
+    }
+
+    @Test
+    void 같은_서버의_인스턴스들엔_서버_전역_신호를_한_번만_감지한다() {
+        // 같은 host:port에 등록된 DB 2개 — 복제 지연은 서버의 상태라 두 번 울리면 같은 사고 알림이 2배가 된다
+        DatabaseInstance app = instanceOn(1, "pg-app", "10.0.0.5:5432");
+        DatabaseInstance billing = instanceOn(2, "pg-billing", "10.0.0.5:5432");
+        when(instanceRepository.findAll()).thenReturn(List.of(app, billing));
+        when(operator.replicationState()).thenReturn(new ReplicationState("REPLICA", 120, "recovery"));
+
+        detector.detect();
+
+        // 경보 1건 + 대상 탐침(operator 생성)도 그룹당 1회 — 중복 부하까지 준다
+        verify(operatorFactory, times(1)).create(any());
+        String message = notifiedMessage();
+        assertTrue(message.contains("복제 지연"));
+        // 공유 서버 경보는 누구에게 해당하는지 명시한다 — 대표 이름만 보고 남의 팀 문제로 오인하지 않게
+        assertTrue(message.contains("pg-app, pg-billing 전체에 해당"));
+    }
+
+    @Test
+    void 다른_서버면_서버_전역_신호를_각각_감지한다() {
+        DatabaseInstance a = instanceOn(1, "pg-a", "10.0.0.5:5432");
+        DatabaseInstance b = instanceOn(2, "pg-b", "10.0.0.6:5432");
+        when(instanceRepository.findAll()).thenReturn(List.of(a, b));
+        when(operator.replicationState()).thenReturn(new ReplicationState("REPLICA", 120, "recovery"));
+
+        detector.detect();
+
+        verify(operatorFactory, times(2)).create(any());
+        verify(notifier, times(2)).send(anyString());
+    }
+
+    @Test
+    void 서버를_공유해도_인스턴스_스코프_신호는_각각_감지한다() {
+        // 백업 신선도는 DB(인스턴스) 단위 판정 — 서버 dedup에 휩쓸려 묻히면 안 된다
+        DatabaseInstance app = instanceOn(1, "pg-app", "10.0.0.5:5432");
+        DatabaseInstance billing = instanceOn(2, "pg-billing", "10.0.0.5:5432");
+        when(instanceRepository.findAll()).thenReturn(List.of(app, billing));
+        when(backupFreshnessService.freshnessFor(any(DatabaseInstance.class)))
+                .thenReturn(stale(48, "VERIFIED"));
+
+        detector.detect();
+
+        verify(notifier, times(2)).send(anyString());
+    }
 }

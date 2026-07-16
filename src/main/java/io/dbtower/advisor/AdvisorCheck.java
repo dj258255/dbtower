@@ -17,7 +17,7 @@ import java.util.List;
 public record AdvisorCheck(String advisor, String title, Status status,
                            List<AdvisorFinding> findings, String note) {
 
-    public enum Status { OK, VIOLATIONS, UNSUPPORTED, ERROR }
+    public enum Status { OK, VIOLATIONS, UNSUPPORTED, ERROR, SHARED }
 
     public static AdvisorCheck ok(Advisor a) {
         return new AdvisorCheck(a.id(), a.title(), Status.OK, List.of(), null);
@@ -34,5 +34,11 @@ public record AdvisorCheck(String advisor, String title, Status status,
 
     public static AdvisorCheck error(Advisor a, String message) {
         return new AdvisorCheck(a.id(), a.title(), Status.ERROR, List.of(), message);
+    }
+
+    /** 서버 공유 dedup (Phase 4) — 호스트 스코프 점검을 같은 호스트의 다른 인스턴스가 이미 수행했다. */
+    public static AdvisorCheck shared(Advisor a, String coveredBy) {
+        return new AdvisorCheck(a.id(), a.title(), Status.SHARED, List.of(),
+                "같은 호스트라 " + coveredBy + " 점검으로 판정을 공유한다(서버 공유 — 중복 탐침 방지)");
     }
 }

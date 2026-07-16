@@ -1,5 +1,6 @@
 package io.dbtower.advisor.internal.job;
 
+import io.dbtower.advisor.Advisor;
 import io.dbtower.advisor.AdvisorService;
 import io.dbtower.advisor.InstanceAdvisorReport;
 
@@ -11,6 +12,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -31,13 +36,16 @@ public class AdvisorSweepJob {
 
     private final DatabaseInstanceRepository instanceRepository;
     private final AdvisorService advisorService;
+    private final List<Advisor> advisors;
 
     /** 인스턴스별 마지막 스윕 리포트 — 캐시(결과 저장). */
     private final Map<Long, InstanceAdvisorReport> latest = new ConcurrentHashMap<>();
 
-    public AdvisorSweepJob(DatabaseInstanceRepository instanceRepository, AdvisorService advisorService) {
+    public AdvisorSweepJob(DatabaseInstanceRepository instanceRepository, AdvisorService advisorService,
+                           List<Advisor> advisors) {
         this.instanceRepository = instanceRepository;
         this.advisorService = advisorService;
+        this.advisors = advisors;
     }
 
     // lockAtMostFor를 넉넉히(PT30M) 둔다 — 인스턴스가 많고 각 operator 조회가 느릴 수 있어
@@ -45,10 +53,31 @@ public class AdvisorSweepJob {
     @Scheduled(fixedDelayString = "${dbtower.advisor.sweep-ms:86400000}", initialDelayString = "${dbtower.advisor.initial-delay-ms:60000}")
     @SchedulerLock(name = "advisor-sweep", lockAtLeastFor = "PT10S", lockAtMostFor = "PT30M")
     public void sweep() {
-        int instances = 0, critical = 0, warning = 0;
-        for (DatabaseInstance instance : instanceRepository.findAll()) {
+        int instances = 0, critical = 0, warning = 0, shared = 0;
+        // 서버 공유 인지 (Phase 4): 호스트 스코프 Advisor(디스크 예측 등)는 판정 대상이 호스트 자원이라,
+        // 같은 호스트(+같은 nodeFilter — 다른 마운트를 보면 다른 점검이다)를 공유하는 인스턴스들엔
+        // 그룹당 1회만 실행하고 나머지는 SHARED로 표기한다. 대표는 id 오름차순의 첫 인스턴스(결정적).
+        // 포트는 키에서 뺀다 — 디스크는 포트가 아니라 머신의 자원이다(같은 머신의 MySQL과 PG는 디스크를 공유).
+        List<DatabaseInstance> targets = new ArrayList<>(instanceRepository.findAll());
+        targets.sort(Comparator.comparing(DatabaseInstance::getId,
+                Comparator.nullsLast(Comparator.naturalOrder())));
+        Map<String, String> hostCoveredBy = new HashMap<>();
+        for (DatabaseInstance instance : targets) {
             try {
-                InstanceAdvisorReport report = advisorService.inspect(instance);
+                Map<String, String> sharedBy = new HashMap<>();
+                String hostKey = instance.getHost().toLowerCase() + "|"
+                        + (instance.getNodeFilter() == null ? "" : instance.getNodeFilter());
+                for (Advisor advisor : advisors) {
+                    if (!advisor.hostScoped() || !advisor.supports(instance.getType())) {
+                        continue;
+                    }
+                    String coveredBy = hostCoveredBy.putIfAbsent(advisor.id() + "@" + hostKey, instance.getName());
+                    if (coveredBy != null) {
+                        sharedBy.put(advisor.id(), coveredBy);
+                        shared++;
+                    }
+                }
+                InstanceAdvisorReport report = advisorService.inspect(instance, sharedBy);
                 latest.put(instance.getId(), report);
                 instances++;
                 critical += report.critical();
@@ -62,7 +91,8 @@ public class AdvisorSweepJob {
                 log.warn("Advisor 스윕 실패 instance={} cause={}", instance.getName(), e.getMessage());
             }
         }
-        log.info("Advisor 스윕 완료 instances={} critical={} warning={}", instances, critical, warning);
+        log.info("Advisor 스윕 완료 instances={} critical={} warning={} 호스트공유생략={}",
+                instances, critical, warning, shared);
     }
 
     /** 스윕이 마지막으로 본 리포트(있으면) — 캐시 조회용. */

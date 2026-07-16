@@ -22,9 +22,13 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Optional;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -97,19 +101,44 @@ public class OpsAlertDetector {
     @SchedulerLock(name = "ops-alert-detect", lockAtLeastFor = "PT110S", lockAtMostFor = "PT4M")
     public void detect() {
         LocalDateTime now = LocalDateTime.now();
-        for (DatabaseInstance instance : instanceRepository.findAll()) {
+        // 서버 공유 인지 (Phase 4): 같은 host:port에 등록된 DB들은 물리적으로 같은 서버라, 서버 전역
+        // 신호(세션·복제·데드락)는 그룹 대표 1개에서만 탐침한다 — 중복 경보와 중복 대상 부하를 함께 줄인다.
+        // id 오름차순 순회라 대표는 그룹 내 최소 id(결정적). 대표가 삭제되면 다음 폴부터 차순위가 대표가
+        // 되는데, 델타 기반 데드락 감지는 첫 관측을 건너뛰므로 한 주기 놓칠 수 있다(감수 — 오탐보다 낫다).
+        List<DatabaseInstance> instances = new ArrayList<>(instanceRepository.findAll());
+        instances.sort(Comparator.comparing(DatabaseInstance::getId,
+                Comparator.nullsLast(Comparator.naturalOrder())));
+        Map<String, List<String>> serverGroups = new LinkedHashMap<>();
+        for (DatabaseInstance i : instances) {
+            if (i.isCollectionEnabled()) {
+                serverGroups.computeIfAbsent(i.serverKey(), k -> new ArrayList<>()).add(i.getName());
+            }
+        }
+        Set<String> probedServers = new HashSet<>();
+        for (DatabaseInstance instance : instances) {
             // 수집 격리된 인스턴스는 능동 탐침을 멈춘다(문제 대상을 관제에서 잠시 빼는 스위치, Phase F).
             if (!instance.isCollectionEnabled()) {
                 continue;
             }
+            boolean serverRepresentative = probedServers.add(instance.serverKey());
             // 인스턴스 하나의 실패(접속 불가·권한 부족 등)가 다른 인스턴스 감지를 막지 않도록 개별 격리.
             List<String> findings = new ArrayList<>();
             try {
-                DbmsOperator operator = operatorFactory.create(instance);
-                findings.addAll(detectIdleTransactions(instance, operator, now));
-                findings.addAll(detectReplicationLag(instance, operator, now));
-                findings.addAll(detectReplicationSlots(instance, operator, now));
-                findings.addAll(detectDeadlocks(instance, operator, now));
+                if (serverRepresentative) {
+                    // findings에 바로 누적한다 — 중간 감지 하나가 죽어도 그 전까지의 신호는 알려야 한다
+                    DbmsOperator operator = operatorFactory.create(instance);
+                    findings.addAll(detectIdleTransactions(instance, operator, now));
+                    findings.addAll(detectReplicationLag(instance, operator, now));
+                    findings.addAll(detectReplicationSlots(instance, operator, now));
+                    findings.addAll(detectDeadlocks(instance, operator, now));
+                    // 서버를 공유하는 다른 인스턴스가 있으면 경보가 그들에게도 해당함을 명시한다
+                    // (이 시점의 findings는 전부 서버 전역 신호 — 인스턴스 스코프는 아래에서 붙는다)
+                    List<String> group = serverGroups.get(instance.serverKey());
+                    if (!findings.isEmpty() && group != null && group.size() > 1) {
+                        findings.add("(서버 %s 공유 — 위 서버 전역 신호는 %s 전체에 해당)"
+                                .formatted(instance.serverKey(), String.join(", ", group)));
+                    }
+                }
                 findings.addAll(detectSnapshotStall(instance, now));
             } catch (Exception e) {
                 // 폴러가 죽으면 안 된다 — 감지 실패는 로그로만 남기고 넘어간다

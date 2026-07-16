@@ -137,4 +137,14 @@ public class DatabaseInstance {
         this.consoleUrl = consoleUrl;
         this.nodeFilter = nodeFilter;
     }
+
+    /**
+     * 서버 그룹 키 (Phase 4 — 서버 공유 인지). 등록 단위는 DB(host·port·dbName)라 같은 서버에
+     * DB 여러 개를 등록하면 서버 전역 신호(복제 상태·세션·데드락)가 인스턴스 수만큼 중복 감지·경보된다.
+     * 같은 host:port = 같은 DBMS 서버로 보고 그룹당 1회만 판정한다. 엔티티 추가 없이 계산 키로 시작 —
+     * 호스트명은 대소문자 무관(DNS)이라 소문자 정규화하되, DNS 해석은 하지 않는다(결정적·정직한 키).
+     */
+    public String serverKey() {
+        return host.toLowerCase() + ":" + port;
+    }
 }
