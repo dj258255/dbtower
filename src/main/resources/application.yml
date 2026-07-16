@@ -131,6 +131,13 @@ dbtower:
     # PG 물리 전체(PHYSICAL) — 시점 복구의 진짜 앵커. replication 프로토콜이라 서버 설정 불변,
     # tar를 stdout으로 받아 저장(-X none: WAL은 세그먼트 수집과 조합하는 것이 체인 정석).
     pg-basebackup-command: "docker exec dbtower-postgres pg_basebackup -h localhost -U {user} -D - -Ft -X none"
+    # PG WAL 스트리밍(pg_receivewal) — 풀 방식의 "수집 주기 사이 세그먼트 재활용" 창을 없애는 정석.
+    # 복제 슬롯(--slot)으로 수신자 공백 구간도 무손실. WalStreamManager가 상주 프로세스를 보살핀다
+    # (30초 생존 점검·재시작). 빈 값 = 기능 끔. 슬롯은 배타적 — 노드 1곳에만 설정할 것.
+    # 주의: 미소비 슬롯은 WAL 무한 보존(디스크 위험) — 끌 때 슬롯 삭제, 감시는 OpsAlert 슬롯 규칙이 담당.
+    # 함정(실측): docker exec에 -i를 주면 원격 프로세스가 죽어도 CLI가 stdin EOF까지 살아남아
+    # 생존 감시가 죽은 스트림을 살아있다고 오인한다 — pg_receivewal은 stdin이 필요 없으니 -i 금지.
+    pg-receivewal-command: "docker exec -e PGPASSWORD dbtower-postgres pg_receivewal -h localhost -U {user} -D /var/backups/wal_stream --slot dbtower_wal"
     # Oracle RMAN(정석) — 지정 시 LOG/PHYSICAL이 RMAN(BACKUP ARCHIVELOG NOT BACKED UP 1 TIMES / BACKUP DATABASE)으로.
     # 데모 Oracle Free(26ai) 이미지에는 rman 바이너리가 없음을 실측 — 비워서 파일 수집 폴백/UNSUPPORTED 정직.
     # RMAN 가용 환경 예: "docker exec -i <ctr> rman" (접속·스크립트는 stdin — 비밀번호 argv 금지 규칙 호환)
