@@ -36,7 +36,6 @@
 - 백업 산출물 저장 암호화(3-2-1-1-0), Vault 동적 자격증명으로 정적 비밀번호 유출 창 축소,
   Vault creds 경로를 database/creds/ 마운트로 봉인(임의 시크릿 접근 차단), Discord 인바운드
   Ed25519 서명·채널/유저 화이트리스트(기본 거부)
-
 - 암호화 fail-closed를 배포 프로필 전체로 — 셀프호스트(docker 프로필)에서 DBTOWER_ENCRYPTION_KEY가
   없으면 기동을 거부한다(이전엔 prod 프로필만 막아 docker 경로가 평문 저장으로 뚫려 있었음, CWE-312).
   compose 수준 `${DBTOWER_ENCRYPTION_KEY:?}` 이중 방어
