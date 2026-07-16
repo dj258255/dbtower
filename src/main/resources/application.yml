@@ -90,6 +90,14 @@ dbtower:
     # 0 이하면 보존 무제한(정리 안 함).
     retention-days: 7
     retention-sweep-ms: 3600000   # 보존 정리 주기(1시간) — 수집보다 훨씬 뜸해도 충분하다
+  # 디스크 예측 지표 소스(Phase 5 소스 추상화) — prometheus(기본, 셀프호스트 node_exporter) |
+  # cloudwatch(RDS — FreeStorageSpace, nodeFilter가 DBInstanceIdentifier). CloudWatch는 총 용량이
+  # 메트릭에 없어 ETA 축만 동작(여유 %는 정직하게 미수집). 자격증명은 AWS 표준 체인(환경변수).
+  disk-forecast:
+    source: ${DBTOWER_DISK_FORECAST_SOURCE:prometheus}
+  cloudwatch:
+    region: ${AWS_REGION:us-east-1}
+    endpoint: ${DBTOWER_CLOUDWATCH_ENDPOINT:}   # LocalStack 등 호환 구현 검증용, 빈 값=AWS
   # Vault 동적 자격증명(선택, 하드닝 잔여) — 인스턴스 username을 "vault:<creds 경로>"로 등록하면
   # 접속 시점에 Vault database secrets engine에서 수명 있는 계정을 발급받아 쓴다(정적 비밀번호의
   # 유출 창을 TTL로 축소). 리스 80% 시점 선제 갱신 + 풀 자동 회전. 미설정 시 vault: 인스턴스는

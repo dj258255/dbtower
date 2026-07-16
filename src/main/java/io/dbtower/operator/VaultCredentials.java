@@ -41,8 +41,15 @@ public class VaultCredentials {
 
     public static final String PREFIX = "vault:";
 
-    /** creds 경로 화이트리스트 형식 — URL 경로로 들어가므로 경로 조작 문자를 거부한다 */
-    private static final Pattern SAFE_PATH = Pattern.compile("[a-zA-Z0-9/_-]+");
+    /**
+     * creds 경로 화이트리스트 — <b>database/creds/&lt;롤&gt; 형식으로 고정</b>한다(보안 리뷰 반영).
+     * 이 클래스의 용도는 "DB 동적 자격증명"뿐인데, 경로를 열어두면 등록 권한자(ADMIN)가 username에
+     * secret/data/... 같은 임의 경로를 넣어 토큰 ACL이 닿는 다른 시크릿을 읽을 수 있다(권한 상승면).
+     * database secrets engine의 읽기 경로만 허용해 이 클래스가 접근할 수 있는 시크릿을 봉인한다.
+     * 롤 이름은 영문/숫자/밑줄/하이픈만(URL 경로 조작·마운트 탈출 차단). 커스텀 마운트명은 안 받는다 —
+     * 필요하면 이 상수를 설정으로 여는 게 옳고, 기본은 최소 권한이다.
+     */
+    private static final Pattern SAFE_PATH = Pattern.compile("database/creds/[a-zA-Z0-9_-]+");
 
     public record Creds(String username, String password) {
     }
@@ -100,7 +107,8 @@ public class VaultCredentials {
 
     private Creds fetch(String credsPath) {
         if (!SAFE_PATH.matcher(credsPath).matches()) {
-            throw new OperatorException("vault 경로 형식 위반(영문/숫자/슬래시/밑줄/하이픈만): " + credsPath, null);
+            throw new OperatorException(
+                    "vault 경로는 database/creds/<롤> 형식만 허용한다(다른 시크릿 접근 차단): " + credsPath, null);
         }
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(vaultUrl + "/v1/" + credsPath))

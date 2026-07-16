@@ -31,10 +31,15 @@ class VaultCredentialsTest {
     }
 
     @Test
-    void creds_경로는_형식_화이트리스트를_통과해야_한다() {
-        // 경로가 URL로 들어가므로 조작 문자(.. ? # 공백)는 거부 — 발급 전에 막는다
+    void creds_경로는_database_creds_마운트로_봉인된다() {
+        // 이 클래스 용도는 DB 동적 자격증명뿐 — 다른 시크릿 경로는 발급 전에 막는다(권한 상승면 차단).
         VaultCredentials vault = new VaultCredentials("http://localhost:18200", "t");
+        // 임의 시크릿 경로 — 토큰 ACL이 닿아도 이 클래스로는 못 읽는다
+        assertThrows(OperatorException.class, () -> vault.resolve(instance("vault:secret/data/prod-api-key")));
+        // 경로 조작·마운트 탈출
         assertThrows(OperatorException.class, () -> vault.resolve(instance("vault:../sys/seal")));
-        assertThrows(OperatorException.class, () -> vault.resolve(instance("vault:a b")));
+        assertThrows(OperatorException.class, () -> vault.resolve(instance("vault:database/creds/a b")));
+        // database/creds/ 아래의 다른 세그먼트 구조도 거부(정확히 롤 하나만)
+        assertThrows(OperatorException.class, () -> vault.resolve(instance("vault:database/config/x")));
     }
 }

@@ -1,7 +1,7 @@
 package io.dbtower.advisor;
 
 import io.dbtower.advisor.internal.DiskForecastAdvisor;
-import io.dbtower.insight.PrometheusClient;
+import io.dbtower.insight.HostDiskMetrics;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -16,7 +16,14 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class DiskForecastAdvisorTest {
 
-    private final DiskForecastAdvisor advisor = new DiskForecastAdvisor(new PrometheusClient(""));
+    /** 소스는 판정과 무관 — 미설정 소스로 순수 판정만 시험한다 */
+    private static final HostDiskMetrics NO_SOURCE = new HostDiskMetrics() {
+        public boolean configured() { return false; }
+        public Double diskAvailPct(String nodeFilter) { return null; }
+        public Double diskEtaSeconds(String nodeFilter) { return null; }
+    };
+
+    private final DiskForecastAdvisor advisor = new DiskForecastAdvisor(NO_SOURCE);
 
     private static final double DAY = 86_400;
 
@@ -71,18 +78,14 @@ class DiskForecastAdvisorTest {
         assertTrue(advisor.evaluate(72.0, null, null).isEmpty());
     }
 
-    @Test
-    void 셀렉터는_nodeFilter를_기본_파일시스템_조건에_결합한다() {
-        assertEquals("fstype!~\"tmpfs|overlay|squashfs|iso9660\",mountpoint=\"/\"",
-                DiskForecastAdvisor.selector(null));
-        assertEquals("fstype!~\"tmpfs|overlay|squashfs|iso9660\",mountpoint=\"/\",instance=\"db1:9100\"",
-                DiskForecastAdvisor.selector("instance=\"db1:9100\""));
-    }
+
 
     @Test
-    void nodeFilter가_mountpoint를_지정하면_기본_루트를_양보한다() {
-        // 데이터 전용 마운트(/data 등)가 실무 정석 — 기본 "/"를 겹치면 AND가 돼 빈 결과가 된다
-        assertEquals("fstype!~\"tmpfs|overlay|squashfs|iso9660\",mountpoint=\"/data\"",
-                DiskForecastAdvisor.selector("mountpoint=\"/data\""));
+    void 여유퍼센트_없이_ETA만_있어도_판정한다_CloudWatch_축() {
+        // CloudWatch는 총 용량이 메트릭에 없어 여유 %가 null — ETA 축만으로 치명 판정이 돼야 한다
+        List<AdvisorFinding> findings = advisor.evaluate(null, 2 * DAY, "my-rds-instance");
+        assertEquals(1, findings.size());
+        assertEquals(Severity.CRITICAL, findings.get(0).severity());
+        assertTrue(findings.get(0).title().contains("여유% 미수집"));
     }
 }

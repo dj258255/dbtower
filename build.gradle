@@ -47,6 +47,8 @@ dependencies {
 	// 백업 원격 보관(3-2-1의 오프사이트) — S3 호환(AWS S3·MinIO·R2 등)에 업로드.
 	// MinIO를 로컬 데모로 쓰므로 path-style 접근을 켠다. Boot BOM 미관리라 버전 명시.
 	implementation 'software.amazon.awssdk:s3:2.46.7'
+	// CloudWatch 메트릭 소스(RDS FreeStorageSpace) — 디스크 예측의 소스 추상화(Prometheus | CloudWatch)
+	implementation 'software.amazon.awssdk:cloudwatch:2.46.7'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
