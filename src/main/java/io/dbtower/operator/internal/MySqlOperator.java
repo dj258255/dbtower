@@ -9,6 +9,7 @@ import io.dbtower.operator.model.DbParameter;
 import io.dbtower.operator.model.DeadlockEvent;
 import io.dbtower.operator.model.IndexUsage;
 import io.dbtower.operator.model.LatencyPercentile;
+import io.dbtower.operator.BackupCommands;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
@@ -73,14 +74,57 @@ public class MySqlOperator extends AbstractJdbcOperator {
             return binlogBackup();
         }
         if (policy.type() == BackupPolicy.BackupType.PHYSICAL) {
-            throw new UnsupportedOperationException(
-                    "MySQL 물리 백업은 XtraBackup/Clone 플러그인 영역 — 공식 PITR는 논리 FULL(mysqldump) + binlog 재생이라 물리가 필수는 아니다");
+            return physicalBackup();
         }
         Path out = Path.of(backupTools.backupDir(),
                 "mysql-%s-%s.sql".formatted(safeFileName(instance.getName()), backupTimestamp()));
         // 비밀번호는 argv가 아니라 MYSQL_PWD 환경변수로 — ps로 노출되지 않게
         return runCliBackup(renderCommand(backupTools.mysqldumpCommand()),
                 Map.of("MYSQL_PWD", instance.getPassword()), out);
+    }
+
+    /**
+     * 물리 백업(PHYSICAL) = Percona XtraBackup — 현업 주 백업의 정석. 논리 덤프는 SQL 재생성·복원 시
+     * 인덱스 재구축 비용이 커 수백 GB급에서 비현실적이고, 물리는 데이터 파일 수준 핫 백업이라
+     * 크기에 비례해 빠르며 binlog 재생의 앵커(xtrabackup_binlog_info의 좌표)로도 정석이다.
+     *
+     * 실행 모델: xtrabackup은 서버의 datadir 파일을 직접 읽어야 해서(접속만으로는 불가) 명령
+     * 템플릿이 실행 위치를 흡수한다 — 데모는 datadir 볼륨을 공유한 XtraBackup 컨테이너를 docker run,
+     * 프로덕션은 DB 호스트의 xtrabackup 바이너리. 산출물은 --stream=xbstream을 stdout으로 받아
+     * 단일 파일로 저장한다(암호화 관문·원격 보관과 그대로 조립). 비밀번호는 MYSQL_PWD 환경변수.
+     * 게이트(정직): 명령 미설정이면 UNSUPPORTED — 도구가 없는 환경에서 실패로 위장하지 않는다.
+     */
+    private BackupResult physicalBackup() {
+        if (backupTools.mysqlXtrabackupCommand() == null || backupTools.mysqlXtrabackupCommand().isBlank()) {
+            throw new UnsupportedOperationException(
+                    "XtraBackup 명령 미설정(dbtower.backup.mysql-xtrabackup-command) — "
+                            + "물리 백업은 datadir 접근이 가능한 xtrabackup 실행 환경이 필요하다");
+        }
+        Path out = Path.of(backupTools.backupDir(),
+                "mysql-physical-%s-%s.xbstream".formatted(safeFileName(instance.getName()), backupTimestamp()));
+        // 함정 두 겹(실측): xtrabackup은 MYSQL_PWD를 읽지 않고("password: not set"), defaults 로더는
+        // /dev/stdin(파이프)을 조용히 무시한다. 그래서 비밀번호를 XB_CNF 환경변수로 컨테이너에 넘기고,
+        // 래퍼 스크립트(코드 소유)가 컨테이너 안 임시 파일(umask 077)로 떨어뜨려 --defaults-extra-file로
+        // 읽는다 — 호스트·컨테이너 어느 쪽 argv에도 비밀번호가 없다. xtrabackup 인자("$@")는 별도
+        // args 템플릿을 렌더해 붙인다(스크립트는 불변, 배치 형태만 설정이 흡수).
+        List<String> cmd = new ArrayList<>(renderCommand(backupTools.mysqlXtrabackupCommand()));
+        cmd.add("-c");
+        cmd.add("set -e; umask 077; printf '%s' \"$XB_CNF\" > /tmp/x.cnf; "
+                + "exec xtrabackup --defaults-extra-file=/tmp/x.cnf \"$@\"");
+        cmd.add("xtrabackup");   // bash -c의 $0 자리
+        cmd.addAll(renderCommand(backupTools.mysqlXtrabackupArgs()));
+        return BackupCommands.run(cmd, Map.of("XB_CNF", cnfPasswordEntry(instance.getPassword())), out, null);
+    }
+
+    /**
+     * stdin으로 흘릴 [client] 설정 한 조각 — 개행이 섞이면 다른 설정 키를 주입할 수 있으므로
+     * 제어 문자를 거부하고(RMAN CONNECT 방어와 동일 원칙) 큰따옴표 값으로 감싼다.
+     */
+    private static String cnfPasswordEntry(String password) {
+        if (password == null || password.chars().anyMatch(Character::isISOControl)) {
+            throw new OperatorException("비밀번호에 제어 문자를 쓸 수 없습니다 — 설정 주입 위험으로 거부한다");
+        }
+        return "[client]\npassword=\"" + password.replace("\\", "\\\\").replace("\"", "\\\"") + "\"\n";
     }
 
     /**
@@ -156,6 +200,23 @@ public class MySqlOperator extends AbstractJdbcOperator {
     /** PITR 안내 (Phase 2) — FULL 적재 후 binlog들을 목표 시점까지 재생하는 명령 문안. 실행은 사람이. */
     @Override
     public String pitrRestoreGuide(String fullLocation, List<String> logLocations, String targetTime) {
+        // 물리 앵커(XtraBackup xbstream)와 논리 앵커(mysqldump)는 복원 절차가 완전히 다르다 —
+        // PG(pg_basebackup 분기)와 같은 구도로 앵커 산출물의 종류에 맞는 문안을 만든다.
+        if (fullLocation != null && fullLocation.endsWith(".xbstream")) {
+            return """
+                    # MySQL 물리(XtraBackup) 시점 복구 안내 (생성된 문안 — 반드시 격리된 복구용 서버에서 실행할 것)
+                    # 1) xbstream 풀기 + prepare(크래시 복구 적용 — 이 단계 전의 산출물은 그대로 못 쓴다)
+                    xbstream -x -C /restore/data < %s
+                    xtrabackup --prepare --target-dir=/restore/data
+                    # 2) 복구 서버 datadir로 반입(서버 정지 상태) 후 기동
+                    xtrabackup --copy-back --target-dir=/restore/data --datadir=/var/lib/mysql
+                    chown -R mysql:mysql /var/lib/mysql && systemctl start mysqld
+                    # 3) binlog를 백업 시점 좌표부터 목표 시점까지 재생
+                    #    시작 좌표는 /restore/data/xtrabackup_binlog_info(파일명·position)가 알려준다
+                    mysqlbinlog --start-position=<binlog_info의 position> --stop-datetime='%s' %s | mysql -u <user> -p
+                    # 주의: --start-position 없이 처음부터 재생하면 백업에 이미 든 변경이 중복 적용된다."""
+                    .formatted(fullLocation, targetTime, String.join(" \\\n                    ", logLocations));
+        }
         return """
                 -- MySQL 시점 복구 안내 (생성된 문안 — 반드시 격리된 복구용 인스턴스에서 실행할 것)
                 -- 1) 마지막 FULL 백업 적재
@@ -176,6 +237,9 @@ public class MySqlOperator extends AbstractJdbcOperator {
         Path dump = Path.of(location);
         if (!Files.isRegularFile(dump)) {
             return RestoreVerification.failed("덤프 파일을 찾을 수 없습니다: " + location);
+        }
+        if (location.endsWith(".xbstream")) {
+            return verifyPhysical(dump);
         }
         String target = RestoreSupport.verifyTargetName();
         RestoreSupport.requireSafeName(target);
@@ -205,6 +269,38 @@ public class MySqlOperator extends AbstractJdbcOperator {
                 RestoreSupport.exec(RestoreSupport.concat(base, "-e",
                         "DROP DATABASE IF EXISTS `" + target + "`"), env, null);
             }
+        }
+    }
+
+    /**
+     * 물리 산출물(xbstream) 검증 = 격리 환경에서 xbstream 추출 + xtrabackup --prepare 실행.
+     * prepare는 백업에 크래시 복구(redo 적용·미완 트랜잭션 롤백)를 실제로 수행하는 단계라,
+     * 이게 성공하면 "복원 가능한 물리 백업"이 사실로 증명된다(파일 존재 확인 따위가 아니라).
+     * 검증 명령이 없으면 UNSUPPORTED — 확인 못 한 것을 통과로 위장하지 않는다.
+     * 산출물을 stdin으로 흘리므로 메모리에 올린다 — 대형 산출물 환경은 검증 명령을 파일 마운트
+     * 방식으로 바꾸는 것을 전제로 한다(데모 스케일에선 충분).
+     */
+    private RestoreVerification verifyPhysical(Path artifact) {
+        if (backupTools.mysqlXtrabackupVerifyCommand() == null || backupTools.mysqlXtrabackupVerifyCommand().isBlank()) {
+            return RestoreVerification.unsupported(
+                    "물리 산출물 검증 명령 미설정(dbtower.backup.mysql-xtrabackup-verify-command) — xbstream/prepare 실행 환경 필요");
+        }
+        try {
+            // 템플릿은 "bash까지의 접두부"만(공백 분리 렌더러라 스크립트를 템플릿에 못 싣는다) —
+            // 검증 스크립트 자체는 코드 소유라 설정 주입면이 없다. 산출물은 stdin으로 흘린다.
+            List<String> cmd = new ArrayList<>(renderCommand(backupTools.mysqlXtrabackupVerifyCommand()));
+            cmd.add("-c");
+            cmd.add("set -e; D=$(mktemp -d); xbstream -x -C \"$D\"; "
+                    + "xtrabackup --prepare --target-dir=\"$D\" >/dev/null 2>&1; "
+                    + "test -f \"$D/xtrabackup_info\"; echo PREPARED");
+            RestoreSupport.ExecResult r = RestoreSupport.exec(cmd, Map.of(), Files.readAllBytes(artifact));
+            if (!r.ok()) {
+                return RestoreVerification.failed("xbstream 추출/prepare 실패: " + r.errorTail());
+            }
+            return RestoreVerification.verified(
+                    "xbstream 추출 + xtrabackup --prepare 성공 — 크래시 복구까지 적용된 복원 가능한 물리 백업", null);
+        } catch (Exception e) {
+            return RestoreVerification.failed("물리 산출물 검증 실행 실패: " + e.getMessage());
         }
     }
 

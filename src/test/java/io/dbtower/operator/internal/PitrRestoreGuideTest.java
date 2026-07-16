@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class PitrRestoreGuideTest {
 
-    private final BackupTools tools = new BackupTools("d", "d", "d", "r", "r", "r", "b", "o", "w", "a", "pb", "rm", "/tmp");
+    private final BackupTools tools = new BackupTools("d", "d", "d", "r", "r", "r", "b", "o", "w", "a", "pb", "rm", "xb", "xba", "xbv", "/tmp");
 
     @Test
     void MySQL_안내는_FULL_적재_후_binlog를_stop_datetime까지_재생한다() {
@@ -32,6 +32,22 @@ class PitrRestoreGuideTest {
         // 로그 체인은 시간순으로 한 번에 재생 — 순서가 곧 정합성
         assertThat(guide.indexOf("binlog.000002")).isLessThan(guide.indexOf("binlog.000003"));
         assertThat(guide).contains("격리된 복구용").doesNotContain("null");
+    }
+
+    @Test
+    void MySQL_물리_앵커는_prepare_copyback_후_binlog_info_좌표부터_재생한다() {
+        DatabaseInstance mysql = new DatabaseInstance("m", DbmsType.MYSQL, "h", 3306, "sample", "u", "p");
+        MySqlOperator op = new MySqlOperator(mysql, Mockito.mock(ConnectionPools.class), tools,
+                Mockito.mock(HistogramSnapshotStore.class));
+
+        String guide = op.pitrRestoreGuide("/b/mysql-physical-m.xbstream",
+                List.of("/b/binlog.000005"), "2026-07-16 12:00:00");
+
+        // 물리 산출물은 논리 적재(mysql < dump)가 아니라 prepare + copy-back 절차여야 한다
+        assertThat(guide).contains("xbstream -x").contains("--prepare").contains("--copy-back");
+        // 백업에 이미 든 변경의 중복 재생 방지 — binlog_info 좌표에서 시작해야 한다
+        assertThat(guide).contains("xtrabackup_binlog_info").contains("--start-position");
+        assertThat(guide).contains("--stop-datetime='2026-07-16 12:00:00'").doesNotContain("null");
     }
 
     @Test

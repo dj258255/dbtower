@@ -18,5 +18,6 @@ public record BackupTools(String mysqldumpCommand, String pgDumpCommand, String 
                           String pgWalCommand, String oracleArchiveCommand,
 
                           String pgBaseBackupCommand, String oracleRmanCommand,
+                          String mysqlXtrabackupCommand, String mysqlXtrabackupArgs, String mysqlXtrabackupVerifyCommand,
                           String backupDir) {
 }

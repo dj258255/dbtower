@@ -42,6 +42,9 @@ public class DbmsOperatorFactory {
                                @Value("${dbtower.backup.oracle-archivelog-command:}") String oracleArchiveCommand,
                                @Value("${dbtower.backup.pg-basebackup-command:}") String pgBaseBackupCommand,
                                @Value("${dbtower.backup.oracle-rman-command:}") String oracleRmanCommand,
+                               @Value("${dbtower.backup.mysql-xtrabackup-command:}") String mysqlXtrabackupCommand,
+                               @Value("${dbtower.backup.mysql-xtrabackup-args:}") String mysqlXtrabackupArgs,
+                               @Value("${dbtower.backup.mysql-xtrabackup-verify-command:}") String mysqlXtrabackupVerifyCommand,
                                @Value("${dbtower.backup.dir:./backups}") String backupDir) {
         this.pools = pools;
         this.mongoClients = mongoClients;
@@ -50,7 +53,8 @@ public class DbmsOperatorFactory {
         this.backupTools = new BackupTools(mysqldumpCommand, pgDumpCommand, mongodumpCommand,
                 mysqlRestoreCommand, pgRestoreCommand, mongoRestoreCommand,
                 mysqlBinlogCommand, mongoOplogCommand, pgWalCommand, oracleArchiveCommand,
-                pgBaseBackupCommand, oracleRmanCommand, backupDir);
+                pgBaseBackupCommand, oracleRmanCommand,
+                mysqlXtrabackupCommand, mysqlXtrabackupArgs, mysqlXtrabackupVerifyCommand, backupDir);
     }
 
     public DbmsOperator create(DatabaseInstance instance) {

@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class RmanScriptInjectionTest {
 
     private final BackupTools tools = new BackupTools("d", "d", "d", "r", "r", "r", "b", "o", "w", "a",
-            "pb", "docker exec -i x rman", "/tmp");
+            "pb", "docker exec -i x rman", "", "", "", "/tmp");
 
     private OracleOperator op(String user, String password) {
         DatabaseInstance inst = new DatabaseInstance("o", DbmsType.ORACLE, "h", 1521, "FREEPDB1", user, password);

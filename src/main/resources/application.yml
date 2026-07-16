@@ -131,6 +131,18 @@ dbtower:
     # PG 물리 전체(PHYSICAL) — 시점 복구의 진짜 앵커. replication 프로토콜이라 서버 설정 불변,
     # tar를 stdout으로 받아 저장(-X none: WAL은 세그먼트 수집과 조합하는 것이 체인 정석).
     pg-basebackup-command: "docker exec dbtower-postgres pg_basebackup -h localhost -U {user} -D - -Ft -X none"
+    # MySQL 물리 백업(XtraBackup) — 현업 주 백업의 정석. xtrabackup은 datadir 파일을 직접 읽어야
+    # 해서(접속만으로 불가) 데모는 datadir 볼륨을 공유한 XtraBackup 컨테이너로 실행, 프로덕션은
+    # DB 호스트의 xtrabackup 바이너리. 산출물은 xbstream을 stdout으로 받아 단일 파일(암호화 관문 통과).
+    # 함정 두 겹(실측): xtrabackup은 MYSQL_PWD를 읽지 않고, defaults 로더는 /dev/stdin(파이프)을
+    # 조용히 무시한다 — 비밀번호는 XB_CNF 환경변수 → 래퍼 스크립트(코드 소유)가 컨테이너 안
+    # 임시 파일로 떨어뜨려 --defaults-extra-file로 읽는다(호스트·컨테이너 argv 모두 비노출).
+    # 이 템플릿은 bash까지의 접두부, 인자는 아래 args가 담당(둘 다 필수).
+    mysql-xtrabackup-command: "docker run --rm --user 0 -e XB_CNF -v dbtower_mysql-data:/var/lib/mysql:ro --network dbtower_default --entrypoint bash percona/percona-xtrabackup:8.4"
+    mysql-xtrabackup-args: "--backup --stream=xbstream --host=mysql --port=3306 --user={user} --datadir=/var/lib/mysql --target-dir=/tmp"
+    # 물리 산출물 검증 접두부(bash까지) — 스크립트(xbstream -x + xtrabackup --prepare)는 코드 소유.
+    # prepare 성공 = 크래시 복구까지 적용된 "복원 가능한 물리 백업"의 실증.
+    mysql-xtrabackup-verify-command: "docker run --rm -i --entrypoint bash percona/percona-xtrabackup:8.4"
     # 백업 산출물 암호화(3-2-1-1-0의 마지막 1) — base64 32바이트 키 설정 시 산출물을 AES-256-GCM으로
     # 암호화 저장(로컬·원격 모두 암호문). 복원 검증은 임시 평문으로 자동 복호. 미설정 = 현행 평문.
     # 한계(정직): MSSQL·Oracle 서버 사이드 백업은 대상 서버 디스크에 직접 쓰여 이 관문을 지나지 않는다.
