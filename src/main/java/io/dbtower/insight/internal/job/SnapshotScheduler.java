@@ -8,7 +8,9 @@ import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DatabaseInstanceRepository;
 import io.dbtower.registry.InstanceDeletedEvent;
 import jakarta.annotation.PreDestroy;
-import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import net.javacrumbs.shedlock.core.LockConfiguration;
+import net.javacrumbs.shedlock.core.LockProvider;
+import net.javacrumbs.shedlock.core.SimpleLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,10 +18,13 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -59,17 +64,23 @@ public class SnapshotScheduler {
     private final DatabaseInstanceRepository instanceRepository;
     private final SnapshotWriter snapshotWriter;
     private final DbmsOperatorFactory operatorFactory;
+    private final LockProvider lockProvider;
     private final ExecutorService pool;
     private final int workers;
+    private final int shards;
 
     public SnapshotScheduler(DatabaseInstanceRepository instanceRepository,
                              SnapshotWriter snapshotWriter,
                              DbmsOperatorFactory operatorFactory,
-                             @Value("${dbtower.snapshot.workers:4}") int workers) {
+                             LockProvider lockProvider,
+                             @Value("${dbtower.snapshot.workers:4}") int workers,
+                             @Value("${dbtower.snapshot.shards:1}") int shards) {
         this.instanceRepository = instanceRepository;
         this.snapshotWriter = snapshotWriter;
         this.operatorFactory = operatorFactory;
+        this.lockProvider = lockProvider;
         this.workers = Math.max(1, workers);
+        this.shards = Math.max(1, shards);
         this.pool = Executors.newFixedThreadPool(this.workers, r -> {
             Thread t = new Thread(r, "dbtower-collect");
             t.setDaemon(true);
@@ -90,24 +101,58 @@ public class SnapshotScheduler {
         }
     }
 
-    // HA 분산 락(Phase A5): 여러 노드가 동시에 같은 대상 DB를 수집하지 않게 한 시점에 한 노드만 실행한다.
+    // HA 분산 락(Phase A5) + 샤딩(Phase 4): 여러 노드가 같은 대상을 중복 수집하지 않게 하되, 노드가
+    // 여럿이면 일을 나눠 든다. 샤드 s∈[0,N)마다 별도 락(snapshot-collect-s)을 각각 시도해, 획득한
+    // 샤드의 인스턴스(instanceId % N == s)만 수집한다 — 노드가 여럿이면 락 경쟁으로 샤드가 자연
+    // 분산되고, 한 노드만 살아 있으면 그 노드가 전 샤드를 잡는다(페일오버가 설정 없이 유지된다).
+    // consistent hashing이 필요 없는 이유: 스냅샷은 카운터 누적의 차분이라 담당 노드가 바뀌어도
+    // 데이터가 깨지지 않는다(구간 한 번 끊길 뿐 — ComparisonService가 이미 리셋 내성).
+    //
+    // shards=1(기본)이면 락 이름을 기존 "snapshot-collect" 그대로 써서 현행과 동작·배타가 동일하다
+    // (롤링 배포 중 구버전 노드와도 같은 락을 다툰다). 샤드 수 변경은 전 노드 동시 적용이 전제 —
+    // 노드마다 N이 다르면 담당 계산(id % N)이 어긋나 같은 인스턴스를 두 노드가 수집할 수 있다.
+    //
     // lockAtLeastFor=PT50S — 60초 주기의 대부분 동안 락을 붙잡아, 노드 간 타이머가 어긋나도(fixedDelay는
     //   노드마다 독립적으로 흐른다) 다른 노드의 틱이 같은 분(minute) 안에서 재수집하지 못하게 막는다.
-    //   짧게 두면(예: 0) 시계 드리프트로 두 노드가 한 주기에 중복 수집한다 — 그래서 주기에 가깝게 잡는다.
-    // lockAtMostFor=PT2M — 락 보유자가 크래시했을 때의 해제 상한(안전망)이자, 인스턴스가 많아 수집이
-    //   길어질 때 다른 노드가 끼어들지 않도록 실제 수집 시간보다 넉넉히 둔 값. 정상 완료 시엔
+    // lockAtMostFor=PT2M — 락 보유자가 크래시했을 때의 해제 상한(안전망). 정상 완료 시엔
     //   lockAtLeastFor(50s)까지만 붙잡으므로 이 상한은 크래시/이상 지연 때만 작동한다.
+    private static final Duration LOCK_AT_LEAST = Duration.ofSeconds(50);
+    private static final Duration LOCK_AT_MOST = Duration.ofMinutes(2);
+
     @Scheduled(fixedDelayString = "${dbtower.snapshot.interval-ms:60000}")
-    @SchedulerLock(name = "snapshot-collect", lockAtLeastFor = "PT50S", lockAtMostFor = "PT2M")
     public void collect() {
         // B-6: 종료 중이면 시작하지 않는다 — @PreDestroy로 풀이 내려가는 중에 submit하면
         // RejectedExecutionException 노이즈만 남는다(taskScheduler와 이 풀의 파괴 순서는 보장되지 않는다).
         if (pool.isShutdown()) {
             return;
         }
+        for (int shard = 0; shard < shards; shard++) {
+            String lockName = shards == 1 ? "snapshot-collect" : "snapshot-collect-" + shard;
+            Optional<SimpleLock> lock = lockProvider.lock(
+                    new LockConfiguration(Instant.now(), lockName, LOCK_AT_MOST, LOCK_AT_LEAST));
+            if (lock.isEmpty()) {
+                log.debug("스냅샷 샤드 스킵(다른 노드 담당) shard={}", shard);
+                continue;
+            }
+            try {
+                collectShard(shard);
+            } finally {
+                // unlock은 lockAtLeastFor를 존중한다(즉시 해제가 아니라 최소 보유 시각까지 유지) —
+                // 같은 분 안에서 다른 노드가 이 샤드를 재수집하지 못하는 보장은 그대로다.
+                lock.get().unlock();
+            }
+        }
+    }
+
+    /** 샤드 하나의 담당 인스턴스(instanceId % shards == shard)를 워커 풀로 병렬 수집한다. */
+    private void collectShard(int shard) {
         List<Future<?>> futures = new ArrayList<>();
-        int order = 0;
+        int order = 0, assigned = 0;
         for (DatabaseInstance instance : instanceRepository.findAll()) {
+            if (shards > 1 && instance.getId() % shards != shard) {
+                continue; // 다른 샤드 담당 — 그 샤드의 락 보유자가 수집한다
+            }
+            assigned++;
             if (!instance.isCollectionEnabled()) {
                 log.debug("스냅샷 수집 비활성(격리) instance={}", instance.getName());
                 continue;
@@ -123,7 +168,11 @@ public class SnapshotScheduler {
             final long jitterMs = Math.min((order++ % workers) * JITTER_STEP_MS, JITTER_CAP_MS);
             futures.add(pool.submit(() -> collectOne(instance, jitterMs)));
         }
-        // 이 틱의 모든 워커가 끝날 때까지 대기 — ShedLock 창 안에서 완료를 보장(다음 노드 끼어들기 방지).
+        if (shards > 1) {
+            // 2노드 분산 실측의 근거 로그 — 어느 노드가 어느 샤드를 몇 개나 담당했는지 남긴다
+            log.info("스냅샷 샤드 수집 shard={}/{} instances={}", shard, shards, assigned);
+        }
+        // 이 샤드의 모든 워커가 끝날 때까지 대기 — 락 창 안에서 완료를 보장(다음 노드 끼어들기 방지).
         for (Future<?> f : futures) {
             try {
                 f.get();
