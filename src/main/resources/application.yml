@@ -90,6 +90,16 @@ dbtower:
     # 0 이하면 보존 무제한(정리 안 함).
     retention-days: 7
     retention-sweep-ms: 3600000   # 보존 정리 주기(1시간) — 수집보다 훨씬 뜸해도 충분하다
+  # Discord 봇 인바운드(선택 모듈, 심화 아크 5 2단계) — 슬래시 커맨드로 자연어 진단.
+  # 보안 3단계: Ed25519 요청 서명(공개키) + 채널 화이트리스트 + 유저 화이트리스트(둘 다 기본 거부).
+  # 공개키 미설정 = 기능 끔(404). Discord 개발자 포털에서 앱 생성 → Interactions Endpoint URL에
+  # {base-url}/api/inbound/discord 등록 → 앱 공개키/ID와 허용 채널·유저 ID를 아래에 주입.
+  inbound:
+    discord:
+      public-key: ${DBTOWER_DISCORD_PUBLIC_KEY:}
+      application-id: ${DBTOWER_DISCORD_APP_ID:}
+      channel-allowlist: ${DBTOWER_DISCORD_CHANNELS:}
+      user-allowlist: ${DBTOWER_DISCORD_USERS:}
   meta-backup:
     enabled: true          # 플랫폼 메타 DB(자기 자신) 자기 백업 — pg_dump가 없거나 메타가 PG가 아니면 조용히 스킵
     interval-ms: 86400000  # 자기 백업 주기(기본 24시간)
