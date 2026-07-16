@@ -47,6 +47,9 @@ public class ConnectionPools {
 
     private final Map<Long, HikariDataSource> pools = new ConcurrentHashMap<>();
 
+    /** Vault 동적 자격증명(선택) — username이 vault: 접두인 인스턴스의 실제 계정을 접속 시점에 해석 */
+    private final VaultCredentials vaultCredentials;
+
     /** 풀별 마지막 사용 시각(ms) — LRU 정리 판정용. getConnection/getDataSource가 갱신한다. */
     private final Map<Long, Long> lastUsedMs = new ConcurrentHashMap<>();
 
@@ -69,6 +72,7 @@ public class ConnectionPools {
     private final long evictAfterMinutes;
 
     public ConnectionPools(
+            VaultCredentials vaultCredentials,
             @Value("${dbtower.query-timeout-seconds:15}") int queryTimeoutSeconds,
             @Value("${dbtower.pool.max-per-instance:6}") int maxPoolSize,
             @Value("${dbtower.pool.connection-timeout-ms:5000}") int connectionTimeoutMs,
@@ -76,6 +80,7 @@ public class ConnectionPools {
             @Value("${dbtower.pool.max-lifetime-ms:1800000}") long maxLifetimeMs,
             @Value("${dbtower.pool.evict-after-minutes:30}") long evictAfterMinutes,
             @Value("${dbtower.snapshot.interval-ms:60000}") long snapshotIntervalMs) {
+        this.vaultCredentials = vaultCredentials;
         this.queryTimeoutSeconds = queryTimeoutSeconds;
         this.maxPoolSize = Math.max(1, maxPoolSize);
         this.connectionTimeoutMs = connectionTimeoutMs;
@@ -98,13 +103,34 @@ public class ConnectionPools {
     }
 
     public Connection getConnection(DatabaseInstance instance, String jdbcUrl) throws SQLException {
+        VaultCredentials.Creds creds = credsFor(instance);
         // 등록 전 접속 검증(id 없음)은 풀을 만들지 않고 1회성 연결로 처리한다
         if (instance.getId() == null) {
-            return DriverManager.getConnection(jdbcUrl, instance.getUsername(), instance.getPassword());
+            return DriverManager.getConnection(jdbcUrl, creds.username(), creds.password());
         }
         lastUsedMs.put(instance.getId(), System.currentTimeMillis());
-        HikariDataSource ds = pools.computeIfAbsent(instance.getId(), id -> newPool(instance, jdbcUrl));
+        rotateIfCredentialsChanged(instance.getId(), creds);
+        HikariDataSource ds = pools.computeIfAbsent(instance.getId(), id -> newPool(instance, jdbcUrl, creds));
         return ds.getConnection();
+    }
+
+    /** 접속에 쓸 자격증명 — vault: 접두면 동적 발급, 아니면 등록 값 그대로. */
+    private VaultCredentials.Creds credsFor(DatabaseInstance instance) {
+        return vaultCredentials.applies(instance)
+                ? vaultCredentials.resolve(instance)
+                : new VaultCredentials.Creds(instance.getUsername(), instance.getPassword());
+    }
+
+    /**
+     * 동적 자격증명 회전 감지 — 풀이 이전 계정으로 만들어져 있으면 통째로 갈아끼운다(upsert의
+     * 접속 정보 변경과 같은 정리 원칙). 옛 커넥션은 close가 회수하고, 만료 계정은 DB가 소멸시킨다.
+     */
+    private void rotateIfCredentialsChanged(Long id, VaultCredentials.Creds creds) {
+        HikariDataSource existing = pools.get(id);
+        if (existing != null && !creds.username().equals(existing.getUsername())) {
+            log.info("동적 자격증명 회전 감지 — pool={} 재생성(new user={})", existing.getPoolName(), creds.username());
+            close(id);
+        }
     }
 
     /**
@@ -114,18 +140,20 @@ public class ConnectionPools {
      * 새 물리 커넥션을 열고 닫아, 기존 DriverManager 1회성 연결과 동작이 동일하다.
      */
     public DataSource getDataSource(DatabaseInstance instance, String jdbcUrl) {
+        VaultCredentials.Creds creds = credsFor(instance);
         if (instance.getId() == null) {
-            return new DriverManagerDataSource(jdbcUrl, instance.getUsername(), instance.getPassword());
+            return new DriverManagerDataSource(jdbcUrl, creds.username(), creds.password());
         }
         lastUsedMs.put(instance.getId(), System.currentTimeMillis());
-        return pools.computeIfAbsent(instance.getId(), id -> newPool(instance, jdbcUrl));
+        rotateIfCredentialsChanged(instance.getId(), creds);
+        return pools.computeIfAbsent(instance.getId(), id -> newPool(instance, jdbcUrl, creds));
     }
 
-    private HikariDataSource newPool(DatabaseInstance instance, String jdbcUrl) {
+    private HikariDataSource newPool(DatabaseInstance instance, String jdbcUrl, VaultCredentials.Creds creds) {
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(jdbcUrl);
-        config.setUsername(instance.getUsername());
-        config.setPassword(instance.getPassword());
+        config.setUsername(creds.username());
+        config.setPassword(creds.password());
         config.setMaximumPoolSize(maxPoolSize);
         // 온디맨드: 유휴 하한 0 — 안 쓰는 대상에 커넥션을 상시 꽂아두지 않는다.
         // 활발한 대상은 idleTimeout(수집 주기 하한 가드) 안에서 커넥션이 따뜻하게 유지된다.
@@ -171,6 +199,7 @@ public class ConnectionPools {
     public void close(Long instanceId) {
         HikariDataSource ds = pools.remove(instanceId);
         lastUsedMs.remove(instanceId);
+        vaultCredentials.evict(instanceId);
         if (ds != null) {
             ds.close();
         }

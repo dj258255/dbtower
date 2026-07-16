@@ -90,6 +90,13 @@ dbtower:
     # 0 이하면 보존 무제한(정리 안 함).
     retention-days: 7
     retention-sweep-ms: 3600000   # 보존 정리 주기(1시간) — 수집보다 훨씬 뜸해도 충분하다
+  # Vault 동적 자격증명(선택, 하드닝 잔여) — 인스턴스 username을 "vault:<creds 경로>"로 등록하면
+  # 접속 시점에 Vault database secrets engine에서 수명 있는 계정을 발급받아 쓴다(정적 비밀번호의
+  # 유출 창을 TTL로 축소). 리스 80% 시점 선제 갱신 + 풀 자동 회전. 미설정 시 vault: 인스턴스는
+  # 명확히 실패(조용한 오동작 방지). 적용 범위는 JDBC 풀 — 백업 CLI는 별도 계정 전제(한계 명시).
+  vault:
+    url: ${DBTOWER_VAULT_URL:}
+    token: ${DBTOWER_VAULT_TOKEN:}
   # Discord 봇 인바운드(선택 모듈, 심화 아크 5 2단계) — 슬래시 커맨드로 자연어 진단.
   # 보안 3단계: Ed25519 요청 서명(공개키) + 채널 화이트리스트 + 유저 화이트리스트(둘 다 기본 거부).
   # 공개키 미설정 = 기능 끔(404). Discord 개발자 포털에서 앱 생성 → Interactions Endpoint URL에
