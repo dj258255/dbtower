@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.LocalDateTime;
 
@@ -50,10 +51,15 @@ class SnapshotRetentionJobTest {
         jobLogger.setLevel(originalLevel);
     }
 
+    /** 파티션 카탈로그가 없는 환경 흉내 — queryForObject가 null이라 isPartitioned=false(DELETE 폴백 경로) */
+    private static JdbcTemplate plainJdbc() {
+        return Mockito.mock(JdbcTemplate.class);
+    }
+
     @Test
     void 기본_보존_7일이면_정확히_7일_전이_cutoff다() {
         when(repository.deleteByCapturedAtBefore(any())).thenReturn(3);
-        SnapshotRetentionJob job = new SnapshotRetentionJob(repository, 7);
+        SnapshotRetentionJob job = new SnapshotRetentionJob(repository, plainJdbc(), 7);
 
         LocalDateTime before = LocalDateTime.now();
         job.sweep();
@@ -69,31 +75,31 @@ class SnapshotRetentionJobTest {
 
     @Test
     void 보존일수_0이면_삭제하지_않는다() {
-        new SnapshotRetentionJob(repository, 0).sweep();
+        new SnapshotRetentionJob(repository, plainJdbc(), 0).sweep();
         verify(repository, never()).deleteByCapturedAtBefore(any());
     }
 
     @Test
     void 보존일수_음수도_보존_무제한으로_취급한다() {
-        new SnapshotRetentionJob(repository, -1).sweep();
+        new SnapshotRetentionJob(repository, plainJdbc(), -1).sweep();
         verify(repository, never()).deleteByCapturedAtBefore(any());
     }
 
     @Test
     void 삭제가_있으면_건수를_info로_남긴다() {
         when(repository.deleteByCapturedAtBefore(any())).thenReturn(42);
-        new SnapshotRetentionJob(repository, 7).sweep();
+        new SnapshotRetentionJob(repository, plainJdbc(), 7).sweep();
 
         assertEquals(1, logs.list.size());
         ILoggingEvent event = logs.list.get(0);
         assertEquals(Level.INFO, event.getLevel());
-        assertTrue(event.getFormattedMessage().contains("deleted=42"));
+        assertTrue(event.getFormattedMessage().contains("deletedRows=42"));
     }
 
     @Test
     void 삭제할_것이_없으면_debug로만_남긴다() {
         when(repository.deleteByCapturedAtBefore(any())).thenReturn(0);
-        new SnapshotRetentionJob(repository, 7).sweep();
+        new SnapshotRetentionJob(repository, plainJdbc(), 7).sweep();
 
         assertEquals(1, logs.list.size());
         assertEquals(Level.DEBUG, logs.list.get(0).getLevel());
