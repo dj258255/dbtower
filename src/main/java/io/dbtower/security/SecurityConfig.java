@@ -135,7 +135,7 @@ public class SecurityConfig {
                         .csrfTokenRepository(csrfCookieRepository())
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
                         // 봇 인바운드는 외부 서버(Discord)가 호출 — 세션·CSRF 대신 Ed25519 서명이 인증
-                        .ignoringRequestMatchers("/api/inbound/discord")
+                        .ignoringRequestMatchers("/api/inbound/discord", "/api/inbound/slack")
                         // OAuth 등록·토큰은 외부 MCP 클라이언트가 쿠키 없이 호출(공개 클라이언트) — CSRF 제외.
                         // authorize는 브라우저 GET이라 CSRF 대상이 아니고, 인가 코드+PKCE가 위조를 막는다.
                         .ignoringRequestMatchers("/oauth/register", "/oauth/token")
@@ -163,7 +163,7 @@ public class SecurityConfig {
                         .requestMatchers("/oauth/authorize").authenticated()
                         // 봇 인바운드 — 인증은 요청 서명(Ed25519)+채널·유저 화이트리스트가 담당(컨트롤러에서 검증).
                         // 공개키 미설정이면 컨트롤러가 404로 기능 자체를 숨긴다(기능 게이트)
-                        .requestMatchers("/api/inbound/discord").permitAll()
+                        .requestMatchers("/api/inbound/discord", "/api/inbound/slack").permitAll()
                         .requestMatchers("/api/security/**").hasRole("ADMIN")
                         .requestMatchers("/api/audit/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/instances").hasRole("ADMIN")

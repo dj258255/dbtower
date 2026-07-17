@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -26,6 +29,8 @@ import java.util.List;
  */
 @Component
 public class PrometheusClient {
+
+    private static final Logger log = LoggerFactory.getLogger(PrometheusClient.class);
 
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
     private final ObjectMapper mapper = new ObjectMapper();
@@ -84,6 +89,7 @@ public class PrometheusClient {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(5)).GET().build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (res.statusCode() != 200) {
+                log.warn("Prometheus query_range 비정상 응답 status={} promql={}", res.statusCode(), promql);
                 return List.of();
             }
             JsonNode result = mapper.readTree(res.body()).path("data").path("result");
@@ -99,7 +105,8 @@ public class PrometheusClient {
             Thread.currentThread().interrupt();
             return List.of();
         } catch (Exception e) {
-            // 연결 불가·파싱 실패 전부 "미수집"으로 수렴 — 그래프 한 장 때문에 콘솔이 죽지 않게 한다
+            // 연결 불가·파싱 실패 전부 "미수집"으로 수렴하되, 원인은 로그로 남긴다 — 침묵 실패는 진단 불가를 낳는다
+            log.warn("Prometheus query_range 실패 promql={} cause={}", promql, e.toString());
             return List.of();
         }
     }

@@ -39,6 +39,10 @@ import org.bson.json.JsonWriterSettings;
 
 import java.nio.file.Files;
 
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayDeque;
+import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -310,26 +314,55 @@ public class MongoOperator implements DbmsOperator {
     public List<SlowQuery> slowQueries(int limit) {
         try {
             return withClient(client -> {
-                List<SlowQuery> result = new ArrayList<>();
+                // 시간대별 샘플링(레퍼런스 교훈) — millis 상위만 뽑으면 폭주 시간대 하나가 목록을
+                // 독점해 다른 시간대의 슬로우가 안 보인다. 상위 3N을 뽑아 시(hour) 버킷을
+                // 라운드로빈으로 돌며 N개를 고른다(버킷 안은 millis 내림차순 유지).
+                List<SlowQuery> fetched = new ArrayList<>();
+                List<Object> hours = new ArrayList<>();
                 var docs = db(client).getCollection("system.profile")
                         .find(Filters.not(Filters.regex("ns", "\\.system\\.")))
                         .sort(Sorts.descending("millis"))
-                        .limit(limit);
+                        .limit(Math.max(limit * 3, limit));
                 for (Document doc : docs) {
                     // system.profile의 planSummary가 인덱스 사용 여부를 그대로 알려준다(예: "IXSCAN { a: 1 }", "COLLSCAN")
-                    result.add(new SlowQuery(
+                    fetched.add(new SlowQuery(
                             queryText(doc.getString("ns"), doc.get("command", Document.class)),
                             ((Number) doc.getOrDefault("millis", 0)).doubleValue(),
                             ((Number) doc.getOrDefault("docsExamined", 0)).longValue(),
                             String.valueOf(doc.get("ts")),
                             null, -1, -1,
                             doc.getString("planSummary")));
+                    Object ts = doc.get("ts");
+                    hours.add(ts instanceof Date d
+                            ? d.toInstant().truncatedTo(ChronoUnit.HOURS) : "unknown");
                 }
-                return result;
+                return sampleAcrossHours(fetched, hours, limit);
             });
         } catch (Exception e) {
             throw new OperatorException("MongoDB 슬로우 쿼리 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    /** 시간(hour) 버킷 라운드로빈 샘플링 — 입력은 millis 내림차순, 버킷 순서는 등장 순서를 따른다. */
+    static List<SlowQuery> sampleAcrossHours(List<SlowQuery> fetched, List<Object> hourKeys, int limit) {
+        LinkedHashMap<Object, ArrayDeque<SlowQuery>> buckets = new LinkedHashMap<>();
+        for (int i = 0; i < fetched.size(); i++) {
+            buckets.computeIfAbsent(hourKeys.get(i), k -> new ArrayDeque<>()).addLast(fetched.get(i));
+        }
+        List<SlowQuery> out = new ArrayList<>();
+        while (out.size() < limit) {
+            boolean took = false;
+            for (var q : buckets.values()) {
+                if (!q.isEmpty() && out.size() < limit) {
+                    out.add(q.pollFirst());
+                    took = true;
+                }
+            }
+            if (!took) {
+                break;
+            }
+        }
+        return out;
     }
 
     /**
