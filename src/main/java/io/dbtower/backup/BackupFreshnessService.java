@@ -54,13 +54,19 @@ public class BackupFreshnessService {
     }
 
     /**
-     * 마지막 성공 백업을 뽑아 신선도를 판정한다.
+     * 마지막 성공 "앵커" 백업(FULL/PHYSICAL)을 뽑아 신선도를 판정한다.
      * 성공 이력이 없으면 NO_BACKUP(사각지대), 있으면 경과가 임계 이내면 FRESH·초과면 STALE.
      * verifyStatus는 그 마지막 성공 백업의 복원 검증 결과(A7)를 그대로 실어 나른다.
+     *
+     * LOG를 제외하는 이유(V23과 함께) — 신선도가 "종류 무관 최근 성공"이면 15분 주기 LOG 성공이
+     * 몇 주째 실패 중인 FULL을 초록으로 가린다. 복구의 앵커가 없으면 LOG 체인만으로는 복원이
+     * 불가능하므로, 신선도의 기준은 앵커여야 한다(LOG 축의 건강은 PITR 창이 별도로 말한다).
+     * 타입 미상(null)은 V13 이전 구 이력 — 전부 FULL 시절이라 앵커로 인정한다.
      */
     BackupFreshness freshnessFor(DatabaseInstance instance, LocalDateTime now) {
         BackupRun latest = runRepository.findTop20ByInstanceIdOrderByStartedAtDesc(instance.getId()).stream()
                 .filter(r -> r.getStatus() == BackupRun.Status.SUCCESS)
+                .filter(r -> !"LOG".equals(r.getBackupType()))
                 .findFirst()
                 .orElse(null);
 

@@ -4,7 +4,7 @@ import io.dbtower.backup.internal.BackupService;
 import io.dbtower.backup.internal.domain.BackupPolicyEntity;
 import io.dbtower.backup.internal.domain.BackupRun;
 
-import io.dbtower.operator.model.BackupPolicy;
+import io.dbtower.operator.model.BackupPolicy.BackupType;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.web.bind.annotation.*;
@@ -22,30 +22,40 @@ public class BackupController {
     }
 
     public record PolicyRequest(@Min(1) @Max(10080) int intervalMinutes,
-                                BackupPolicy.BackupType type,
+                                BackupType type,
                                 Boolean enabled) {
     }
 
     public record PolicyResponse(Long instanceId, int intervalMinutes,
-                                 BackupPolicy.BackupType type, boolean enabled, String lastRunAt) {
+                                 BackupType type, boolean enabled, String lastRunAt) {
         static PolicyResponse from(BackupPolicyEntity p) {
             return new PolicyResponse(p.getInstanceId(), p.getIntervalMinutes(), p.getType(),
                     p.isEnabled(), p.getLastRunAt() == null ? null : p.getLastRunAt().toString());
         }
     }
 
-    /** "N분 주기 백업해줘" — 추상 정책 등록. 실행 방식은 기종별 Operator가 결정 */
+    /**
+     * "N분 주기 백업해줘" — 추상 정책 등록. 실행 방식은 기종별 Operator가 결정.
+     * 타입별 upsert(V23) — FULL 6시간 + LOG 15분처럼 병행 스케줄이 정석이라 타입이 정책 키의 일부다.
+     * type 생략 시 FULL(기존 호출 호환).
+     */
     @PutMapping("/backup-policy")
     public PolicyResponse upsert(@PathVariable Long id, @RequestBody PolicyRequest req) {
-        BackupPolicy.BackupType type = req.type() == null ? BackupPolicy.BackupType.FULL : req.type();
+        BackupType type = req.type() == null ? BackupType.FULL : req.type();
         boolean enabled = req.enabled() == null || req.enabled();
         return PolicyResponse.from(backupService.upsertPolicy(id, req.intervalMinutes(), type, enabled));
+    }
+
+    /** 인스턴스의 정책 목록 — 타입별 병행 정책을 한눈에 */
+    @GetMapping("/backup-policy")
+    public List<PolicyResponse> policies(@PathVariable Long id) {
+        return backupService.policiesFor(id).stream().map(PolicyResponse::from).toList();
     }
 
     /** 즉시 백업 실행 */
     @PostMapping("/backup")
     public BackupRunView runNow(@PathVariable Long id,
-                                @RequestParam(defaultValue = "FULL") BackupPolicy.BackupType type) {
+                                @RequestParam(defaultValue = "FULL") BackupType type) {
         return BackupRunView.from(backupService.runNow(id, type));
     }
 

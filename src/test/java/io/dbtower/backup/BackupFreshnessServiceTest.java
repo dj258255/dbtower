@@ -52,6 +52,22 @@ class BackupFreshnessServiceTest {
     }
 
     @Test
+    void LOG_성공은_앵커_신선도를_채우지_못한다() {
+        // FULL이 3일 전, LOG가 방금 성공 — "종류 무관 최근 성공"이면 FRESH로 위장되는 케이스(V23 왜곡 수정).
+        LocalDateTime now = LocalDateTime.now();
+        BackupRun recentLog = success(now.minusMinutes(10), null);
+        recentLog.setBackupType("LOG");
+        BackupRun oldFull = success(now.minusDays(3), "VERIFIED");
+        oldFull.setBackupType("FULL");
+        when(runRepository.findTop20ByInstanceIdOrderByStartedAtDesc(any()))
+                .thenReturn(List.of(recentLog, oldFull));
+
+        BackupFreshness f = service.freshnessFor(instance, now);
+
+        assertEquals(BackupFreshness.Status.STALE, f.status()); // 앵커(FULL) 기준 3일 경과
+    }
+
+    @Test
     void 임계_이내_백업은_FRESH다() {
         LocalDateTime now = LocalDateTime.now();
         when(runRepository.findTop20ByInstanceIdOrderByStartedAtDesc(any()))

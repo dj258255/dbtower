@@ -6,6 +6,7 @@ import io.dbtower.backup.internal.persistence.BackupPolicyRepository;
 import io.dbtower.backup.internal.persistence.BackupRunRepository;
 
 import io.dbtower.operator.model.BackupPolicy;
+import io.dbtower.operator.model.BackupPolicy.BackupType;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.BackupArtifactCipher;
@@ -44,18 +45,24 @@ public class BackupService {
         this.artifactCipher = artifactCipher;
     }
 
-    /** 정책 등록/수정 — 인스턴스당 하나 */
+    /** 정책 등록/수정 — 키는 (인스턴스, 타입). FULL 앵커와 LOG 체인이 각자의 주기로 병행한다(V23) */
     public BackupPolicyEntity upsertPolicy(Long instanceId, int intervalMinutes,
-                                           BackupPolicy.BackupType type, boolean enabled) {
+                                           BackupType type, boolean enabled) {
         registryService.findById(instanceId); // 존재 검증
-        BackupPolicyEntity policy = policyRepository.findByInstanceId(instanceId)
+        BackupPolicyEntity policy = policyRepository.findByInstanceIdAndType(instanceId, type)
                 .orElseGet(() -> new BackupPolicyEntity(instanceId, intervalMinutes, type));
         policy.update(intervalMinutes, type, enabled);
         return policyRepository.save(policy);
     }
 
+    /** 인스턴스의 정책 목록 — 타입별로 최대 3개(FULL/LOG/PHYSICAL) */
+    public List<BackupPolicyEntity> policiesFor(Long instanceId) {
+        registryService.findById(instanceId); // 존재 검증(스코프 밖 404 동일 경계)
+        return policyRepository.findAllByInstanceId(instanceId);
+    }
+
     /** 즉시 실행 — 실행 방식은 Operator가 기종에 맞게 결정하고, 성공/실패/미지원을 이력으로 남긴다 */
-    public BackupRun runNow(Long instanceId, BackupPolicy.BackupType type) {
+    public BackupRun runNow(Long instanceId, BackupType type) {
         LocalDateTime startedAt = LocalDateTime.now();
         long start = System.currentTimeMillis();
         BackupRun run;
@@ -167,9 +174,9 @@ public class BackupService {
         // 앵커 = 가장 최근의 성공한 전체 백업 — PHYSICAL(물리)이 있으면 그것이 진짜 앵커다
         // (PG·Oracle은 논리 덤프에 로그를 재생할 수 없다). 둘 다 있으면 더 최근 것.
         var physical = runRepository.findTopByInstanceIdAndBackupTypeAndStatusOrderByStartedAtDesc(
-                instanceId, BackupPolicy.BackupType.PHYSICAL.name(), BackupRun.Status.SUCCESS);
+                instanceId, BackupType.PHYSICAL.name(), BackupRun.Status.SUCCESS);
         var logical = runRepository.findTopByInstanceIdAndBackupTypeAndStatusOrderByStartedAtDesc(
-                instanceId, BackupPolicy.BackupType.FULL.name(), BackupRun.Status.SUCCESS);
+                instanceId, BackupType.FULL.name(), BackupRun.Status.SUCCESS);
         var full = physical.isEmpty() ? logical
                 : logical.isEmpty() ? physical
                 : (physical.get().getStartedAt().isAfter(logical.get().getStartedAt()) ? physical : logical);
@@ -180,7 +187,7 @@ public class BackupService {
         }
         List<BackupRun> logs = runRepository
                 .findByInstanceIdAndBackupTypeAndStatusAndStartedAtAfterOrderByStartedAtAsc(
-                        instanceId, BackupPolicy.BackupType.LOG.name(), BackupRun.Status.SUCCESS,
+                        instanceId, BackupType.LOG.name(), BackupRun.Status.SUCCESS,
                         full.get().getStartedAt());
         LocalDateTime lastLogAt = logs.isEmpty() ? null : logs.get(logs.size() - 1).getStartedAt();
         String note = logs.isEmpty()

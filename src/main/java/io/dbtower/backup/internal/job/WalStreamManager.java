@@ -2,7 +2,7 @@ package io.dbtower.backup.internal.job;
 
 import io.dbtower.backup.internal.persistence.BackupPolicyRepository;
 import io.dbtower.operator.BackupCommands;
-import io.dbtower.operator.model.BackupPolicy;
+import io.dbtower.operator.model.BackupPolicy.BackupType;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DatabaseInstanceRepository;
 import io.dbtower.registry.DbmsType;
@@ -97,7 +97,7 @@ public class WalStreamManager {
     Set<Long> desiredInstanceIds() {
         Set<Long> desired = new HashSet<>();
         for (var policy : policyRepository.findByEnabledTrue()) {
-            if (policy.getType() != BackupPolicy.BackupType.LOG) {
+            if (policy.getType() != BackupType.LOG) {
                 continue;
             }
             instanceRepository.findById(policy.getInstanceId()).ifPresent(i -> {
