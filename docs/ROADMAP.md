@@ -302,7 +302,7 @@ record TableDetail(String table, String engine, long rowCount, long dataBytes, l
 
 ## 심화 아크 5 — MCP 채널 루프·digest 위생 (레퍼런스 2부 대조, 2026-07-15)
 
-> **구현 완료** (VERIFICATION 70·71절): 데이터 마스킹 배선 4곳, StatsCollectionAdvisor(digest 포화·소실·PS 사각 실측 + PG dealloc), 알림 진단 딥링크(dbtower.base-url·질문 프리필), metrics MCP 도구(14종). 인스턴스 팀 라벨+console_url(V12)도 함께 완료. 잔여: Slack/Discord 봇 인바운드(후속 선택 모듈), Slow KST 표시·Mongo 샘플링(소소). 아래 명세는 기록.
+> **구현 완료** (VERIFICATION 70·71절): 데이터 마스킹 배선 4곳, StatsCollectionAdvisor(digest 포화·소실·PS 사각 실측 + PG dealloc), 알림 진단 딥링크(dbtower.base-url·질문 프리필), metrics MCP 도구(14종). 인스턴스 팀 라벨+console_url(V12)도 함께 완료. Discord 봇 인바운드도 완료 — 슬래시 커맨드(88절, Ed25519·화이트리스트) + Gateway 봇(93·94절, 이모지 반응 → embed 진단 답글, 특권 인텐트 0·하트비트 분리·재시작 스팸 차단) 실연동 e2e. Slow 로컬 시간 표시·Mongo 보존 창 표기도 완료(85절). 잔여: 슬래시 커맨드 실등록만 공개 엔드포인트(터널/배포) 필요, Slack Events는 수요 시. 아래 명세는 기록.
 
 레퍼런스 발표 2부(MCP 활용 4장 + Lessons Learned 5장)를 장 단위로 대조한 결과. 대조 과정에서
 레퍼런스의 교훈 두 개(digest 포화·Prepared Statement 사각)가 **DBTower에도 실재함을 데모 DB로
