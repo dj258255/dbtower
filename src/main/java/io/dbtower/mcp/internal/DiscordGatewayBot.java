@@ -21,12 +21,15 @@ import java.net.http.WebSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -71,6 +74,13 @@ public class DiscordGatewayBot {
         t.setDaemon(true);
         return t;
     });
+    // 진단은 분 단위로 오래 걸린다 — 하트비트와 같은 스레드에 태우면 하트비트가 굶어 Discord가
+    // 연결을 끊는다(실측: 진단 중 code=1000 재접속 반복). 진단 전용 워커로 분리한다(직렬이면 충분).
+    private final ExecutorService diagnosisWorker = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "dbtower-discord-diagnosis");
+        t.setDaemon(true);
+        return t;
+    });
 
     private final String botToken;
     private final Set<String> triggerEmojis;
@@ -82,6 +92,8 @@ public class DiscordGatewayBot {
     private volatile WebSocket socket;
     private volatile Integer lastSequence;
     private volatile String botUserId;
+    /** 현재 연결의 하트비트 태스크 — 재접속 시 취소하지 않으면 연결마다 하트비트가 누적된다. */
+    private volatile ScheduledFuture<?> heartbeatTask;
     private final StringBuilder frame = new StringBuilder();
     /** 진단·답글을 이미 한 메시지 id — 재접속 보충 스캔·중복 반응에서 두 번 처리하지 않게(멱등). */
     private final Set<String> processed = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -130,6 +142,7 @@ public class DiscordGatewayBot {
             ws.sendClose(WebSocket.NORMAL_CLOSURE, "shutdown");
         }
         scheduler.shutdownNow();
+        diagnosisWorker.shutdownNow();
     }
 
     private void connect() {
@@ -198,7 +211,11 @@ public class DiscordGatewayBot {
         switch (op) {
             case 10 -> { // HELLO — 하트비트 시작 + IDENTIFY
                 long interval = msg.path("d").path("heartbeat_interval").asLong(45000);
-                scheduler.scheduleAtFixedRate(() -> sendHeartbeat(ws), interval, interval, TimeUnit.MILLISECONDS);
+                ScheduledFuture<?> prev = heartbeatTask;
+                if (prev != null) {
+                    prev.cancel(false); // 이전 연결의 하트비트 중단 — 안 하면 재접속마다 누적된다
+                }
+                heartbeatTask = scheduler.scheduleAtFixedRate(() -> sendHeartbeat(ws), interval, interval, TimeUnit.MILLISECONDS);
                 identify(ws);
             }
             case 0 -> dispatch(msg.path("t").asText(), msg.path("d")); // 이벤트
@@ -227,7 +244,7 @@ public class DiscordGatewayBot {
             log.info("Discord Gateway READY — 봇 user={}", botUserId);
             // 연결 시 보충 스캔 — Gateway는 연결 중의 이벤트만 주므로(재접속/기동 전 반응은 재생 안 됨),
             // 화이트리스트 채널의 최근 메시지에 이미 달린 트리거 반응을 한 번 훑어 처리한다(멱등: 처리한 메시지 기억).
-            scheduler.execute(this::reconcileExistingReactions);
+            diagnosisWorker.execute(this::reconcileExistingReactions);
             return;
         }
         if ("MESSAGE_REACTION_ADD".equals(type)) {
@@ -238,8 +255,8 @@ public class DiscordGatewayBot {
             // allowSelfReact(테스트 훅)면 봇 자기 반응 배제를 끈다 — botUserId를 null로 넘겨 우회.
             if (DiscordTriggerRules.shouldReact(emoji, triggerEmojis, channelId, userId,
                     allowSelfReact ? null : botUserId, channelAllowlist, userAllowlist)) {
-                // 진단은 느리다 — 스케줄러 스레드를 막지 않게 워커로 넘긴다
-                scheduler.execute(() -> diagnoseAndReply(channelId, messageId));
+                // 진단은 느리다 — 하트비트가 도는 스케줄러가 아니라 진단 전용 워커로 넘긴다
+                diagnosisWorker.execute(() -> diagnoseAndReply(channelId, messageId, true));
             } else {
                 // 트리거·화이트리스트에 안 걸린 반응 — 왜 무시됐는지 추적 가능하게 남긴다(설정 디버깅)
                 log.debug("반응 무시 emoji={} channel={} user={} (트리거·화이트리스트 밖)", emoji, channelId, userId);
@@ -271,7 +288,7 @@ public class DiscordGatewayBot {
                         }
                         if (reactedByAllowedUser(channelId, messageId, emoji)) {
                             log.info("보충 스캔 — 기존 반응 {} 처리 message={}", emoji, messageId);
-                            diagnoseAndReply(channelId, messageId);
+                            diagnoseAndReply(channelId, messageId, false);
                             break;
                         }
                     }
@@ -298,8 +315,14 @@ public class DiscordGatewayBot {
         return false;
     }
 
-    /** 반응이 달린 알림 메시지를 조회해 대상 인스턴스를 알아내고, 진단 결과를 답글로 붙인다. */
-    private void diagnoseAndReply(String channelId, String messageId) {
+    /**
+     * 반응이 달린 알림 메시지를 조회해 대상 인스턴스를 알아내고, 진단 결과를 답글로 붙인다.
+     *
+     * announceUnresolved — 대상 인스턴스를 못 알아냈을 때 안내 답글을 다는가. 라이브 반응(true)은
+     * 사람이 방금 눌러 기다리고 있으니 침묵하면 안 되고, 재시작 보충 스캔(false)은 과거 이력 순회라
+     * 재시작할 때마다 옛 알림에 같은 안내가 반복 답글로 쌓인다(스팸) — 로그만 남기고 넘어간다.
+     */
+    private void diagnoseAndReply(String channelId, String messageId, boolean announceUnresolved) {
         if (!processed.add(messageId)) {
             return; // 이미 처리한 메시지 — 중복 반응·재접속 보충에서 두 번 진단하지 않는다
         }
@@ -323,8 +346,12 @@ public class DiscordGatewayBot {
                         ? message.path("embeds").get(0).path("title").asText(null) : null;
                 String instanceName = DiscordTriggerRules.extractInstanceName(embedTitle, content);
                 if (instanceName == null) {
-                    reply(channelId, messageId, "이 메시지에서 대상 인스턴스를 알 수 없어 진단을 시작하지 못했습니다 "
-                            + "(오래된 알림이면 봇 재시작으로 매핑이 비었을 수 있습니다 — 새 알림에 반응해 주세요).");
+                    if (announceUnresolved) {
+                        reply(channelId, messageId, "이 메시지에서 대상 인스턴스를 알 수 없어 진단을 시작하지 못했습니다 "
+                                + "(오래된 알림이면 봇 재시작으로 매핑이 비었을 수 있습니다 — 새 알림에 반응해 주세요).");
+                    } else {
+                        log.info("보충 스캔 — 대상 인스턴스 미해소로 건너뜀 message={} (재시작으로 매핑 소실)", messageId);
+                    }
                     return;
                 }
                 instance = registryService.findAll().stream()
@@ -332,22 +359,26 @@ public class DiscordGatewayBot {
                         .findFirst().orElse(null);
             }
             if (instance == null) {
-                reply(channelId, messageId, "등록되지 않은 인스턴스입니다.");
+                if (announceUnresolved) {
+                    reply(channelId, messageId, "등록되지 않은 인스턴스입니다.");
+                } else {
+                    log.info("보충 스캔 — 미등록 인스턴스로 건너뜀 message={}", messageId);
+                }
                 return;
             }
             String instanceName = instance.getName();
             reply(channelId, messageId, "**" + instanceName + "** 진단을 시작합니다… (잠시만요)");
             var result = diagnosisService.diagnose(instance.getId(), instance.getType().name(),
                     instanceName, "방금 이 알림이 온 이유를 분석해줘");
-            reply(channelId, messageId, clip("[" + instanceName + "] " + result.answer()));
+            replyEmbed(channelId, messageId, "DBTower 진단 — " + instanceName, result.answer());
         } catch (Exception e) {
             log.warn("Discord 반응 진단 실패 channel={} msg={} cause={}", channelId, messageId, e.getMessage());
         }
     }
 
-    /** Discord 메시지 본문 한도(2000자) — 초과분은 경계에서 자른다(문의 embed 절단과 같은 규칙). */
-    private static String clip(String s) {
-        return s.length() <= 2000 ? s : s.substring(0, 1980) + "\n…(한도 절단)";
+    /** embed description 한도(4096자) 경계 절단 — 본문(2000자)보다 여유가 있어 긴 진단 답변에 알맞다. */
+    private static String clipEmbed(String s) {
+        return s.length() <= 4000 ? s : s.substring(0, 3980) + "\n…(한도 절단)";
     }
 
     private JsonNode restGet(String path) throws Exception {
@@ -365,20 +396,37 @@ public class DiscordGatewayBot {
 
     /** 원본 메시지에 답글(message_reference)로 붙인다 — 레퍼런스의 "스레드 댓글"에 대응. */
     private void reply(String channelId, String messageId, String content) {
+        postReply(channelId, messageId, Map.of("content", content));
+    }
+
+    /**
+     * 진단 결과 답글을 embed 카드로 — 감지 알림·문의와 같은 결(알림은 카드인데 답변만 밋밋한 텍스트면
+     * 루프의 마지막 조각만 격이 떨어진다). 색은 문의와 같은 브랜드 인디고.
+     */
+    private void replyEmbed(String channelId, String messageId, String title, String description) {
+        Map<String, Object> embed = Map.of(
+                "title", title,
+                "color", 0x6366F1,
+                "description", clipEmbed(description));
+        postReply(channelId, messageId, Map.of("embeds", List.of(embed)));
+    }
+
+    private void postReply(String channelId, String messageId, Map<String, Object> payload) {
         try {
-            String body = mapper.writeValueAsString(Map.of(
-                    "content", content,
-                    "message_reference", Map.of("message_id", messageId),
-                    "allowed_mentions", Map.of("parse", List.of())));
+            Map<String, Object> body = new HashMap<>(payload);
+            body.put("message_reference", Map.of("message_id", messageId));
+            body.put("allowed_mentions", Map.of("parse", List.of()));
             HttpRequest req = HttpRequest.newBuilder(URI.create(API + "/channels/" + channelId + "/messages"))
                     .timeout(Duration.ofSeconds(10))
                     .header("Authorization", "Bot " + botToken)
                     .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
                     .build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (res.statusCode() >= 300) {
                 log.warn("Discord 답글 실패 status={} body={}", res.statusCode(), res.body());
+            } else {
+                log.info("Discord 답글 발송 status={} reply_to={}", res.statusCode(), messageId);
             }
         } catch (Exception e) {
             log.warn("Discord 답글 발송 실패: {}", e.getMessage());
