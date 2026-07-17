@@ -1197,10 +1197,19 @@ async function loadBackupInfo() {
 async function loadMcpTools() {
   const box = $("#mcp-tools");
   try {
-    const data = await api("/mcp", {
+    // api() 래퍼를 쓰지 않는 이유 — /mcp는 세션이 아니라 OAuth/토큰 전용 stateless 체인(91절)이라
+    // 콘솔 세션으로는 401이 정상이다. 래퍼의 401 처리(로그인 리다이렉트)를 타면 로그인한 사용자가
+    // 페이지 진입마다 로그인으로 튕기는 회귀가 된다(실측) — 여기서는 401을 안내 문구로 삼는다.
+    const r = await fetch("/mcp", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
+    if (r.status === 401) {
+      box.textContent = "MCP는 토큰 인증 전용입니다 — 클라이언트에서 OAuth 브라우저 로그인 또는 API 토큰으로 접속하세요";
+      return;
+    }
+    if (!r.ok) throw new Error(`${r.status}`);
+    const data = await r.json();
     box.classList.remove("muted");
     box.innerHTML = data.result.tools.map((t) => `
       <div class="mcp-tool"><b>${esc(t.name)}</b><p>${esc(t.description)}</p></div>`).join("");
