@@ -204,6 +204,11 @@ claude mcp add --transport http dbtower http://localhost:8080/mcp
 나열하고 "수치를 지어내지 않겠습니다"로 마감했다 (VERIFICATION 93절). 슬래시 커맨드
 (/dbtower instance question)도 같은 코어로 동작한다 (88절).
 
+반대 방향의 조작도 이모지다. 레퍼런스의 "알람 스킵" 버튼은 웹훅 메시지에 버튼이 붙지 않는
+Discord 제약 때문에 음소거 이모지 반응으로 대응했다. 알림에 달면 그 인스턴스의 알림이 1시간
+중지되고 만료 시 자동 재개되며, 강제 지점은 웹훅 어댑터 한 곳이다 (98절). Slack Events
+인바운드(서명 검증, challenge, 이모지 이벤트)도 같은 루프의 변형으로 준비돼 있다.
+
 ![알림 embed에 돋보기 반응 — 봇 호출](images/webui/51-alert-embed-reaction.png)
 
 ![봇의 진단 답글 — 도구 연쇄 근거를 나열](images/webui/52-bot-diagnosis-reply.png)
