@@ -326,6 +326,12 @@ public class DiscordGatewayBot {
         if (!processed.add(messageId)) {
             return; // 이미 처리한 메시지 — 중복 반응·재접속 보충에서 두 번 진단하지 않는다
         }
+        // 처리 이력은 영속(V22)도 확인 — 인메모리만 보면 재시작 후 보충 스캔이 이미 답글 단
+        // 알림을 다시 진단한다(실측). 매핑처럼 이력도 메타 DB가 진실이다.
+        if (messageIndex.alreadyProcessed(messageId)) {
+            log.info("반응 진단 건너뜀 — 이미 처리된 알림(영속 이력) message={}", messageId);
+            return;
+        }
         try {
             // 1차: 발사 시점 매핑(AlertMessageIndex) — 특권 인텐트 없이 대상 인스턴스를 바로 안다.
             Long mappedId = messageIndex.instanceFor(messageId);
@@ -371,6 +377,7 @@ public class DiscordGatewayBot {
             var result = diagnosisService.diagnose(instance.getId(), instance.getType().name(),
                     instanceName, "방금 이 알림이 온 이유를 분석해줘");
             replyEmbed(channelId, messageId, "DBTower 진단 — " + instanceName, result.answer());
+            messageIndex.markProcessed(messageId); // 재시작 후에도 중복 진단 안 하게 이력 영속
         } catch (Exception e) {
             log.warn("Discord 반응 진단 실패 channel={} msg={} cause={}", channelId, messageId, e.getMessage());
         }
