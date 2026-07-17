@@ -127,6 +127,9 @@ dbtower:
     retention-count: 7     # 로컬 보존 개수(최신 N개만)
   backup:
     dir: ./backups
+    # 산출물 로컬 보존(일) — 초과분 삭제하되 스트림별 최신 1개는 보존(ts 마커·체인 장부).
+    # 0 이하면 정리 안 함(외부 보존 체계가 있는 조직). 이력(backup_run)은 지우지 않는다.
+    artifact-retention-days: ${DBTOWER_BACKUP_RETENTION_DAYS:14}
     # 원격 보관(3-2-1의 오프사이트) — S3 호환(AWS S3·MinIO·R2). 자격증명은 환경변수로만
     # (DBTOWER_S3_ACCESS_KEY/SECRET_KEY). endpoint 비우면 AWS, 지정하면 MinIO 등 커스텀(path-style).
     # 업로드 실패는 백업 실패가 아니다 — 로컬 성공은 유효, remoteLocation만 비운다.
