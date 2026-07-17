@@ -518,3 +518,16 @@ input[type="datetime-local"] {
 .bk-SUCCESS { background: #e6f4ea; color: #137333; }
 .bk-FAILED { background: #fce8e6; color: #c5221f; }
 .bk-UNSUPPORTED { background: #f1f3f4; color: #5f6368; }
+
+/* 인스턴스 검색·필터 + 복제 역할 배지 (레퍼런스 목록 패리티) */
+.instance-filter { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.instance-filter input[type="search"] { flex: 1; max-width: 260px; padding: 6px 10px;
+  border: 1px solid var(--border, #d0d5dd); border-radius: 6px; font-size: 13px; }
+.instance-filter select { padding: 6px 8px; border: 1px solid var(--border, #d0d5dd);
+  border-radius: 6px; font-size: 13px; background: #fff; }
+.repl-role { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; margin-left: 4px; }
+.role-primary { background: #e6f4ea; color: #137333; }
+.role-replica { background: #e8f0fe; color: #1a56db; }
+.command-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.command-box h4 { margin-bottom: 4px; }
+.cmd-legend { display: flex; gap: 14px; font-size: 11px; color: #7b8494; margin-top: 2px; }

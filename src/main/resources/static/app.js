@@ -97,10 +97,12 @@ async function loadInstances() {
       ? list.filter((o) => o.id !== i.id && `${o.host.toLowerCase()}:${o.port}` === serverKey).map((o) => o.name)
       : [];
     return `
-    <div class="instance-card" data-id="${i.id}">
+    <div class="instance-card" data-id="${i.id}" data-name="${esc(i.name.toLowerCase())}"
+         data-host="${esc(i.host.toLowerCase())}" data-type="${esc(i.type)}" data-team="${esc(i.teamLabel || "")}">
       <div class="instance-name">
         <span class="type-badge type-${esc(i.type)}">${esc(i.type)}</span>
         ${esc(i.name)}
+        <span class="repl-role" id="role-${i.id}"></span>
         <span class="health-dot" id="health-${i.id}"></span>
         <button class="collect-toggle ${i.collectionEnabled ? "" : "isolated"}" data-id="${i.id}"
           title="수집 격리 토글 — 끄면 스냅샷 수집·운영 경보에서 이 인스턴스를 뺀다(등록은 유지)">
@@ -155,14 +157,49 @@ async function loadInstances() {
   } else if (first) {
     selectInstance(list[0], first);
   }
-  // 헬스는 카드 렌더 후 비동기로 채운다 — 죽은 인스턴스가 목록 로딩을 막지 않게
+  // 헬스는 카드 렌더 후 비동기로 채운다 — 죽은 인스턴스가 목록 로딩을 막지 않게.
+  // 복제 역할 배지(레퍼런스의 Primary/Secondary 인라인 표기)도 같은 방식 — 역할이 확인되는
+  // 기종·구성에서만 배지가 붙고, 미구성·미지원은 조용히 비워둔다(N회 조회지만 데모 규모라 감수).
   list.forEach(async (i) => {
     try {
       const h = await api(`/api/instances/${i.id}/health`);
       $(`#health-${i.id}`).classList.add(h.up ? "up" : "down");
       $(`#healthms-${i.id}`).textContent = h.up ? `${h.pingMillis}ms · ${h.version ?? ""}` : h.message;
     } catch { $(`#health-${i.id}`).classList.add("down"); }
+    try {
+      const r = await api(`/api/instances/${i.id}/replication`);
+      if (r && r.role && r.role !== "UNSUPPORTED" && r.role !== "NONE") {
+        $(`#role-${i.id}`).textContent = r.role;
+        $(`#role-${i.id}`).classList.add(/PRIMARY|SOURCE|MASTER/i.test(r.role) ? "role-primary" : "role-replica");
+      }
+    } catch { /* 역할 미확인 — 배지 생략 */ }
   });
+  initInstanceFilter(list);
+}
+
+// 검색·필터 — 카드 data 속성만 보고 표시/숨김(재렌더 없음). 필터 결과 수를 함께 표기.
+function initInstanceFilter(list) {
+  const engineSel = $("#inst-engine"), teamSel = $("#inst-team");
+  const engines = [...new Set(list.map((i) => i.type))].sort();
+  const teams = [...new Set(list.map((i) => i.teamLabel).filter(Boolean))].sort();
+  engineSel.innerHTML = '<option value="">기종 전체</option>' + engines.map((e) => `<option>${esc(e)}</option>`).join("");
+  teamSel.innerHTML = '<option value="">팀 전체</option>' + teams.map((t) => `<option>${esc(t)}</option>`).join("");
+  const apply = () => {
+    const q = $("#inst-search").value.trim().toLowerCase();
+    const eng = engineSel.value, team = teamSel.value;
+    let shown = 0;
+    document.querySelectorAll(".instance-card").forEach((c) => {
+      const hit = (!q || c.dataset.name.includes(q) || c.dataset.host.includes(q))
+        && (!eng || c.dataset.type === eng)
+        && (!team || c.dataset.team === team);
+      c.style.display = hit ? "" : "none";
+      if (hit) shown++;
+    });
+    $("#inst-count").textContent = shown === list.length ? "" : `${shown}/${list.length}`;
+  };
+  $("#inst-search").oninput = apply;
+  engineSel.onchange = apply;
+  teamSel.onchange = apply;
 }
 
 async function selectInstance(instance, card) {
@@ -450,6 +487,36 @@ async function loadMetrics() {
   drawSimpleChart("#cpu-chart", "#cpu-empty", m.cpu ?? [], "#e5533d", m.cpuNote);
   drawSimpleChart("#conn-chart", "#conn-empty", m.connections ?? [], "#6672f5", m.connectionsNote);
   if (state.chartMetric === "cpu") drawChart();   // 드래그 차트가 CPU 모드면 새 데이터로 다시 그린다
+  loadCommandMetrics(from, to);
+}
+
+// 명령/행 연산 세분 차트(레퍼런스 Query Activity·Row Operation 대응) — 차트마다 Mean/Max/Min 범례.
+async function loadCommandMetrics(from, to) {
+  const box = $("#command-charts");
+  let cm;
+  try {
+    cm = await api(`/api/instances/${state.instance.id}/metrics/commands?from=${from}&to=${to}`);
+  } catch (e) {
+    box.innerHTML = `<div class="muted">명령별 시계열 조회 실패: ${esc(e.message)}</div>`;
+    return;
+  }
+  if (!cm.series || !cm.series.length) {
+    box.innerHTML = `<div class="muted">${esc(cm.note ?? "이 구간에 수집된 시계열이 없습니다")}</div>`;
+    return;
+  }
+  const fmtStat = (v) => v == null ? "-" : fmtNum(v, v >= 10 ? 1 : 2);
+  box.innerHTML = cm.series.map((s, idx) => `
+    <div class="metric-chart-box command-box">
+      <h4>${esc(s.name)}</h4>
+      <svg id="cmd-chart-${idx}" width="100%" height="120" preserveAspectRatio="none"></svg>
+      <div id="cmd-empty-${idx}" class="muted center" hidden></div>
+      <div class="cmd-legend"><span>Mean <b>${fmtStat(s.mean)}</b></span>
+        <span>Max <b>${fmtStat(s.max)}</b></span><span>Min <b>${fmtStat(s.min)}</b></span></div>
+    </div>`).join("");
+  cm.series.forEach((s, idx) => {
+    drawSimpleChart(`#cmd-chart-${idx}`, `#cmd-empty-${idx}`, s.points ?? [], "#2f9e6e",
+      cm.note ?? "이 구간에 수집된 시계열이 없습니다");
+  });
 }
 
 // 단순 라인 차트 (Metric 카드용) — 드래그 차트와 달리 선택 하이라이트가 없다
@@ -606,8 +673,18 @@ function setChartMetric(metric) {
 // ---------- Top Query: 단순 조회 ----------
 async function runQuery() {
   state.compareMode = false;
-  $("#compare-summary").hidden = true;
   closeDetail();
+  // 조회 범위 표기(레퍼런스 하단 텍스트 대응) — 단독 조회에서도 어떤 창을 보고 있는지 남긴다.
+  // datetime-local 값은 브라우저 로컬(KST) 그대로라 변환 없이 표기만 한다.
+  const sum = $("#compare-summary");
+  const tf = $("#target-from").value, tt = $("#target-to").value;
+  if (tf && tt) {
+    sum.hidden = false;
+    sum.innerHTML = `<span class="summary-item muted">조회하는 시간 범위(KST): ${esc(tf.replace("T", " "))} ~ ${esc(tt.replace("T", " "))}
+      / 비교하는 시간 범위(KST): -</span>`;
+  } else {
+    sum.hidden = true;
+  }
   const stats = await api(`/api/instances/${state.instance.id}/query-stats?limit=20`);
   const table = $("#top-table");
   // Call/sec는 스냅샷 차분이라 이력 없으면 null → "—". Latency/Row Examined는 누적÷호출수(평균).
@@ -652,8 +729,8 @@ async function runCompare() {
     <span class="summary-item">평균 레이턴시 ${pct(result.avgLatencyChangePct)}</span>
     <span class="summary-item">읽은 행수 ${pct(result.rowsExaminedChangePct)}</span>
     <span class="summary-item">신규 쿼리 <b>${result.newQueryCount}</b>개</span>
-    <span class="summary-item muted">조회 ${esc($("#target-from").value.replace("T", " "))} ~ ${esc($("#target-to").value.slice(11))}
-      / 비교 ${esc($("#base-from").value.replace("T", " "))} ~ ${esc($("#base-to").value.slice(11))}</span>`;
+    <span class="summary-item muted">조회하는 시간 범위(KST): ${esc($("#target-from").value.replace("T", " "))} ~ ${esc($("#target-to").value.slice(11))}
+      / 비교하는 시간 범위(KST): ${esc($("#base-from").value.replace("T", " "))} ~ ${esc($("#base-to").value.slice(11))}</span>`;
 
   // Load(시간 점유율%) = qps×avgMs / Σ(qps×avgMs) — 구간별로 따로 계산해 증감까지 보여준다(레퍼런스 첫 컬럼).
   const loadShare = (rows, qpsKey, msKey) => {

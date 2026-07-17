@@ -3,6 +3,7 @@ package io.dbtower.mcp.internal;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.dbtower.alert.AlertMessageIndex;
+import io.dbtower.alert.AlertMuter;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
 import jakarta.annotation.PostConstruct;
@@ -67,6 +68,7 @@ public class DiscordGatewayBot {
     private final RegistryService registryService;
     private final DiagnosisService diagnosisService;
     private final AlertMessageIndex messageIndex;
+    private final AlertMuter muter;
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -99,7 +101,7 @@ public class DiscordGatewayBot {
     private final Set<String> processed = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public DiscordGatewayBot(RegistryService registryService, DiagnosisService diagnosisService,
-                             AlertMessageIndex messageIndex,
+                             AlertMessageIndex messageIndex, AlertMuter muter,
                              @Value("${dbtower.inbound.discord.bot-token:}") String botToken,
                              @Value("${dbtower.inbound.discord.trigger-emoji:🔍,🔎}") String triggerEmoji,
                              @Value("${dbtower.inbound.discord.channel-allowlist:}") String channels,
@@ -108,6 +110,7 @@ public class DiscordGatewayBot {
         this.registryService = registryService;
         this.diagnosisService = diagnosisService;
         this.messageIndex = messageIndex;
+        this.muter = muter;
         this.botToken = botToken == null ? "" : botToken.trim();
         // 왼쪽(🔍 U+1F50D)·오른쪽(🔎 U+1F50E) 돋보기는 다른 유니코드 — 둘 다 트리거로 받는다(실측 함정)
         this.triggerEmojis = csv(triggerEmoji);
@@ -252,6 +255,14 @@ public class DiscordGatewayBot {
             String channelId = d.path("channel_id").asText();
             String messageId = d.path("message_id").asText();
             String userId = d.path("user_id").asText();
+            // 알람 스킵(레퍼런스의 버튼 대응 — 웹훅 메시지엔 버튼이 안 붙어 이모지 반응으로) —
+            // 알림에 음소거 이모지를 달면 그 인스턴스 알림을 1시간 중지한다. 판정 규칙은 진단과 동일(화이트리스트).
+            if ("\uD83D\uDD15".equals(emoji)
+                    && DiscordTriggerRules.shouldReact(emoji, Set.of("\uD83D\uDD15"), channelId, userId,
+                    allowSelfReact ? null : botUserId, channelAllowlist, userAllowlist)) {
+                diagnosisWorker.execute(() -> muteAndAck(channelId, messageId));
+                return;
+            }
             // allowSelfReact(테스트 훅)면 봇 자기 반응 배제를 끈다 — botUserId를 null로 넘겨 우회.
             if (DiscordTriggerRules.shouldReact(emoji, triggerEmojis, channelId, userId,
                     allowSelfReact ? null : botUserId, channelAllowlist, userAllowlist)) {
@@ -313,6 +324,20 @@ public class DiscordGatewayBot {
             }
         }
         return false;
+    }
+
+    /** 음소거 반응 처리 — 매핑으로 인스턴스를 찾아 1시간 알림 중지 후 확인 답글. */
+    private void muteAndAck(String channelId, String messageId) {
+        Long instanceId = messageIndex.instanceFor(messageId);
+        if (instanceId == null) {
+            reply(channelId, messageId, "대상 인스턴스를 알 수 없어 알람 스킵을 적용하지 못했습니다(오래된 알림).");
+            return;
+        }
+        muter.mute(instanceId, Duration.ofHours(1));
+        DatabaseInstance instance = registryService.findAll().stream()
+                .filter(i -> i.getId().equals(instanceId)).findFirst().orElse(null);
+        reply(channelId, messageId, "**" + (instance != null ? instance.getName() : ("instance " + instanceId))
+                + "** 알림을 1시간 중지했습니다(만료 시 자동 재개).");
     }
 
     /**

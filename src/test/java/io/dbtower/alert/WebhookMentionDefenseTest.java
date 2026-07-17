@@ -47,7 +47,7 @@ class WebhookMentionDefenseTest {
 
     @Test
     void Discord_payload에_allowed_mentions와_제어문자_이스케이프가_적용된다() {
-        WebhookNotifier notifier = new WebhookNotifier(url(), 12, null);
+        WebhookNotifier notifier = new WebhookNotifier(url(), 12, null, null);
 
         // @everyone 멘션 시도 + 캐리지리턴(\r) 제어문자 포함
         notifier.send("[경보] @everyone 위험\r다음줄\t탭");

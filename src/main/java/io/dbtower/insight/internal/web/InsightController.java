@@ -29,7 +29,10 @@ import jakarta.validation.constraints.NotBlank;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 
@@ -313,10 +316,10 @@ public class InsightController {
             String note = "Prometheus 미설정 — DBTOWER_PROMETHEUS_URL을 지정하면 수집됩니다";
             return new MetricsView(List.of(), note, List.of(), note);
         }
-        java.time.Instant f = from.atZone(java.time.ZoneId.systemDefault()).toInstant();
-        java.time.Instant t = to.atZone(java.time.ZoneId.systemDefault()).toInstant();
+        Instant f = from.atZone(ZoneId.systemDefault()).toInstant();
+        Instant t = to.atZone(ZoneId.systemDefault()).toInstant();
         // 화면 폭 기준 ~200포인트가 되도록 step을 잡되 스크레이프 주기(15s) 밑으로는 내리지 않는다
-        int step = (int) Math.max(15, java.time.Duration.between(f, t).getSeconds() / 200);
+        int step = (int) Math.max(15, Duration.between(f, t).getSeconds() / 200);
 
         List<MetricPoint> cpu = toMetricPoints(prometheusClient.queryRange(
                 "100 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[3m])) * 100", f, t, step));
@@ -336,6 +339,72 @@ public class InsightController {
         List<MetricPoint> conn = toMetricPoints(prometheusClient.queryRange(connQuery, f, t, step));
         return new MetricsView(cpu, cpuNote, conn,
                 conn.isEmpty() ? "exporter 미수집 — 이 구간에 수집된 시계열이 없습니다" : null);
+    }
+
+    /** 명령/행 연산 시계열 한 종 — Mean/Max/Min은 서버가 계산해 범례로 내려준다(레퍼런스 하단 표기). */
+    public record SeriesStat(String name, List<MetricPoint> points, Double mean, Double max, Double min) {
+        static SeriesStat of(String name, List<MetricPoint> points) {
+            if (points.isEmpty()) {
+                return new SeriesStat(name, points, null, null, null);
+            }
+            var stats = points.stream().mapToDouble(MetricPoint::value).summaryStatistics();
+            return new SeriesStat(name, points, stats.getAverage(), stats.getMax(), stats.getMin());
+        }
+    }
+
+    public record CommandMetricsView(List<SeriesStat> series, String note) {
+    }
+
+    /**
+     * Monitoring 탭 명령/행 연산 세분 차트(레퍼런스 Query Activity·Row Operation 대응).
+     * MySQL은 exporter의 Com_* 카운터 rate(SELECT/INSERT/UPDATE/DELETE Commands),
+     * PostgreSQL은 pg_stat_database의 tup_* rate(행 연산 — PG exporter에 명령별 카운터가 없어
+     * 같은 자리의 정직한 등가 지표). 그 외 기종은 표준 exporter가 없어 사유를 note로 돌려준다.
+     */
+    @GetMapping("/metrics/commands")
+    public CommandMetricsView commandMetrics(
+            @PathVariable Long id,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+        var instance = registryService.findById(id);
+        if (!prometheusClient.configured()) {
+            return new CommandMetricsView(List.of(), "Prometheus 미설정 — DBTOWER_PROMETHEUS_URL을 지정하면 수집됩니다");
+        }
+        Instant f = from.atZone(ZoneId.systemDefault()).toInstant();
+        Instant t = to.atZone(ZoneId.systemDefault()).toInstant();
+        int step = (int) Math.max(15, Duration.between(f, t).getSeconds() / 200);
+
+        List<SeriesStat> series = new java.util.ArrayList<>();
+        switch (instance.getType()) {
+            case MYSQL -> {
+                for (String cmd : List.of("select", "insert", "update", "delete")) {
+                    series.add(SeriesStat.of(cmd.toUpperCase() + " Commands", toMetricPoints(
+                            prometheusClient.queryRange(
+                                    "rate(mysql_global_status_commands_total{command=\"" + cmd + "\"}[3m])",
+                                    f, t, step))));
+                }
+            }
+            case POSTGRESQL -> {
+                String datname = instance.getDbName().replaceAll("[\"\\\\]", "");
+                record Tup(String metric, String label) { }
+                for (Tup tup : List.of(new Tup("tup_returned", "Rows returned"),
+                        new Tup("tup_inserted", "Rows inserted"),
+                        new Tup("tup_updated", "Rows updated"),
+                        new Tup("tup_deleted", "Rows deleted"))) {
+                    series.add(SeriesStat.of(tup.label(), toMetricPoints(
+                            prometheusClient.queryRange(
+                                    "rate(pg_stat_database_" + tup.metric() + "{datname=\"" + datname + "\"}[3m])",
+                                    f, t, step))));
+                }
+            }
+            default -> {
+                return new CommandMetricsView(List.of(),
+                        instance.getType() + "은 표준 exporter가 없어 명령별 시계열 미지원(정직 표기)");
+            }
+        }
+        boolean empty = series.stream().allMatch(sr -> sr.points().isEmpty());
+        return new CommandMetricsView(series,
+                empty ? "exporter 미수집 — 이 구간에 수집된 시계열이 없습니다" : null);
     }
 
     private List<MetricPoint> toMetricPoints(List<PrometheusClient.Point> points) {

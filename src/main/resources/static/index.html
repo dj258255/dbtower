@@ -31,6 +31,13 @@
   <!-- 인스턴스 선택 -->
   <section class="panel">
     <h2 class="panel-title">Instances</h2>
+    <!-- 검색·필터 (레퍼런스의 클러스터 검색·필터 대응 — 환경/리전은 AWS 고유라 기종·팀으로 일반화) -->
+    <div class="instance-filter">
+      <input id="inst-search" type="search" placeholder="이름·호스트 검색" autocomplete="off">
+      <select id="inst-engine"><option value="">기종 전체</option></select>
+      <select id="inst-team"><option value="">팀 전체</option></select>
+      <span id="inst-count" class="muted"></span>
+    </div>
     <div id="instance-list" class="instance-list">
       <div class="muted">불러오는 중...</div>
     </div>
@@ -188,6 +195,8 @@
           <svg id="qps-chart" width="100%" height="140" preserveAspectRatio="none"></svg>
           <div id="qps-empty" class="muted center" hidden></div>
         </div>
+        <!-- 명령/행 연산 세분 차트 — MySQL은 Com_* rate, PG는 tup_* rate(명령 카운터 부재의 정직한 등가), 그 외 미지원 사유 표기 -->
+        <div id="command-charts" class="command-grid"></div>
       </div>
       <div class="monitor-card diagnose-card">
         <h3>자연어 근본원인 진단 <span class="hint">(AI가 읽기 도구를 스스로 연쇄 호출해 원인을 서술 — 대상 DB는 바꾸지 않습니다)</span></h3>

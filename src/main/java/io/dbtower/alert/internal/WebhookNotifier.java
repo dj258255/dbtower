@@ -1,6 +1,7 @@
 package io.dbtower.alert.internal;
 
 import io.dbtower.alert.AlertMessageIndex;
+import io.dbtower.alert.AlertMuter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -43,13 +44,16 @@ public class WebhookNotifier {
 
     /** Discord 알림 메시지 id ↔ 인스턴스 매핑 인덱스(Gateway 봇 이모지 트리거용). 테스트에선 null 가능. */
     private final AlertMessageIndex messageIndex;
+    /** 인스턴스별 알림 일시 중지("알람 스킵") — 강제 지점은 여기 한 곳. 테스트에선 null 가능. */
+    private final AlertMuter muter;
 
     public WebhookNotifier(@Value("${DBTOWER_WEBHOOK_URL:}") String webhookUrl,
                            @Value("${dbtower.alert.rate-per-minute:12}") int ratePerMinute,
-                           AlertMessageIndex messageIndex) {
+                           AlertMessageIndex messageIndex, AlertMuter muter) {
         this.webhookUrl = webhookUrl;
         this.ratePerMinute = Math.max(1, ratePerMinute);
         this.messageIndex = messageIndex;
+        this.muter = muter;
     }
 
     /**
@@ -87,6 +91,12 @@ public class WebhookNotifier {
     }
 
     void sendEmbedAt(String fallbackText, Embed embed, Long instanceId, long now) {
+        // 알람 스킵(음소거 반응) — 중지된 인스턴스의 알림은 발사하지 않는다. 조용한 유실이 아니라
+        // 사람이 방금 명시적으로 끈 상태이고, 만료되면 자동 재개된다(레이트리밋 억제와 달리 요약도 안 남긴다).
+        if (muter != null && muter.isMuted(instanceId)) {
+            log.info("알림 중지 중(알람 스킵) — instance={} 발사 생략", instanceId);
+            return;
+        }
         String decided = decide(fallbackText, now);
         if (decided == null) {
             return;
