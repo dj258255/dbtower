@@ -249,7 +249,15 @@ input[type="datetime-local"] {
   background: rgba(34,160,107,.1); padding: 2px 8px; border-radius: 5px;
 }
 .detail-actions { display: inline-flex; gap: 8px; }
-.detail-section h3 { font-size: 13px; margin: 12px 0 6px; }
+/* 상세 섹션 헤더 — 파란 좌측 액센트 바(레퍼런스처럼 섹션 구분을 또렷하게) */
+.detail-section h3 {
+  font-size: 13px; margin: 14px 0 7px; padding-left: 9px;
+  border-left: 3px solid var(--primary); line-height: 1.3;
+}
+
+/* 인라인 쿼리 상세 — 클릭한 행 바로 아래 셀에 끼워 넣는다 */
+#top-table tr.detail-host > td.detail-cell { padding: 0; background: #f6f7fb; border-bottom: 1px solid var(--line); }
+#top-table tr.detail-host .detail { margin: 10px 12px 14px; }
 .advisor-input { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .advisor-cols {
   flex: 1; border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px;

@@ -500,7 +500,7 @@ async function loadMetrics() {
     m = { cpu: [], cpuNote: `조회 실패: ${e.message}`, connections: [], connectionsNote: `조회 실패: ${e.message}` };
   }
   state.metricsCpu = m.cpu ?? [];
-  drawSimpleChart("#cpu-chart", "#cpu-empty", m.cpu ?? [], "#e5533d", m.cpuNote, "%");
+  drawSimpleChart("#cpu-chart", "#cpu-empty", m.cpu ?? [], "#e5533d", m.cpuNote, "%", 100);
   drawSimpleChart("#conn-chart", "#conn-empty", m.connections ?? [], "#6672f5", m.connectionsNote);
   if (state.chartMetric === "cpu") drawChart();   // 드래그 차트가 CPU 모드면 새 데이터로 다시 그린다
   loadCommandMetrics(from, to);
@@ -614,8 +614,9 @@ function attachChartHover(svg) {
   svg.addEventListener("pointerleave", hide);
 }
 
-// 단순 라인 차트 (Metric 카드용) — 드래그 차트와 달리 선택 하이라이트가 없다
-function drawSimpleChart(svgSel, emptySel, pts, color, note, unit = "") {
+// 단순 라인 차트 (Metric 카드용) — 드래그 차트와 달리 선택 하이라이트가 없다.
+// fixedMax를 주면 Y축 상한을 고정한다(CPU%는 100 고정 — 스파이크가 없어도 척도가 일정해 읽기 쉽다).
+function drawSimpleChart(svgSel, emptySel, pts, color, note, unit = "", fixedMax = null) {
   const svg = $(svgSel);
   const empty = $(emptySel);
   const W = 1000, H = 140, padL = 46, padR = 10, padT = 10, padB = 20;
@@ -630,10 +631,11 @@ function drawSimpleChart(svgSel, emptySel, pts, color, note, unit = "") {
   empty.hidden = true;
   const t0 = parseApiTime(pts[0].time).getTime();
   const t1 = parseApiTime(pts[pts.length - 1].time).getTime();
-  const maxV = Math.max(...pts.map((p) => p.value), 1);
+  const maxV = fixedMax ?? Math.max(...pts.map((p) => p.value), 1);
   const x = (t) => padL + (t - t0) / Math.max(t1 - t0, 1) * (W - padL - padR);
   const y = (v) => H - padB - v / maxV * (H - padT - padB);
-  const yTicks = [0, 0.5, 1].map((r) => {
+  const yRatios = fixedMax ? [0, 0.25, 0.5, 0.75, 1] : [0, 0.5, 1];
+  const yTicks = yRatios.map((r) => {
     const v = maxV * r;
     return `<line x1="${padL}" y1="${y(v)}" x2="${W - padR}" y2="${y(v)}" stroke="#eef0f3"/>
             <text x="${padL - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" fill="#7b8494">${fmtNum(v, v >= 10 ? 0 : 1)}</text>`;
@@ -668,7 +670,8 @@ function chartScales() {
   const pts = chartSeries();
   const t0 = pts[0].t;
   const t1 = pts[pts.length - 1].t;
-  const maxQ = Math.max(...pts.map((p) => p.v), 1);
+  // CPU 모드는 0~100% 고정축(척도 일정), QPS는 데이터 최대에 맞춰 자동
+  const maxQ = state.chartMetric === "cpu" ? 100 : Math.max(...pts.map((p) => p.v), 1);
   const x = (t) => CHART.padL + (t - t0) / Math.max(t1 - t0, 1) * (CHART.w - CHART.padL - CHART.padR);
   const y = (q) => CHART.h - CHART.padB - q / maxQ * (CHART.h - CHART.padT - CHART.padB);
   const invX = (px) => t0 + (px - CHART.padL) / (CHART.w - CHART.padL - CHART.padR) * (t1 - t0);
@@ -696,8 +699,9 @@ function drawChart() {
         width="${Math.max(s.x(sel.to.getTime()) - s.x(sel.from.getTime()), 2)}"
         height="${CHART.h - CHART.padT - CHART.padB}" fill="${color}" opacity="0.22"/>` : "";
 
-  // y축 눈금 3개 + 시간 라벨 4개
-  const yTicks = [0, 0.5, 1].map((r) => {
+  // y축 눈금 — CPU(고정 0~100%)는 5개, QPS(자동)는 3개
+  const yRatios = state.chartMetric === "cpu" ? [0, 0.25, 0.5, 0.75, 1] : [0, 0.5, 1];
+  const yTicks = yRatios.map((r) => {
     const q = s.maxQ * r;
     return `<line x1="${CHART.padL}" y1="${s.y(q)}" x2="${CHART.w - CHART.padR}" y2="${s.y(q)}" stroke="#eef0f3"/>
             <text x="${CHART.padL - 6}" y="${s.y(q) + 4}" text-anchor="end" font-size="10" fill="#7b8494">${fmtNum(q, 0)}</text>`;
@@ -763,6 +767,11 @@ function setupChartDrag() {
   $("#mode-base").addEventListener("click", () => toggleDragMode("base"));
   $("#metric-qps").addEventListener("click", () => setChartMetric("qps"));
   $("#metric-cpu").addEventListener("click", () => setChartMetric("cpu"));
+  // 차트 헤더 조회 버튼 — 비교 구간까지 드래그했으면 비교 조회, 아니면 단독 조회
+  $("#chart-query").addEventListener("click", () => {
+    if ($("#base-from").value && $("#base-to").value && state.selections.base) runCompare();
+    else runQuery();
+  });
 }
 
 function toggleDragMode(mode) {
@@ -873,14 +882,29 @@ function bindRowClicks(rows) {
     tr.addEventListener("click", () => {
       document.querySelectorAll("#top-table tbody tr").forEach((r) => r.classList.remove("selected"));
       tr.classList.add("selected");
-      openDetail(rows[tr.dataset.idx]);
+      openDetail(rows[tr.dataset.idx], tr);
     });
   });
 }
 
-function openDetail(query) {
+// 상세 패널을 클릭한 행 바로 아래에 끼워 넣는다(레퍼런스처럼 인라인 확장 — 맨 아래로 튀지 않게)
+function placeDetailUnder(tr) {
+  const detail = $("#query-detail");
+  let host = $("#top-table").querySelector("tbody tr.detail-host");
+  if (!host) {
+    host = document.createElement("tr");
+    host.className = "detail-host";
+    host.innerHTML = '<td class="detail-cell"></td>';
+  }
+  host.firstElementChild.colSpan = tr.children.length;
+  host.firstElementChild.appendChild(detail);
+  tr.after(host);
+}
+
+function openDetail(query, tr) {
   state.currentQuery = query;
   $("#query-detail").hidden = false;
+  if (tr) placeDetailUnder(tr);
   $("#detail-qid").textContent = `SQL ID: ${query.queryId}`;
   $("#detail-sql").value = query.queryText ?? "";
   $("#plan-section").hidden = true;
@@ -903,7 +927,12 @@ function openDetail(query) {
 }
 
 function closeDetail() {
-  $("#query-detail").hidden = true;
+  const detail = $("#query-detail");
+  detail.hidden = true;
+  // 인라인 호스트 행에서 빼내 원위치(테이블 밖 tab-top)로 되돌린다 — 표를 다시 그려도 상세 엘리먼트가 살아남게
+  $("#tab-top").appendChild(detail);
+  const host = $("#top-table").querySelector("tbody tr.detail-host");
+  if (host) host.remove();
   state.currentQuery = null;
 }
 
