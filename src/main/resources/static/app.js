@@ -295,7 +295,13 @@ async function loadInstances() {
     try {
       const h = await api(`/api/instances/${i.id}/health`);
       $(`#health-${i.id}`).classList.add(h.up ? "up" : "down");
-      $(`#healthms-${i.id}`).textContent = h.up ? `${h.pingMillis}ms · ${h.version ?? ""}` : h.message;
+      const el = $(`#healthms-${i.id}`);
+      if (h.up) {
+        // 버전 전문은 길어 카드를 키운다 — 제품명+번호만 짧게, 전문은 title(hover)로
+        const ver = (h.version || "").split(/[\s(]/).filter(Boolean).slice(0, 2).join(" ");
+        el.textContent = `${h.pingMillis}ms${ver ? " · " + ver : ""}`;
+        el.title = h.version || "";
+      } else { el.textContent = h.message; }
     } catch { $(`#health-${i.id}`).classList.add("down"); }
     try {
       const r = await api(`/api/instances/${i.id}/replication`);
