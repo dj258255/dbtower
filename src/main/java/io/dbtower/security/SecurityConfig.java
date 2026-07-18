@@ -186,6 +186,8 @@ public class SecurityConfig {
                         // 이름 기반 휴리스틱이라 완전하지 않아 ADMIN으로 올린다(ParameterController 주석 참고).
                         .requestMatchers(HttpMethod.GET, "/api/instances/*/parameters").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/param-diff").hasRole("ADMIN")
+                        // 설정 드리프트 이력(B1)도 파라미터 값(old→new)을 담아 같은 ADMIN 경계에 둔다.
+                        .requestMatchers(HttpMethod.GET, "/api/instances/*/config-drift", "/api/instances/*/config-drift/around").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage("/login.html")

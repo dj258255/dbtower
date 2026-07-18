@@ -1026,8 +1026,8 @@ public class MongoOperator implements DbmsOperator {
                         .runCommand(new Document("getParameter", "*"));
                 List<DbParameter> result = new ArrayList<>();
                 for (Map.Entry<String, Object> e : params.entrySet()) {
-                    if ("ok".equals(e.getKey())) {
-                        continue;
+                    if (isEnvelopeField(e.getKey())) {
+                        continue; // 명령 응답 메타데이터는 설정이 아니다(호출마다 변함 — 드리프트·diff 오탐 방지)
                     }
                     Object v = e.getValue();
                     String value;
@@ -1045,6 +1045,16 @@ public class MongoOperator implements DbmsOperator {
         } catch (Exception e) {
             throw new OperatorException("MongoDB 파라미터 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * getParameter 응답에 섞인 명령 응답 봉투(envelope) 메타데이터인가. MongoDB는 모든 명령 응답에
+     * $clusterTime·operationTime·$configTime·$topologyTime 같은 gossip 필드와 ok를 붙이는데,
+     * 이것들은 설정 파라미터가 아니라 매 호출 변하는 런타임 값이라 드리프트·파라미터 diff에서 오탐이 된다.
+     * $ 접두 필드 전체와 operationTime·ok를 제외한다.
+     */
+    private static boolean isEnvelopeField(String key) {
+        return key == null || key.startsWith("$") || "ok".equals(key) || "operationTime".equals(key);
     }
 
     private String queryText(String ns, Document command) {

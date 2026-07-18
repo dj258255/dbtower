@@ -18,8 +18,43 @@ public final class AlertEmbeds {
     public static final int RED = 0xD6404F;    // 운영 경보 — 지금 위험
     public static final int AMBER = 0xF08C2D;  // 회귀 — 성능 신호
     public static final int PURPLE = 0x8B5CF6; // 이상 감지 — 평소와 다름
+    public static final int BLUE = 0x3B82F6;   // 설정 드리프트 — 형상 변경
 
     private AlertEmbeds() {
+    }
+
+    /**
+     * 설정 드리프트 embed (B1) — 파라미터 변경을 old→new로 구조화한다. "누가"는 대상 DB가 주지
+     * 않는 정보라 싣지 않고, 콘솔 링크로 대상 DB 감사 로그의 몫임을 안내한다(정직).
+     *
+     * @param instance 대상 인스턴스
+     * @param changes  "name: old → new" 형태로 이미 렌더된 변경 목록(호출자가 마스킹·표기 결정)
+     * @param deeplink 콘솔 설정 이력 딥링크(null이면 생략)
+     */
+    public static Embed forConfigDrift(DatabaseInstance instance, List<String> changes, String deeplink) {
+        List<Embed.Field> fields = new ArrayList<>();
+        fields.add(new Embed.Field("인스턴스", instance.getName() + " (" + instance.getType() + ")", true));
+        fields.add(new Embed.Field("변경 수", String.valueOf(changes.size()), true));
+        if (instance.getTeamLabel() != null && !instance.getTeamLabel().isBlank()) {
+            fields.add(new Embed.Field("담당", instance.getTeamLabel(), true));
+        }
+        StringBuilder body = new StringBuilder();
+        for (String c : changes) {
+            if (body.length() > 0) {
+                body.append('\n');
+            }
+            body.append("• ").append(c);
+        }
+        fields.add(new Embed.Field("설정 변경", body.toString(), false));
+        // "누가"는 대상 DB가 주지 않는다 — 콘솔/대상 감사 로그로 안내(값 지어내기 금지)
+        fields.add(new Embed.Field("참고", "변경 주체는 대상 DB의 감사 로그에서 확인하세요.", false));
+        if (instance.getConsoleUrl() != null && !instance.getConsoleUrl().isBlank()) {
+            fields.add(new Embed.Field("콘솔", link("콘솔 열기", instance.getConsoleUrl()), false));
+        }
+        if (deeplink != null && !deeplink.isBlank()) {
+            fields.add(new Embed.Field("설정 이력", link("변경 이력 보기", deeplink), false));
+        }
+        return new Embed("DBTower 설정 변경 감지 — " + instance.getName(), BLUE, fields);
     }
 
     /**

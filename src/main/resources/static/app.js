@@ -143,6 +143,7 @@ async function loadInstances() {
   const params = new URLSearchParams(location.search);
   const deepId = params.get("instance");
   const deepQ = params.get("diagnose");
+  const deepView = params.get("view");
   const target = deepId ? list.find((i) => String(i.id) === deepId) : null;
   const first = box.querySelector(".instance-card");
   if (target) {
@@ -153,6 +154,12 @@ async function loadInstances() {
       input.value = deepQ;
       input.scrollIntoView({ block: "center" });
       input.focus();
+    }
+    // 설정 드리프트 알림의 "변경 이력 보기" 링크 — Monitoring 탭 열고 이력을 바로 조회
+    if (deepView === "config-drift") {
+      document.querySelector('.tab[data-tab="monitor"]').click();
+      loadConfigDrift();
+      $("#config-drift-result").scrollIntoView({ block: "center" });
     }
   } else if (first) {
     selectInstance(list[0], first);
@@ -1360,10 +1367,22 @@ async function loadPlanChanges() {
       return;
     }
     box.className = "anomaly-result";
-    box.innerHTML = changes.map((c) => `<div class="anomaly-item">
+    box.innerHTML = changes.map((c, idx) => `<div class="anomaly-item">
         <div class="anomaly-q">${esc(c.changedAt.replace("T", " "))} · queryId=${esc(c.queryId)}</div>
         <div class="anomaly-metric"><b>${esc(c.fromShape)}</b> &rarr; <b>${esc(c.toShape)}</b></div>
+        <div class="drift-around" id="drift-around-${idx}"></div>
       </div>`).join("");
+    // P4 대조 — 각 플랜 플립 무렵(±24h) 설정 변경 수를 붙인다(설정 변경이 플랜을 갈아탄 원인 후보).
+    // ADMIN 아니면 403 — 조용히 생략(플랜 변경 카드 자체는 인증 사용자에게 열려 있다).
+    changes.forEach(async (c, idx) => {
+      try {
+        const r = await api(`/api/instances/${state.instance.id}/config-drift/around?at=${encodeURIComponent(c.changedAt)}&hours=24`);
+        if (r.changeCount > 0) {
+          $(`#drift-around-${idx}`).innerHTML =
+            `<a class="drift-hint" href="/?instance=${state.instance.id}&view=config-drift">± ${r.windowHours}h 내 설정 변경 ${r.changeCount}건 — 원인 후보 확인 ↗</a>`;
+        }
+      } catch (e) { /* 비ADMIN·미수집 — 생략 */ }
+    });
   } catch (e) {
     box.className = "anomaly-result muted";
     box.textContent = `조회 실패: ${e.message}`;
@@ -1694,6 +1713,48 @@ async function runParamDiff() {
   box.innerHTML = parts.join("");
 }
 
+// ---------- 설정 변경 이력 (B1) — 시간축 드리프트: 언제부터 무엇이 바뀌었나 ----------
+async function loadConfigDrift() {
+  const box = $("#config-drift-result");
+  if (!state.instance) { box.className = "config-drift-result muted"; box.textContent = "인스턴스를 먼저 선택하세요."; return; }
+  box.className = "config-drift-result muted";
+  box.innerHTML = '<div class="muted">조회 중...</div>';
+  let rows;
+  try {
+    rows = await api(`/api/instances/${state.instance.id}/config-drift?limit=100`);
+  } catch (e) {
+    box.innerHTML = e.message.startsWith("403")
+      ? '<div class="schema-warning">설정 변경 이력은 ADMIN 역할만 볼 수 있습니다.</div>'
+      : `<div class="schema-warning">조회 실패: ${esc(e.message)}</div>`;
+    return;
+  }
+  box.className = "config-drift-result";
+  if (!rows.length) {
+    box.innerHTML = '<div class="schema-same">기록된 설정 변경이 없습니다 — 첫 수집(기준선) 이후 변동 없음이거나 아직 수집 전입니다.</div>';
+    return;
+  }
+  // 변경을 시각별로 묶는다(같은 captured_at = 한 번의 수집에서 함께 바뀐 것)
+  const byTime = new Map();
+  for (const r of rows) {
+    const t = (r.capturedAt || "").replace("T", " ").slice(0, 19);
+    if (!byTime.has(t)) byTime.set(t, []);
+    byTime.get(t).push(r);
+  }
+  const kindCell = (r) => {
+    if (r.kind === "ADDED") return `<span class="drift-add">추가</span> <code>${esc(r.paramName)}</code> = ${esc(r.newValue)}`;
+    if (r.kind === "REMOVED") return `<span class="drift-del">제거</span> <code>${esc(r.paramName)}</code> <span class="muted">(이전 ${esc(r.oldValue)})</span>`;
+    return `<span class="drift-chg">변경</span> <code>${esc(r.paramName)}</code>: ${esc(r.oldValue)} <span class="schema-arrow">→</span> ${esc(r.newValue)}`;
+  };
+  const blocks = [];
+  for (const [t, changes] of byTime) {
+    blocks.push(`<div class="drift-block">
+      <div class="drift-time">${esc(t)} <span class="hint">(${changes.length}건)</span></div>
+      ${changes.map((r) => `<div class="drift-line">${kindCell(r)}</div>`).join("")}
+    </div>`);
+  }
+  box.innerHTML = `<p class="hint">"누가" 바꿨는지는 대상 DB가 알려주지 않아 표기하지 않습니다 — 대상 DB의 감사 로그에서 확인하세요.</p>` + blocks.join("");
+}
+
 // ---------- 온라인 스키마 변경 (B4) — gh-ost, MySQL 전용 ----------
 // 기본은 dry-run(noop). "실제 실행"은 confirm으로 한 번 더 막는다(파괴적 행위).
 // 결과 3-값(OK/FAILED/UNSUPPORTED)을 색으로 구분해 정직하게 보여준다.
@@ -1860,6 +1921,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#btn-inquiry").addEventListener("click", runInquiry);
   $("#btn-schema-diff").addEventListener("click", runSchemaDiff);
   $("#btn-param-diff").addEventListener("click", runParamDiff);
+  $("#btn-config-drift").addEventListener("click", loadConfigDrift);
   $("#btn-ddl-noop").addEventListener("click", () => runOnlineDdl(false));
   $("#btn-ddl-exec").addEventListener("click", () => runOnlineDdl(true));
   $("#btn-diagnose").addEventListener("click", runDiagnose);

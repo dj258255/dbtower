@@ -531,3 +531,16 @@ input[type="datetime-local"] {
 .command-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
 .command-box h4 { margin-bottom: 4px; }
 .cmd-legend { display: flex; gap: 14px; font-size: 11px; color: #7b8494; margin-top: 2px; }
+
+/* 설정 변경 이력 (B1) — 시간축 드리프트 타임라인 */
+.config-drift-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.config-drift-result .drift-block { border-left: 3px solid var(--accent); padding: 6px 0 6px 12px; margin: 10px 0; }
+.config-drift-result .drift-time { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+.config-drift-result .drift-line { padding: 3px 0; font-size: 13px; }
+.config-drift-result .drift-line code { background: var(--code-bg, #f1f3f5); padding: 1px 5px; border-radius: 3px; }
+.drift-add { color: #1f7a4d; font-weight: 700; }
+.drift-del { color: #c0392b; font-weight: 700; }
+.drift-chg { color: #b5730f; font-weight: 700; }
+.drift-around { margin-top: 4px; }
+.drift-hint { font-size: 12px; color: #b5730f; text-decoration: none; }
+.drift-hint:hover { text-decoration: underline; }

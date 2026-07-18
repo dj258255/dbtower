@@ -2747,3 +2747,35 @@ MSSQL 라이브(컨테이너 복구 후 재사이클): volume_total=1007GB · av
   max_bytes NULL(볼륨이 한도) — 세 기종 판정 전부 실측 완료
 lakehouse 소비: 마트가 seed 부재 시 'volume_reported' 폴백(그쪽 16절 unit test 고정)
 ```
+
+## 105. 설정 드리프트 이력 (운영 병목 아크 B1) — "언제부터 무엇이 바뀌었나"
+
+파라미터 diff(B6)는 공간축("A와 B가 다른가")뿐이었다. "누가 work_mem 줄였어?", "이 인스턴스
+언제부터 설정이 달라졌지?"는 시간축이 있어야 답한다. 원천은 기존 operator.parameters()
+재사용 — 신규 수집 메서드 0개.
+
+설계(폭증 방지): config_current_param이 인스턴스별 '현재 전량'을 거울처럼 들고(변경분만
+upsert/delete), 바뀐 항목만 config_param_change에 append. config_snapshot은 매 수집 1행
+(SHA-256 해시 = 무변경 증거). 무변경 주기엔 이 한 줄만 쌓인다. 첫 수집은 baseline=true라
+경보를 내지 않는다(경보 폭탄 방지). "누가"는 대상 DB가 주지 않는 정보라 저장·표기하지 않고
+대상 DB 감사 로그의 몫임을 콘솔·카드에 명시(정직).
+
+- V27: config_snapshot / config_param_change / config_current_param.
+- ConfigDriftService(diff·노이즈 필터·해시), ConfigDriftDao(JdbcTemplate), ConfigDriftDetector
+  (수집 잡 30초~1시간·ShedLock·보존 365일 스윕·웹훅), AlertEmbeds.forConfigDrift(BLUE),
+  ConfigDriftController(타임라인 P3·플랜플립 대조 P4, ADMIN). 콘솔 "설정 변경 이력" 카드 +
+  플랜 플립 카드에 "±24h 내 설정 변경 N건" 대조 링크.
+
+**라이브 실측**(2026-07-18): 7인스턴스 전부 baseline 생성(change_count=0, 경보 0 — 첫 수집
+억제 확인). 대상 PG 서버 `ALTER SYSTEM SET work_mem='8MB'` + reload 후 다음 수집이 인스턴스
+2·4(같은 서버) 각각에 `work_mem: 4096 → 8192` CHANGED 1건씩 감지, 웹훅 카드 발사(URL 설정·
+오류 0). 콘솔 타임라인 실화면(docs/images/webui/56-config-drift.png)에 시각·변경·"누가 미표기"
+안내 렌더. 단위 5건(첫수집=기준선·무변경=스냅샷만·값변경·추가/제거 구분·노이즈 무시).
+
+**덤(회귀 발견·수정)**: 라이브 검증에서 MongoDB가 매 수집 드리프트로 잡히는 것을 발견 —
+원인은 operator.parameters()가 `getParameter:"*"` 응답의 명령 봉투 gossip 필드($clusterTime·
+operationTime)까지 파라미터로 반환한 것(호출마다 변함). 이건 B6 파라미터 diff도 오염시키던
+기존 버그. MongoOperator에 봉투 필드($ 접두·operationTime·ok) 제외를 넣어 원천에서 수정 —
+Mongo 파라미터 622→620, gossip 0, 수정 후 재수집에서 Mongo 오탐 0 확인.
+
+총 491건 그린(+5, ModularityTests 포함).
