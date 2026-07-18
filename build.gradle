@@ -32,6 +32,8 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 	implementation 'com.anthropic:anthropic-java:2.34.0'
+	// 스키마 변경 리뷰 게이트(B2) — SQL 정확 파싱(다중 문장·구문 트리). 순수 Java, 트랜지티브 의존 없음.
+	implementation 'com.github.jsqlparser:jsqlparser:5.1'
 	implementation 'org.mongodb:mongodb-driver-sync'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	// 스키마의 단일 권위를 Hibernate(ddl-auto)에서 마이그레이션 도구로 이관 (Phase A3).

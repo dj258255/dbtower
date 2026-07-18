@@ -2,13 +2,16 @@ package io.dbtower.review.internal;
 
 import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.QueryMasker;
+import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.TableDetail;
+import io.dbtower.operator.model.TableSchema;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.registry.RegistryService;
 import io.dbtower.review.ReviewDecidedEvent;
 import io.dbtower.review.ReviewSubmittedEvent;
+import io.dbtower.review.internal.ChangeReviewRules.ColumnOp;
 import io.dbtower.review.internal.ChangeReviewRules.Verdict;
 import io.dbtower.review.internal.domain.ReviewRequest;
 import io.dbtower.review.internal.domain.ReviewRequest.Status;
@@ -76,6 +79,9 @@ public class ReviewService {
         verdict.alterTable().ifPresent(table -> tryRowCount(instance, table)
                 .ifPresent(rows -> findings.add(rules.lockRiskLine(table, rows))));
 
+        // 스키마 대조 — ADD/DROP 컬럼이 실제 스키마와 어긋나는지(이미 있는 컬럼 추가·없는 컬럼 삭제)
+        addSchemaMismatches(instance, verdict, findings);
+
         String aiOpinion = aiOpinion(req.sql(), findings);
         ReviewRequest saved = repository.save(new ReviewRequest(
                 instanceId, req.sql(), req.reason(), requester,
@@ -133,6 +139,47 @@ public class ReviewService {
             log.debug("리뷰 락 위험 행수 확인 실패 table={} cause={}", table, e.getMessage());
             return Optional.empty();
         }
+    }
+
+    /**
+     * ADD/DROP 컬럼을 실제 스키마와 대조해 어긋남을 지적한다. 스냅샷에 그 테이블이 없거나(대량 캡·다른
+     * 스키마) 스키마리스(컬럼 목록 비어 있음)면 판정을 보류한다 — 확신 없는 지적은 하지 않는다.
+     */
+    private void addSchemaMismatches(DatabaseInstance instance, Verdict verdict, List<String> findings) {
+        if (verdict.columnOps().isEmpty()) {
+            return;
+        }
+        Optional<SchemaSnapshot> snapshot = trySchema(instance);
+        if (snapshot.isEmpty()) {
+            return;
+        }
+        for (ColumnOp op : verdict.columnOps()) {
+            Optional<TableSchema> table = findTable(snapshot.get(), op.table());
+            if (table.isEmpty() || table.get().columns().isEmpty()) {
+                continue; // 못 찾았거나 스키마리스 — 존재 여부를 단정할 수 없어 보류
+            }
+            boolean exists = table.get().columns().stream()
+                    .anyMatch(c -> c.name().equalsIgnoreCase(op.column()));
+            rules.schemaMismatchLine(op, exists).ifPresent(findings::add);
+        }
+    }
+
+    private Optional<SchemaSnapshot> trySchema(DatabaseInstance instance) {
+        try {
+            return Optional.of(operatorFactory.create(instance).describeSchema());
+        } catch (RuntimeException e) {
+            // 스키마 조회 실패는 리뷰를 막지 않는다 — SQL 규칙 지적만으로도 유효하다
+            log.debug("리뷰 스키마 대조 조회 실패 instance={} cause={}", instance.getId(), e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /** 스냅샷에서 테이블을 찾는다 — ALTER 대상이 스키마 한정(schema.table)일 수 있어 끝 세그먼트로 대조. */
+    private static Optional<TableSchema> findTable(SchemaSnapshot snapshot, String table) {
+        String bare = table.contains(".") ? table.substring(table.lastIndexOf('.') + 1) : table;
+        return snapshot.tables().stream()
+                .filter(t -> t.name().equalsIgnoreCase(bare))
+                .findFirst();
     }
 
     private String aiOpinion(String sql, List<String> findings) {

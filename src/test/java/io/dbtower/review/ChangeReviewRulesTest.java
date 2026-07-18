@@ -1,6 +1,7 @@
 package io.dbtower.review;
 
 import io.dbtower.review.internal.ChangeReviewRules;
+import io.dbtower.review.internal.ChangeReviewRules.ColumnOp;
 import io.dbtower.review.internal.ChangeReviewRules.Verdict;
 import org.junit.jupiter.api.Test;
 
@@ -8,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * 변경 리뷰 규칙 판정 검증 — 락 위험(ALTER)·WHERE 없는 대량 변경·DROP·NOT NULL 추가를
- * 지적하고, 위험 없는 SQL은 "신호 없음", 다중 문장은 파싱 한계를 정직 표기한다.
+ * 지적하고, 위험 없는 SQL은 "신호 없음"을 알린다. 파싱은 JSqlParser(구문 트리)라 정상 다중
+ * 문장이면 parseLimited가 꺼지고, 파서가 못 다루는 SQL만 정규식 폴백으로 한계를 표기한다.
+ * ADD/DROP 컬럼은 columnOps로 뽑아 서비스의 스키마 대조 재료가 된다.
  */
 class ChangeReviewRulesTest {
 
@@ -62,15 +65,48 @@ class ChangeReviewRulesTest {
     }
 
     @Test
-    void 다중_문장은_파싱_한계를_표기한다() {
+    void 정상_다중_문장은_이제_정확히_파싱된다() {
+        // 예전에는 정규식이라 다중 문장을 parseLimited로 표기했지만, JSqlParser는 각 문장을 정확히 본다
         Verdict v = rules.evaluate("ALTER TABLE a ADD COLUMN x INT; ALTER TABLE b DROP COLUMN y");
-        assertTrue(v.parseLimited());
+        assertFalse(v.parseLimited());
+        assertTrue(has(v, "R-LOCK"));     // 첫 문장 ALTER
+        assertTrue(has(v, "R-DROPCOL"));  // 둘째 문장 DROP COLUMN
     }
 
     @Test
     void 주석_안_세미콜론은_다중문장_오판을_만들지_않는다() {
         Verdict v = rules.evaluate("ALTER TABLE orders ADD COLUMN memo TEXT -- a; b; c\n");
         assertFalse(v.parseLimited());
+    }
+
+    @Test
+    void 파서가_못_다루는_SQL은_정규식_폴백으로_한계를_표기한다() {
+        // 종료 안 된 문자열 리터럴 — JSqlParser는 실패하고 정규식 폴백이 R-NOWHERE를 잡되 한계를 표기한다
+        Verdict v = rules.evaluate("UPDATE orders SET data = '{broken ;;;");
+        assertTrue(v.parseLimited());
+        assertTrue(has(v, "R-NOWHERE"));
+    }
+
+    @Test
+    void ADD와_DROP_컬럼을_columnOps로_뽑는다() {
+        Verdict add = rules.evaluate("ALTER TABLE users ADD COLUMN `nickname` VARCHAR(32) NOT NULL");
+        assertTrue(add.columnOps().stream()
+                .anyMatch(op -> op.add() && op.table().equals("users") && op.column().equals("nickname")));
+
+        Verdict drop = rules.evaluate("ALTER TABLE users DROP COLUMN nickname");
+        assertTrue(drop.columnOps().stream()
+                .anyMatch(op -> !op.add() && op.column().equals("nickname")));
+    }
+
+    @Test
+    void 스키마_대조는_이미_있는_컬럼_추가와_없는_컬럼_삭제를_짚는다() {
+        ColumnOp add = new ColumnOp("users", "email", true);
+        assertTrue(rules.schemaMismatchLine(add, true).orElseThrow().startsWith("R-COL-EXISTS"));
+        assertTrue(rules.schemaMismatchLine(add, false).isEmpty()); // 없는 컬럼 추가는 정상
+
+        ColumnOp drop = new ColumnOp("users", "ghost", false);
+        assertTrue(rules.schemaMismatchLine(drop, false).orElseThrow().startsWith("R-COL-MISSING"));
+        assertTrue(rules.schemaMismatchLine(drop, true).isEmpty()); // 있는 컬럼 삭제는 정상
     }
 
     @Test
