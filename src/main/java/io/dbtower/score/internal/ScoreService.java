@@ -6,6 +6,8 @@ import io.dbtower.insight.BaselineService;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.HealthStatus;
 import io.dbtower.registry.RegistryService;
+import io.dbtower.score.HealthScoreView;
+import io.dbtower.score.ScoreQuery;
 import io.dbtower.score.internal.SignalContribution.Signal;
 import io.dbtower.slo.SloService;
 import org.slf4j.Logger;
@@ -30,7 +32,7 @@ import java.util.function.Supplier;
  * 없는 신호를 0점·장애로 오판하지 않는다.
  */
 @Service
-public class ScoreService {
+public class ScoreService implements ScoreQuery {
 
     private static final Logger log = LoggerFactory.getLogger(ScoreService.class);
 
@@ -102,6 +104,13 @@ public class ScoreService {
     /** 인스턴스 하나의 상세 분해 — GET /api/instances/{id}/health-score(존재 검증 포함). */
     public HealthScore evaluate(Long instanceId) {
         return evaluate(registryService.findById(instanceId), LocalDateTime.now());
+    }
+
+    /** ScoreQuery 공개 구현 — 월간 리포트 등 다른 모듈이 건강을 읽는 최소 창구(B5). */
+    @Override
+    public HealthScoreView scoreFor(Long instanceId) {
+        HealthScore s = evaluate(instanceId);
+        return new HealthScoreView(s.instanceId(), s.score(), s.grade(), s.down());
     }
 
     /** 인스턴스 하나에 다섯 신호를 모아 스코어를 낸다. 신호마다 개별 격리한다. */

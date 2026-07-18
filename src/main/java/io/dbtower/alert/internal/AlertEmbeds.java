@@ -94,6 +94,25 @@ public final class AlertEmbeds {
         return new Embed("DBTower 인시던트 리포트 — " + instance.getName(), RED, fields);
     }
 
+    /** 월간 점검 리포트 롤업 카드 (B5) — 인스턴스별 점수 한 줄씩, 전문은 콘솔. */
+    public static Embed forMonthlyDigest(List<String> rollup, String from, String to, String deeplink) {
+        List<Embed.Field> fields = new ArrayList<>();
+        fields.add(new Embed.Field("기간", from + " ~ " + to, true));
+        fields.add(new Embed.Field("인스턴스", String.valueOf(rollup.size()), true));
+        StringBuilder body = new StringBuilder();
+        for (String r : rollup) {
+            if (body.length() > 0) {
+                body.append('\n');
+            }
+            body.append("• ").append(r);
+        }
+        fields.add(new Embed.Field("헬스 스코어 (나쁜 순)", clip(body.toString(), 1000), false));
+        if (deeplink != null && !deeplink.isBlank()) {
+            fields.add(new Embed.Field("전문", link("콘솔에서 인스턴스별 리포트", deeplink), false));
+        }
+        return new Embed("DBTower 월간 점검 리포트", BLUE, fields);
+    }
+
     private static String clip(String s, int max) {
         if (s == null) {
             return "";

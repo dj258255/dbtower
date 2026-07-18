@@ -1911,6 +1911,37 @@ function downloadIncident() {
   URL.revokeObjectURL(a.href);
 }
 
+// ---------- 월간 점검 리포트 (B5) — 기간 전체의 건강을 한 장으로 ----------
+let lastMonthlyMarkdown = "";
+
+async function generateMonthly() {
+  const box = $("#monthly-result");
+  if (!state.instance) { box.className = "incident-result schema-warning"; box.textContent = "인스턴스를 먼저 선택하세요."; return; }
+  const days = Number($("#monthly-days").value) || 30;
+  const btn = $("#btn-monthly"); btn.disabled = true;
+  box.className = "incident-result muted"; box.innerHTML = '<div class="muted">점검 리포트 조립 중...</div>';
+  try {
+    const r = await api(`/api/instances/${state.instance.id}/monthly-report?days=${days}`, { method: "POST" });
+    lastMonthlyMarkdown = r.markdown;
+    box.className = "incident-result";
+    box.innerHTML = mdToHtml(r.markdown);
+    $("#btn-monthly-dl").hidden = false;
+  } catch (e) {
+    box.className = "incident-result schema-warning";
+    box.textContent = e.message.startsWith("403") ? "월간 리포트는 ADMIN 역할만 생성할 수 있습니다." : `생성 실패: ${e.message}`;
+  } finally { btn.disabled = false; }
+}
+
+function downloadMonthly() {
+  if (!lastMonthlyMarkdown) return;
+  const blob = new Blob([lastMonthlyMarkdown], { type: "text/markdown" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `monthly-${state.instance?.name || "report"}.md`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 // ---------- 온라인 스키마 변경 (B4) — gh-ost, MySQL 전용 ----------
 // 기본은 dry-run(noop). "실제 실행"은 confirm으로 한 번 더 막는다(파괴적 행위).
 // 결과 3-값(OK/FAILED/UNSUPPORTED)을 색으로 구분해 정직하게 보여준다.
@@ -2081,6 +2112,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#btn-review-submit").addEventListener("click", submitReview);
   $("#btn-incident").addEventListener("click", generateIncident);
   $("#btn-incident-dl").addEventListener("click", downloadIncident);
+  $("#btn-monthly").addEventListener("click", generateMonthly);
+  $("#btn-monthly-dl").addEventListener("click", downloadMonthly);
   incidentDefaults();
   $("#btn-ddl-noop").addEventListener("click", () => runOnlineDdl(false));
   $("#btn-ddl-exec").addEventListener("click", () => runOnlineDdl(true));

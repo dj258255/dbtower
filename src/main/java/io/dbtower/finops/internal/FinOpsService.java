@@ -1,5 +1,8 @@
 package io.dbtower.finops.internal;
 
+import io.dbtower.finops.FinOpsQuery;
+import io.dbtower.finops.WasteSummary;
+
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.registry.DatabaseInstance;
@@ -21,7 +24,7 @@ import java.util.List;
  * 산출도 하지 않는다(실제 과금 연동은 자격증명 필요라 범위 밖). "절감 가능 신호"까지만 낸다.
  */
 @Service
-public class FinOpsService {
+public class FinOpsService implements FinOpsQuery {
 
     private static final Logger log = LoggerFactory.getLogger(FinOpsService.class);
 
@@ -39,6 +42,15 @@ public class FinOpsService {
     /** 인스턴스 id로 온디맨드 분석 — REST가 부른다. */
     public InstanceFinOpsReport analyze(Long instanceId) {
         return analyze(registryService.findById(instanceId));
+    }
+
+    /** FinOpsQuery 공개 구현 — 월간 리포트가 낭비 요약을 읽는 최소 창구(B5). */
+    @Override
+    public WasteSummary wasteSummary(Long instanceId) {
+        InstanceFinOpsReport report = analyze(instanceId);
+        // 전 분석기가 미지원이면(예: 일부 기종) supported=false — "낭비 없음"과 "판정 불가"를 구분
+        boolean supported = report.checks().stream().anyMatch(c -> !"UNSUPPORTED".equals(c.status().name()));
+        return new WasteSummary(instanceId, report.candidateCount(), supported);
     }
 
     /** 인스턴스 하나에 전 분석기를 적용한다. operator는 supports=true인 분석기가 있을 때만 만든다. */

@@ -306,6 +306,16 @@
         <p class="hint">감지 알림은 영속 이력이 없어(웹훅 전용) 타임라인에 미포함 — 영속된 신호로 재구성합니다. 구간이 24시간을 넘으면 잘립니다.</p>
         <div id="incident-result" class="incident-result muted">구간을 고르고 리포트 생성을 누르세요.</div>
       </div>
+      <div class="monitor-card monthly-card">
+        <h3>월간 점검 리포트 <span class="hint">(기간 전체의 건강을 한 장으로 — 헬스 스코어·백업 신선도·Advisor·용량 예측·낭비 신호·설정 변경 · 매월 자동 발행 + 수동 생성 · ADMIN)</span></h3>
+        <div class="incident-controls">
+          <label class="hint">기간(일) <input type="number" id="monthly-days" class="incident-time" value="30" min="1" max="90" style="width:70px"></label>
+          <button id="btn-monthly" class="btn btn-primary btn-small">리포트 생성</button>
+          <button id="btn-monthly-dl" class="btn btn-small" hidden>마크다운 다운로드</button>
+        </div>
+        <p class="hint">읽고 종합한 신호·조언입니다. 대상 DB는 바꾸지 않으며 조치·실행은 사람이 합니다.</p>
+        <div id="monthly-result" class="incident-result muted">기간을 고르고 리포트 생성을 누르세요.</div>
+      </div>
       <div class="monitor-card online-ddl-card">
         <h3>온라인 스키마 변경 <span class="hint">(gh-ost · MySQL 전용 — 대형 테이블 ALTER를 락 최소화로)</span></h3>
         <div class="online-ddl-controls">

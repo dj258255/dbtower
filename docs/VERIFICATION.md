@@ -2854,3 +2854,23 @@ registryService.findById로 LBAC 스코프 게이트(스코프 밖 404), /api/re
 근거 부족" 판정 — 1차 분석기 원칙(근거 없으면 모른다) 실증. 콘솔 마크다운 렌더 실화면
 (docs/images/webui/59-incident-report.png), 웹훅 카드 발사. 단위 3건(전 절 포함·24h 절단·LBAC 게이트).
 총 504건 그린(ModularityTests 포함).
+
+## 109. 월간 정기 점검 리포트 (운영 병목 아크 B5) — 기간 전체의 건강을 한 장으로
+
+DBA가 매달 손으로 만드는 정기 점검 보고서를 자동화한다. 인시던트 리포트(B4)가 "장애 구간의
+사건"이라면, 이쪽은 "기간 전체의 건강"이다. 전부 공개 API 조합 — 신규 수집 0.
+
+- 재료: 헬스 스코어(ScoreQuery)·백업 신선도와 복원 검증(BackupFreshnessService)·Advisor 스윕과
+  용량 예측(AdvisorService, disk-forecast 포함)·낭비 신호(FinOpsQuery)·설정 변경 건수(ConfigDriftService).
+- 공개 파사드 2개 신설(Modulith 경계): score.ScoreQuery/HealthScoreView(ScoreService 구현),
+  finops.FinOpsQuery/WasteSummary(FinOpsService 구현) — 월간 리포트가 score·finops 내부를 참조하지
+  않게. MonthlyReportService(alert)가 조립 — alert -> score·advisor·finops 신규 의존(전부 순환 없음,
+  ModularityTests 통과).
+- M1: MonthlyReportJob(@monthly cron·ShedLock) — 전 인스턴스 리포트 후 롤업 요약 카드 1장 발행
+  (인스턴스마다 쏘면 폭주라 한 장, 나쁜 순 정렬). M3: 수동 트리거 POST(ADMIN) + 콘솔 마크다운
+  렌더·다운로드(B4의 mdToHtml 재사용).
+
+**라이브 실측**(2026-07-18): dbtower-self(instance 4) 지난 30일 리포트 — 헬스 72점(C)·백업 FRESH
+(마지막 백업 시각·복원 검증)·Advisor CRITICAL 0/WARNING 1(완전 중복 인덱스 후보 oauth_token 지적)·
+낭비 후보 9건·설정 변경 2건. 콘솔 마크다운 렌더 실화면(docs/images/webui/60-monthly-report.png).
+단위 2건(전 절 포함·미지원 기종 판정불가 표기). 총 506건 그린(ModularityTests 포함).
