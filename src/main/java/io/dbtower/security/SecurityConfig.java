@@ -188,8 +188,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/param-diff").hasRole("ADMIN")
                         // 설정 드리프트 이력(B1)도 파라미터 값(old→new)을 담아 같은 ADMIN 경계에 둔다.
                         .requestMatchers(HttpMethod.GET, "/api/instances/*/config-drift", "/api/instances/*/config-drift/around").hasRole("ADMIN")
-                        // 변경 리뷰 승인/반려(B2)는 ADMIN. 제출·조회는 authenticated(자기 팀 인스턴스는 LBAC가 스코프).
+                        // 변경 리뷰 승인/반려(B2)는 ADMIN. 대기함(전 인스턴스 횡단 뷰)도 ADMIN 트리아지 —
+                        // 팀 사용자에게 다른 팀 리뷰 SQL이 새지 않게. 인스턴스별 조회·제출은 authenticated(findById가 LBAC 스코프).
                         .requestMatchers(HttpMethod.POST, "/api/reviews/*/decision").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/reviews/pending").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage("/login.html")

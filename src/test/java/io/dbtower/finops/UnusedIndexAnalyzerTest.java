@@ -5,6 +5,7 @@ import io.dbtower.finops.internal.WasteCandidate;
 import io.dbtower.finops.internal.WasteKind;
 
 import io.dbtower.advisor.Severity;
+import io.dbtower.insight.IndexUsageHistoryService;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.model.IndexUsage;
 import io.dbtower.registry.DatabaseInstance;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.when;
@@ -20,10 +22,15 @@ import static org.mockito.Mockito.when;
 /** 미사용 인덱스 판정 — 스캔 0 & 비유니크만 후보, 유니크·사용됨·UNSUPPORTED 행은 제외. */
 class UnusedIndexAnalyzerTest {
 
-    private final UnusedIndexAnalyzer analyzer = new UnusedIndexAnalyzer();
+    private final IndexUsageHistoryService history = Mockito.mock(IndexUsageHistoryService.class);
+    private final UnusedIndexAnalyzer analyzer = new UnusedIndexAnalyzer(history);
     private final DbmsOperator operator = Mockito.mock(DbmsOperator.class);
-    private final DatabaseInstance instance =
-            new DatabaseInstance("db1", DbmsType.POSTGRESQL, "h", 5432, "sample", "u", "p");
+    private final DatabaseInstance instance = Mockito.mock(DatabaseInstance.class);
+
+    {
+        when(instance.getId()).thenReturn(1L);
+        when(history.observationDays(1L)).thenReturn(Optional.of(30L));
+    }
 
     @Test
     void Oracle만_미지원이고_나머지_기종은_지원한다() {

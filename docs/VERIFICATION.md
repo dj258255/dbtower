@@ -2805,3 +2805,28 @@ VARCHAR(32) NOT NULL` 제출 → R-LOCK·R-NOTNULL·**R-LOCK-OK: users 약 8,118
 (docs/images/webui/57-review-gate.png). ADMIN 승인 → APPROVED 전이·감사 기록 2건(제출 #254·
 승인 #256, AuditInterceptor 자동)·결과 카드 발사. 단위 10건(락·NOT NULL·WHERE 없음·DROP·
 파싱 한계·주석 오판 방지·행수 임계 등). 총 501건 그린(+10, ModularityTests 포함).
+
+## 107. 인덱스 사용 통계 주기 영속 (운영 병목 아크 B3) — lakehouse 장기 판정의 공급원
+
+"이 인덱스 지워도 되나"는 재시작-누적 카운터의 순간값으론 답할 수 없다("지난주 재기동 이후
+0회"와 "분기 내내 0회"가 구분 안 됨). 분기 창 판정은 lakehouse 몫이고, DBTower는 원료를 낳는다.
+
+- I1은 기존 자산: operator.indexUsage()가 이미 5기종 구현(PG pg_stat_user_indexes / MSSQL
+  dm_db_index_usage_stats / MySQL performance_schema / Mongo $indexStats), Oracle은 UNSUPPORTED
+  (MONITORING USAGE 침습·라이선스). 신규 수집 메서드 0개.
+- I2: V29 index_usage_snapshot + IndexUsageSnapshotJob(6시간·7일 보존·ShedLock) —
+  WaitEventSnapshotJob·SizeSnapshotJob과 같은 패턴. UNSUPPORTED 행은 저장 안 함(지어내기 금지).
+- I3: IndexUsageHistoryService(insight 공개) — 관측 일수(스냅샷 축적 기간)를 FinOps 미사용 인덱스
+  신호에 "관측 N일"로 실어 "미사용(관측 3일)"과 "미사용(관측 90일)"을 구분. finops -> insight
+  단방향 의존(ModularityTests 통과). 서버 재기동이 카운터를 리셋할 수 있다는 한계를 권고에 명시.
+- I4: lakehouse 인계 — 레지스트리 편입·mart_index_verdict·판정 예외 3종은 lakehouse ROADMAP
+  16단계(eeab9a4에 명세).
+
+**라이브 실측**(2026-07-18): 수집 주기 30초로 index_usage_snapshot 적재 — MySQL·PG·Mongo·MSSQL
+기록, **Oracle 0행(UNSUPPORTED 정직)**. 심은 미사용 인덱스(plan_demo.idx_never_used, scan_count=0,
+unique=false) 캡처. FinOps 신호가 "스캔 0회 · 크기 2.3 MB · 관측 0일" + "분기 단위 장기 판정
+(lakehouse)과 함께 보라" 권고 렌더(docs/images/webui/58-index-observation.png).
+
+**보안(백그라운드 리뷰 반영)**: B2 커밋에서 발견된 리뷰 조회 IDOR 2건 수정 — byInstance()는
+registryService.findById로 LBAC 스코프 게이트(스코프 밖 404), /api/reviews/pending은 ADMIN 트리아지로
+제한(팀 사용자에게 타 팀 리뷰 SQL 노출 차단). 총 501건 그린(ModularityTests 포함).

@@ -110,6 +110,8 @@ public class ReviewService {
     }
 
     public List<ReviewRequest> byInstance(Long instanceId) {
+        // LBAC 스코프 강제 — 스코프 밖 인스턴스면 findById가 404(리뷰 SQL 노출 방지). 목록 직조회 전에 게이트한다.
+        registryService.findById(instanceId);
         return repository.findByInstanceIdOrderBySubmittedAtDesc(instanceId);
     }
 
