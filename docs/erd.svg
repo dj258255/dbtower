@@ -47,7 +47,7 @@
   </style>
 
   <rect class="bg" x="0" y="0" width="1460" height="1040" rx="14"/>
-  <text class="title" x="730" y="36" font-size="18" text-anchor="middle">DBTower 메타 DB ERD — Flyway V1~V26 스키마 중 핵심 표 9개(OAuth·매핑 등 확장 표 생략)</text>
+  <text class="title" x="730" y="36" font-size="18" text-anchor="middle">DBTower 메타 DB ERD — Flyway V1~V29 스키마 중 핵심 표 9개(OAuth·매핑 등 확장 표 생략)</text>
   <text class="sub"   x="730" y="58" font-size="12.5" text-anchor="middle">PK/UQ/FK/IDX만 표기 · FK 5개는 전부 V10에서 일괄 추가(ON DELETE CASCADE — 인스턴스 삭제 시 자식 자동 정리)</text>
 
   <!-- ===== 그룹: 백업 (왼쪽) ===== -->
@@ -216,5 +216,5 @@
   <text class="col" x="892" y="908" font-size="11">outcome  INTEGER  — HTTP 상태 · duration_ms  BIGINT</text>
   <text class="idx" x="892" y="936" font-size="10.5">IDX (occurred_at) — 최신 N건·기간 검색</text>
 
-  <text class="note" x="730" y="1004" font-size="11" text-anchor="middle">근거: src/main/resources/db/migration/V1~V26 (JPA 엔티티는 ddl-auto=validate로 검증만) · verify_status·audit role에 CHECK가 없는 것은 값 추가 때 제약 재생성 마이그레이션이 필요해지는 결합을 피한 의도적 선택</text>
+  <text class="note" x="730" y="1004" font-size="11" text-anchor="middle">근거: src/main/resources/db/migration/V1~V29 (JPA 엔티티는 ddl-auto=validate로 검증만) · verify_status·audit role에 CHECK가 없는 것은 값 추가 때 제약 재생성 마이그레이션이 필요해지는 결합을 피한 의도적 선택</text>
 </svg>
