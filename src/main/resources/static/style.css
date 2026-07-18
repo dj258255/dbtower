@@ -492,7 +492,27 @@ input[type="datetime-local"] {
 .metric-full-link { margin-left: auto; font-size: 12px; font-weight: 600; }
 .metric-chart-box { margin-top: 10px; }
 .metric-chart-box h4 { font-size: 12.5px; margin: 0 0 4px; color: var(--muted); }
-.metric-chart-box svg { display: block; background: #fff; border: 1px solid #eef0f3; border-radius: 6px; }
+.metric-chart-box svg { display: block; background: #fff; border: 1px solid #eef0f3; border-radius: 6px; cursor: crosshair; }
+
+/* 차트 호버 — 커서에 가장 가까운 점의 정확 수치·시각 (Grafana류 툴팁) */
+.chart-tip {
+  position: fixed;
+  transform: translate(-50%, -100%);
+  background: #1f2430;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.35;
+  padding: 4px 8px;
+  border-radius: 5px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 60;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+.chart-tip b { font-weight: 700; }
+.chart-tip span { opacity: 0.75; margin-left: 6px; }
+.hover-line { stroke: #9aa3b2; stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+.hover-dot { fill: #6672f5; stroke: #fff; stroke-width: 1.5; pointer-events: none; }
 
 /* 인스턴스 메타 — 담당 팀 배지 + 콘솔 딥링크 (심화 아크 4, 레퍼런스 Slack Group/PI 링크 대응) */
 .instance-meta { margin-top: 5px; display: flex; align-items: center; gap: 6px; }

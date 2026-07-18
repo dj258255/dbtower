@@ -497,7 +497,7 @@ async function loadMetrics() {
     m = { cpu: [], cpuNote: `조회 실패: ${e.message}`, connections: [], connectionsNote: `조회 실패: ${e.message}` };
   }
   state.metricsCpu = m.cpu ?? [];
-  drawSimpleChart("#cpu-chart", "#cpu-empty", m.cpu ?? [], "#e5533d", m.cpuNote);
+  drawSimpleChart("#cpu-chart", "#cpu-empty", m.cpu ?? [], "#e5533d", m.cpuNote, "%");
   drawSimpleChart("#conn-chart", "#conn-empty", m.connections ?? [], "#6672f5", m.connectionsNote);
   if (state.chartMetric === "cpu") drawChart();   // 드래그 차트가 CPU 모드면 새 데이터로 다시 그린다
   loadCommandMetrics(from, to);
@@ -532,14 +532,94 @@ async function loadCommandMetrics(from, to) {
   });
 }
 
+// ---------- 차트 호버 툴팁 ----------
+// 두 렌더러(드래그 차트·단순 차트)가 렌더 끝에 svg._chart에 {pts,x,y,W,H,padT,padB,fmt}를 남기면,
+// 공용 호버가 그걸 읽어 커서에 가장 가까운 점의 정확 수치·시각을 세로 가이드선·점·말풍선으로 보여준다.
+// 좌표 변환은 getScreenCTM()으로 — viewBox·preserveAspectRatio가 어떻든 화면↔차트 좌표가 정확하다.
+const SVGNS = "http://www.w3.org/2000/svg";
+
+function chartTip() {
+  let el = document.getElementById("chart-tip");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "chart-tip";
+    el.className = "chart-tip";
+    el.hidden = true;
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+// 세로 가이드선 + 점 마커 — svg.innerHTML 재그림에 지워지므로 없으면 다시 붙인다(드래그 중에도 유지)
+function chartHoverMarker(svg) {
+  let g = svg.querySelector(".hover-marker");
+  if (!g) {
+    g = document.createElementNS(SVGNS, "g");
+    g.setAttribute("class", "hover-marker");
+    const line = document.createElementNS(SVGNS, "line");
+    line.setAttribute("class", "hover-line");
+    const dot = document.createElementNS(SVGNS, "circle");
+    dot.setAttribute("class", "hover-dot");
+    dot.setAttribute("r", "3.5");
+    g.appendChild(line);
+    g.appendChild(dot);
+    svg.appendChild(g);
+  }
+  return g;
+}
+
+function fmtClock(t) {
+  const d = new Date(t);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function attachChartHover(svg) {
+  if (svg._hoverAttached) return; // 명령 차트는 매번 새 SVG라 각자 한 번씩 붙는다
+  svg._hoverAttached = true;
+  const tip = chartTip();
+  const hide = () => {
+    tip.hidden = true;
+    const g = svg.querySelector(".hover-marker");
+    if (g) g.remove();
+  };
+  svg.addEventListener("pointermove", (ev) => {
+    const c = svg._chart;
+    const ctm = svg.getScreenCTM();
+    if (!c || !c.pts || c.pts.length < 2 || !ctm) { hide(); return; }
+    // 커서 화면좌표 → 차트좌표. 가장 가까운 점은 x(시간축)만으로 찾는다.
+    const local = new DOMPoint(ev.clientX, ev.clientY).matrixTransform(ctm.inverse());
+    let best = c.pts[0], bd = Infinity;
+    for (const p of c.pts) {
+      const d = Math.abs(c.x(p.t) - local.x);
+      if (d < bd) { bd = d; best = p; }
+    }
+    const cx = c.x(best.t), cy = c.y(best.v);
+    const g = chartHoverMarker(svg);
+    const line = g.querySelector(".hover-line");
+    line.setAttribute("x1", cx); line.setAttribute("x2", cx);
+    line.setAttribute("y1", c.padT); line.setAttribute("y2", c.H - c.padB);
+    const dot = g.querySelector(".hover-dot");
+    dot.setAttribute("cx", cx); dot.setAttribute("cy", cy);
+    // 점 화면좌표에 말풍선 — position:fixed라 getScreenCTM 결과(뷰포트 기준)를 그대로 쓴다
+    const sp = new DOMPoint(cx, cy).matrixTransform(ctm);
+    tip.innerHTML = `<b>${c.fmt(best.v)}</b><span>${fmtClock(best.t)}</span>`;
+    tip.hidden = false;
+    tip.style.left = sp.x + "px";
+    tip.style.top = (sp.y - 12) + "px";
+  });
+  svg.addEventListener("pointerleave", hide);
+}
+
 // 단순 라인 차트 (Metric 카드용) — 드래그 차트와 달리 선택 하이라이트가 없다
-function drawSimpleChart(svgSel, emptySel, pts, color, note) {
+function drawSimpleChart(svgSel, emptySel, pts, color, note, unit = "") {
   const svg = $(svgSel);
   const empty = $(emptySel);
   const W = 1000, H = 140, padL = 46, padR = 10, padT = 10, padB = 20;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   if (!pts || pts.length < 2) {
     svg.innerHTML = "";
+    svg._chart = null;
     empty.hidden = false;
     empty.textContent = note ?? "이 구간에 수집된 시계열이 없습니다";
     return;
@@ -563,6 +643,11 @@ function drawSimpleChart(svgSel, emptySel, pts, color, note) {
   const line = pts.map((p, i) =>
     `${i === 0 ? "M" : "L"}${x(parseApiTime(p.time).getTime()).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
   svg.innerHTML = `${yTicks}${xTicks}<path d="${line}" fill="none" stroke="${color}" stroke-width="1.8"/>`;
+  svg._chart = {
+    pts: pts.map((p) => ({ t: parseApiTime(p.time).getTime(), v: p.value })),
+    W, H, padT, padB, x, y, fmt: (v) => fmtNum(v, v >= 10 ? 0 : 1) + unit,
+  };
+  attachChartHover(svg);
 }
 
 const CHART = { w: 1000, h: 180, padL: 46, padR: 10, padT: 12, padB: 22 };
@@ -593,6 +678,7 @@ function drawChart() {
   svg.setAttribute("viewBox", `0 0 ${CHART.w} ${CHART.h}`);
   if (pts.length < 2) {
     svg.innerHTML = "";
+    svg._chart = null;
     $("#chart-empty").hidden = false;
     $("#chart-empty").textContent = state.chartMetric === "cpu"
       ? "CPU 시계열이 없습니다 (node_exporter/Prometheus 미수집)" : "이 구간에 수집된 스냅샷이 없습니다";
@@ -628,6 +714,14 @@ function drawChart() {
     ${selRect(state.selections.base, "#f08c2d")}
     ${selRect(state.selections.target, "#22a06b")}
     <path d="${line}" fill="none" stroke="#6672f5" stroke-width="1.8"/>`;
+
+  // 호버 정보 — QPS면 "q/s", CPU 모드면 "%" 단위로 정확 수치를 띄운다
+  const unit = state.chartMetric === "cpu" ? "%" : " q/s";
+  svg._chart = {
+    pts, W: CHART.w, H: CHART.h, padT: CHART.padT, padB: CHART.padB,
+    x: s.x, y: s.y, fmt: (v) => fmtNum(v, v >= 10 ? 0 : 1) + unit,
+  };
+  attachChartHover(svg);
 }
 
 // 드래그로 구간 선택 -> datetime 입력에 반영

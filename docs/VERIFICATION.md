@@ -2911,3 +2911,20 @@ tests="13" skipped="0" failures="0" errors="0"
 $ ./gradlew test
 tests=514 failures=0 errors=0 skipped=2   (skip 2는 웹훅 URL 미설정 시 스킵되는 실발사 테스트)
 ```
+
+## 111. 차트 호버 툴팁 — 커서에 가장 가까운 점의 정확 수치·시각
+
+모니터링 그래프(활동/QPS·CPU%·Connections·명령별 시계열)는 라인만 그려서 정확한 값을 눈대중해야
+했다. Grafana류 호버 툴팁을 붙였다 — 차트 위에 커서를 올리면 가장 가까운 데이터 점에 세로
+가이드선과 점 마커가 붙고, 그 점의 정확 수치(단위 포함)와 시각(MM/DD HH:mm:ss)이 말풍선으로 뜬다.
+
+- 두 렌더러(드래그 차트 drawChart·단순 차트 drawSimpleChart)가 렌더 끝에 svg._chart에
+  {pts,x,y,W,H,fmt}를 남기고, 공용 attachChartHover가 그걸 읽어 동작한다 — 명령 차트처럼 매번 새로
+  생성되는 SVG도 각자 한 번씩 호버가 붙는다(idempotent 가드).
+- 좌표 변환은 getScreenCTM()으로 화면↔차트 좌표를 왕복 — viewBox·preserveAspectRatio가 어떻든
+  가장 가까운 점 탐색과 말풍선 위치가 정확하다. 의존성 0 원칙 유지(라이브러리 없음).
+- 단위: CPU는 "%", QPS는 "q/s". 값 없으면(<2점) 호버 비활성.
+
+**라이브 실측**(2026-07-18, dbtower-self CPU% 201점): 스파이크 지점에 커서를 올리니 세로 가이드선·
+점 마커와 함께 "25% 07/18 16:01:35" 말풍선이 정확히 떴다. Playwright로 pointermove 디스패치 시
+호버 예외 0(hoverErrors=[]). 화면: docs/images/webui/61-chart-hover.png.
