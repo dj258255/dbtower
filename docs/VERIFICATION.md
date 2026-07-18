@@ -3001,3 +3001,21 @@ Mean 0.37 등 실데이터. 화면: docs/images/webui/65-metric-groups.png.
 필터 셀렉트에 환경(dev/prod/staging)·리전(ap-northeast-2/us-east-1)·클러스터(billing/catalog/
 legacy/orders/platform) 자동 채움, 카드 배지 렌더, 환경=staging 필터 시 local-postgres·mssql-pitr
 2대만 표시. 단위 테스트 1건 추가(태그 보존). 전체 515건 그린. 화면: docs/images/webui/66-env-region-cluster.png.
+
+## 116. 쿼리 상세 뷰 포매팅 — SQL 정형화 + 실행계획 정형화(5기종)
+
+레퍼런스 상세 뷰 대조에서 SQL·실행계획이 한 줄로 뭉쳐 나오던 것을 문법대로 정형화했다. 의존성 0.
+
+- **SQL 포매터**(formatSql): 정규화 텍스트(digest)를 주요 절(FROM/WHERE/GROUP BY/ORDER BY/JOIN/
+  LIMIT…) 앞에서 개행하고, SELECT 최상위 컬럼을 개행·정렬한다. 괄호 깊이로 함수 인자 콤마는 보존.
+  textarea 높이는 줄 수에 맞춰 자동. 완벽한 파서가 아닌 경량 heuristic(의존성 0 원칙).
+- **실행계획 포매터**(prettyPlan): 5기종 무관 — plan이 JSON(MySQL EXPLAIN FORMAT=JSON·PG JSON)이면
+  들여쓰기, 텍스트 트리(PG text)·기타는 원문 유지(파싱 실패 시에도 안전). explain·deep 진단 둘 다 적용.
+- 상세 섹션 헤더 파란 좌측 액센트, 테이블 상세는 기존 아코디언(스키마 CREATE TABLE·기본 통계·인덱스
+  카디널리티 카드)이 레퍼런스 구조와 이미 일치.
+
+**라이브 검증**(2026-07-18, Playwright, dbtower-self): 상세 뷰에서 SELECT/FROM/WHERE/GROUP BY/
+ORDER BY 개행, PG EXPLAIN JSON 들여쓰기(Sort→Aggregate→Merge Append→Index Scan 트리), AI 1차
+분석·테이블 구조(569,090행·상세 토글) 동시 렌더. 심층 진단은 EXPLAIN ANALYZE 실제 계획 포매팅 +
+카디널리티 괴리(추정 443 vs 실제 0) 근본 원인. 비교 조회는 호출량 +3,178%·NEW 뱃지·증감 화살표.
+화면: docs/images/webui/04-ai.png·02-compare.png·13-deep-diagnose.png.

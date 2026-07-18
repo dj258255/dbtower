@@ -44,6 +44,48 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 // AI 서술 출력에서 이모지만 제거(우리 규칙: 이모지 금지). →·✓ 같은 기술 기호는 보존.
 const stripEmoji = (s) => String(s ?? "").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{26FF}✨️‍]/gu, "");
 
+// SQL 정규화 텍스트(digest)가 한 줄로 뭉쳐 오므로, SQL 문법처럼 절·컬럼을 줄바꿈해 읽기 좋게 만든다.
+// 의존성 0 경량 포매터(완벽한 파서 아님) — 주요 절 앞 개행 + SELECT 최상위 컬럼 개행. 괄호 깊이로 함수 인자 콤마는 보존.
+function formatSql(sql) {
+  if (!sql || typeof sql !== "string") return sql || "";
+  let s = sql.replace(/\s+/g, " ").trim();
+  s = s.replace(/\s*\.\s*/g, ".");                       // `스키마` . `표` → `스키마`.`표`
+  s = s.replace(/\(\s+/g, "(").replace(/\s+\)/g, ")");   // 괄호 안쪽 공백 제거
+  s = s.replace(/\s*,\s*/g, ", ");
+  const majors = ["LEFT OUTER JOIN", "RIGHT OUTER JOIN", "FULL OUTER JOIN", "INNER JOIN",
+    "LEFT JOIN", "RIGHT JOIN", "CROSS JOIN", "JOIN", "FROM", "WHERE", "GROUP BY", "HAVING",
+    "ORDER BY", "LIMIT", "OFFSET", "UNION ALL", "UNION", "SET", "VALUES"];
+  majors.forEach((kw) => {
+    const re = new RegExp("\\s+(" + kw.replace(/ /g, "\\s+") + ")\\s+", "gi");
+    s = s.replace(re, (m, g) => "\n" + g.replace(/\s+/g, " ").toUpperCase() + " ");
+  });
+  const lines = s.split("\n");
+  if (/^\s*select/i.test(lines[0])) {
+    const kw = lines[0].match(/^\s*(SELECT(?:\s+DISTINCT)?)/i)[1].replace(/\s+/g, " ").toUpperCase();
+    const cols = lines[0].replace(/^\s*SELECT(?:\s+DISTINCT)?\s+/i, "");
+    let depth = 0, out = "", buf = "";
+    for (const ch of cols) {
+      if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+      if (ch === "," && depth === 0) { out += buf.trim() + ",\n       "; buf = ""; }
+      else buf += ch;
+    }
+    lines[0] = kw + " " + out + buf.trim();
+  }
+  return lines.join("\n");
+}
+
+// 실행계획을 읽기 좋게 — JSON 형식(MySQL EXPLAIN FORMAT=JSON 등)이면 들여쓰기, 텍스트 트리(PostgreSQL)·
+// 기타 기종은 원문 그대로. 5기종 어떤 plan 형식이 와도 안전하게(파싱 실패 시 원문 유지).
+function prettyPlan(plan) {
+  if (!plan || typeof plan !== "string") return plan || "";
+  const t = plan.trim();
+  if (t.startsWith("{") || t.startsWith("[")) {
+    try { return JSON.stringify(JSON.parse(t), null, 2); } catch { /* JSON 아님 — 원문 */ }
+  }
+  return plan;
+}
+
 // datetime-local 입력값(로컬 시각)과 LocalDateTime(ISO) 사이 변환
 const toLocalInput = (date) => {
   const p = (n) => String(n).padStart(2, "0");
@@ -933,7 +975,10 @@ function openDetail(query, tr) {
   $("#query-detail").hidden = false;
   if (tr) placeDetailUnder(tr);
   $("#detail-qid").textContent = `SQL ID: ${query.queryId}`;
-  $("#detail-sql").value = query.queryText ?? "";
+  const formatted = formatSql(query.queryText);
+  $("#detail-sql").value = formatted;
+  $("#detail-sql").rows = Math.min(24, Math.max(5, formatted.split("\n").length + 1)); // 포매팅 줄 수에 맞춰 높이 자동
+
   $("#plan-section").hidden = true;
   $("#schema-section").hidden = true;
   $("#schema-result").innerHTML = "";
@@ -980,7 +1025,7 @@ async function runExplain() {
       $("#detail-findings").innerHTML = "";
       return;
     }
-    $("#detail-plan").textContent = data.plan;
+    $("#detail-plan").textContent = prettyPlan(data.plan);
     $("#detail-findings").innerHTML = (data.findings ?? []).map((f) =>
       `<div class="finding-item">${esc(f)}</div>`).join("") ||
       '<div class="muted">규칙 기반 지적 없음 — 비효율 신호가 발견되지 않았습니다.</div>';
@@ -1120,7 +1165,7 @@ async function runAiAnalysis() {
     } catch (e) { $("#detail-ai").textContent = `실패: ${e.message}`; return; }
     // 실행계획 섹션도 함께 갱신 (같은 응답에 plan/findings 포함)
     $("#plan-section").hidden = false;
-    $("#detail-plan").textContent = data.plan;
+    $("#detail-plan").textContent = prettyPlan(data.plan);
     $("#detail-findings").innerHTML = (data.findings ?? []).map((f) =>
       `<div class="finding-item">${esc(f)}</div>`).join("");
     $("#detail-ai").textContent = stripEmoji(data.aiAnalysis) ||
