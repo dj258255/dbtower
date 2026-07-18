@@ -202,175 +202,186 @@ function deltaCell(base, target, changePct, digits = 2) {
   return `<span class="num">${t} <span class="${cls}">(${arrow} ${fmtNum(Math.abs(diff), digits)})</span></span>`;
 }
 
-// ---------- 인스턴스 ----------
+// ---------- 인스턴스 (검색·필터 구동) ----------
+// 수백~수천 대를 상정 — 전부 렌더하지 않는다. 목록은 메모리에 두고, 검색/필터가 있을 때만 매칭분을 그린다.
+const INSTANCE_RENDER_CAP = 60; // 한 번에 그리는 상한(렉 방지)
+
 async function loadInstances() {
   const list = await api("/api/instances");
   state.instances = list;
-  populateSchemaSelects(list); // Schema Diff 좌/우 드롭다운 채우기
-  const box = $("#instance-list");
-  if (!list.length) {
-    box.innerHTML = '<div class="muted">등록된 인스턴스가 없습니다 — POST /api/instances 로 등록하세요.</div>';
-    return;
-  }
-  // 서버 공유 인지 (Phase 4): 같은 host:port에 등록된 DB들은 같은 서버 — 서버 전역 경보(복제·세션·
-  // 데드락)가 그룹당 1회로 dedup되므로, 어느 카드들이 한 서버인지 눈에 보여야 경보를 옳게 해석한다.
+  populateSchemaSelects(list);
   const serverCount = {};
-  list.forEach((i) => {
-    const key = `${i.host.toLowerCase()}:${i.port}`;
-    serverCount[key] = (serverCount[key] || 0) + 1;
-  });
-  box.innerHTML = list.map((i) => {
-    const serverKey = `${i.host.toLowerCase()}:${i.port}`;
-    const sharedNames = serverCount[serverKey] > 1
-      ? list.filter((o) => o.id !== i.id && `${o.host.toLowerCase()}:${o.port}` === serverKey).map((o) => o.name)
-      : [];
-    return `
-    <div class="instance-card" data-id="${i.id}" data-name="${esc(i.name.toLowerCase())}"
+  list.forEach((i) => { const k = `${i.host.toLowerCase()}:${i.port}`; serverCount[k] = (serverCount[k] || 0) + 1; });
+  state.serverCount = serverCount;
+  populateInstanceFilterOptions(list);
+  renderInstanceMatches();
+  handleInstanceDeepLink(list);
+}
+
+// 엔진 아이콘 — 공식 브랜드 로고(devicon SVG)를 스프라이트 심볼로 1회 정의하고 <use>로 참조(DOM 폭증 방지).
+// 5기종 외(미지원 타입)면 빈 문자열. 스프라이트는 index.html의 .db-sprite에 박혀 있다.
+const ENGINE_TYPES = new Set(["MYSQL", "POSTGRESQL", "MONGODB", "ORACLE", "MSSQL"]);
+function engineIcon(type) {
+  if (!ENGINE_TYPES.has(type)) return "";
+  return `<svg class="db-icon" viewBox="0 0 128 128" width="16" height="16" aria-hidden="true"><use href="#dbicon-${type}"></use></svg>`;
+}
+
+// 기종 아이콘 + 배지 — 목록·헬스·백업 어디서든 같은 표기로(레퍼런스처럼 아이콘으로 기종 구분)
+function typeBadge(type) {
+  return `${engineIcon(type)}<span class="type-badge type-${esc(type)}">${esc(type)}</span>`;
+}
+
+// 카드 HTML — 이름 행은 항상, 상세(host·태그)는 선택 시에만 CSS로 펼친다(선택한 DB만 자세히).
+function instanceCardHtml(i) {
+  const serverKey = `${i.host.toLowerCase()}:${i.port}`;
+  const cnt = state.serverCount[serverKey] || 1;
+  const sharedNames = cnt > 1
+    ? state.instances.filter((o) => o.id !== i.id && `${o.host.toLowerCase()}:${o.port}` === serverKey).map((o) => o.name) : [];
+  const selected = state.instance && state.instance.id === i.id ? " selected" : "";
+  return `
+    <div class="instance-card${selected}" data-id="${i.id}" data-name="${esc(i.name.toLowerCase())}"
          data-host="${esc(i.host.toLowerCase())}" data-type="${esc(i.type)}" data-team="${esc(i.teamLabel || "")}"
          data-env="${esc(i.environment || "")}" data-region="${esc(i.region || "")}" data-cluster="${esc(i.cluster || "")}">
       <div class="instance-name">
+        ${engineIcon(i.type)}
         <span class="type-badge type-${esc(i.type)}">${esc(i.type)}</span>
-        ${esc(i.name)}
+        <span class="inst-name-text">${esc(i.name)}</span>
         <span class="repl-role" id="role-${i.id}"></span>
         <span class="health-dot" id="health-${i.id}"></span>
         <button class="collect-toggle ${i.collectionEnabled ? "" : "isolated"}" data-id="${i.id}"
           title="수집 격리 토글 — 끄면 스냅샷 수집·운영 경보에서 이 인스턴스를 뺀다(등록은 유지)">
           ${i.collectionEnabled ? "수집중" : "격리됨"}</button>
       </div>
-      <div class="instance-host">${esc(i.host)}:${i.port} / ${esc(i.dbName)}
-        ${sharedNames.length ? `<span class="server-shared-badge"
-          title="같은 서버(${esc(serverKey)})에 등록된 다른 인스턴스: ${esc(sharedNames.join(", "))} — 서버 전역 경보(복제·세션·데드락)는 그룹당 1회">서버 공유 ×${serverCount[serverKey]}</span>` : ""}
-        <span class="health-ms" id="healthms-${i.id}"></span></div>
-      ${i.environment || i.region || i.cluster || i.teamLabel || i.consoleUrl ? `<div class="instance-meta">
-        ${i.environment ? `<span class="tag-badge tag-env" title="환경">${esc(i.environment)}</span>` : ""}
-        ${i.region ? `<span class="tag-badge tag-region" title="리전">${esc(i.region)}</span>` : ""}
-        ${i.cluster ? `<span class="tag-badge tag-cluster" title="클러스터">${esc(i.cluster)}</span>` : ""}
-        ${i.teamLabel ? `<span class="team-badge" title="담당 팀/Slack">${esc(i.teamLabel)}</span>` : ""}
-        ${i.consoleUrl && /^https?:\/\//.test(i.consoleUrl) ? `<a class="console-link" href="${esc(i.consoleUrl)}" target="_blank" rel="noopener" title="콘솔 딥링크(PI·Grafana 등)">콘솔 ↗</a>` : ""}
-      </div>` : ""}
+      <div class="instance-detail">
+        <div class="inst-field"><span class="k">호스트</span><span class="v">${esc(i.host)}:${i.port}</span></div>
+        <div class="inst-field"><span class="k">DB</span><span class="v">${esc(i.dbName)}${sharedNames.length ? ` <span class="server-shared-badge" title="같은 서버(${esc(serverKey)})에 등록된 다른 인스턴스: ${esc(sharedNames.join(", "))} — 서버 전역 경보(복제·세션·데드락)는 그룹당 1회">서버 공유 ×${cnt}</span>` : ""}</span></div>
+        <div class="inst-field"><span class="k">응답</span><span class="v" id="ping-${i.id}">—</span></div>
+        <div class="inst-field"><span class="k">버전</span><span class="v ver" id="ver-${i.id}">—</span></div>
+        ${i.environment || i.region || i.cluster || i.teamLabel || i.consoleUrl ? `<div class="instance-meta">
+          ${i.environment ? `<span class="tag-badge tag-env" title="환경">${esc(i.environment)}</span>` : ""}
+          ${i.region ? `<span class="tag-badge tag-region" title="리전">${esc(i.region)}</span>` : ""}
+          ${i.cluster ? `<span class="tag-badge tag-cluster" title="클러스터">${esc(i.cluster)}</span>` : ""}
+          ${i.teamLabel ? `<span class="team-badge" title="담당 팀/Slack">${esc(i.teamLabel)}</span>` : ""}
+          ${i.consoleUrl && /^https?:\/\//.test(i.consoleUrl) ? `<a class="console-link" href="${esc(i.consoleUrl)}" target="_blank" rel="noopener" title="콘솔 딥링크(PI·Grafana 등)">콘솔 ↗</a>` : ""}
+        </div>` : ""}
+      </div>
     </div>`;
-  }).join("");
+}
 
+// 현재 검색·필터에 걸리는 인스턴스 — 아무 조건 없으면 빈 배열(초기 빈 리스트)
+function matchingInstances() {
+  const q = $("#inst-search").value.trim().toLowerCase();
+  const eng = $("#inst-engine").value, env = $("#inst-env").value, region = $("#inst-region").value,
+        cluster = $("#inst-cluster").value, team = $("#inst-team").value;
+  const anyFilter = !!(q || eng || env || region || cluster || team);
+  if (!anyFilter) return { anyFilter: false, matches: [] };
+  const matches = state.instances.filter((i) =>
+    (!q || i.name.toLowerCase().includes(q) || i.host.toLowerCase().includes(q))
+    && (!eng || i.type === eng) && (!env || (i.environment || "") === env)
+    && (!region || (i.region || "") === region) && (!cluster || (i.cluster || "") === cluster)
+    && (!team || (i.teamLabel || "") === team));
+  return { anyFilter: true, matches };
+}
+
+// 매칭분만 렌더 — 선택된 인스턴스는 조건과 무관하게 맨 위 유지. 렌더된 카드에만 헬스·역할·이벤트를 붙인다.
+function renderInstanceMatches() {
+  const box = $("#instance-list");
+  const total = state.instances.length;
+  const { anyFilter, matches } = matchingInstances();
+  let shown = matches;
+  if (state.instance && !matches.some((m) => m.id === state.instance.id)) {
+    const sel = state.instances.find((i) => i.id === state.instance.id);
+    if (sel) shown = [sel, ...matches];
+  }
+  $("#inst-count").textContent = anyFilter ? `${matches.length}/${total}` : `${total}대`;
+  if (!shown.length) {
+    box.innerHTML = anyFilter
+      ? '<div class="inst-empty muted">일치하는 인스턴스가 없습니다.</div>'
+      : `<div class="inst-empty muted">총 <b>${total}</b>대 — 위에서 검색하거나 필터를 선택하면 여기 표시됩니다.</div>`;
+    return;
+  }
+  const capped = shown.slice(0, INSTANCE_RENDER_CAP);
+  box.innerHTML = capped.map(instanceCardHtml).join("")
+    + (shown.length > capped.length ? `<div class="inst-more muted">…${shown.length - capped.length}대 더 — 검색·필터로 좁히세요.</div>` : "");
+  bindInstanceCards();
+  loadInstanceMeta(capped);
+}
+
+function bindInstanceCards() {
+  const box = $("#instance-list");
   box.querySelectorAll(".instance-card").forEach((card) => {
-    card.addEventListener("click", () => selectInstance(list.find((i) => i.id == card.dataset.id), card));
+    card.addEventListener("click", () => selectInstance(state.instances.find((i) => i.id == card.dataset.id), card));
   });
-  // 수집 격리 토글 — 카드 선택과 분리(stopPropagation). PATCH 후 목록을 다시 그려 상태 반영.
   box.querySelectorAll(".collect-toggle").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      const id = btn.dataset.id;
-      const inst = list.find((i) => i.id == id);
+      const inst = state.instances.find((i) => i.id == btn.dataset.id);
       try {
-        await api(`/api/instances/${id}/collection`, {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ enabled: !inst.collectionEnabled }),
-        });
-        loadInstances();
+        await api(`/api/instances/${inst.id}/collection`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !inst.collectionEnabled }) });
+        inst.collectionEnabled = !inst.collectionEnabled;
+        renderInstanceMatches();
       } catch (err) { alert("수집 토글 실패: " + err.message); }
     });
   });
-  // 첫 인스턴스 자동 선택 — 진입 즉시 대시보드가 차 있게
-  // 진단 딥링크 (심화 아크 5) — 알림의 "진단" 링크로 열리면 해당 인스턴스를 선택하고
-  // Monitoring 탭의 자연어 진단 입력을 프리필한다(실행은 사람이 — 열리자마자 AI를 돌리지 않는다)
-  const params = new URLSearchParams(location.search);
-  const deepId = params.get("instance");
-  const deepQ = params.get("diagnose");
-  const deepView = params.get("view");
-  const target = deepId ? list.find((i) => String(i.id) === deepId) : null;
-  const first = box.querySelector(".instance-card");
-  if (target) {
-    selectInstance(target, box.querySelector(`.instance-card[data-id="${target.id}"]`) ?? first);
-    if (deepQ) {
-      document.querySelector('.tab[data-tab="monitor"]').click();
-      showMonGroup("perf"); // 자연어 진단은 성능 그룹
-      const input = $("#diagnose-question");
-      input.value = deepQ;
-      input.scrollIntoView({ block: "center" });
-      input.focus();
-    }
-    // 설정 드리프트 알림의 "변경 이력 보기" 링크 — Monitoring 탭 열고 이력을 바로 조회
-    if (deepView === "config-drift") {
-      document.querySelector('.tab[data-tab="monitor"]').click();
-      showMonGroup("gov"); // 설정 변경 이력은 거버넌스 그룹
-      loadConfigDrift();
-      $("#config-drift-result").scrollIntoView({ block: "center" });
-    }
-    // 리뷰 카드의 "승인/반려" 링크 — Monitoring 탭 열고 리뷰 게이트로 스크롤
-    if (deepView === "review") {
-      document.querySelector('.tab[data-tab="monitor"]').click();
-      showMonGroup("gov"); // 리뷰 게이트는 거버넌스 그룹
-      loadReviews();
-      $(".review-gate-card").scrollIntoView({ block: "center" });
-    }
-  } else if (first) {
-    selectInstance(list[0], first);
-  }
-  // 헬스는 카드 렌더 후 비동기로 채운다 — 죽은 인스턴스가 목록 로딩을 막지 않게.
-  // 복제 역할 배지(레퍼런스의 Primary/Secondary 인라인 표기)도 같은 방식 — 역할이 확인되는
-  // 기종·구성에서만 배지가 붙고, 미구성·미지원은 조용히 비워둔다(N회 조회지만 데모 규모라 감수).
-  list.forEach(async (i) => {
-    try {
-      const h = await api(`/api/instances/${i.id}/health`);
-      $(`#health-${i.id}`).classList.add(h.up ? "up" : "down");
-      const el = $(`#healthms-${i.id}`);
-      if (h.up) {
-        // 버전 전문은 길어 카드를 키운다 — 제품명+번호만 짧게, 전문은 title(hover)로
-        const ver = (h.version || "").split(/[\s(]/).filter(Boolean).slice(0, 2).join(" ");
-        el.textContent = `${h.pingMillis}ms${ver ? " · " + ver : ""}`;
-        el.title = h.version || "";
-      } else { el.textContent = h.message; }
-    } catch { $(`#health-${i.id}`).classList.add("down"); }
-    try {
-      const r = await api(`/api/instances/${i.id}/replication`);
-      if (r && r.role && r.role !== "UNSUPPORTED" && r.role !== "NONE") {
-        $(`#role-${i.id}`).textContent = r.role;
-        $(`#role-${i.id}`).classList.add(/PRIMARY|SOURCE|MASTER/i.test(r.role) ? "role-primary" : "role-replica");
-      }
-    } catch { /* 역할 미확인 — 배지 생략 */ }
-  });
-  initInstanceFilter(list);
 }
 
-// 검색·필터 — 카드 data 속성만 보고 표시/숨김(재렌더 없음). 필터 결과 수를 함께 표기.
-// 차원: 기종·환경·리전·클러스터·팀 (레퍼런스의 환경/리전/클러스터 선택 대응 — 이기종에 일반화).
-function initInstanceFilter(list) {
-  const engineSel = $("#inst-engine"), envSel = $("#inst-env"),
-        regionSel = $("#inst-region"), clusterSel = $("#inst-cluster"), teamSel = $("#inst-team");
-  // 각 셀렉트를 데이터에 있는 distinct 값으로 채운다(빈 값 제외). 미지정 태그가 하나도 없으면 옵션도 안 생긴다.
-  const opts = (sel, placeholder, values) => {
-    sel.innerHTML = `<option value="">${placeholder}</option>`
+// 렌더된 카드에만 헬스(핑·버전)·복제 역할을 비동기로 채운다 — 화면에 보이는 만큼만 조회(수천 대 확장).
+function loadInstanceMeta(rendered) {
+  rendered.forEach(async (i) => {
+    try {
+      const h = await api(`/api/instances/${i.id}/health`);
+      const dot = $(`#health-${i.id}`); if (dot) dot.classList.add(h.up ? "up" : "down");
+      const ping = $(`#ping-${i.id}`), ver = $(`#ver-${i.id}`);
+      if (h.up) { if (ping) ping.textContent = `${h.pingMillis}ms`; if (ver) ver.textContent = h.version || "—"; }
+      else if (ping) ping.textContent = h.message;
+    } catch { const dot = $(`#health-${i.id}`); if (dot) dot.classList.add("down"); }
+    try {
+      const r = await api(`/api/instances/${i.id}/replication`);
+      const role = $(`#role-${i.id}`);
+      if (role && r && r.role && r.role !== "UNSUPPORTED" && r.role !== "NONE") {
+        role.textContent = r.role;
+        role.classList.add(/PRIMARY|SOURCE|MASTER/i.test(r.role) ? "role-primary" : "role-replica");
+      }
+    } catch { /* 역할 미확인 */ }
+  });
+}
+
+function populateInstanceFilterOptions(list) {
+  const opts = (id, placeholder, values) => {
+    $(`#${id}`).innerHTML = `<option value="">${placeholder}</option>`
       + [...new Set(values.filter(Boolean))].sort().map((v) => `<option>${esc(v)}</option>`).join("");
   };
-  opts(engineSel, "기종 전체", list.map((i) => i.type));
-  opts(envSel, "환경 전체", list.map((i) => i.environment));
-  opts(regionSel, "리전 전체", list.map((i) => i.region));
-  opts(clusterSel, "클러스터 전체", list.map((i) => i.cluster));
-  opts(teamSel, "팀 전체", list.map((i) => i.teamLabel));
-  const apply = () => {
-    const q = $("#inst-search").value.trim().toLowerCase();
-    const eng = engineSel.value, env = envSel.value, region = regionSel.value,
-          cluster = clusterSel.value, team = teamSel.value;
-    let shown = 0;
-    document.querySelectorAll(".instance-card").forEach((c) => {
-      const hit = (!q || c.dataset.name.includes(q) || c.dataset.host.includes(q))
-        && (!eng || c.dataset.type === eng)
-        && (!env || c.dataset.env === env)
-        && (!region || c.dataset.region === region)
-        && (!cluster || c.dataset.cluster === cluster)
-        && (!team || c.dataset.team === team);
-      c.style.display = hit ? "" : "none";
-      if (hit) shown++;
-    });
-    $("#inst-count").textContent = shown === list.length ? "" : `${shown}/${list.length}`;
-  };
-  $("#inst-search").oninput = apply;
-  [engineSel, envSel, regionSel, clusterSel, teamSel].forEach((s) => { s.onchange = apply; });
+  opts("inst-engine", "기종 전체", list.map((i) => i.type));
+  opts("inst-env", "환경 전체", list.map((i) => i.environment));
+  opts("inst-region", "리전 전체", list.map((i) => i.region));
+  opts("inst-cluster", "클러스터 전체", list.map((i) => i.cluster));
+  opts("inst-team", "팀 전체", list.map((i) => i.teamLabel));
+}
+
+// 검색·필터 이벤트 → 재렌더(입력·선택할 때만 매칭분을 그린다). 앱 로딩 시 한 번 연결.
+function setupInstanceFilter() {
+  ["inst-search", "inst-engine", "inst-env", "inst-region", "inst-cluster", "inst-team"].forEach((id) => {
+    const el = $(`#${id}`);
+    el.addEventListener(id === "inst-search" ? "input" : "change", renderInstanceMatches);
+  });
+}
+
+function handleInstanceDeepLink(list) {
+  const params = new URLSearchParams(location.search);
+  const target = params.get("instance") ? list.find((i) => String(i.id) === params.get("instance")) : null;
+  if (!target) return;
+  state.instance = target;
+  renderInstanceMatches();
+  selectInstance(target, $(`#instance-list .instance-card[data-id="${target.id}"]`));
+  const deepQ = params.get("diagnose"), deepView = params.get("view");
+  if (deepQ) { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("perf"); const input = $("#diagnose-question"); input.value = deepQ; input.scrollIntoView({ block: "center" }); input.focus(); }
+  if (deepView === "config-drift") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadConfigDrift(); $("#config-drift-result").scrollIntoView({ block: "center" }); }
+  if (deepView === "review") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadReviews(); $(".review-gate-card").scrollIntoView({ block: "center" }); }
 }
 
 async function selectInstance(instance, card) {
   state.instance = instance;
-  document.querySelectorAll(".instance-card").forEach((c) => c.classList.remove("selected"));
-  card.classList.add("selected");
+  renderInstanceMatches(); // 선택 반영 — 선택 카드를 맨 위 유지·상세 펼침·하이라이트
   $("#time-panel").hidden = false;
   $("#result-panel").hidden = false;
 
@@ -541,7 +552,7 @@ async function loadHealthScore() {
     return `
       <tbody class="score-group" data-id="${s.instanceId}">
         <tr class="score-row score-grade-${esc(s.grade)}">
-          <td><span class="type-badge type-${esc(s.type)}">${esc(s.type)}</span> ${esc(s.instanceName)}
+          <td><span class="cell-inst">${typeBadge(s.type)} ${esc(s.instanceName)}</span>
             ${s.down ? '<span class="score-down">DOWN</span>' : ""}
             ${s.partial ? '<span class="score-partial-dot" title="일부 신호가 데이터 부족·수집 실패">부분</span>' : ""}</td>
           <td class="num score-num">${s.score}<span class="score-outof">/100</span></td>
@@ -607,7 +618,7 @@ async function loadBackupFreshness() {
       : '<span class="muted">로컬만</span>';
     return `
       <tr class="fresh-row fresh-row-${esc(f.status)}">
-        <td><span class="type-badge type-${esc(f.type)}">${esc(f.type)}</span> ${esc(f.instanceName)}</td>
+        <td><span class="cell-inst">${typeBadge(f.type)} ${esc(f.instanceName)}</span></td>
         <td><span class="fresh-badge fresh-${esc(f.status)}">${esc(FRESHNESS_LABEL[f.status] ?? f.status)}</span></td>
         <td>${last}</td>
         <td class="num">${elapsed}</td>
@@ -2394,6 +2405,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadBackupFreshness(); // 함대 전체 백업 신선도 (D7) — 인스턴스 선택과 무관한 상시 뷰
   setupTabs();
   setupMonitorNav();
+  setupInstanceFilter(); // 검색·필터 이벤트 연결(검색·필터 구동 렌더)
   setupPresets();
   // SQL 편집 시 하이라이트 레이어를 따라 갱신·스크롤 동기화(투명 textarea 오버레이)
   $("#detail-sql").addEventListener("input", updateSqlHl);
