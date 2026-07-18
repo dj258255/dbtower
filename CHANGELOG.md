@@ -9,6 +9,13 @@
 ## [Unreleased]
 
 ### Added
+- 장기 베이스라인 수신·병합(D8): V24 `baseline_longterm`(lakehouse 되쓰기 수신) +
+  BaselineService 가중 병합 — 요일x시간대 장기 통계를 QPS 축에 결합해 주간 계절성
+  오탐을 줄인다(빈 테이블이면 현행 그대로, 회귀 0). `dbtower.baseline.longterm-enabled`.
+- plan_snapshot 보존 시간 하한(D2): 카운트 스윕에 `retention-min-age-hours`(기본 48h)
+  병행 — lakehouse D+1 하루창 추출 전 유실 차단.
+
+### Added
 - 커넥션 온디맨드(Phase 4) — minimumIdle 0 + idleTimeout 하한 가드(수집 주기+30s) + 장기 미사용 풀
   LRU 정리: 격리·저빈도 대상의 유휴 커넥션이 0으로 수렴(이전엔 대상마다 1개 영구 점유).
   SLO 헬스 폴러가 격리를 무시하고 핑하던 구멍도 해소

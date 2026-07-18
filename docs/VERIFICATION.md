@@ -2599,3 +2599,54 @@ rowCountApprox=472,217, dataBytes=156,950,528, indexBytes=25,157,632,
 query_snapshot_pkey[U](id,captured_at) btree — 수정 전 "0행·없음"과 대비.
 전 필드 문의 실발사 {"sent":true} (검증용 임시 admin은 사용 직후 삭제).
 카디널리티는 null — 파티션 부모에 pg_stats 통계가 없어 미확보 정직 표기(위장 금지 원칙).
+
+## 100. 장기 베이스라인 수신·병합(D8) + plan 보존 시간 하한(D2) — lakehouse 루프의 반대편
+
+Phase 5 reverse ETL의 DBTower 몫. lakehouse가 되쓰는 `baseline_longterm`을 Flyway로
+정의(V24)하고, BaselineService가 (요일×시간대) 장기 통계를 단기 14일 창에 **가중
+병합**한다 — 충분통계량 복원(Σx=n·m, Σx²=(n−1)s²+n·m²)이라 원시 관측을 더한 것과
+수학적으로 동일. 단위 정합: 장기는 시간당 delta_calls → QPS로 /3600. 장기가 나르는
+축은 호출량(QPS)뿐 — 레이턴시·행수는 단기 관측이 충분할 때만 판정(얕은 표본 오탐 방지).
+
+### 100-1. V24 라이브 적용 + 실제 되쓰기 왕복
+
+```
+Migrating schema "public" to version "24 - baseline longterm"
+Successfully applied 1 migration ... now at version v24
+lakehouse writeback → {'enabled': True, 'rows': 32498}   (Flyway 정본 테이블에 적재)
+```
+
+운영 발견: 검증용 수동 테이블을 DROP하고 Flyway가 재생성하자 `lakehouse_writer`
+GRANT가 함께 사라져 첫 되쓰기가 permission denied — **DDL 재생성 시 GRANT 재적용**이
+운영 절차에 필요하다(역할·GRANT는 환경 소유 — V24 주석·operations.md).
+
+### 100-2. 병합 라이브 실측 — 실측 스파이크의 판정이 장기 테이블에 따라 뒤집힌다
+
+실제 부하(psql로 `SELECT 1 AS d8_spike` 3,000회/5분, 대상 sample DB)를 만들어 신규
+쿼리를 발생시키고, 그 쿼리의 장기 버킷(dow=6, hour=1)을 조작하며 같은 스캔을 반복했다:
+
+```
+장기 없음(신규 쿼리)      → 학습중(판정 보류)                        ← 기존 동작
+장기 주입: 평소=0.2qps    → 이상 발화: qps 현재=7.47 장기평균=0.3
+                            z=7.42, 관측=101                          ← 병합 실물
+```
+
+**관측=101 = 장기 100 + 단기 1** — 가중 병합이 게이트(minObservations=8)를 넘겨 판정을
+가능하게 했고, z는 병합 통계로 계산됐다. 반대 방향(평소가 높음을 알아 오탐 억제)은
+단위 테스트로 고정: `월요일_피크를_아는_장기_평균이_오탐을_없앤다`(단기 8관측 평소
+1.0qps + 현재 5.0 = 이상 → 장기 100관측 "평소 5.0" 병합 후 무경보). 회귀 0도 테스트로
+고정: 장기 테이블이 비면 병합 전과 판정·z 동일. 정직 표기: 라이브에서 "판정 가능+정상"
+단계는 배치 타이밍이 스파이크 꼬리를 놓쳐(mean=0 주입) 증명력이 없었다 — 그 방향은
+위 단위 테스트가 커버한다.
+
+### 100-3. D2 — plan_snapshot 보존 시간 하한(48h) 병행
+
+카운트 단독 보존(쿼리당 최신 20)은 플랜이 자주 뒤집히는 쿼리에서 "어제" 행을 하루가
+닫히기 전 밀어낼 수 있다 — lakehouse의 D+1 하루창 추출 계약과 어긋난다. 스윕에
+`retention-min-age-hours`(기본 48) 하한 추가: cutoff보다 어린 행은 세대 초과여도 보존
+(테이블이 일시적으로 N을 넘는 것이 의도된 트레이드오프). 통합 테스트 3건 —
+순수 카운트(하한 없음 경로) 기존 2건 + 어린 행 보존/오래된 초과분만 삭제 1건. H2
+PostgreSQL 모드에서 네이티브 윈도우 쿼리 검증, 전 스위트 그린.
+
+잔여: D8 라이브의 "억제 방향" 실증은 4주 이력이 쌓인 실버킷에서(합성 주입 없이) 재확인
+대상. baseline_longterm의 되쓰기 주기·deadman 편입은 lakehouse 쪽 스케줄 결정.

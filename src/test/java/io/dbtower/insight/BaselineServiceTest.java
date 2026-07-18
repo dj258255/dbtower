@@ -23,8 +23,15 @@ import static org.mockito.Mockito.when;
 class BaselineServiceTest {
 
     private final QuerySnapshotRepository repository = Mockito.mock(QuerySnapshotRepository.class);
-    // historyDays=14, recentMinutes=5, zThreshold=3.0, minObservations=8
-    private final BaselineService service = new BaselineService(repository, 14, 5, 3.0, 8);
+    // 장기 베이스라인(D8)은 기본 "빈 테이블" — 기존 판정 테스트는 D8 이전과 동일하게 동작해야 한다(회귀 0).
+    private final io.dbtower.insight.internal.BaselineLongtermDao longtermDao =
+            Mockito.mock(io.dbtower.insight.internal.BaselineLongtermDao.class);
+    // historyDays=14, recentMinutes=5, zThreshold=3.0, minObservations=8, longterm 병합 on
+    private final BaselineService service = new BaselineService(repository, longtermDao, 14, 5, 3.0, 8, true);
+
+    {
+        when(longtermDao.findBucket(any(), Mockito.anyInt(), Mockito.anyInt())).thenReturn(java.util.Map.of());
+    }
 
     // 14시대의 고정 시각 — now.getHour()==14라 findForHourBucket(hour=14)로 조회된다.
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 7, 6, 14, 30);
@@ -153,6 +160,72 @@ class BaselineServiceTest {
         var scan = service.detectAnomalies(1L, NOW);
 
         assertTrue(scan.anomalies().isEmpty());
+        assertEquals(0, scan.learningCount());
+    }
+
+    // ---------- D8: 장기 베이스라인 병합 (lakehouse reverse ETL) ----------
+    // NOW(2026-07-06 14시)는 월요일 — java getValue()=1, lakehouse 규약(일=0..토=6)으로도 1.
+
+    private void stubLongterm(String queryId, long observations, double meanDeltaCallsPerHour,
+                              double stddevDeltaCallsPerHour) {
+        when(longtermDao.findBucket(eq(1L), eq(1), eq(14))).thenReturn(java.util.Map.of(
+                queryId, new io.dbtower.insight.internal.BaselineLongtermDao.LongtermStat(
+                        observations, meanDeltaCallsPerHour, stddevDeltaCallsPerHour)));
+    }
+
+    @Test
+    void 장기_테이블이_비면_병합_전과_완전히_동일하다_회귀0() {
+        // 같은 입력을 두 서비스(장기 스위치 on/빈 테이블 vs off)에 넣어 판정이 일치해야 한다.
+        stubBaseline(stableHistory(NOW.minusDays(7)));
+        stubCurrent(List.of(
+                snap(NOW.minusMinutes(5), "A", 2000, 200_000, 4000),
+                snap(NOW, "A", 3500, 215_000, 7000)));
+        var off = new BaselineService(repository, longtermDao, 14, 5, 3.0, 8, false);
+
+        var withEmpty = service.detectAnomalies(1L, NOW);
+        var disabled = off.detectAnomalies(1L, NOW);
+
+        assertEquals(disabled.anomalies().size(), withEmpty.anomalies().size());
+        assertEquals(disabled.learningCount(), withEmpty.learningCount());
+        assertEquals(disabled.anomalies().get(0).anomalies().get(0).zScore(),
+                withEmpty.anomalies().get(0).anomalies().get(0).zScore(), 0.001);
+    }
+
+    @Test
+    void 장기_관측이_학습중을_판정가능으로_바꾼다() {
+        // 단기 이력 전무(학습 중이던 케이스) + 장기가 이 버킷을 100관측으로 안다(평소 QPS 1.0
+        // = 시간당 3600콜, 표준편차도 넉넉) → 판정 가능해지고, 현재 QPS 5.0은 이상으로 잡힌다.
+        stubBaseline(List.of());
+        stubLongterm("A", 100, 3600.0, 360.0);
+        stubCurrent(List.of(
+                snap(NOW.minusMinutes(5), "A", 2000, 200_000, 4000),
+                snap(NOW, "A", 3500, 215_000, 7000)));
+
+        var scan = service.detectAnomalies(1L, NOW);
+
+        assertEquals(0, scan.learningCount(), "장기 100관측이 게이트(8)를 넘긴다");
+        assertEquals(1, scan.anomalies().size());
+        var q = scan.anomalies().get(0);
+        assertEquals(100, q.observations());
+        assertEquals(1, q.anomalies().size(), "장기가 나르는 축은 QPS뿐 — 레이턴시·행수는 단기 부족으로 보류");
+        assertEquals("qps", q.anomalies().get(0).metric());
+    }
+
+    @Test
+    void 월요일_피크를_아는_장기_평균이_오탐을_없앤다() {
+        // 단기 14일 창: 평소 QPS 1.0 안정(8관측) — 현재 5.0은 z가 임계를 훌쩍 넘는 "이상"이다.
+        // 그런데 장기(수개월)는 이 버킷(월요일 14시)의 평소가 원래 QPS 5.0(시간당 18000콜)임을 안다.
+        // 병합 후 평균이 5.0 쪽으로 끌려가 z가 임계 밑으로 내려와야 한다 — 주간 계절성 오탐 제거.
+        stubBaseline(stableHistory(NOW.minusDays(7)));
+        stubLongterm("A", 100, 18_000.0, 1_800.0);
+        stubCurrent(List.of(
+                snap(NOW.minusMinutes(5), "A", 2000, 200_000, 4000),
+                snap(NOW, "A", 3500, 215_000, 7000)));
+
+        var scan = service.detectAnomalies(1L, NOW);
+
+        assertTrue(scan.anomalies().isEmpty(),
+                "장기 평균(5.0)과 같은 현재값(5.0)은 이상이 아니다 — 계절성 오탐 제거");
         assertEquals(0, scan.learningCount());
     }
 }

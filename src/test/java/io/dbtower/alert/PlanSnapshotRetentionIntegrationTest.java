@@ -43,7 +43,8 @@ class PlanSnapshotRetentionIntegrationTest {
         }
         repository.flush();
 
-        int deleted = repository.deleteExceedingPerQuery(2);
+        // cutoff를 미래로 줘 시간 하한 없이 순수 카운트 동작을 검증한다(minAgeHours<=0 경로).
+        int deleted = repository.deleteExceedingPerQuery(2, now.plusMinutes(1));
 
         assertThat(deleted).isEqualTo(4); // (5-2) + (3-2) + 0
         List<PlanSnapshot> remaining = repository.findAll();
@@ -62,7 +63,32 @@ class PlanSnapshotRetentionIntegrationTest {
         repository.save(snap(9L, "qX", now, "only"));
         repository.flush();
 
-        assertThat(repository.deleteExceedingPerQuery(20)).isZero();
+        assertThat(repository.deleteExceedingPerQuery(20, now.plusMinutes(1))).isZero();
         assertThat(repository.findAll()).hasSize(1);
+    }
+
+    @Test
+    void 시간_하한보다_어린_행은_세대_초과여도_보존된다_D2() {
+        // 플랜이 자주 뒤집히는 쿼리 시나리오: keep=2 초과분이 5건인데, 그중 3건은 최근 24h 안(어린 행).
+        // cutoff=now-48h 기준 — 어린 행은 살아남고, 48h를 넘긴 초과분만 지워져야 한다.
+        // lakehouse가 "어제 하루창"을 D+1에 뽑는 계약(CONTRACT §1-1) 보장이 이 하한의 존재 이유다.
+        LocalDateTime now = LocalDateTime.now();
+        // 오래된 4건(3~6일 전) + 어린 3건(1~23시간 전) = 7건, keep=2
+        for (int d = 3; d <= 6; d++) {
+            repository.save(snap(5L, "qHot", now.minusDays(d), "old-" + d));
+        }
+        repository.save(snap(5L, "qHot", now.minusHours(1), "young-1h"));
+        repository.save(snap(5L, "qHot", now.minusHours(12), "young-12h"));
+        repository.save(snap(5L, "qHot", now.minusHours(23), "young-23h"));
+        repository.flush();
+
+        int deleted = repository.deleteExceedingPerQuery(2, now.minusHours(48));
+
+        // 최신 2 = young-1h, young-12h(보존 대상 아님이어도 rn<=keep), young-23h는 rn=3이지만
+        // cutoff(48h)보다 어리므로 보존. 삭제되는 것은 48h 넘긴 old-3~6 전부(rn 4~7) = 4건.
+        assertThat(deleted).isEqualTo(4);
+        List<String> shapes = repository.findAll().stream()
+                .map(PlanSnapshot::getPlanShape).sorted().toList();
+        assertThat(shapes).containsExactly("young-12h", "young-1h", "young-23h");
     }
 }

@@ -1,5 +1,6 @@
 package io.dbtower.insight;
 
+import io.dbtower.insight.internal.BaselineLongtermDao;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -26,6 +27,7 @@ import java.util.stream.Collectors;
 public class BaselineService {
 
     private final QuerySnapshotRepository snapshotRepository;
+    private final BaselineLongtermDao longtermDao;
 
     /** 베이스라인 학습에 쓸 과거 이력 길이(일). 이 안의 "같은 요일·시간대" 관측만 베이스라인에 들어간다 */
     private final int historyDays;
@@ -35,17 +37,23 @@ public class BaselineService {
     private final double zThreshold;
     /** 버킷당 최소 관측 수 — 이보다 적으면 "학습 중"으로 판정 보류(신규 인스턴스·쿼리 오탐 방지) */
     private final int minObservations;
+    /** 장기 베이스라인(lakehouse 되쓰기) 병합 스위치 — 끄면 D8 이전과 완전히 동일하게 동작 */
+    private final boolean longtermEnabled;
 
     public BaselineService(QuerySnapshotRepository snapshotRepository,
+                           BaselineLongtermDao longtermDao,
                            @Value("${dbtower.baseline.history-days:14}") int historyDays,
                            @Value("${dbtower.baseline.recent-minutes:5}") int recentMinutes,
                            @Value("${dbtower.baseline.z-threshold:3.0}") double zThreshold,
-                           @Value("${dbtower.baseline.min-observations:8}") int minObservations) {
+                           @Value("${dbtower.baseline.min-observations:8}") int minObservations,
+                           @Value("${dbtower.baseline.longterm-enabled:true}") boolean longtermEnabled) {
         this.snapshotRepository = snapshotRepository;
+        this.longtermDao = longtermDao;
         this.historyDays = historyDays;
         this.recentMinutes = recentMinutes;
         this.zThreshold = zThreshold;
         this.minObservations = minObservations;
+        this.longtermEnabled = longtermEnabled;
     }
 
     // ---------- 노이즈 게이트 ----------
@@ -114,12 +122,32 @@ public class BaselineService {
         Map<String, QueryAcc> baseline =
                 buildBaseline(instanceId, now.minusDays(historyDays), currentFrom, dow, hour);
 
+        // 장기 베이스라인 병합(D8, lakehouse reverse ETL) — 14일 창은 주간 계절성 버킷의 관측이
+        // 최대 2개라 "매주 월요일 아침 피크"를 오탐한다. lakehouse가 수개월 이력으로 계산해
+        // baseline_longterm에 되써 준 (dow, hour) 통계를 QPS 축에 가중 병합한다.
+        // 단위 정합: 장기는 "시간당 delta_calls" — QPS로 /3600 스케일(선형이라 mean·stddev 동일 배율).
+        // 요일 규약: lakehouse dow는 일=0..토=6, java DayOfWeek는 월=1..일=7 → getValue()%7.
+        // 미존재/빈 테이블이면 병합할 것이 없어 D8 이전과 완전히 동일하게 동작한다(회귀 0 계약).
+        Map<String, BaselineLongtermDao.LongtermStat> longterm =
+                longtermEnabled ? longtermDao.findBucket(instanceId, dow.getValue() % 7, hour) : Map.of();
+
         List<QueryAnomaly> anomalies = new ArrayList<>();
         int learning = 0;
         for (Map.Entry<String, Obs> e : current.entrySet()) {
             Obs obs = e.getValue();
             QueryAcc acc = baseline.get(e.getKey());
-            long n = acc == null ? 0 : acc.qps.n; // 세 메트릭은 같은 관측에서 나오므로 n이 동일하다
+            // 단기 관측 수를 병합 전에 기억한다 — 레이턴시·행수 통계는 단기 창에서만 나오므로,
+            // 그 두 메트릭의 판정 가능 여부는 단기 n이 정한다(장기가 늘리는 건 QPS 축뿐).
+            long shortN = acc == null ? 0 : acc.qps.n;
+
+            BaselineLongtermDao.LongtermStat lt = longterm.get(e.getKey());
+            if (lt != null) {
+                if (acc == null) {
+                    acc = new QueryAcc(); // 단기 이력이 전무해도 장기가 아는 쿼리 — 장기만으로 QPS 판정 가능
+                }
+                acc.qps.addSummary(lt.observations(), lt.meanDeltaCalls() / 3600.0, lt.stddevDeltaCalls() / 3600.0);
+            }
+            long n = acc == null ? 0 : acc.qps.n; // QPS 축의 (병합 후) 관측 수
 
             if (n < minObservations) {
                 // 이력 부족 — 오탐을 만드느니 판정을 보류하고 "학습 중"으로만 표기한다.
@@ -129,8 +157,12 @@ public class BaselineService {
 
             List<MetricAnomaly> hits = new ArrayList<>();
             evaluate(hits, "qps", obs.qps, acc.qps, MIN_QPS);
-            evaluate(hits, "latencyMs", obs.avgMs, acc.avgMs, MIN_AVG_MS);
-            evaluate(hits, "rowsPerCall", obs.rowsPerCall, acc.rows, MIN_ROWS_PER_CALL);
+            if (shortN >= minObservations) {
+                // 장기 통계는 호출량(QPS)만 나른다 — 레이턴시·행수는 단기 관측이 충분할 때만 판정한다
+                // (얕은 단기 표본으로 판정하면 장기 병합이 오히려 오탐 문을 여는 꼴).
+                evaluate(hits, "latencyMs", obs.avgMs, acc.avgMs, MIN_AVG_MS);
+                evaluate(hits, "rowsPerCall", obs.rowsPerCall, acc.rows, MIN_ROWS_PER_CALL);
+            }
             if (!hits.isEmpty()) {
                 anomalies.add(new QueryAnomaly(e.getKey(), obs.queryText, dow.getValue(), hour, n, true, hits));
             }
@@ -268,6 +300,20 @@ public class BaselineService {
             n++;
             sum += v;
             sumSq += v * v;
+        }
+
+        /**
+         * 요약 통계(관측 수·평균·표본표준편차)를 충분통계량으로 복원해 병합한다(D8 장기 병합).
+         * Σx = n·mean, Σx² = (n−1)·s² + n·mean² — 원시 관측을 일일이 더한 것과 수학적으로 동일하므로
+         * 단기 관측과 장기 요약의 가중 결합이 자동으로 성립한다(가중치 = 관측 수).
+         */
+        void addSummary(long count, double mean, double stddev) {
+            if (count <= 0) {
+                return;
+            }
+            n += count;
+            sum += mean * count;
+            sumSq += (count - 1) * stddev * stddev + count * mean * mean;
         }
 
         double mean() {
