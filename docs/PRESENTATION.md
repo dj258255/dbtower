@@ -178,7 +178,7 @@ Discord 리치 embed로 발송한다 (VERIFICATION 34절 · 65절). 문의받는
 
 ### 8.2 제공 기능
 
-JSON-RPC 2.0을 SDK 없이 직접 구현했고(stdio·HTTP 두 전송, 프로토콜 코어 공유), 도구 14종을
+JSON-RPC 2.0을 SDK 없이 직접 구현했고(stdio·HTTP 두 전송, 프로토콜 코어 공유), 도구 16종을
 제공한다 (VERIFICATION 17절 · 71절). compare, explain, wait_events, sessions, partitions,
 schema_diff, metrics 등 전부 읽기 전용이다. kill은 위험해서 도구로 만들지 않았다. 등록은 한 줄이다.
 
