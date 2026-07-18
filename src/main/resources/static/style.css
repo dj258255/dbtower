@@ -78,8 +78,10 @@ body {
   width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 7px;
   padding: 6px 26px 6px 9px; font-size: 12.5px; font-family: inherit; color: var(--text);
   background: #fff; cursor: pointer; position: relative;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: flex; align-items: center; gap: 6px;
 }
+.cs-btn > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-opt { display: flex; align-items: center; gap: 6px; }
 .cs-btn::after {
   content: ""; position: absolute; right: 10px; top: 50%; width: 7px; height: 7px;
   border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
@@ -565,6 +567,14 @@ input[type="datetime-local"] {
 /* 문제 행은 왼쪽 색 띠로 눈에 띄게 — 오래됨=주황, 백업 없음=빨강 */
 .fresh-row-STALE td:first-child { box-shadow: inset 3px 0 0 #f08c2d; }
 .fresh-row-NO_BACKUP td:first-child { box-shadow: inset 3px 0 0 #d6404f; }
+.fresh-row { cursor: pointer; }
+.fresh-row:hover { background: #f7f8fa; }
+
+/* 톤 통일 — 키보드 포커스 시 일관된 파란 링(버튼·입력·탭·커스텀 드롭다운) */
+button:focus-visible, input:focus-visible, select:focus-visible,
+.cs-btn:focus-visible, .mon-tab:focus-visible, .tab:focus-visible, .instance-card:focus-visible {
+  outline: 2px solid rgba(79, 94, 247, .5); outline-offset: 1px;
+}
 .verify-badge { display: inline-block; padding: 1px 7px; border-radius: 8px; font-size: 11px; font-weight: 700; }
 .verify-VERIFIED { background: #e3f5ec; color: #1a7a52; }
 .verify-FAILED { background: #fbe4e6; color: #b02a37; }

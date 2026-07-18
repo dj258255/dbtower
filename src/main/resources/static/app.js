@@ -383,7 +383,9 @@ function enhanceSelect(sel) {
   btn.type = "button";
   btn.className = "cs-btn";
   wrap.appendChild(btn);
-  const sync = () => { btn.textContent = sel.options[sel.selectedIndex]?.text ?? ""; };
+  // 기종 옵션이면 브랜드 아이콘을 붙인다(engineIcon은 5기종 외엔 "" 반환이라 다른 필터엔 영향 없음)
+  const label = (txt) => engineIcon(txt) + `<span>${esc(txt)}</span>`;
+  const sync = () => { btn.innerHTML = label(sel.options[sel.selectedIndex]?.text ?? ""); };
   sync();
   sel._csSync = sync;
   let panel = null;
@@ -397,7 +399,7 @@ function enhanceSelect(sel) {
     [...sel.options].forEach((o, i) => {
       const it = document.createElement("div");
       it.className = "cs-opt" + (i === sel.selectedIndex ? " sel" : "");
-      it.textContent = o.text;
+      it.innerHTML = label(o.text);
       it.addEventListener("click", () => {
         sel.selectedIndex = i; sync();
         sel.dispatchEvent(new Event("change"));
@@ -662,7 +664,7 @@ async function loadBackupFreshness() {
       ? `<span class="verify-badge verify-VERIFIED" title="${esc(f.remoteLocation)}">원격 보관</span>`
       : '<span class="muted">로컬만</span>';
     return `
-      <tr class="fresh-row fresh-row-${esc(f.status)}">
+      <tr class="fresh-row fresh-row-${esc(f.status)}" data-id="${f.instanceId}" title="클릭하면 이 인스턴스를 선택해 대시보드를 엽니다">
         <td><span class="cell-inst">${typeBadge(f.type)} ${esc(f.instanceName)}</span></td>
         <td><span class="fresh-badge fresh-${esc(f.status)}">${esc(FRESHNESS_LABEL[f.status] ?? f.status)}</span></td>
         <td>${last}</td>
@@ -678,6 +680,13 @@ async function loadBackupFreshness() {
         <tbody>${rows}</tbody>
       </table>
     </div>`;
+  // 행 클릭 → 그 인스턴스를 선택해 대시보드를 연다(함대 표에서 바로 드릴인)
+  box.querySelectorAll(".fresh-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      const inst = state.instances.find((i) => i.id == row.dataset.id);
+      if (inst) { selectInstance(inst, null); $("#time-panel").scrollIntoView({ behavior: "smooth", block: "start" }); }
+    });
+  });
 }
 
 // ---------- 활동 그래프 (드래그 구간 선택) ----------
