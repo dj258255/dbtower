@@ -204,10 +204,11 @@ DB 접속정보를 다루는 관리 도구라 인증 없이는 운영에 못 들
 
 ### 메타 DB ERD
 
-메타 DB 스키마의 단일 권위는 Flyway 마이그레이션(V1~V10)입니다. 표 9개와 관계(FK 5개는 전부
-V10에서 ON DELETE CASCADE로 일괄 추가 — 인스턴스 삭제 시 자식 데이터 자동 정리)를 정리했습니다.
+메타 DB 스키마의 단일 권위는 Flyway 마이그레이션(V1~V23)입니다. ERD는 그중 핵심 표 9개와
+관계(FK는 ON DELETE CASCADE — 인스턴스 삭제 시 자식 데이터 자동 정리)를 정리한 것이고,
+이후 확장 표(로그인 잠금·OAuth·알림 매핑·파티션 자식 등)는 그림에서 생략했습니다.
 
-![DBTower 메타 DB ERD — Flyway V1~V10 기준 표 9개](docs/erd.svg)
+![DBTower 메타 DB ERD — Flyway 스키마 중 핵심 표 9개](docs/erd.svg)
 
 ## 기존 모니터링 스택과의 관계
 

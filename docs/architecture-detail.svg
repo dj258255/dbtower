@@ -184,7 +184,7 @@
   <rect class="card" x="1090" y="200" width="280" height="120" rx="10"/>
   <text class="title" x="1230" y="228" font-size="13" text-anchor="middle">메타 PostgreSQL 16</text>
   <text class="sub"   x="1230" y="250" font-size="10.5" text-anchor="middle">dev :15432 · 셀프호스트 meta-db 컨테이너</text>
-  <text class="sub"   x="1230" y="268" font-size="10.5" text-anchor="middle">Flyway V1~V10 · 표 9개 (docs/erd.svg)</text>
+  <text class="sub"   x="1230" y="268" font-size="10.5" text-anchor="middle">Flyway V1~V23 · 핵심 표 9개 (docs/erd.svg)</text>
   <text class="sub"   x="1230" y="286" font-size="10.5" text-anchor="middle">ddl-auto=validate — 스키마 권위는 Flyway</text>
   <path class="a-req" d="M1040 258 L1084 258"/>
   <polygon class="h-req" points="1084,258 1074,253 1074,263"/>
