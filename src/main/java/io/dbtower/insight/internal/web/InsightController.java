@@ -27,6 +27,7 @@ import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.format.annotation.DateTimeFormat.ISO;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
@@ -252,10 +253,10 @@ public class InsightController {
     @GetMapping("/compare")
     public ComparisonService.CompareResult compare(
             @PathVariable Long id,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime baseFrom,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime baseTo,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime targetFrom,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime targetTo) {
+            @RequestParam @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime baseFrom,
+            @RequestParam @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime baseTo,
+            @RequestParam @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime targetFrom,
+            @RequestParam @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime targetTo) {
         return comparisonService.compare(id, baseFrom, baseTo, targetFrom, targetTo);
     }
 
@@ -271,8 +272,8 @@ public class InsightController {
     @GetMapping("/activity")
     public List<ActivityPoint> activity(
             @PathVariable Long id,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+            @RequestParam @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime to) {
         List<QuerySnapshotRepository.BatchTotal> batches = snapshotRepository.sumByBatch(id, from, to);
         List<ActivityPoint> points = new java.util.ArrayList<>();
         for (int i = 1; i < batches.size(); i++) {
@@ -309,8 +310,8 @@ public class InsightController {
     @GetMapping("/metrics")
     public MetricsView metrics(
             @PathVariable Long id,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+            @RequestParam @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime to) {
         var instance = registryService.findById(id);
         if (!prometheusClient.configured()) {
             String note = "Prometheus 미설정 — DBTOWER_PROMETHEUS_URL을 지정하면 수집됩니다";
@@ -364,8 +365,8 @@ public class InsightController {
     @GetMapping("/metrics/commands")
     public CommandMetricsView commandMetrics(
             @PathVariable Long id,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+            @RequestParam @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime to) {
         var instance = registryService.findById(id);
         if (!prometheusClient.configured()) {
             return new CommandMetricsView(List.of(), "Prometheus 미설정 — DBTOWER_PROMETHEUS_URL을 지정하면 수집됩니다");

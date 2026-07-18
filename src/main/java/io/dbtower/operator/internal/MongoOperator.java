@@ -2,6 +2,7 @@ package io.dbtower.operator.internal;
 
 import io.dbtower.operator.BackupCommands;
 import io.dbtower.operator.model.BackupPolicy;
+import io.dbtower.operator.model.BackupPolicy.BackupType;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.model.DbParameter;
 import io.dbtower.operator.DbmsOperator;
@@ -20,6 +21,7 @@ import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableDetail;
+import io.dbtower.operator.model.TableDetail.DdlSource;
 import io.dbtower.operator.model.TableSchema;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.operator.model.WaitEvent;
@@ -599,7 +601,7 @@ public class MongoOperator implements DbmsOperator {
 
                 return new TableDetail(tableName, engine, rowCount, dataBytes, indexBytes, avgRowBytes,
                         null, // createdAt — MongoDB는 컬렉션 생성 시각을 쉽게 주지 않는다
-                        ddl, TableDetail.DdlSource.NATIVE, indexes,
+                        ddl, DdlSource.NATIVE, indexes,
                         "스키마리스 — 컬렉션 옵션·인덱스 정의(테이블 DDL 아님)");
             });
         } catch (Exception e) {
@@ -614,10 +616,10 @@ public class MongoOperator implements DbmsOperator {
      */
     @Override
     public BackupResult backup(BackupPolicy policy) {
-        if (policy.type() == BackupPolicy.BackupType.LOG) {
+        if (policy.type() == BackupType.LOG) {
             return oplogBackup();
         }
-        if (policy.type() == BackupPolicy.BackupType.PHYSICAL) {
+        if (policy.type() == BackupType.PHYSICAL) {
             throw new UnsupportedOperationException(
                     "MongoDB 물리 백업은 파일시스템 스냅샷/Percona hot backup 영역 — 공식 PITR는 mongodump + oplog 재생이라 물리가 필수는 아니다");
         }

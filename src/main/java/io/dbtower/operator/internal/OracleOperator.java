@@ -1,6 +1,7 @@
 package io.dbtower.operator.internal;
 
 import io.dbtower.operator.model.BackupPolicy;
+import io.dbtower.operator.model.BackupPolicy.BackupType;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.model.ColumnSchema;
 import io.dbtower.operator.ConnectionPools;
@@ -15,6 +16,7 @@ import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableDetail;
+import io.dbtower.operator.model.TableDetail.DdlSource;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.operator.model.WaitEvent;
 
@@ -342,12 +344,12 @@ public class OracleOperator extends AbstractJdbcOperator {
                 // 결과는 CLOB — ojdbc는 getString으로 CLOB 전문을 문자열로 내주므로 그대로 읽는다(DDL 크기는 무난).
                 ddl = jdbc().query("SELECT DBMS_METADATA.GET_DDL('TABLE', ?) FROM dual",
                         rs -> rs.next() ? rs.getString(1) : null, t);
-                ddlSource = TableDetail.DdlSource.NATIVE;
+                ddlSource = DdlSource.NATIVE;
                 note = baseNote;
             } catch (DataAccessException e) {
                 // DBMS_METADATA 실패(권한 등)는 전체를 실패시키지 않는다 — 통계·인덱스는 살리고 DDL만 비운다
                 ddl = null;
-                ddlSource = TableDetail.DdlSource.UNSUPPORTED;
+                ddlSource = DdlSource.UNSUPPORTED;
                 note = baseNote + ". DDL 원문 조회 실패(DBMS_METADATA 권한 부족 추정): " + e.getMessage();
             }
             return new TableDetail(table, null, (Long) head[0], (Long) head[1], (Long) head[2],
@@ -453,10 +455,10 @@ public class OracleOperator extends AbstractJdbcOperator {
      */
     @Override
     public BackupResult backup(BackupPolicy policy) {
-        if (policy.type() == BackupPolicy.BackupType.LOG) {
+        if (policy.type() == BackupType.LOG) {
             return archiveLogBackup();
         }
-        if (policy.type() == BackupPolicy.BackupType.PHYSICAL) {
+        if (policy.type() == BackupType.PHYSICAL) {
             // 물리 전체 = RMAN BACKUP DATABASE(블록 검증·컨트롤파일 카탈로그까지 정석 그 자체).
             // Data Pump(FULL)는 논리라 아카이브 로그를 재생할 수 없다 — Oracle의 진짜 PITR 앵커는 이쪽.
             if (backupTools.oracleRmanCommand() == null || backupTools.oracleRmanCommand().isBlank()) {

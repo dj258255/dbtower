@@ -1,6 +1,7 @@
 package io.dbtower.operator.internal;
 
 import io.dbtower.operator.model.BackupPolicy;
+import io.dbtower.operator.model.BackupPolicy.BackupType;
 import io.dbtower.operator.model.StatsHealth;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.model.ColumnSchema;
@@ -22,6 +23,7 @@ import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableBloat;
 import io.dbtower.operator.model.TableDetail;
+import io.dbtower.operator.model.TableDetail.DdlSource;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.operator.model.WaitEvent;
 
@@ -55,10 +57,10 @@ public class PostgresOperator extends AbstractJdbcOperator {
     /** PostgreSQL 백업 = 호스트 CLI(pg_dump) 실행 모델. 비밀번호는 인자가 아니라 PGPASSWORD 환경변수로 */
     @Override
     public BackupResult backup(BackupPolicy policy) {
-        if (policy.type() == BackupPolicy.BackupType.LOG) {
+        if (policy.type() == BackupType.LOG) {
             return walBackup();
         }
-        if (policy.type() == BackupPolicy.BackupType.PHYSICAL) {
+        if (policy.type() == BackupType.PHYSICAL) {
             return physicalBackup();
         }
         Path out = Path.of(backupTools.backupDir(),
@@ -883,7 +885,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
                 note.append(" 파티션 테이블 — 행수·데이터·인덱스 크기는 리프 파티션 합산.");
             }
             return new TableDetail(tableName, null, stats.rowCount(), stats.dataBytes(), stats.indexBytes(),
-                    avgRowBytes, null, ddl, TableDetail.DdlSource.RECONSTRUCTED, indexes, note.toString());
+                    avgRowBytes, null, ddl, DdlSource.RECONSTRUCTED, indexes, note.toString());
         } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 테이블 상세 조회 실패: " + e.getMessage(), e);
         }

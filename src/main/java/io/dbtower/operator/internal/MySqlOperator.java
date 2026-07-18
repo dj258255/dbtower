@@ -1,6 +1,7 @@
 package io.dbtower.operator.internal;
 
 import io.dbtower.operator.model.BackupPolicy;
+import io.dbtower.operator.model.BackupPolicy.BackupType;
 import io.dbtower.operator.model.StatsHealth;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.model.ColumnSchema;
@@ -21,6 +22,7 @@ import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableDetail;
+import io.dbtower.operator.model.TableDetail.DdlSource;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.operator.model.WaitEvent;
 
@@ -70,10 +72,10 @@ public class MySqlOperator extends AbstractJdbcOperator {
      */
     @Override
     public BackupResult backup(BackupPolicy policy) {
-        if (policy.type() == BackupPolicy.BackupType.LOG) {
+        if (policy.type() == BackupType.LOG) {
             return binlogBackup();
         }
-        if (policy.type() == BackupPolicy.BackupType.PHYSICAL) {
+        if (policy.type() == BackupType.PHYSICAL) {
             return physicalBackup();
         }
         Path out = Path.of(backupTools.backupDir(),
@@ -623,7 +625,7 @@ public class MySqlOperator extends AbstractJdbcOperator {
             String ddl = jdbc().query("SHOW CREATE TABLE `" + instance.getDbName() + "`.`" + table + "`",
                     rs -> rs.next() ? rs.getString(2) : null);
             return new TableDetail(table, (String) head[0], (Long) head[1], (Long) head[2], (Long) head[3],
-                    (Long) head[4], (String) head[5], ddl, TableDetail.DdlSource.NATIVE, indexes,
+                    (Long) head[4], (String) head[5], ddl, DdlSource.NATIVE, indexes,
                     "행수·평균 행 길이는 InnoDB 통계 추정, 카디널리티는 STATISTICS 기준");
         } catch (DataAccessException e) {
             throw new OperatorException("MySQL 테이블 상세 조회 실패: " + e.getMessage(), e);

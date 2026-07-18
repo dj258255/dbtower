@@ -1,5 +1,7 @@
 package io.dbtower.score.internal;
 
+import io.dbtower.score.internal.SignalContribution.State;
+import io.dbtower.score.internal.SignalContribution.Signal;
 import io.dbtower.registry.DbmsType;
 
 import java.time.LocalDateTime;
@@ -60,7 +62,7 @@ public record HealthScore(Long instanceId, String instanceName, DbmsType type, L
             if (c.missing()) {
                 partial = true;
             }
-            if (c.signal() == SignalContribution.Signal.HEALTH && c.state() == SignalContribution.State.PENALIZED) {
+            if (c.signal() == Signal.HEALTH && c.state() == State.PENALIZED) {
                 down = true;
             }
         }

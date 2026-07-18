@@ -1,5 +1,6 @@
 package io.dbtower.operator;
 
+import java.lang.ProcessBuilder.Redirect;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.registry.DatabaseInstance;
 
@@ -57,7 +58,7 @@ public final class BackupCommands {
             pb.environment().putAll(env);
             boolean encrypt = cipher != null && cipher.enabled();
             if (encrypt) {
-                pb.redirectOutput(ProcessBuilder.Redirect.PIPE);
+                pb.redirectOutput(Redirect.PIPE);
             } else {
                 pb.redirectOutput(outFile.toFile());
             }

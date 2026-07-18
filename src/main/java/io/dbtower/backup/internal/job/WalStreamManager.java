@@ -1,5 +1,6 @@
 package io.dbtower.backup.internal.job;
 
+import java.lang.ProcessBuilder.Redirect;
 import io.dbtower.backup.internal.persistence.BackupPolicyRepository;
 import io.dbtower.operator.BackupCommands;
 import io.dbtower.operator.model.BackupPolicy.BackupType;
@@ -135,7 +136,7 @@ public class WalStreamManager {
         // 비밀번호는 argv 금지 — PGPASSWORD 환경변수로(도커 템플릿은 -e PGPASSWORD로 전달)
         pb.environment().put("PGPASSWORD", instance.getPassword());
         pb.redirectErrorStream(true);
-        pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+        pb.redirectOutput(Redirect.DISCARD);
         Process p = pb.start();
         // stdin 즉시 EOF — 함정(실측): docker exec -i류 래퍼는 원격 프로세스가 죽어도 stdin이 열려
         // 있으면 CLI가 살아남아, isAlive() 생존 감시가 죽은 스트림을 산 것으로 오인한다(재시작 불발).

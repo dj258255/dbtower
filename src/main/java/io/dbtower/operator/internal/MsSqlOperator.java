@@ -1,6 +1,7 @@
 package io.dbtower.operator.internal;
 
 import io.dbtower.operator.model.BackupPolicy;
+import io.dbtower.operator.model.BackupPolicy.BackupType;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.model.ColumnSchema;
 import io.dbtower.operator.ConnectionPools;
@@ -18,6 +19,7 @@ import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableDetail;
+import io.dbtower.operator.model.TableDetail.DdlSource;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.operator.model.WaitEvent;
 
@@ -79,7 +81,7 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 .formatted(safeFileName(instance.getName()), backupTimestamp());
         // 식별자는 바인딩이 안 되므로 ]를 ]]로 이스케이프해 대괄호 탈출을 막는다 (등록 시 패턴 검증 + 심층 방어)
         String escapedDb = instance.getDbName().replace("]", "]]");
-        String sql = policy.type() == BackupPolicy.BackupType.LOG
+        String sql = policy.type() == BackupType.LOG
                 ? "BACKUP LOG [%s] TO DISK = ?".formatted(escapedDb)
                 : "BACKUP DATABASE [%s] TO DISK = ?".formatted(escapedDb);
         try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -654,7 +656,7 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                     + "DDL은 단일 CREATE 명령이 없어 카탈로그(INFORMATION_SCHEMA)로 재구성했으며, "
                     + "제약조건(FK/CHECK)·트리거·계산열 정의는 아직 담지 못함.";
             return new TableDetail(table, null, stats.rowCount(), stats.dataBytes(), stats.indexBytes(),
-                    avgRowBytes, stats.createdAt(), ddl, TableDetail.DdlSource.RECONSTRUCTED, indexes, note);
+                    avgRowBytes, stats.createdAt(), ddl, DdlSource.RECONSTRUCTED, indexes, note);
         } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 테이블 상세 조회 실패: " + e.getMessage(), e);
         }

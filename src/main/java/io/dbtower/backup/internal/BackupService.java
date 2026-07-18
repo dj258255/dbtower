@@ -1,5 +1,6 @@
 package io.dbtower.backup.internal;
 
+import io.dbtower.backup.internal.domain.BackupRun.Status;
 import io.dbtower.backup.internal.domain.BackupPolicyEntity;
 import io.dbtower.backup.internal.domain.BackupRun;
 import io.dbtower.backup.internal.persistence.BackupPolicyRepository;
@@ -70,18 +71,18 @@ public class BackupService {
             BackupResult result = operatorFactory.create(registryService.findById(instanceId))
                     .backup(new BackupPolicy(null, type));
             run = new BackupRun(instanceId, startedAt, System.currentTimeMillis() - start,
-                    BackupRun.Status.SUCCESS, result.location() + " (" + result.bytes() + " bytes)",
+                    Status.SUCCESS, result.location() + " (" + result.bytes() + " bytes)",
                     result.location());
             // 3-2-1의 오프사이트 — 업로드 실패는 백업 실패가 아니다(로컬 성공은 유효, 위치만 비움)
             remoteStore.upload(instanceId, result.location()).ifPresent(run::recordRemote);
         } catch (UnsupportedOperationException e) {
             // "기종이 못 하는 것"은 실패가 아니다 — 사유와 함께 UNSUPPORTED로 구분 기록(위장 금지)
             run = new BackupRun(instanceId, startedAt, System.currentTimeMillis() - start,
-                    BackupRun.Status.UNSUPPORTED, e.getMessage());
+                    Status.UNSUPPORTED, e.getMessage());
             log.info("백업 미지원 instance={} type={} 사유={}", instanceId, type, e.getMessage());
         } catch (Exception e) {
             run = new BackupRun(instanceId, startedAt, System.currentTimeMillis() - start,
-                    BackupRun.Status.FAILED, e.getMessage());
+                    Status.FAILED, e.getMessage());
             log.warn("백업 실패 instance={} cause={}", instanceId, e.getMessage());
         }
         run.setBackupType(type.name());   // PITR 범위 계산의 전제(V13) — 어떤 타입의 실행이었는지 기록
@@ -103,7 +104,7 @@ public class BackupService {
         String location = explicitLocation;
         if (location == null || location.isBlank()) {
             target = runRepository.findTop20ByInstanceIdOrderByStartedAtDesc(instanceId).stream()
-                    .filter(r -> r.getStatus() == BackupRun.Status.SUCCESS)
+                    .filter(r -> r.getStatus() == Status.SUCCESS)
                     .findFirst()
                     .orElseThrow(() -> new IllegalArgumentException(
                             "검증할 성공한 백업 이력이 없습니다 — 먼저 백업을 실행하세요"));
@@ -174,9 +175,9 @@ public class BackupService {
         // 앵커 = 가장 최근의 성공한 전체 백업 — PHYSICAL(물리)이 있으면 그것이 진짜 앵커다
         // (PG·Oracle은 논리 덤프에 로그를 재생할 수 없다). 둘 다 있으면 더 최근 것.
         var physical = runRepository.findTopByInstanceIdAndBackupTypeAndStatusOrderByStartedAtDesc(
-                instanceId, BackupType.PHYSICAL.name(), BackupRun.Status.SUCCESS);
+                instanceId, BackupType.PHYSICAL.name(), Status.SUCCESS);
         var logical = runRepository.findTopByInstanceIdAndBackupTypeAndStatusOrderByStartedAtDesc(
-                instanceId, BackupType.FULL.name(), BackupRun.Status.SUCCESS);
+                instanceId, BackupType.FULL.name(), Status.SUCCESS);
         var full = physical.isEmpty() ? logical
                 : logical.isEmpty() ? physical
                 : (physical.get().getStartedAt().isAfter(logical.get().getStartedAt()) ? physical : logical);
@@ -187,7 +188,7 @@ public class BackupService {
         }
         List<BackupRun> logs = runRepository
                 .findByInstanceIdAndBackupTypeAndStatusAndStartedAtAfterOrderByStartedAtAsc(
-                        instanceId, BackupType.LOG.name(), BackupRun.Status.SUCCESS,
+                        instanceId, BackupType.LOG.name(), Status.SUCCESS,
                         full.get().getStartedAt());
         LocalDateTime lastLogAt = logs.isEmpty() ? null : logs.get(logs.size() - 1).getStartedAt();
         String note = logs.isEmpty()

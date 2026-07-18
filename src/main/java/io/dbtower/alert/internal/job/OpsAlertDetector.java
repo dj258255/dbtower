@@ -3,6 +3,7 @@ package io.dbtower.alert.internal.job;
 import io.dbtower.alert.internal.AlertEmbeds;
 import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.backup.BackupFreshness;
+import io.dbtower.backup.BackupFreshness.Status;
 import io.dbtower.backup.BackupFreshnessService;
 import io.dbtower.insight.QuerySnapshotRepository;
 import io.dbtower.operator.DbmsOperator;
@@ -311,10 +312,10 @@ public class OpsAlertDetector {
      */
     private List<String> detectStaleBackup(DatabaseInstance instance, LocalDateTime now) {
         BackupFreshness f = backupFreshnessService.freshnessFor(instance);
-        if (f.status() == BackupFreshness.Status.FRESH) {
+        if (f.status() == Status.FRESH) {
             return List.of();
         }
-        if (f.status() == BackupFreshness.Status.NO_BACKUP) {
+        if (f.status() == Status.NO_BACKUP) {
             LocalDateTime windowStart = now.minusHours(f.thresholdHours());
             if (instance.getCreatedAt() != null && instance.getCreatedAt().isAfter(windowStart)) {
                 return List.of(); // 등록 직후 — 아직 첫 백업 전이라 판단 보류
