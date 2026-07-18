@@ -217,6 +217,11 @@ public final class McpProtocolHandler {
                         + "mart_weekly_ops_report(week_start, is_partial_week, instance_id, capacity_worst_risk, "
                         + "min_days_to_threshold, top_wait_event, plan_flips_this_week, plan_regressed_this_week, "
                         + "backup_gap_days, backup_status — 인스턴스별 주간 요약 한 행), "
+                        + "mart_config_change(instance_id, dt, param_name, old_value, new_value, change_kind — "
+                        + "설정 변경 타임라인, 누가는 없음), "
+                        + "mart_config_impact(instance_id, change_dt, change_source, change_key, plan_flips_after, "
+                        + "regressed_after, before/after_latency_ms, latency_ratio, correlation — followed_by_"
+                        + "regression/plan_flip/latency_rise/no_signal, 변경 뒤 회귀 상관·상관≠인과), "
                         + "pipeline_run_log(파이프라인 런 메타). 이 목록에 없는 컬럼은 지어내지 말 것. "
                         + "SELECT/WITH만 허용, 세미콜론 금지. 미설정 환경이면 404.",
                 schema(Map.of("sql", strProp("DuckDB SQL (SELECT 전용)"),
