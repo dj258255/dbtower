@@ -12,6 +12,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * DB팀 문의 채널 — 분석 결과(쿼리·실행계획·규칙 지적·AI 분석)를 사람이 읽기 좋은 메시지로 묶어
@@ -66,19 +67,20 @@ public class InquiryService {
         // 대상 조회 실패가 문의 자체를 막지 않게 격리한다(구조가 없어도 쿼리·플랜은 보낸다).
         // 파싱은 원문으로(FROM·JOIN 추출 정확도), 외부 발신 렌더링은 마스킹본으로 — 문의 창의 SQL은
         // 사용자가 직접 친 원문이라 실값(고객 이메일·ID 등)이 그대로 실려 오는 대표 경로다.
-        String schemaSummary = safeSchemaSummary(instanceId, req.sql());
+        ReferencedSchemaService.ReferencedSchema schema = safeSchema(instanceId, req.sql());
+        String schemaSummary = schema == null ? "" : ReferencedSchemaService.formatCompact(schema);
         InquiryRequest masked = new InquiryRequest(queryMasker.apply(req.sql()),
                 req.plan(), req.findings(), req.aiAnalysis(), req.note());
         notifier.sendEmbed(format(instance, masked, principal, schemaSummary), instance.getId(),
-                buildEmbed(instance, masked, principal, schemaSummary));
+                buildEmbed(instance, masked, principal, schema));
         return new InquiryResult(true, null);
     }
 
-    private String safeSchemaSummary(Long instanceId, String sql) {
+    private ReferencedSchemaService.ReferencedSchema safeSchema(Long instanceId, String sql) {
         try {
-            return ReferencedSchemaService.formatCompact(referencedSchema.describe(instanceId, sql));
+            return referencedSchema.describe(instanceId, sql);
         } catch (RuntimeException e) {
-            return "";  // 대상 DB 조회 실패 — 구조 없이도 문의는 나간다
+            return null;  // 대상 DB 조회 실패 — 구조 없이도 문의는 나간다
         }
     }
 
@@ -96,7 +98,7 @@ public class InquiryService {
      * 본문을 먼저 900자로 줄인다 — 한도 절단이 코드블록 백틱을 삼키면 이후 텍스트 전체가 코드로 렌더된다.
      */
     private WebhookNotifier.Embed buildEmbed(DatabaseInstance instance, InquiryRequest req,
-                                             String principal, String schemaSummary) {
+                                             String principal, ReferencedSchemaService.ReferencedSchema schema) {
         List<WebhookNotifier.Embed.Field> fields = new ArrayList<>();
         fields.add(new WebhookNotifier.Embed.Field("요청자", principal, true));
         fields.add(new WebhookNotifier.Embed.Field("인스턴스", instance.getName() + " (" + instance.getType() + ")", true));
@@ -105,8 +107,8 @@ public class InquiryService {
             fields.add(new WebhookNotifier.Embed.Field("담당", instance.getTeamLabel(), true));
         }
         fields.add(new WebhookNotifier.Embed.Field("쿼리", codeBlock("sql", blankToDash(req.sql())), false));
-        if (hasText(schemaSummary)) {
-            fields.add(new WebhookNotifier.Embed.Field("관련 테이블 구조", codeBlock("", schemaSummary), false));
+        if (schema != null) {
+            addSchemaFields(fields, schema);
         }
         if (hasText(req.plan())) {
             fields.add(new WebhookNotifier.Embed.Field("실행계획", codeBlock("", req.plan().strip()), false));
@@ -135,6 +137,65 @@ public class InquiryService {
     private static String codeBlock(String lang, String body) {
         String clipped = body.length() > 900 ? body.substring(0, 892) + "… (잘림)" : body;
         return "```" + lang + "\n" + clipped + "\n```";
+    }
+
+    /** DDL 코드블록 필드에 붙는 부속 줄(통계·카디널리티) 몫을 남기려 본문을 더 줄인다 */
+    private static String ddlBlock(String ddl) {
+        String lang = ddl.stripLeading().startsWith("{") || ddl.stripLeading().startsWith("[") ? "json" : "sql";
+        String clipped = ddl.length() > 760 ? ddl.substring(0, 752) + "… (잘림)" : ddl;
+        return "```" + lang + "\n" + clipped + "\n```";
+    }
+
+    /** embed 필드 25개 한도 안에서 DDL 필드로 쓸 수 있는 테이블 수 — 나머지는 요약으로 */
+    private static final int DDL_TABLES_MAX = 2;
+
+    /**
+     * 관련 테이블 구조 — 테이블 상세 화면과 같은 구성(스키마 정보=DDL·기본 통계·인덱스 카디널리티)을
+     * 테이블당 필드 하나로 압축한다. DDL은 기종별 원천 그대로(MySQL=SHOW CREATE TABLE 원문,
+     * PG/MSSQL=카탈로그 재구성 — "재구성" 라벨로 정직 표기, Mongo=컬렉션 JSON).
+     * 참조 테이블이 많으면 앞 2개만 DDL로, 나머지는 인덱스 중심 요약 필드 하나로 묶는다(한도 25 방어).
+     */
+    private static void addSchemaFields(List<WebhookNotifier.Embed.Field> fields,
+                                        ReferencedSchemaService.ReferencedSchema schema) {
+        int ddlShown = 0;
+        List<ReferencedSchemaService.RefTable> rest = new ArrayList<>();
+        for (ReferencedSchemaService.RefTable t : schema.tables()) {
+            if (ddlShown >= DDL_TABLES_MAX || !hasText(t.ddl())) {
+                rest.add(t);
+                continue;
+            }
+            StringBuilder v = new StringBuilder(ddlBlock(t.ddl()));
+            String stats = ReferencedSchemaService.formatStats(t);
+            if ("RECONSTRUCTED".equals(t.ddlSource())) {
+                stats = stats.isEmpty() ? "DDL 재구성" : stats + " · DDL 재구성";
+            }
+            if (!stats.isEmpty()) {
+                v.append('\n').append(stats);
+            }
+            String card = cardinalityLine(t);
+            if (!card.isEmpty()) {
+                v.append('\n').append(card);
+            }
+            fields.add(new WebhookNotifier.Embed.Field("관련 테이블 구조 — " + t.name(), v.toString(), false));
+            ddlShown++;
+        }
+        if (!rest.isEmpty() || !schema.notFound().isEmpty()) {
+            String compact = ReferencedSchemaService.formatCompact(
+                    new ReferencedSchemaService.ReferencedSchema(rest, schema.notFound(), schema.truncated()));
+            if (hasText(compact)) {
+                fields.add(new WebhookNotifier.Embed.Field("관련 테이블 구조(요약)", codeBlock("", compact), false));
+            }
+        }
+    }
+
+    /** 인덱스 카디널리티 — DDL엔 없는 선택도 재료. 확보된 인덱스만, 앞 4개까지(필드 한도 방어). */
+    private static String cardinalityLine(ReferencedSchemaService.RefTable t) {
+        List<String> parts = t.indexes().stream()
+                .filter(i -> i.cardinality() != null)
+                .limit(4)
+                .map(i -> i.name() + "≈" + String.format(Locale.ROOT, "%,d", i.cardinality()))
+                .toList();
+        return parts.isEmpty() ? "" : "카디널리티: " + String.join(" · ", parts);
     }
 
     /**

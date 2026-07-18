@@ -47,9 +47,13 @@ public class ReferencedSchemaService {
     public record RefIndex(String name, List<String> columns, boolean unique, String type, Long cardinality) {
     }
 
-    /** rowCountApprox/dataBytes/indexBytes < 0 이면 미확보(tableStats 상한 밖, tableDetail 실패 등) */
+    /**
+     * rowCountApprox/dataBytes/indexBytes < 0 이면 미확보(tableStats 상한 밖, tableDetail 실패 등).
+     * ddl은 기종별 원천 그대로(MySQL=SHOW CREATE TABLE, PG/MSSQL=카탈로그 재구성, Mongo=JSON) —
+     * ddlSource(NATIVE/RECONSTRUCTED)로 출처를 함께 실어 렌더 측이 정직하게 라벨링한다.
+     */
     public record RefTable(String name, long rowCountApprox, long dataBytes, long indexBytes,
-                           List<RefColumn> columns, List<RefIndex> indexes) {
+                           String ddl, String ddlSource, List<RefColumn> columns, List<RefIndex> indexes) {
     }
 
     /** notFound = SQL엔 있으나 스키마에 없던 후보(CTE·별칭·상한 밖·오탈자). truncated = 스키마 상한에 걸림 */
@@ -104,12 +108,12 @@ public class ReferencedSchemaService {
             // 상세 실패는 요약 폴백으로 흡수 — 구조 요약만으로도 첨부는 유효하다
         }
         if (detail == null || detail.ddlSource() == TableDetail.DdlSource.UNSUPPORTED) {
-            return new RefTable(t.name(), rows, -1, -1, columns(t.columns()), indexes(t.indexes()));
+            return new RefTable(t.name(), rows, -1, -1, null, null, columns(t.columns()), indexes(t.indexes()));
         }
         long detailRows = detail.rowCount() >= 0 ? detail.rowCount() : rows;
         List<RefIndex> idx = detail.indexes().isEmpty() ? indexes(t.indexes()) : fromDetail(detail.indexes());
         return new RefTable(t.name(), detailRows, detail.dataBytes(), detail.indexBytes(),
-                columns(t.columns()), idx);
+                detail.ddl(), detail.ddlSource().name(), columns(t.columns()), idx);
     }
 
     /** tableStats로 대략 행수 맵 — 없거나 실패하면 빈 맵(행수는 부가 정보라 없어도 구조는 보여준다) */
@@ -139,18 +143,9 @@ public class ReferencedSchemaService {
         StringBuilder sb = new StringBuilder();
         for (RefTable t : schema.tables()) {
             sb.append(t.name());
-            List<String> facts = new ArrayList<>();
-            if (t.rowCountApprox() >= 0) {
-                facts.add("≈ " + String.format(Locale.ROOT, "%,d", t.rowCountApprox()) + "행");
-            }
-            if (t.dataBytes() >= 0) {
-                facts.add("데이터 " + humanBytes(t.dataBytes()));
-            }
-            if (t.indexBytes() >= 0) {
-                facts.add("인덱스 " + humanBytes(t.indexBytes()));
-            }
-            if (!facts.isEmpty()) {
-                sb.append(" (").append(String.join(" · ", facts)).append(")");
+            String stats = formatStats(t);
+            if (!stats.isEmpty()) {
+                sb.append(" (").append(stats).append(")");
             }
             sb.append('\n');
             if (!t.indexes().isEmpty()) {
@@ -181,6 +176,21 @@ public class ReferencedSchemaService {
             sb.append('\n');
         }
         return sb.toString().strip();
+    }
+
+    /** 기본 통계 한 줄 — "≈ N행 · 데이터 X · 인덱스 Y". 미확보(-1) 항목은 생략, 전부 미확보면 빈 문자열. */
+    public static String formatStats(RefTable t) {
+        List<String> facts = new ArrayList<>();
+        if (t.rowCountApprox() >= 0) {
+            facts.add("≈ " + String.format(Locale.ROOT, "%,d", t.rowCountApprox()) + "행");
+        }
+        if (t.dataBytes() >= 0) {
+            facts.add("데이터 " + humanBytes(t.dataBytes()));
+        }
+        if (t.indexBytes() >= 0) {
+            facts.add("인덱스 " + humanBytes(t.indexBytes()));
+        }
+        return String.join(" · ", facts);
     }
 
     /** 인덱스 하나의 표기 — 이름[U](컬럼들) 타입·card≈카디널리티. 미확보 항목은 표기 자체를 생략(위장 금지). */
