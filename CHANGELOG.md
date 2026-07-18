@@ -9,6 +9,9 @@
 ## [Unreleased]
 
 ### Added
+- 자연어 서빙 MCP 도구 2종: `lakehouse_query`(장기 마트 SELECT — 가드·행 상한)·
+  `lakehouse_card_create`(Metabase 카드 생성, "DBTower AI" 컬렉션 격리) — Metabase API
+  경유로 DuckLake 마트를 에이전트에 연다(셀프호스트에 없는 Metabot의 대체 경로).
 - 오브젝트 크기 주기 영속: V26 `size_snapshot` + 6시간 수집·7일 보존 잡 — lakehouse
   용량 예측(장기 D-day)의 원료. 단기 디스크 ETA(78절)와 지평 분리.
 - 대기 이벤트 주기 영속(D1): V25 `wait_event_snapshot` + 5분 수집·7일 보존 잡 —

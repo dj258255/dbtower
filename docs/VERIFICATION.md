@@ -2687,3 +2687,29 @@ lakehouse: 편입·43행 멱등·게이트 통과 → fct_size_daily·mart_capac
 
 volume_total/available·max_bytes 컬럼은 계약상 nullable로 두고 **채우지 않는다** —
 기종별 볼륨 조회(MSSQL dm_os_volume_stats·Oracle maxbytes)는 후속 아크. 지어내지 않는다.
+
+## 103. 자연어 서빙 — MCP 장기 마트 도구 2종 (lakehouse 15단계의 DBTower 몫)
+
+Metabot은 Cloud 전용이라 셀프호스트에 없다(lakehouse ROADMAP 15단계 웹 검증). 그 갭을
+기존 부품 재조립로 메웠다: 에이전트 → MCP(도구 14→16종) → REST(/api/lakehouse/*) →
+**Metabase API**(DuckLake 서빙 계층 재사용 — DuckDB JDBC 직접 의존 0) → 장기 마트.
+
+- `lakehouse_query` — 장기 마트 SELECT(도구 설명에 실재 테이블·컬럼 명시: 지어내기 방지).
+  SELECT/WITH 전용 가드(주석 제거 후 판정·세미콜론/쓰기·DDL 거부, 단위 4건) + 행 상한.
+  최종 방어는 Metabase 커넥션 자체가 DuckLake를 read-only로 무는 구조.
+- `lakehouse_card_create` — 질의를 Metabase 카드로 저장하고 URL 반환. 전용 컬렉션
+  "DBTower AI"에 격리 생성(사람 대시보드 오염 방지).
+- MetabaseClient: API 키(x-api-key) 또는 관리자 세션(401 시 1회 재로그인), duckdb 엔진
+  DB 자동 탐색·캐시. 미설정이면 컨트롤러가 404(기능 게이트 — 있는 척 안 함).
+
+```
+질의: mart_capacity_forecast → {"columns":[...],"rows":[[4,1,true,"learning",194.3],...],"row_count":6}
+가드: DELETE FROM ... → 400 {"error":"SELECT/WITH로 시작하는 읽기 질의만 허용한다"}
+카드: {"card_id":76,"url":"http://localhost:13001/question/76","collection":"DBTower AI"}
+  → 실화면: bar 차트 6행·143ms 렌더(스크린샷 — 블로그 19편)
+함정: Boot 4 기본 Jackson 3가 Jackson 2 JsonNode를 POJO로 직렬화(메타데이터 덤프) —
+  컨트롤러가 JSON 문자열로 직접 응답해 해소
+```
+
+정직한 한계: Metabase 화면 안 채팅 UI는 아니다(대화는 에이전트에서, 결과물이 Metabase에
+남는 형태). 관제 대상 DB 직결 질의 도구는 이번에도 만들지 않았다(3계층 분업 유지).

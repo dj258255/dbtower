@@ -186,6 +186,40 @@ public final class McpProtocolHandler {
         // 온라인 스키마 변경(gh-ost, B4)은 의도적으로 MCP 도구로 노출하지 않는다.
         // 실제 테이블 구조를 바꾸는 파괴적 행위를 에이전트가 스스로 실행하는 건 위험하기 때문 —
         // 사람(ADMIN)이 웹 콘솔에서 dry-run으로 먼저 확인하고 실행하도록 REST로만 연다.
+
+        // ---------- 15단계: 장기 마트 (lakehouse — Metabase 경유, SELECT 전용) ----------
+        // 3계층 분업: 위 도구들 = 라이브 7일 시야, 아래 둘 = 장기(주~분기, DuckLake 마트).
+        // 관제 대상 DB 직결 질의는 어느 도구에도 없다(원천 무부하 원칙).
+        tools.put("lakehouse_query", new Tool(
+                "장기 마트 SELECT 질의(수개월 이력 — 7일 시야 도구들이 못 답하는 추세·분기 비교). "
+                        + "실재 테이블: mart_query_regression(instance_id, query_id, recent/prior avg_latency_ms, "
+                        + "latency_increase_ms, increase_pct — 최근7일 vs 직전30일 악화 랭킹), "
+                        + "fct_query_daily(instance_id, query_id, dt, delta_calls, delta_total_time_ms, avg_latency_ms), "
+                        + "fct_query_hourly(+hour), fct_size_daily(instance_id, object_name, dt, total_bytes), "
+                        + "mart_capacity_forecast(instance_id, days_observed, learning, current_bytes, "
+                        + "slope_bytes_per_day, days_to_threshold, risk_flag — 용량 D-day), "
+                        + "mart_baseline_longterm(dow, hour, mean_delta_calls — 요일x시간대 장기 베이스라인), "
+                        + "pipeline_run_log(파이프라인 런 메타). 이 목록에 없는 컬럼은 지어내지 말 것. "
+                        + "SELECT/WITH만 허용, 세미콜론 금지. 미설정 환경이면 404.",
+                schema(Map.of("sql", strProp("DuckDB SQL (SELECT 전용)"),
+                        "rowLimit", intProp("최대 행수 (기본 200, 상한 2000)"))),
+                args -> post("/api/lakehouse/query",
+                        mapper.createObjectNode().put("sql", args.get("sql").asText())
+                                .put("rowLimit", optInt(args, "rowLimit", 200)).toString())));
+
+        tools.put("lakehouse_card_create", new Tool(
+                "질의 결과를 Metabase 카드(차트)로 저장하고 URL을 돌려준다 — \"보여줘\"의 종착지. "
+                        + "전용 컬렉션 'DBTower AI'에 격리 생성(사람 대시보드 오염 방지). display: "
+                        + "table|bar|line|row|area|pie 등 Metabase 표준. sql은 lakehouse_query와 같은 규칙"
+                        + "(SELECT 전용 — 먼저 lakehouse_query로 결과를 확인한 뒤 만들 것).",
+                schema(Map.of("title", strProp("카드 제목(한국어 권장)"),
+                        "sql", strProp("카드가 실행할 DuckDB SQL (SELECT 전용)"),
+                        "display", strProp("차트 타입 (기본 table)"))),
+                args -> post("/api/lakehouse/cards",
+                        mapper.createObjectNode().put("title", args.get("title").asText())
+                                .put("sql", args.get("sql").asText())
+                                .put("display", args.hasNonNull("display") ? args.get("display").asText() : "table")
+                                .toString())));
     }
 
     // ---------- JSON-RPC 결과 조립 ----------
