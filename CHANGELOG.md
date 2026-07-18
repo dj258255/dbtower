@@ -9,6 +9,8 @@
 ## [Unreleased]
 
 ### Added
+- 오브젝트 크기 주기 영속: V26 `size_snapshot` + 6시간 수집·7일 보존 잡 — lakehouse
+  용량 예측(장기 D-day)의 원료. 단기 디스크 ETA(78절)와 지평 분리.
 - 대기 이벤트 주기 영속(D1): V25 `wait_event_snapshot` + 5분 수집·7일 보존 잡 —
   lakehouse 장기 추세 분석의 공급원(첫 사이클 6인스턴스 134행 실측).
 - 장기 베이스라인 수신·병합(D8): V24 `baseline_longterm`(lakehouse 되쓰기 수신) +
