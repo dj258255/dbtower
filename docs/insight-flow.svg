@@ -65,11 +65,11 @@
   <g>
     <rect class="card" x="896" y="88" width="280" height="74" rx="10"/>
     <text class="ct" x="916" y="118">웹훅 경보 push</text>
-    <text class="cs" x="916" y="142">회귀·이상·플랜 플립 — Discord/Slack</text>
+    <text class="cs" x="916" y="142">리치 카드 · 이모지 반응 → AI 진단 답글</text>
     <rect class="card" x="896" y="174" width="280" height="92" rx="10"/>
     <text class="ct" x="916" y="204">DB팀에 문의 (원클릭)</text>
-    <text class="cs" x="916" y="228">쿼리·실행계획·규칙 지적·AI 분석을</text>
-    <text class="cs" x="916" y="248">한 메시지로 묶어 첨부</text>
+    <text class="cs" x="916" y="228">쿼리·플랜·규칙·AI 분석·테이블 구조를</text>
+    <text class="cs" x="916" y="248">카드 한 장으로 묶어 첨부</text>
     <rect class="card" x="896" y="278" width="280" height="74" rx="10"/>
     <text class="ct" x="916" y="308">침묵 실패 방지</text>
     <text class="cs" x="916" y="332">웹훅 미설정 시 sent:false + 원인 반환</text>
