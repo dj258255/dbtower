@@ -99,3 +99,39 @@ db.setProfilingLevel(2)
 프로파일러 레벨 2(모든 연산 기록)는 오버헤드가 있으므로 운영에서는 레벨 1 + slowms
 임계로 낮추는 것이 일반적이다 — 이 경우 "느린 쿼리만" 통계에 잡힌다는 가시성
 트레이드오프를 받아들이는 것이다 (PS 이슈와 같은 종류의 판단).
+
+## lakehouse 연동 운영 (Phase 5 — 두 저장소 루프)
+
+### 계정·권한 (환경 소유 — 마이그레이션에 없음)
+
+- `lakehouse_reader` — 원천 5테이블 SELECT(정확한 GRANT는 lakehouse CONTRACT §1-1).
+- `lakehouse_writer` — `baseline_longterm` 한 테이블만 SELECT/INSERT/DELETE.
+- **함정(실측)**: Flyway가 테이블을 DROP·재생성하면 GRANT가 함께 사라진다 — V24류
+  마이그레이션 후 첫 되쓰기가 permission denied면 이것이다. DDL 재생성 시 GRANT 재적용이
+  운영 절차다(VERIFICATION 100-1).
+
+### 자연어 서빙(MCP lakehouse 도구) 환경변수
+
+셀프호스트/개발 실행 설정에 셋을 넣어야 `lakehouse_query`·`lakehouse_card_create`가 켜진다
+(미설정이면 REST가 404 — 기능 게이트, 있는 척하지 않음):
+
+```
+DBTOWER_METABASE_URL=http://<metabase-host>:<port>
+DBTOWER_METABASE_API_KEY=...            # 권장(x-api-key)
+# 또는 관리자 세션 경로:
+DBTOWER_METABASE_EMAIL=... / DBTOWER_METABASE_PASSWORD=...
+# duckdb 커넥션이 여럿이면 명시: DBTOWER_METABASE_DATABASE_ID=<id>
+```
+
+에이전트 생성 카드는 "DBTower AI" 컬렉션에 격리된다 — 사람 대시보드와 섞이지 않는다.
+
+### 공급 잡 3종 요약 (주기·보존 전부 프로퍼티로 조정 가능)
+
+| 잡 | 주기(기본) | 보존 | lakehouse 소비 |
+|---|---|---|---|
+| WaitEventSnapshotJob | 5분 | 7일 | fct_wait_event_daily·mart_wait_top |
+| SizeSnapshotJob(+volumeStat) | 6시간 | 7일 | fct_size_daily·mart_capacity_forecast |
+| (기존) SnapshotScheduler | 60초 | 7일 | 주 파이프라인 전체 |
+
+volume 판정(임계 원천 ②): MSSQL=dm_os_volume_stats(총량/여유, 실측 1007GB/774GB),
+Oracle=dba_data_files(할당/autoextend 상한, 실측 1189MB/96TB), MySQL·PG·Mongo=NULL(불가 정직).
