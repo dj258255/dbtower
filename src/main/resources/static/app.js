@@ -86,6 +86,72 @@ function prettyPlan(plan) {
   return plan;
 }
 
+// JSON 실행계획을 구문 강조(키·문자열·숫자·불리언/null 색 구분)해 코드블록에 색을 입힌다. esc 후 토큰만 span 래핑.
+function highlightJson(pretty) {
+  return esc(pretty).replace(
+    /(&quot;(?:[^&]|&(?!quot;))*?&quot;)(\s*:)?|\b(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b|\b(true|false|null)\b/g,
+    (m, str, colon, num, kw) => {
+      if (str != null) return `<span class="${colon ? "j-key" : "j-str"}">${str}</span>${colon || ""}`;
+      if (num != null) return `<span class="j-num">${num}</span>`;
+      if (kw != null) return `<span class="j-kw">${kw}</span>`;
+      return m;
+    });
+}
+
+// 경량 SQL 구문 강조(의존성 0) — 키워드·함수·문자열·숫자·식별자·주석·연산자를 char 스캔으로 토큰화해 색을 입힌다.
+const SQL_KEYWORDS = new Set(("SELECT FROM WHERE GROUP BY ORDER HAVING LIMIT OFFSET JOIN LEFT RIGHT INNER OUTER FULL "
+  + "CROSS ON USING AND OR NOT NULL IS IN LIKE ILIKE BETWEEN AS DISTINCT UNION ALL EXCEPT INTERSECT INSERT INTO "
+  + "VALUES UPDATE SET DELETE CREATE ALTER DROP TRUNCATE TABLE INDEX VIEW ASC DESC EXISTS CASE WHEN THEN ELSE END "
+  + "CAST INTERVAL RETURNING WITH RECURSIVE OVER PARTITION FOR").split(/\s+/));
+const SQL_FUNCS = new Set(("COUNT SUM AVG MIN MAX COALESCE NOW EXTRACT LOWER UPPER LENGTH ROUND ABS IFNULL ISNULL "
+  + "NVL GREATEST LEAST DATE_SUB DATE_ADD CONCAT SUBSTRING").split(/\s+/));
+
+function highlightSql(sql) {
+  let out = "", i = 0;
+  const n = (sql || "").length;
+  const span = (cls, txt) => `<span class="${cls}">${esc(txt)}</span>`;
+  while (i < n) {
+    const ch = sql[i];
+    if (ch === "-" && sql[i + 1] === "-") { let j = i; while (j < n && sql[j] !== "\n") j++; out += span("t-com", sql.slice(i, j)); i = j; continue; }
+    if (ch === "/" && sql[i + 1] === "*") { let j = sql.indexOf("*/", i + 2); j = j < 0 ? n : j + 2; out += span("t-com", sql.slice(i, j)); i = j; continue; }
+    if (ch === "'") { let j = i + 1; while (j < n) { if (sql[j] === "'" && sql[j + 1] === "'") { j += 2; continue; } if (sql[j] === "'") { j++; break; } j++; } out += span("t-str", sql.slice(i, j)); i = j; continue; }
+    if (ch === "`" || ch === '"') { const q = ch; let j = i + 1; while (j < n && sql[j] !== q) j++; j++; out += span("t-id", sql.slice(i, j)); i = j; continue; }
+    if (ch >= "0" && ch <= "9") { let j = i; while (j < n && /[0-9.]/.test(sql[j])) j++; out += span("t-num", sql.slice(i, j)); i = j; continue; }
+    if (/[A-Za-z_]/.test(ch)) {
+      let j = i; while (j < n && /[A-Za-z0-9_$]/.test(sql[j])) j++;
+      const w = sql.slice(i, j), up = w.toUpperCase();
+      if (SQL_KEYWORDS.has(up)) out += span("t-kw", w);
+      else if (SQL_FUNCS.has(up) || sql[j] === "(") out += span("t-fn", w);
+      else out += esc(w);
+      i = j; continue;
+    }
+    if (/[=<>!+\-*/%,;().]/.test(ch)) { out += span("t-op", ch); i++; continue; }
+    out += esc(ch); i++;
+  }
+  return out;
+}
+
+// 오버레이 갱신 — 투명 textarea 뒤의 하이라이트 레이어를 현재 값으로 다시 그린다(마지막 줄이 보이게 개행 하나 덧붙임).
+function updateSqlHl() {
+  const ta = $("#detail-sql"), hl = $("#detail-sql-hl");
+  if (!hl) return;
+  hl.innerHTML = highlightSql(ta.value) + "\n";
+  hl.scrollTop = ta.scrollTop;
+  hl.scrollLeft = ta.scrollLeft;
+}
+
+// 실행계획을 안전한 HTML로 — JSON이면 하이라이트, 텍스트 트리·기타는 esc. (문자열 조립·엘리먼트 주입 공용)
+function planHtml(plan) {
+  const pp = prettyPlan(plan);
+  const t = (pp || "").trim();
+  return (t.startsWith("{") || t.startsWith("[")) ? highlightJson(pp) : esc(pp);
+}
+
+// 실행계획을 대상 엘리먼트에 렌더 — planHtml을 innerHTML로.
+function renderPlanInto(el, plan) {
+  el.innerHTML = planHtml(plan);
+}
+
 // datetime-local 입력값(로컬 시각)과 LocalDateTime(ISO) 사이 변환
 const toLocalInput = (date) => {
   const p = (n) => String(n).padStart(2, "0");
@@ -978,6 +1044,7 @@ function openDetail(query, tr) {
   const formatted = formatSql(query.queryText);
   $("#detail-sql").value = formatted;
   $("#detail-sql").rows = Math.min(24, Math.max(5, formatted.split("\n").length + 1)); // 포매팅 줄 수에 맞춰 높이 자동
+  updateSqlHl(); // SQL 구문 강조 레이어 갱신
 
   $("#plan-section").hidden = true;
   $("#schema-section").hidden = true;
@@ -1025,7 +1092,7 @@ async function runExplain() {
       $("#detail-findings").innerHTML = "";
       return;
     }
-    $("#detail-plan").textContent = prettyPlan(data.plan);
+    renderPlanInto($("#detail-plan"), data.plan);
     $("#detail-findings").innerHTML = (data.findings ?? []).map((f) =>
       `<div class="finding-item">${esc(f)}</div>`).join("") ||
       '<div class="muted">규칙 기반 지적 없음 — 비효율 신호가 발견되지 않았습니다.</div>';
@@ -1165,7 +1232,7 @@ async function runAiAnalysis() {
     } catch (e) { $("#detail-ai").textContent = `실패: ${e.message}`; return; }
     // 실행계획 섹션도 함께 갱신 (같은 응답에 plan/findings 포함)
     $("#plan-section").hidden = false;
-    $("#detail-plan").textContent = prettyPlan(data.plan);
+    renderPlanInto($("#detail-plan"), data.plan);
     $("#detail-findings").innerHTML = (data.findings ?? []).map((f) =>
       `<div class="finding-item">${esc(f)}</div>`).join("");
     $("#detail-ai").textContent = stripEmoji(data.aiAnalysis) ||
@@ -1286,7 +1353,7 @@ async function runDeepDiagnose() {
     if ((data.notes ?? []).length) {
       html += `<div class="advisor-note muted">${data.notes.map(esc).join(" · ")}</div>`;
     }
-    html += `<h3>실제 실행 계획</h3><pre class="codeblock">${esc(data.plan)}</pre>`;
+    html += `<h3>실제 실행 계획</h3><pre class="codeblock">${planHtml(data.plan)}</pre>`;
     result.innerHTML = html;
     // 수정안 원클릭 재진단 — 이전 결과 요약을 담아두고 SQL을 바꿔 다시 돌린다
     result.querySelectorAll(".deep-retry").forEach((b) => b.addEventListener("click", () => {
@@ -2305,6 +2372,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupTabs();
   setupMonitorNav();
   setupPresets();
+  // SQL 편집 시 하이라이트 레이어를 따라 갱신·스크롤 동기화(투명 textarea 오버레이)
+  $("#detail-sql").addEventListener("input", updateSqlHl);
+  $("#detail-sql").addEventListener("scroll", () => { const h = $("#detail-sql-hl"); if (h) { h.scrollTop = $("#detail-sql").scrollTop; h.scrollLeft = $("#detail-sql").scrollLeft; } });
   setupChartDrag();
   setupCopyButtons();
   loadMcpTools();

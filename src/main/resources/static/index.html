@@ -144,7 +144,10 @@
           </div>
           <div class="detail-section">
             <h3>SQL 쿼리 <span class="hint">(통계의 정규화 텍스트 — 파라미터 자리(?, $1)는 실제 값으로 고쳐서 실행계획을 확인하세요)</span></h3>
-            <textarea id="detail-sql" class="codeblock sql-edit" rows="7" spellcheck="false"></textarea>
+            <div class="sql-editor">
+              <pre id="detail-sql-hl" class="sql-hl" aria-hidden="true"></pre>
+              <textarea id="detail-sql" class="codeblock sql-edit" rows="7" spellcheck="false"></textarea>
+            </div>
           </div>
           <div class="detail-section" id="plan-section" hidden>
             <h3>실행계획 결과</h3>

@@ -274,7 +274,38 @@ input[type="datetime-local"] {
   overflow-x: auto; white-space: pre-wrap; word-break: break-word; margin: 0;
 }
 .codeblock.ai { background: #10141b; color: #d9e6d9; }
+/* JSON 실행계획 구문 강조 — 다크 코드블록 위에서 키·문자열·숫자·불리언 색 구분 */
+.j-key { color: #7cc7ff; }
+.j-str { color: #9fe8a8; }
+.j-num { color: #f0b86e; }
+.j-kw  { color: #d98cf0; }
 .sql-edit { width: 100%; resize: vertical; border: none; outline: none; line-height: 1.55; }
+
+/* SQL 구문 강조 오버레이 — 투명 textarea(편집·캐럿) 뒤에 색칠된 pre(하이라이트). 두 레이어 메트릭 일치 필수 */
+.sql-editor { position: relative; }
+.sql-editor .sql-hl,
+.sql-editor .sql-edit {
+  box-sizing: border-box; margin: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; line-height: 1.55;
+  padding: 12px 14px; border: 0; border-radius: 8px;
+  white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word; tab-size: 2;
+}
+.sql-editor .sql-hl {
+  position: absolute; inset: 0; background: #14181f; color: #e8ecf2;
+  overflow: auto; pointer-events: none; z-index: 0;
+}
+.sql-editor .sql-edit {
+  position: relative; z-index: 1; display: block;
+  background: transparent; color: transparent; caret-color: #e8ecf2;
+}
+.sql-editor .sql-edit::selection { background: rgba(124, 199, 255, .3); }
+.t-kw { color: #7cc7ff; font-weight: 600; }
+.t-fn { color: #d98cf0; }
+.t-str { color: #9fe8a8; }
+.t-num { color: #f0b86e; }
+.t-id { color: #cdd6e3; }
+.t-com { color: #6b7684; font-style: italic; }
+.t-op { color: #aab4c2; }
 .findings { margin-top: 8px; }
 .finding-item {
   background: #fff7e8; border: 1px solid #f0dcb4; border-radius: 6px;
