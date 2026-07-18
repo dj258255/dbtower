@@ -2830,3 +2830,27 @@ unique=false) 캡처. FinOps 신호가 "스캔 0회 · 크기 2.3 MB · 관측 0
 **보안(백그라운드 리뷰 반영)**: B2 커밋에서 발견된 리뷰 조회 IDOR 2건 수정 — byInstance()는
 registryService.findById로 LBAC 스코프 게이트(스코프 밖 404), /api/reviews/pending은 ADMIN 트리아지로
 제한(팀 사용자에게 타 팀 리뷰 SQL 노출 차단). 총 501건 그린(ModularityTests 포함).
+
+## 108. 인시던트 리포트 원클릭 (운영 병목 아크 B4) — 장애 구간을 신호로 재구성
+
+장애 후 보고서 작성이라는 순수 사람 병목을 제거한다. 구간을 주면 그 시간의 이야기를 이미
+저장된 신호로 엮는다 — 신규 수집 0, 전부 기존 API 조합.
+
+- 재료 5종: 시점 비교(ComparisonService, 직전 동일 길이 구간 대비)·설정 변경(config_param_change,
+  B1)·플랜 플립(plan_snapshot)·대기 이벤트(wait_event_snapshot, V25)·헬스 추이(health_sample).
+  신규 공개 조회 서비스 2개: WaitEventHistoryService(insight), SloService.healthInWindow(slo).
+  config 창 조회는 ConfigDriftService.changesInWindow(B1 확장).
+- IncidentReportService(alert) 조립 — alert가 plan·config·webhook을 직접 갖고 insight·slo·analysis는
+  공개 API. alert -> slo 신규 의존(순환 없음, ModularityTests 통과). AI 요약은 조립된 재료만으로
+  (재료에 없는 수치·원인 생성 금지 프롬프트). N3: 웹훅 요약 카드 + 콘솔 마크다운 다운로드.
+- 정직(함정): 감지 알림(회귀·이상·운영)은 영속 이력이 없어(웹훅 전용) 타임라인 미포함 — "영속된
+  신호로 재구성한 사건"임을 리포트에 명시. 구간 24h 상한·항목별 top-N 절단은 노트로 표기(silent
+  truncation 금지). 콘솔 시각은 toApiTime으로 로컬→UTC 변환(KST/UTC 스큐 방지).
+
+**라이브 실측**(2026-07-18): dbtower-self(instance 4) 03:50~05:50 구간 리포트 — 성능 비교(평균 지연
++50.0%·읽은 행수 +57.1%·신규 쿼리 15개, 상위 회귀 표), 설정 변경 2건(work_mem 4096→8192→4096),
+대기 이벤트(WalSenderMain 23회), 가용성(샘플 109·다운 0). AI 요약이 "지연 상승이 읽은 행수와
+나란히 움직여 플랜 악화보다 워크로드 증가 가능성, work_mem은 4분 net-zero라 악화 설명 어려움,
+근거 부족" 판정 — 1차 분석기 원칙(근거 없으면 모른다) 실증. 콘솔 마크다운 렌더 실화면
+(docs/images/webui/59-incident-report.png), 웹훅 카드 발사. 단위 3건(전 절 포함·24h 절단·LBAC 게이트).
+총 504건 그린(ModularityTests 포함).

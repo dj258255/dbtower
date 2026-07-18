@@ -1831,6 +1831,86 @@ async function decideReview(id, approved) {
   }
 }
 
+// ---------- 인시던트 리포트 (B4) — 장애 구간을 신호로 재구성 ----------
+let lastIncidentMarkdown = "";
+
+function isoLocal(d) {
+  // datetime-local 값 형식(YYYY-MM-DDTHH:MM) — 로컬 시각 기준
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function incidentDefaults() {
+  const to = new Date(), from = new Date(to.getTime() - 2 * 3600 * 1000);
+  if (!$("#incident-from").value) $("#incident-from").value = isoLocal(from);
+  if (!$("#incident-to").value) $("#incident-to").value = isoLocal(to);
+}
+
+// 아주 작은 마크다운 렌더러(의존성 0) — 리포트가 쓰는 부분집합(h1/h2·표·불릿·인라인 코드)만.
+function mdToHtml(md) {
+  const inline = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
+  const lines = md.split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (l.startsWith("# ")) { out.push(`<h2>${inline(l.slice(2))}</h2>`); i++; continue; }
+    if (l.startsWith("## ")) { out.push(`<h3>${inline(l.slice(3))}</h3>`); i++; continue; }
+    if (l.startsWith("|")) {
+      // 표 행은 전부 "|"로 시작(구분선 |---|---| 포함) — 구분선까지 모아야 헤더/본문이 안 쪼개진다
+      const rows = [];
+      while (i < lines.length && lines[i].startsWith("|")) { rows.push(lines[i]); i++; }
+      const cells = (r) => r.split("|").slice(1, -1).map((c) => c.trim());
+      const isSep = (r) => /^\|[\s\-:|]+\|$/.test(r);
+      const head = cells(rows[0]);
+      const body = rows.slice(1).filter((r) => !isSep(r))
+        .map((r) => `<tr>${cells(r).map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("");
+      out.push(`<table class="qtable incident-table"><thead><tr>${head.map((h) => `<th>${inline(h)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>`);
+      continue;
+    }
+    if (l.startsWith("- ")) {
+      const items = [];
+      while (i < lines.length && lines[i].startsWith("- ")) { items.push(`<li>${inline(lines[i].slice(2))}</li>`); i++; }
+      out.push(`<ul class="incident-list">${items.join("")}</ul>`);
+      continue;
+    }
+    if (l.trim()) out.push(`<p>${inline(l)}</p>`);
+    i++;
+  }
+  return out.join("");
+}
+
+async function generateIncident() {
+  const box = $("#incident-result");
+  if (!state.instance) { box.className = "incident-result schema-warning"; box.textContent = "인스턴스를 먼저 선택하세요."; return; }
+  const fromRaw = $("#incident-from").value, toRaw = $("#incident-to").value;
+  if (!fromRaw || !toRaw) { box.className = "incident-result schema-warning"; box.textContent = "구간 시작·끝을 고르세요."; return; }
+  // 로컬 벽시계 → UTC ISO(다른 조회와 동일한 toApiTime) — 서버는 UTC 저장이라 변환 없이 보내면 구간이 어긋난다
+  const from = toApiTime(fromRaw), to = toApiTime(toRaw);
+  const btn = $("#btn-incident"); btn.disabled = true;
+  box.className = "incident-result muted"; box.innerHTML = '<div class="muted">리포트 조립 중... (AI 요약 포함 시 시간이 걸립니다)</div>';
+  try {
+    const r = await api(`/api/instances/${state.instance.id}/incident-report?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&publish=true`, { method: "POST" });
+    lastIncidentMarkdown = r.markdown;
+    box.className = "incident-result";
+    box.innerHTML = mdToHtml(r.markdown);
+    $("#btn-incident-dl").hidden = false;
+  } catch (e) {
+    box.className = "incident-result schema-warning";
+    box.textContent = e.message.startsWith("403") ? "인시던트 리포트는 ADMIN 역할만 생성할 수 있습니다." : `생성 실패: ${e.message}`;
+  } finally { btn.disabled = false; }
+}
+
+function downloadIncident() {
+  if (!lastIncidentMarkdown) return;
+  const blob = new Blob([lastIncidentMarkdown], { type: "text/markdown" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `incident-${state.instance?.name || "report"}.md`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 // ---------- 온라인 스키마 변경 (B4) — gh-ost, MySQL 전용 ----------
 // 기본은 dry-run(noop). "실제 실행"은 confirm으로 한 번 더 막는다(파괴적 행위).
 // 결과 3-값(OK/FAILED/UNSUPPORTED)을 색으로 구분해 정직하게 보여준다.
@@ -1999,6 +2079,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#btn-param-diff").addEventListener("click", runParamDiff);
   $("#btn-config-drift").addEventListener("click", loadConfigDrift);
   $("#btn-review-submit").addEventListener("click", submitReview);
+  $("#btn-incident").addEventListener("click", generateIncident);
+  $("#btn-incident-dl").addEventListener("click", downloadIncident);
+  incidentDefaults();
   $("#btn-ddl-noop").addEventListener("click", () => runOnlineDdl(false));
   $("#btn-ddl-exec").addEventListener("click", () => runOnlineDdl(true));
   $("#btn-diagnose").addEventListener("click", runDiagnose);

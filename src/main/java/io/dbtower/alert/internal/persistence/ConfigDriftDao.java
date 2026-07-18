@@ -103,6 +103,19 @@ public class ConfigDriftDao {
                 instanceId, limit);
     }
 
+    /** 창 안 변경 이벤트(시간순) — 인시던트 리포트(B4)의 "그때 뭘 바꿨나" 재료. */
+    public List<ParamChangeRow> changesInWindow(long instanceId, LocalDateTime from, LocalDateTime to) {
+        return jdbc.query("""
+                SELECT captured_at, param_name, old_value, new_value, change_kind
+                FROM config_param_change
+                WHERE instance_id = ? AND captured_at BETWEEN ? AND ?
+                ORDER BY captured_at, param_name
+                """, (rs, i) -> new ParamChangeRow(
+                rs.getString("param_name"), rs.getString("old_value"), rs.getString("new_value"),
+                rs.getString("change_kind"), rs.getTimestamp("captured_at").toLocalDateTime()),
+                instanceId, Timestamp.valueOf(from), Timestamp.valueOf(to));
+    }
+
     /** 플랜 플립 대조(P4) — 기준 시각 ±windowHours 안의 변경 수. */
     public int changeCountAround(long instanceId, LocalDateTime center, int windowHours) {
         Integer n = jdbc.queryForObject("""

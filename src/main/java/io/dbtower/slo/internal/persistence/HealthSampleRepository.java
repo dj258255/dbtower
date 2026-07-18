@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 헬스 샘플 저장소 (Phase D4). 가용성 SLI·에러 버짓은 여기서 뽑은 윈도우 카운트로 계산한다.
@@ -17,6 +18,10 @@ public interface HealthSampleRepository extends JpaRepository<HealthSample, Long
 
     /** 윈도우 [from, now] 안의 전체 샘플 수 */
     long countByInstanceIdAndSampledAtAfter(Long instanceId, LocalDateTime from);
+
+    /** 창 안 샘플(시간순) — 인시던트 리포트의 가용성 추이(B4 재료). */
+    List<HealthSample> findByInstanceIdAndSampledAtBetweenOrderBySampledAt(
+            Long instanceId, LocalDateTime from, LocalDateTime to);
 
     /** 윈도우 [from, now] 안의 up(또는 down) 샘플 수 */
     long countByInstanceIdAndUpAndSampledAtAfter(Long instanceId, boolean up, LocalDateTime from);

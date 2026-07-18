@@ -192,6 +192,8 @@ public class SecurityConfig {
                         // 팀 사용자에게 다른 팀 리뷰 SQL이 새지 않게. 인스턴스별 조회·제출은 authenticated(findById가 LBAC 스코프).
                         .requestMatchers(HttpMethod.POST, "/api/reviews/*/decision").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/reviews/pending").hasRole("ADMIN")
+                        // 인시던트 리포트(B4)는 설정 값·쿼리 성능을 담아 ADMIN.
+                        .requestMatchers(HttpMethod.POST, "/api/instances/*/incident-report").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage("/login.html")

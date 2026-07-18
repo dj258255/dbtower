@@ -100,6 +100,11 @@ public class ConfigDriftService {
         return dao.changeCountAround(instanceId, center, windowHours);
     }
 
+    /** 창 안 설정 변경(B4 인시던트 리포트 재료). */
+    public List<ParamChangeRow> changesInWindow(long instanceId, LocalDateTime from, LocalDateTime to) {
+        return dao.changesInWindow(instanceId, from, to);
+    }
+
     private Map<String, String> freshParams(DatabaseInstance instance) {
         List<DbParameter> params = operatorFactory.create(instance).parameters();
         Map<String, String> map = new LinkedHashMap<>();

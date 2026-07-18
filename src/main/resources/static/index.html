@@ -295,6 +295,17 @@
         </div>
         <div id="review-list" class="review-list muted">이 인스턴스의 리뷰 요청이 여기 표시됩니다.</div>
       </div>
+      <div class="monitor-card incident-card">
+        <h3>인시던트 리포트 <span class="hint">(장애 구간을 주면 그 시간의 신호를 한 장으로 — 시점 비교·설정 변경·플랜 플립·대기·가용성 + AI 요약 · 신규 수집 0, 기존 신호 재구성 · ADMIN)</span></h3>
+        <div class="incident-controls">
+          <label class="hint">구간 시작 <input type="datetime-local" id="incident-from" class="incident-time"></label>
+          <label class="hint">구간 끝 <input type="datetime-local" id="incident-to" class="incident-time"></label>
+          <button id="btn-incident" class="btn btn-primary btn-small">리포트 생성</button>
+          <button id="btn-incident-dl" class="btn btn-small" hidden>마크다운 다운로드</button>
+        </div>
+        <p class="hint">감지 알림은 영속 이력이 없어(웹훅 전용) 타임라인에 미포함 — 영속된 신호로 재구성합니다. 구간이 24시간을 넘으면 잘립니다.</p>
+        <div id="incident-result" class="incident-result muted">구간을 고르고 리포트 생성을 누르세요.</div>
+      </div>
       <div class="monitor-card online-ddl-card">
         <h3>온라인 스키마 변경 <span class="hint">(gh-ost · MySQL 전용 — 대형 테이블 ALTER를 락 최소화로)</span></h3>
         <div class="online-ddl-controls">

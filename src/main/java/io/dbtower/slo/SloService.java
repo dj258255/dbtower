@@ -220,6 +220,22 @@ public class SloService {
         return anyMeeting ? SloReport.MEETING : SloReport.INSUFFICIENT_DATA;
     }
 
+    /** 헬스 추이 한 점 — 인시던트 리포트(B4)의 가용성 타임라인 재료. */
+    public record HealthPoint(LocalDateTime sampledAt, boolean up, long pingMillis) {
+    }
+
+    /**
+     * 창 안 헬스 샘플(시간순) — 인시던트 리포트가 "그 구간에 언제 다운됐나"를 붙일 때 쓴다.
+     * findById로 스코프를 게이트한 뒤 샘플을 시간순으로 돌려준다(스코프 밖이면 404).
+     */
+    public List<HealthPoint> healthInWindow(Long instanceId, LocalDateTime from, LocalDateTime to) {
+        registryService.findById(instanceId); // LBAC 스코프 게이트
+        return sampleRepository.findByInstanceIdAndSampledAtBetweenOrderBySampledAt(instanceId, from, to)
+                .stream()
+                .map(s -> new HealthPoint(s.getSampledAt(), s.isUp(), s.getPingMillis()))
+                .toList();
+    }
+
     private static double round2(double v) {
         return Math.round(v * 100.0) / 100.0;
     }

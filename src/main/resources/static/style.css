@@ -561,3 +561,14 @@ input[type="datetime-local"] {
 .rv-pending { color: #b5730f; font-weight: 700; }
 .rv-approved { color: #1f7a4d; font-weight: 700; }
 .rv-rejected { color: #6b7280; font-weight: 700; }
+
+/* 인시던트 리포트 (B4) */
+.incident-controls { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.incident-time { display: block; margin-top: 2px; padding: 4px 6px; }
+.incident-result h2 { font-size: 18px; margin: 12px 0 8px; }
+.incident-result h3 { font-size: 14px; margin: 14px 0 6px; color: var(--accent, #3b82f6); }
+.incident-result p { font-size: 13px; margin: 4px 0; }
+.incident-result .incident-list { margin: 4px 0; padding-left: 18px; font-size: 13px; }
+.incident-result .incident-list li { padding: 2px 0; }
+.incident-result code { background: #f1f3f5; padding: 1px 5px; border-radius: 3px; }
+.incident-table { margin: 8px 0; font-size: 13px; }

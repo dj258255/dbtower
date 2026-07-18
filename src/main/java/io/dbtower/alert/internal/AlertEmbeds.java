@@ -77,6 +77,23 @@ public final class AlertEmbeds {
                 approved ? GREEN : GRAY, fields);
     }
 
+    /** 인시던트 리포트 요약 카드 (B4) — 전문은 콘솔 다운로드, 카드엔 AI 요약·구간·딥링크만. */
+    public static Embed forIncident(DatabaseInstance instance, String from, String to,
+                                    String aiSummary, String deeplink) {
+        List<Embed.Field> fields = new ArrayList<>();
+        fields.add(new Embed.Field("인스턴스", instance.getName() + " (" + instance.getType() + ")", true));
+        fields.add(new Embed.Field("구간", from + " ~ " + to, true));
+        if (instance.getTeamLabel() != null && !instance.getTeamLabel().isBlank()) {
+            fields.add(new Embed.Field("담당", instance.getTeamLabel(), true));
+        }
+        fields.add(new Embed.Field("AI 요약",
+                aiSummary != null && !aiSummary.isBlank() ? clip(aiSummary, 1000) : "AI 비활성 — 콘솔에서 전문 확인", false));
+        if (deeplink != null && !deeplink.isBlank()) {
+            fields.add(new Embed.Field("리포트", link("콘솔에서 전문 보기", deeplink), false));
+        }
+        return new Embed("DBTower 인시던트 리포트 — " + instance.getName(), RED, fields);
+    }
+
     private static String clip(String s, int max) {
         if (s == null) {
             return "";
