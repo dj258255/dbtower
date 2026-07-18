@@ -580,6 +580,12 @@ input[type="datetime-local"] {
 .score-num { font-weight: 800; font-size: 15px; }
 .score-outof { color: var(--muted); font-weight: 500; font-size: 11px; }
 .score-reasons { color: var(--muted); font-size: 12.5px; }
+/* 헬스 스코어·백업 신선도 — 각 행을 한 줄로(인스턴스·마지막 백업 날짜·상태 배지가 줄바꿈되지 않게).
+   감점 사유는 길어질 수 있어 넘치면 말줄임(전문은 행 클릭 시 분해로 확인). */
+#score-result td, #freshness-result td { white-space: nowrap; vertical-align: middle; }
+#score-result .score-reasons { max-width: 460px; overflow: hidden; text-overflow: ellipsis; }
+.cell-inst { white-space: nowrap; }
+.fresh-badge, .grade-badge, .score-down { white-space: nowrap; }
 .score-down { background: #d6404f; color: #fff; border-radius: 4px; padding: 0 5px; font-size: 10.5px; font-weight: 800; margin-left: 4px; }
 .score-partial-dot { background: #eef0f4; color: var(--muted); border-radius: 4px; padding: 0 5px; font-size: 10.5px; font-weight: 700; margin-left: 4px; }
 /* 문제 행은 왼쪽 색 띠로 — 등급이 낮을수록 진하게 */
@@ -671,12 +677,7 @@ input[type="datetime-local"] {
 .bk-FAILED { background: #fce8e6; color: #c5221f; }
 .bk-UNSUPPORTED { background: #f1f3f4; color: #5f6368; }
 
-/* 인스턴스 검색·필터 + 복제 역할 배지 (레퍼런스 목록 패리티) */
-.instance-filter { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
-.instance-filter input[type="search"] { flex: 1; max-width: 260px; padding: 6px 10px;
-  border: 1px solid var(--border, #d0d5dd); border-radius: 6px; font-size: 13px; }
-.instance-filter select { padding: 6px 8px; border: 1px solid var(--border, #d0d5dd);
-  border-radius: 6px; font-size: 13px; background: #fff; }
+/* 복제 역할 배지 (레퍼런스 목록 패리티) — 필터·검색 스타일은 사이드바 섹션(.instance-filter*)이 관장한다(중복 규칙 제거) */
 .repl-role { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; margin-left: 4px; }
 .role-primary { background: #e6f4ea; color: #137333; }
 .role-replica { background: #e8f0fe; color: #1a56db; }
