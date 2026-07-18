@@ -2779,3 +2779,29 @@ operationTime)까지 파라미터로 반환한 것(호출마다 변함). 이건 
 Mongo 파라미터 622→620, gossip 0, 수정 후 재수집에서 Mongo 오탐 0 확인.
 
 총 491건 그린(+5, ModularityTests 포함).
+
+## 106. 스키마 변경 리뷰 게이트 (운영 병목 아크 B2) — 판정·승인·기록(실행은 안 함)
+
+현업 DBA 병목 1순위인 "변경 요청 리뷰 대기"를 겨냥한다. "범위 밖"이던 SQL 변경 심의를
+**판정·승인·기록까지**로 좁혀 부분 재결정 — 승인된 변경의 실행은 여전히 안 한다(기존 gh-ost
+경로 또는 사람). (a) 실행 안 함으로 gh-ost MySQL 전용 문제 해소, (b) 판정이 읽기·진단
+DNA(규칙 엔진) 그 자체라 정체성 충돌 없음.
+
+- 신규 모듈 `review`: ReviewRequest 엔티티(V28 review_request), ChangeReviewRules(SQL 위험
+  규칙), ReviewService(제출 판정·승인/반려), ReviewController. 카드 발송은 이벤트로 alert에
+  위임(ReviewSubmittedEvent·ReviewDecidedEvent → ReviewAlertListener) — Modulith 순환 회피
+  (InstanceDeletedEvent와 같은 패턴, ModularityTests 통과).
+- 규칙(R2): R-LOCK(대테이블 ALTER), R-NOTNULL(DEFAULT 없는 NOT NULL 추가), R-DROP/DROPCOL/
+  TRUNCATE, R-NOWHERE(WHERE 없는 UPDATE/DELETE). 대테이블은 tableDetail 실제 행수로
+  R-LOCK-OK/CONFIRM 확정. 정규식 파싱 한계(다중 문장·중첩)는 parseLimited로 정직 표기.
+  판정은 조언이지 차단이 아님(강제력은 조직 프로세스).
+- R3 AI 1차 소견(AiAnalyzer, ai-analysis-rules 원칙 승계 — 규칙 반복 금지·근거 없으면 침묵),
+  R4 감사(POST를 AuditInterceptor가 자동 기록), R5 Discord 카드(제출 TEAL·승인 GREEN·반려 GRAY),
+  R6 승인된 MySQL DDL이면 gh-ost 안내만(실행은 사람).
+
+**라이브 실측**(2026-07-18): MySQL(instance 1) `ALTER TABLE users ADD COLUMN nickname
+VARCHAR(32) NOT NULL` 제출 → R-LOCK·R-NOTNULL·**R-LOCK-OK: users 약 8,118행**(tableDetail
+실조회) 3건 + AI 소견(배포 순서·롤백 계획 보완, 규칙 미반복) 생성. 콘솔 리뷰 패널 실화면
+(docs/images/webui/57-review-gate.png). ADMIN 승인 → APPROVED 전이·감사 기록 2건(제출 #254·
+승인 #256, AuditInterceptor 자동)·결과 카드 발사. 단위 10건(락·NOT NULL·WHERE 없음·DROP·
+파싱 한계·주석 오판 방지·행수 임계 등). 총 501건 그린(+10, ModularityTests 포함).

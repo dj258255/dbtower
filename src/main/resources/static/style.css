@@ -544,3 +544,20 @@ input[type="datetime-local"] {
 .drift-around { margin-top: 4px; }
 .drift-hint { font-size: 12px; color: #b5730f; text-decoration: none; }
 .drift-hint:hover { text-decoration: underline; }
+
+/* 스키마 변경 리뷰 게이트 (B2) */
+.review-submit-row { display: flex; gap: 8px; margin-top: 6px; }
+.review-submit-row .ddl-input { flex: 1; }
+.rv-item { border: 1px solid var(--border, #e5e7eb); border-radius: 6px; padding: 10px 12px; margin: 10px 0; }
+.rv-head { font-weight: 700; margin-bottom: 6px; }
+.rv-sql { font-size: 12px; margin: 6px 0; white-space: pre-wrap; }
+.rv-reason { font-size: 12px; margin-bottom: 4px; }
+.rv-findings { margin: 6px 0; padding-left: 18px; font-size: 13px; }
+.rv-findings li { padding: 2px 0; }
+.rv-ai { font-size: 13px; background: #f0f9ff; border-left: 3px solid #3b82f6; padding: 6px 10px; margin: 6px 0; border-radius: 3px; }
+.rv-limited { font-size: 12px; color: #b5730f; margin: 4px 0; }
+.rv-actions { display: flex; gap: 8px; margin-top: 8px; }
+.rv-decided { font-size: 12px; margin-top: 6px; }
+.rv-pending { color: #b5730f; font-weight: 700; }
+.rv-approved { color: #1f7a4d; font-weight: 700; }
+.rv-rejected { color: #6b7280; font-weight: 700; }

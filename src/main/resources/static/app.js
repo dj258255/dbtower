@@ -161,6 +161,12 @@ async function loadInstances() {
       loadConfigDrift();
       $("#config-drift-result").scrollIntoView({ block: "center" });
     }
+    // 리뷰 카드의 "승인/반려" 링크 — Monitoring 탭 열고 리뷰 게이트로 스크롤
+    if (deepView === "review") {
+      document.querySelector('.tab[data-tab="monitor"]').click();
+      loadReviews();
+      $(".review-gate-card").scrollIntoView({ block: "center" });
+    }
   } else if (first) {
     selectInstance(list[0], first);
   }
@@ -224,7 +230,7 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
-  await Promise.all([loadActivity(), loadMetrics(), loadBackupInfo(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks()]);
+  await Promise.all([loadActivity(), loadMetrics(), loadBackupInfo(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks(), loadReviews()]);
 }
 
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
@@ -1755,6 +1761,76 @@ async function loadConfigDrift() {
   box.innerHTML = `<p class="hint">"누가" 바꿨는지는 대상 DB가 알려주지 않아 표기하지 않습니다 — 대상 DB의 감사 로그에서 확인하세요.</p>` + blocks.join("");
 }
 
+// ---------- 스키마 변경 리뷰 게이트 (B2) — 판정·승인·기록(실행은 안 함) ----------
+async function submitReview() {
+  if (!state.instance) return;
+  const sql = $("#review-sql").value.trim();
+  if (!sql) { $("#review-list").className = "review-list schema-warning"; $("#review-list").textContent = "리뷰할 SQL을 입력하세요."; return; }
+  const reason = $("#review-reason").value.trim();
+  const btn = $("#btn-review-submit");
+  btn.disabled = true;
+  try {
+    await api(`/api/instances/${state.instance.id}/reviews`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sql, reason }),
+    });
+    $("#review-sql").value = ""; $("#review-reason").value = "";
+    await loadReviews();
+  } catch (e) {
+    $("#review-list").className = "review-list schema-warning";
+    $("#review-list").textContent = `요청 실패: ${e.message}`;
+  } finally { btn.disabled = false; }
+}
+
+async function loadReviews() {
+  const box = $("#review-list");
+  if (!state.instance) return;
+  box.className = "review-list muted"; box.innerHTML = '<div class="muted">조회 중...</div>';
+  let rows;
+  try {
+    rows = await api(`/api/instances/${state.instance.id}/reviews`);
+  } catch (e) { box.innerHTML = `<div class="schema-warning">조회 실패: ${esc(e.message)}</div>`; return; }
+  box.className = "review-list";
+  if (!rows.length) { box.innerHTML = '<div class="muted">아직 리뷰 요청이 없습니다.</div>'; return; }
+  const isAdmin = state.role === "ADMIN";
+  box.innerHTML = rows.map((r) => {
+    const badge = r.status === "PENDING" ? '<span class="rv-pending">대기</span>'
+      : r.status === "APPROVED" ? '<span class="rv-approved">승인</span>'
+      : '<span class="rv-rejected">반려</span>';
+    const findings = (r.findings || []).map((f) => `<li>${esc(f)}</li>`).join("");
+    const ai = r.aiOpinion ? `<div class="rv-ai"><b>AI 1차 소견:</b> ${esc(r.aiOpinion)}</div>` : "";
+    const limited = r.parseLimited ? '<div class="rv-limited">다중 문장·복잡 구문 — 규칙 판정이 불완전할 수 있습니다(사람이 전체 확인).</div>' : "";
+    const decided = r.status !== "PENDING"
+      ? `<div class="rv-decided muted">${esc(r.decidedBy || "")} · ${esc((r.decidedAt || "").replace("T", " ").slice(0, 19))}${r.decisionComment ? " · " + esc(r.decisionComment) : ""}</div>` : "";
+    const actions = (r.status === "PENDING" && isAdmin)
+      ? `<div class="rv-actions">
+           <button class="btn btn-small btn-primary" onclick="decideReview(${r.id}, true)">승인</button>
+           <button class="btn btn-small btn-danger" onclick="decideReview(${r.id}, false)">반려</button>
+         </div>`
+      : (r.status === "PENDING" ? '<div class="hint">승인/반려는 ADMIN만 가능합니다.</div>' : "");
+    return `<div class="rv-item">
+      <div class="rv-head">#${r.id} ${badge} <span class="muted">${esc(r.requester)} · rules v${r.rulesVersion}</span></div>
+      <pre class="rv-sql codeblock">${esc(r.targetSql)}</pre>
+      ${r.reason ? `<div class="rv-reason muted">사유: ${esc(r.reason)}</div>` : ""}
+      <ul class="rv-findings">${findings}</ul>
+      ${ai}${limited}${actions}${decided}
+    </div>`;
+  }).join("");
+}
+
+async function decideReview(id, approved) {
+  const comment = approved ? "" : (prompt("반려 사유(선택):") ?? "");
+  try {
+    await api(`/api/reviews/${id}/decision`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approved, comment }),
+    });
+    await loadReviews();
+  } catch (e) {
+    alert(e.message.startsWith("403") ? "승인/반려는 ADMIN만 가능합니다." : `처리 실패: ${e.message}`);
+  }
+}
+
 // ---------- 온라인 스키마 변경 (B4) — gh-ost, MySQL 전용 ----------
 // 기본은 dry-run(noop). "실제 실행"은 confirm으로 한 번 더 막는다(파괴적 행위).
 // 결과 3-값(OK/FAILED/UNSUPPORTED)을 색으로 구분해 정직하게 보여준다.
@@ -1922,6 +1998,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#btn-schema-diff").addEventListener("click", runSchemaDiff);
   $("#btn-param-diff").addEventListener("click", runParamDiff);
   $("#btn-config-drift").addEventListener("click", loadConfigDrift);
+  $("#btn-review-submit").addEventListener("click", submitReview);
   $("#btn-ddl-noop").addEventListener("click", () => runOnlineDdl(false));
   $("#btn-ddl-exec").addEventListener("click", () => runOnlineDdl(true));
   $("#btn-diagnose").addEventListener("click", runDiagnose);

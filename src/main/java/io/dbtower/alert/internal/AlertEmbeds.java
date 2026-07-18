@@ -19,8 +19,69 @@ public final class AlertEmbeds {
     public static final int AMBER = 0xF08C2D;  // 회귀 — 성능 신호
     public static final int PURPLE = 0x8B5CF6; // 이상 감지 — 평소와 다름
     public static final int BLUE = 0x3B82F6;   // 설정 드리프트 — 형상 변경
+    public static final int TEAL = 0x14B8A6;   // 리뷰 요청 — 승인 대기
+    public static final int GREEN = 0x22A565;  // 리뷰 승인
+    public static final int GRAY = 0x6B7280;   // 리뷰 반려
 
     private AlertEmbeds() {
+    }
+
+    /**
+     * 리뷰 요청 카드 (B2, R5) — 변경 SQL(마스킹본 코드블록)·규칙 지적·AI 소견·승인 딥링크.
+     * 실행 카드가 아니라 심의 카드다(승인/반려는 콘솔 ADMIN에서).
+     */
+    public static Embed forReviewRequest(DatabaseInstance instance, long reviewId, String requester,
+                                         String maskedSql, List<String> findings, String aiOpinion,
+                                         boolean parseLimited, String deeplink) {
+        List<Embed.Field> fields = new ArrayList<>();
+        fields.add(new Embed.Field("요청자", requester, true));
+        fields.add(new Embed.Field("인스턴스", instance.getName() + " (" + instance.getType() + ")", true));
+        if (instance.getTeamLabel() != null && !instance.getTeamLabel().isBlank()) {
+            fields.add(new Embed.Field("담당", instance.getTeamLabel(), true));
+        }
+        fields.add(new Embed.Field("변경 SQL", "```sql\n" + clip(maskedSql, 900) + "\n```", false));
+        StringBuilder bullets = new StringBuilder();
+        for (String f : findings) {
+            if (bullets.length() > 0) {
+                bullets.append('\n');
+            }
+            bullets.append("• ").append(f);
+        }
+        fields.add(new Embed.Field("규칙 지적", bullets.toString(), false));
+        if (aiOpinion != null && !aiOpinion.isBlank()) {
+            fields.add(new Embed.Field("AI 1차 소견", aiOpinion, false));
+        }
+        if (parseLimited) {
+            fields.add(new Embed.Field("참고", "다중 문장·복잡 구문이라 규칙 판정이 불완전할 수 있습니다. 사람이 전체를 확인하세요.", false));
+        }
+        if (deeplink != null && !deeplink.isBlank()) {
+            fields.add(new Embed.Field("승인", link("콘솔에서 승인/반려", deeplink), false));
+        }
+        return new Embed("DBTower 변경 리뷰 요청 #" + reviewId + " — " + instance.getName(), TEAL, fields);
+    }
+
+    /** 리뷰 결과 카드 (B2, R5) — 승인/반려·결정자·코멘트·(승인 시)온라인 DDL 안내. */
+    public static Embed forReviewDecision(DatabaseInstance instance, long reviewId, boolean approved,
+                                          String decidedBy, String comment, String onlineDdlHint) {
+        List<Embed.Field> fields = new ArrayList<>();
+        fields.add(new Embed.Field("결과", approved ? "승인" : "반려", true));
+        fields.add(new Embed.Field("결정자", decidedBy, true));
+        fields.add(new Embed.Field("인스턴스", instance.getName() + " (" + instance.getType() + ")", true));
+        if (comment != null && !comment.isBlank()) {
+            fields.add(new Embed.Field("코멘트", comment, false));
+        }
+        if (onlineDdlHint != null && !onlineDdlHint.isBlank()) {
+            fields.add(new Embed.Field("실행 안내", onlineDdlHint, false));
+        }
+        return new Embed("DBTower 변경 리뷰 #" + reviewId + " " + (approved ? "승인" : "반려") + " — " + instance.getName(),
+                approved ? GREEN : GRAY, fields);
+    }
+
+    private static String clip(String s, int max) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() > max ? s.substring(0, max) + "… (잘림)" : s;
     }
 
     /**
