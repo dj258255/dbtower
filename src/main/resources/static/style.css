@@ -55,7 +55,8 @@ body {
   position: sticky; top: 66px; max-height: calc(100vh - 84px);
   display: flex; flex-direction: column;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-  padding: 14px; box-shadow: 0 1px 2px rgba(16,24,40,.04); overflow: hidden;
+  padding: 14px; box-shadow: 0 1px 2px rgba(16,24,40,.04);
+  overflow: visible; /* 커스텀 드롭다운 패널이 사이드바 밖으로 펼쳐질 수 있게(목록은 .instance-list가 자체 스크롤) */
 }
 .sidebar-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
 .sidebar-title { margin: 0; font-size: 15px; font-weight: 700; }
@@ -452,6 +453,8 @@ input[type="datetime-local"] {
   padding: 7px 10px; border: 1px solid #d4d9df; border-radius: 7px; font-size: 13px;
   background: #fff; min-width: 180px;
 }
+/* Schema Diff·파라미터 드리프트의 커스텀 드롭다운 — 한 줄(셀렉트·화살표·버튼) 안에서 내용 폭에 맞게 */
+.schema-diff-controls .cs { flex: 0 1 auto; min-width: 200px; max-width: 280px; }
 .schema-arrow { color: var(--muted); font-weight: 700; }
 .schema-warning {
   background: #fff7e6; color: #a15c00; border: 1px solid #f0d9a8;

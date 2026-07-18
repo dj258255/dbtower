@@ -1960,6 +1960,8 @@ function populateSchemaSelects(list) {
     left.innerHTML = opts;
     right.innerHTML = opts;
     if (list.length > 1) right.selectedIndex = 1; // 기본값: 서로 다른 두 대
+    left._csSync?.(); right._csSync?.();          // 커스텀 드롭다운이면 버튼 동기화
+    enhanceSelect(left); enhanceSelect(right);    // 사이드바 필터와 같은 커스텀 드롭다운으로 통일
   });
 }
 
