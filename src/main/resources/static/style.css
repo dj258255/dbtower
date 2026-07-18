@@ -43,22 +43,78 @@ body {
 
 .container { max-width: 1200px; margin: 20px auto 60px; padding: 0 20px; }
 
+/* 앱 셸 — 좌측 사이드바(인스턴스) + 우측 워크스페이스(대시보드) */
+.app-shell {
+  display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px;
+  max-width: 1560px; margin: 16px auto 60px; padding: 0 20px; align-items: start;
+}
+.workspace { min-width: 0; } /* 그리드 자식 오버플로 방지 */
+
+/* 사이드바 — 상단바 아래 sticky, 자체 스크롤(수백 대 인스턴스 확장 대응) */
+.sidebar {
+  position: sticky; top: 66px; max-height: calc(100vh - 84px);
+  display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px; box-shadow: 0 1px 2px rgba(16,24,40,.04); overflow: hidden;
+}
+.sidebar-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+.sidebar-title { margin: 0; font-size: 15px; font-weight: 700; }
+.instance-filter { display: flex; flex-direction: column; gap: 7px; margin-bottom: 10px; }
+.instance-filter input[type="search"] {
+  width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px;
+  font-size: 13px; font-family: inherit; color: var(--text); background: #fff;
+}
+.instance-filter-row { display: flex; gap: 6px; }
+.instance-filter-row select {
+  flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px;
+  font-size: 12.5px; font-family: inherit; background: #fff; color: var(--text);
+}
+
+/* 함대 개요 — 헬스 스코어 + 백업 신선도 나란히 */
+.fleet-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.fleet-row .panel { margin-bottom: 16px; }
+
+/* Monitoring 카테고리 서브내비 (세그먼트 컨트롤) */
+.mon-subnav {
+  display: inline-flex; gap: 3px; background: #eceef3; padding: 4px; border-radius: 10px;
+  margin-bottom: 16px; flex-wrap: wrap;
+}
+.mon-tab {
+  border: none; background: transparent; color: var(--muted);
+  padding: 6px 15px; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.mon-tab:hover { color: var(--text); }
+.mon-tab.active { background: #fff; color: var(--primary); box-shadow: 0 1px 2px rgba(16,24,40,.1); }
+.mon-group { display: flex; flex-direction: column; gap: 16px; }
+.mon-group[hidden] { display: none; } /* display:flex가 [hidden]의 display:none을 덮어쓰지 않게 복원 */
+
+/* 좁은 화면 — 사이드바를 상단으로 접고 인스턴스는 가로 배치 */
+@media (max-width: 980px) {
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar { position: static; max-height: none; }
+  .instance-list { flex-direction: row; flex-wrap: wrap; }
+  .fleet-row { grid-template-columns: 1fr; }
+}
+
 /* 패널 */
 .panel {
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-  padding: 18px 20px; margin-bottom: 16px;
+  padding: 18px 20px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04);
 }
 .panel-title { margin: 0 0 12px; font-size: 15px; font-weight: 700; }
 
-/* 인스턴스 카드 */
-.instance-list { display: flex; flex-wrap: wrap; gap: 10px; }
+/* 인스턴스 목록 — 사이드바 세로 스택, 스크롤 */
+.instance-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; flex: 1; margin: -2px; padding: 2px; }
 .instance-card {
-  border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px;
-  cursor: pointer; min-width: 210px; background: #fff; transition: border-color .15s;
+  border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
+  cursor: pointer; min-width: 0; background: #fff; transition: border-color .15s, background .15s;
 }
-.instance-card:hover { border-color: #b9c0cc; }
-.instance-card.selected { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(79,94,247,.15); }
-.instance-name { font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.instance-card:hover { border-color: #b9c0cc; background: #fafbfc; }
+.instance-card.selected {
+  border-color: var(--primary); background: #f5f6ff;
+  box-shadow: inset 3px 0 0 var(--primary), 0 0 0 1px rgba(79,94,247,.15);
+}
+.instance-name { font-weight: 700; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13.5px; }
 .type-badge {
   font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; color: #fff;
 }
@@ -217,13 +273,22 @@ input[type="datetime-local"] {
   padding: 6px 10px; font-size: 12.5px; margin-bottom: 5px;
 }
 
-/* 모니터링 */
+/* 모니터링 — 각 섹션을 독립 카드로(테두리·패딩·그림자) */
 .monitor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.monitor-card h3 { margin: 0 0 8px; font-size: 13.5px; }
+.monitor-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px 18px; box-shadow: 0 1px 2px rgba(16,24,40,.04);
+}
+.monitor-card h3 {
+  margin: 0 0 10px; font-size: 14px; font-weight: 700;
+  padding-bottom: 8px; border-bottom: 1px solid var(--line);
+}
+.monitor-card h3 .hint { display: block; margin-top: 3px; }
+.monitor-card h4 { font-size: 12.5px; margin: 0 0 4px; color: var(--muted); }
 @media (max-width: 800px) { .monitor-grid { grid-template-columns: 1fr; } }
 
 /* 세션 / 블로킹 (B2) — 막힌 세션 행 강조 + kill 버튼 */
-.session-card { margin-bottom: 14px; }
+.session-card { margin-bottom: 0; }
 .qtable tbody tr.blocked-row { background: #fff1f2; }
 .qtable tbody tr.blocked-row:hover { background: #ffe4e6; }
 .blocked-by { color: var(--up); font-weight: 700; }
@@ -233,7 +298,7 @@ input[type="datetime-local"] {
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 
 /* MCP 카드 */
-.mcp-card { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 16px; }
+.mcp-card { margin-top: 0; padding-top: 16px; }
 .mcp-cmd-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .mcp-cmd {
   flex: 1; background: #14181f; color: #9fe8c1; border-radius: 6px; padding: 8px 12px;

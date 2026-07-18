@@ -150,6 +150,7 @@ async function loadInstances() {
     selectInstance(target, box.querySelector(`.instance-card[data-id="${target.id}"]`) ?? first);
     if (deepQ) {
       document.querySelector('.tab[data-tab="monitor"]').click();
+      showMonGroup("perf"); // 자연어 진단은 성능 그룹
       const input = $("#diagnose-question");
       input.value = deepQ;
       input.scrollIntoView({ block: "center" });
@@ -158,12 +159,14 @@ async function loadInstances() {
     // 설정 드리프트 알림의 "변경 이력 보기" 링크 — Monitoring 탭 열고 이력을 바로 조회
     if (deepView === "config-drift") {
       document.querySelector('.tab[data-tab="monitor"]').click();
+      showMonGroup("gov"); // 설정 변경 이력은 거버넌스 그룹
       loadConfigDrift();
       $("#config-drift-result").scrollIntoView({ block: "center" });
     }
     // 리뷰 카드의 "승인/반려" 링크 — Monitoring 탭 열고 리뷰 게이트로 스크롤
     if (deepView === "review") {
       document.querySelector('.tab[data-tab="monitor"]').click();
+      showMonGroup("gov"); // 리뷰 게이트는 거버넌스 그룹
       loadReviews();
       $(".review-gate-card").scrollIntoView({ block: "center" });
     }
@@ -2165,6 +2168,19 @@ function setupTabs() {
   });
 }
 
+// Monitoring 카테고리 서브내비 — 한 번에 한 그룹만. 로딩은 selectInstance가 전부 미리 하므로 순수 표시 전환.
+function setupMonitorNav() {
+  document.querySelectorAll(".mon-tab").forEach((tab) => {
+    tab.addEventListener("click", () => showMonGroup(tab.dataset.mon));
+  });
+}
+
+// 특정 카테고리 그룹을 연다(딥링크가 숨은 그룹의 섹션으로 스크롤할 때도 씀)
+function showMonGroup(name) {
+  document.querySelectorAll(".mon-tab").forEach((t) => t.classList.toggle("active", t.dataset.mon === name));
+  document.querySelectorAll(".mon-group").forEach((g) => { g.hidden = g.dataset.group !== name; });
+}
+
 function setupPresets() {
   document.querySelectorAll(".preset").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -2186,6 +2202,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadHealthScore();     // 함대 전체 통합 헬스 스코어 (D8) — 나쁜 순 정렬, 대시보드 상단 상시 뷰
   loadBackupFreshness(); // 함대 전체 백업 신선도 (D7) — 인스턴스 선택과 무관한 상시 뷰
   setupTabs();
+  setupMonitorNav();
   setupPresets();
   setupChartDrag();
   setupCopyButtons();

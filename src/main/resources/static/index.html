@@ -26,397 +26,433 @@
   </nav>
 </header>
 
-<main class="container">
+<div class="app-shell">
 
-  <!-- 인스턴스 선택 -->
-  <section class="panel">
-    <h2 class="panel-title">Instances</h2>
+  <!-- 좌측 사이드바 — 인스턴스 검색·목록(수백 대 확장 대응, 스크롤). 선택 시 우측 워크스페이스에 대시보드 -->
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <h2 class="sidebar-title">Instances</h2>
+      <span id="inst-count" class="muted"></span>
+    </div>
     <!-- 검색·필터 (레퍼런스의 클러스터 검색·필터 대응 — 환경/리전은 AWS 고유라 기종·팀으로 일반화) -->
     <div class="instance-filter">
       <input id="inst-search" type="search" placeholder="이름·호스트 검색" autocomplete="off">
-      <select id="inst-engine"><option value="">기종 전체</option></select>
-      <select id="inst-team"><option value="">팀 전체</option></select>
-      <span id="inst-count" class="muted"></span>
+      <div class="instance-filter-row">
+        <select id="inst-engine"><option value="">기종 전체</option></select>
+        <select id="inst-team"><option value="">팀 전체</option></select>
+      </div>
     </div>
     <div id="instance-list" class="instance-list">
       <div class="muted">불러오는 중...</div>
     </div>
-  </section>
+  </aside>
 
-  <!-- 통합 헬스 스코어 (D8) — 5기종 전체를 한 점수·등급으로, 나쁜 순으로. 어디부터 볼지 기계가 정렬 -->
-  <section class="panel health-score-panel">
-    <h2 class="panel-title">헬스 스코어
-      <span class="hint">(흩어진 신호를 인스턴스별 한 점수로 — 나쁜 순 정렬 · 읽고 종합만, 대상 DB 변경 없음)</span>
-    </h2>
-    <div id="score-summary" class="score-summary"></div>
-    <div id="score-result" class="score-result muted">불러오는 중...</div>
-  </section>
+  <main class="workspace">
 
-  <!-- 백업 신선도 (D7) — 전 인스턴스를 한 표로, 오래된 것·백업 없는 것을 위로 -->
-  <section class="panel backup-freshness-panel">
-    <h2 class="panel-title">백업 신선도
-      <span class="hint">(모든 DB가 최근에 백업됐나 · 3-2-1 일일 점검 — 읽고 비출 뿐, 백업 실행은 안 합니다)</span>
-    </h2>
-    <div id="freshness-summary" class="freshness-summary"></div>
-    <div id="freshness-result" class="freshness-result muted">불러오는 중...</div>
-  </section>
+    <!-- 함대 개요 — 인스턴스 선택과 무관한 전체 뷰 두 개를 나란히 -->
+    <div class="fleet-row">
+      <!-- 통합 헬스 스코어 (D8) — 5기종 전체를 한 점수·등급으로, 나쁜 순으로. 어디부터 볼지 기계가 정렬 -->
+      <section class="panel health-score-panel">
+        <h2 class="panel-title">헬스 스코어
+          <span class="hint">(흩어진 신호를 인스턴스별 한 점수로 — 나쁜 순 정렬 · 읽고 종합만, 대상 DB 변경 없음)</span>
+        </h2>
+        <div id="score-summary" class="score-summary"></div>
+        <div id="score-result" class="score-result muted">불러오는 중...</div>
+      </section>
 
-  <!-- 시간대 선택 -->
-  <section class="panel" id="time-panel" hidden>
-    <h2 class="panel-title">시간대 선택</h2>
-    <div class="time-row">
-      <span class="range-label target-label">조회 구간 (분석 대상)</span>
-      <input type="datetime-local" id="target-from" step="60">
-      <span class="tilde">~</span>
-      <input type="datetime-local" id="target-to" step="60">
-      <span class="presets">
-        <button data-mins="30" class="preset">30분</button>
-        <button data-mins="60" class="preset">1시간</button>
-        <button data-mins="180" class="preset">3시간</button>
-      </span>
-      <button id="btn-query" class="btn btn-primary">조회</button>
-    </div>
-    <div class="time-row">
-      <span class="range-label base-label">비교 구간 (베이스라인)</span>
-      <input type="datetime-local" id="base-from" step="60">
-      <span class="tilde">~</span>
-      <input type="datetime-local" id="base-to" step="60">
-      <button id="btn-compare" class="btn btn-accent">비교 조회</button>
+      <!-- 백업 신선도 (D7) — 전 인스턴스를 한 표로, 오래된 것·백업 없는 것을 위로 -->
+      <section class="panel backup-freshness-panel">
+        <h2 class="panel-title">백업 신선도
+          <span class="hint">(모든 DB가 최근에 백업됐나 · 3-2-1 일일 점검 — 읽고 비출 뿐, 백업 실행은 안 합니다)</span>
+        </h2>
+        <div id="freshness-summary" class="freshness-summary"></div>
+        <div id="freshness-result" class="freshness-result muted">불러오는 중...</div>
+      </section>
     </div>
 
-    <!-- 활동 그래프 + 드래그 구간 선택 (QPS ↔ CPU 토글 — 레퍼런스는 CPU 그래프에서 드래그) -->
-    <div class="chart-head">
-      <span>그래프로 구간 선택하기 — <span id="chart-metric-label">QPS</span></span>
-      <span class="chart-tools">
-        <button id="metric-qps" class="btn btn-small active">QPS</button>
-        <button id="metric-cpu" class="btn btn-small">CPU %</button>
-        <button id="mode-target" class="btn btn-small btn-target">조회구간 드래그</button>
-        <button id="mode-base" class="btn btn-small btn-base">비교구간 드래그</button>
-      </span>
-    </div>
-    <div id="chart-wrap" class="chart-wrap">
-      <svg id="activity-chart" width="100%" height="180" preserveAspectRatio="none"></svg>
-      <div id="chart-empty" class="muted center" hidden>이 구간에 수집된 스냅샷이 없습니다</div>
-    </div>
-  </section>
-
-  <!-- 결과 탭 -->
-  <section class="panel" id="result-panel" hidden>
-    <div class="tabs">
-      <button class="tab active" data-tab="top">Top Query</button>
-      <button class="tab" data-tab="slow">Slow Query</button>
-      <button class="tab" data-tab="monitor">Monitoring</button>
-    </div>
-
-    <div id="tab-top" class="tab-body">
-      <div id="compare-summary" class="summary-strip" hidden></div>
-      <div class="table-scroll">
-        <table class="qtable" id="top-table">
-          <thead></thead>
-          <tbody></tbody>
-        </table>
+    <!-- 시간대 선택 -->
+    <section class="panel" id="time-panel" hidden>
+      <h2 class="panel-title">시간대 선택</h2>
+      <div class="time-row">
+        <span class="range-label target-label">조회 구간 (분석 대상)</span>
+        <input type="datetime-local" id="target-from" step="60">
+        <span class="tilde">~</span>
+        <input type="datetime-local" id="target-to" step="60">
+        <span class="presets">
+          <button data-mins="30" class="preset">30분</button>
+          <button data-mins="60" class="preset">1시간</button>
+          <button data-mins="180" class="preset">3시간</button>
+        </span>
+        <button id="btn-query" class="btn btn-primary">조회</button>
       </div>
-      <!-- 쿼리 상세: EXPLAIN + AI 분석 -->
-      <div id="query-detail" class="detail" hidden>
-        <div class="detail-head">
-          <span id="detail-qid" class="qid"></span>
-          <span class="detail-actions">
-            <button id="btn-explain" class="btn btn-primary btn-small">실행계획 보기</button>
-            <button id="btn-schema" class="btn btn-small">관련 테이블 구조</button>
-            <button id="btn-ai" class="btn btn-dark btn-small">AI 분석</button>
-            <button id="btn-advisor" class="btn btn-small">인덱스 제안</button>
-            <button id="btn-deep" class="btn btn-small">심층 진단</button>
-            <button id="btn-inquiry" class="btn btn-small">DB팀에 문의</button>
-          </span>
+      <div class="time-row">
+        <span class="range-label base-label">비교 구간 (베이스라인)</span>
+        <input type="datetime-local" id="base-from" step="60">
+        <span class="tilde">~</span>
+        <input type="datetime-local" id="base-to" step="60">
+        <button id="btn-compare" class="btn btn-accent">비교 조회</button>
+      </div>
+
+      <!-- 활동 그래프 + 드래그 구간 선택 (QPS ↔ CPU 토글 — 레퍼런스는 CPU 그래프에서 드래그) -->
+      <div class="chart-head">
+        <span>그래프로 구간 선택하기 — <span id="chart-metric-label">QPS</span></span>
+        <span class="chart-tools">
+          <button id="metric-qps" class="btn btn-small active">QPS</button>
+          <button id="metric-cpu" class="btn btn-small">CPU %</button>
+          <button id="mode-target" class="btn btn-small btn-target">조회구간 드래그</button>
+          <button id="mode-base" class="btn btn-small btn-base">비교구간 드래그</button>
+        </span>
+      </div>
+      <div id="chart-wrap" class="chart-wrap">
+        <svg id="activity-chart" width="100%" height="180" preserveAspectRatio="none"></svg>
+        <div id="chart-empty" class="muted center" hidden>이 구간에 수집된 스냅샷이 없습니다</div>
+      </div>
+    </section>
+
+    <!-- 결과 탭 -->
+    <section class="panel" id="result-panel" hidden>
+      <div class="tabs">
+        <button class="tab active" data-tab="top">Top Query</button>
+        <button class="tab" data-tab="slow">Slow Query</button>
+        <button class="tab" data-tab="monitor">Monitoring</button>
+      </div>
+
+      <div id="tab-top" class="tab-body">
+        <div id="compare-summary" class="summary-strip" hidden></div>
+        <div class="table-scroll">
+          <table class="qtable" id="top-table">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
         </div>
-        <div class="detail-section">
-          <h3>SQL 쿼리 <span class="hint">(통계의 정규화 텍스트 — 파라미터 자리(?, $1)는 실제 값으로 고쳐서 실행계획을 확인하세요)</span></h3>
-          <textarea id="detail-sql" class="codeblock sql-edit" rows="7" spellcheck="false"></textarea>
-        </div>
-        <div class="detail-section" id="plan-section" hidden>
-          <h3>실행계획 결과</h3>
-          <pre id="detail-plan" class="codeblock"></pre>
-          <div id="detail-findings" class="findings"></div>
-        </div>
-        <div class="detail-section" id="advisor-section" hidden>
-          <h3>인덱스 제안 <span class="hint">(PostgreSQL만 — HypoPG 가상 인덱스로 실제 생성 없이 before/after 비용 비교. 타 기종은 미지원)</span></h3>
-          <div class="advisor-input">
-            <input id="advisor-columns" class="advisor-cols" placeholder="후보 인덱스 컬럼 — 예: users(category)" spellcheck="false" />
-            <button id="btn-advisor-run" class="btn btn-primary btn-small">시뮬레이션</button>
+        <!-- 쿼리 상세: EXPLAIN + AI 분석 -->
+        <div id="query-detail" class="detail" hidden>
+          <div class="detail-head">
+            <span id="detail-qid" class="qid"></span>
+            <span class="detail-actions">
+              <button id="btn-explain" class="btn btn-primary btn-small">실행계획 보기</button>
+              <button id="btn-schema" class="btn btn-small">관련 테이블 구조</button>
+              <button id="btn-ai" class="btn btn-dark btn-small">AI 분석</button>
+              <button id="btn-advisor" class="btn btn-small">인덱스 제안</button>
+              <button id="btn-deep" class="btn btn-small">심층 진단</button>
+              <button id="btn-inquiry" class="btn btn-small">DB팀에 문의</button>
+            </span>
           </div>
-          <div id="advisor-result" class="findings"></div>
-        </div>
-        <div class="detail-section" id="schema-section" hidden>
-          <h3>관련 테이블 구조 <span class="hint">(쿼리가 참조하는 테이블의 컬럼·인덱스·대략 행수 — 조인 컬럼 인덱스·타입 불일치 진단용. 문의 시 자동 첨부됩니다)</span></h3>
-          <div id="schema-result" class="findings"></div>
-        </div>
-        <div class="detail-section" id="ai-section" hidden>
-          <h3>AI 1차 분석 <span class="hint">(docs/ai-analysis-rules.md 판단 기준 기반)</span></h3>
-          <pre id="detail-ai" class="codeblock ai"></pre>
-        </div>
-        <div class="detail-section" id="deep-section" hidden>
-          <h3>심층 원인 진단 <span class="hint">(실제 실행 계획으로 "왜 인덱스를 못 타나"를 짚습니다 — 쿼리를 실제 실행하므로 ADMIN·타임아웃 적용. 파라미터 자리는 실제 값으로 채우세요)</span></h3>
-          <div id="deep-result" class="findings"></div>
-        </div>
-        <div class="detail-section" id="inquiry-section" hidden>
-          <h3>DB팀 문의 <span class="hint">(현재 패널의 쿼리·실행계획·규칙 지적·AI 분석을 함께 첨부합니다)</span></h3>
-          <textarea id="inquiry-note" class="codeblock" rows="3" placeholder="비고 (선택): 상황·요청 사항을 적어주세요"></textarea>
-          <div id="inquiry-result" class="findings"></div>
-        </div>
-      </div>
-    </div>
-
-    <div id="tab-slow" class="tab-body" hidden>
-      <div class="table-scroll">
-        <table class="qtable" id="slow-table">
-          <thead></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <p id="slow-source-note" class="muted" style="font-size:12px; margin:6px 2px 0;"></p>
-    </div>
-
-    <div id="tab-monitor" class="tab-body" hidden>
-      <div class="monitor-card metric-card">
-        <h3>Metric <span class="hint">(Prometheus exporter 시계열 — CPU는 호스트 수준 node_exporter, Connections는 기종 exporter · 미수집은 사유를 그대로 표기)</span>
-          <a class="metric-full-link" href="http://localhost:13000" target="_blank" rel="noopener">전체 화면으로 보기 ↗</a></h3>
-        <div class="metric-chart-box">
-          <h4>CPU (%)</h4>
-          <svg id="cpu-chart" width="100%" height="140" preserveAspectRatio="none"></svg>
-          <div id="cpu-empty" class="muted center" hidden></div>
-        </div>
-        <div class="metric-chart-box">
-          <h4>Connections</h4>
-          <svg id="conn-chart" width="100%" height="140" preserveAspectRatio="none"></svg>
-          <div id="conn-empty" class="muted center" hidden></div>
-        </div>
-        <div class="metric-chart-box">
-          <h4>Query Activity (QPS)</h4>
-          <svg id="qps-chart" width="100%" height="140" preserveAspectRatio="none"></svg>
-          <div id="qps-empty" class="muted center" hidden></div>
-        </div>
-        <!-- 명령/행 연산 세분 차트 — MySQL은 Com_* rate, PG는 tup_* rate(명령 카운터 부재의 정직한 등가), 그 외 미지원 사유 표기 -->
-        <div id="command-charts" class="command-grid"></div>
-      </div>
-      <div class="monitor-card diagnose-card">
-        <h3>자연어 근본원인 진단 <span class="hint">(AI가 읽기 도구를 스스로 연쇄 호출해 원인을 서술 — 대상 DB는 바꾸지 않습니다)</span></h3>
-        <div class="diagnose-input">
-          <input type="text" id="diagnose-question" class="diagnose-q" placeholder="예: 어제 오후에 왜 느려졌어? / 어떤 쿼리가 부하를 일으키고 왜 느린가?" spellcheck="false">
-          <button id="btn-diagnose" class="btn btn-primary btn-small">진단</button>
-        </div>
-        <p class="hint">AI가 compare·explain·wait_events 같은 읽기 도구를 필요한 만큼 호출해 근거를 모읍니다. 근거가 없으면 "모른다"고 답합니다. (ANTHROPIC_API_KEY 또는 claude CLI 필요)</p>
-        <div id="diagnose-result" class="diagnose-result muted">질문을 입력하고 진단을 누르세요.</div>
-      </div>
-      <div class="monitor-card advisors-card">
-        <h3>Advisors <span class="hint">(자동 점검 — 읽고 조언만, 대상 DB는 바꾸지 않습니다 / 심각도별)</span></h3>
-        <div id="advisors-summary" class="advisors-summary"></div>
-        <div id="advisors-result" class="advisors-result muted">점검 중...</div>
-      </div>
-      <div class="monitor-card finops-card">
-        <h3>비용/효율 (FinOps) <span class="hint">(낭비 후보를 신호로 — 절감액은 산출하지 않고 검토 지점까지, 대상 DB는 바꾸지 않습니다)</span></h3>
-        <p class="hint">미사용 인덱스(사용 통계) · 중복·잉여 인덱스(D2 재사용) · 큰 테이블·과다 인덱싱 · 오버프로비저닝(연결·메모리) · 사용 통계 없는 기종은 미지원으로 정직 표기</p>
-        <div id="finops-summary" class="advisors-summary"></div>
-        <div id="finops-result" class="advisors-result muted">분석 중...</div>
-      </div>
-      <div class="monitor-card backup-card">
-        <h3>백업 / 시점 복구 <span class="hint">(이력·복원 가능 창 — 실행은 API/폴러, 복원 문안 생성까지만: 실행은 사람이)</span></h3>
-        <div id="pitr-window" class="pitr-window muted">조회 중...</div>
-        <details class="pitr-guide-box"><summary>복원 명령 문안 보기 (생성·안내 — 실행은 사람)</summary>
-          <pre id="pitr-guide" class="codeblock"></pre></details>
-        <div class="table-scroll">
-          <table class="qtable" id="backup-table">
-            <thead></thead>
-            <tbody><tr><td class="muted">조회 중...</td></tr></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="monitor-card session-card">
-        <h3>세션 / 블로킹 <span class="hint">(지금 누가 누구를 막고 있나 — blockedBy가 있으면 강조)</span></h3>
-        <div class="table-scroll">
-          <table class="qtable" id="session-table">
-            <thead></thead>
-            <tbody><tr><td class="muted">조회 중...</td></tr></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="monitor-card anomaly-card">
-        <h3>이상 감지 <span class="hint">(평소=이 요일·시간대 베이스라인 대비 z-score 이탈 — 고정 임계와 별개로 "평소와 다른가"를 본다)</span></h3>
-        <div id="anomaly-result" class="anomaly-result muted">조회 중...</div>
-      </div>
-      <div class="monitor-card deadlock-card">
-        <h3>최근 데드락 <span class="hint">(DB가 이미 남긴 흔적을 설정 변경 0으로 읽음 — MSSQL system_health XE·MySQL INNODB STATUS. 롤링이라 "최근"만, PG는 카운터라 알림으로)</span></h3>
-        <div id="deadlock-result" class="anomaly-result muted">조회 중...</div>
-      </div>
-      <div class="monitor-card plan-change-card">
-        <h3>실행계획 변경 <span class="hint">("쿼리도 데이터도 그대로인데 느려짐 = 플랜 플립" — 회귀 감지된 쿼리만 계획을 떠서 비교, 첫 관측은 기준선)</span></h3>
-        <div id="plan-change-result" class="anomaly-result muted">조회 중...</div>
-      </div>
-      <div class="monitor-card schema-diff-card">
-        <h3>Schema Diff <span class="hint">(같은 역할의 두 인스턴스 구조 비교 — 왜 저 장비만 다르지)</span></h3>
-        <div class="schema-diff-controls">
-          <select id="schema-left" class="schema-select"></select>
-          <span class="schema-arrow">→</span>
-          <select id="schema-right" class="schema-select"></select>
-          <button id="btn-schema-diff" class="btn btn-primary btn-small">비교</button>
-          <span class="hint">추가=초록(right에만) · 삭제=빨강(left에만) · 변경=주황</span>
-        </div>
-        <div id="schema-diff-warning" class="schema-warning" hidden></div>
-        <div id="schema-diff-result" class="schema-diff-result muted">좌/우 인스턴스를 고르고 비교를 누르세요.</div>
-      </div>
-      <div class="monitor-card param-diff-card">
-        <h3>파라미터 드리프트 <span class="hint">(같은 역할 두 인스턴스 설정값 비교 — 왜 저 장비만 느리지)</span></h3>
-        <div class="schema-diff-controls">
-          <select id="param-left" class="schema-select"></select>
-          <span class="schema-arrow">→</span>
-          <select id="param-right" class="schema-select"></select>
-          <button id="btn-param-diff" class="btn btn-primary btn-small">비교</button>
-          <span class="hint">값이 다른 항목 + 한쪽에만 있는 항목만 표시 · ADMIN 전용</span>
-        </div>
-        <div id="param-diff-warning" class="schema-warning" hidden></div>
-        <div id="param-diff-result" class="schema-diff-result muted">좌/우 인스턴스를 고르고 비교를 누르세요.</div>
-      </div>
-      <div class="monitor-card config-drift-card">
-        <h3>설정 변경 이력 <span class="hint">(시간축 — 이 인스턴스의 파라미터가 언제부터 무엇이 어떻게 바뀌었나 · "누가"는 대상 DB 감사 로그의 몫 · ADMIN 전용)</span></h3>
-        <div class="config-drift-controls">
-          <button id="btn-config-drift" class="btn btn-primary btn-small">변경 이력 조회</button>
-          <span class="hint">주기 수집이 직전 상태와 diff해 변경분만 기록 · 첫 수집은 기준선(변경 아님)</span>
-        </div>
-        <div id="config-drift-result" class="config-drift-result muted">조회를 누르면 최근 설정 변경을 최신순으로 보여줍니다.</div>
-      </div>
-      <div class="monitor-card review-gate-card">
-        <h3>스키마 변경 리뷰 게이트 <span class="hint">(배포 전 DDL/대량 DML을 규칙으로 자동 판정 + AI 소견 → ADMIN 승인 · 실행은 안 함, 판정·기록까지)</span></h3>
-        <div class="review-submit">
-          <textarea id="review-sql" class="codeblock sql-edit" rows="4" spellcheck="false" placeholder="리뷰할 변경 SQL — 예: ALTER TABLE orders ADD COLUMN memo VARCHAR(64) NOT NULL"></textarea>
-          <div class="review-submit-row">
-            <input type="text" id="review-reason" class="ddl-input" placeholder="사유 (선택) — 왜 이 변경이 필요한가">
-            <button id="btn-review-submit" class="btn btn-primary btn-small">리뷰 요청</button>
+          <div class="detail-section">
+            <h3>SQL 쿼리 <span class="hint">(통계의 정규화 텍스트 — 파라미터 자리(?, $1)는 실제 값으로 고쳐서 실행계획을 확인하세요)</span></h3>
+            <textarea id="detail-sql" class="codeblock sql-edit" rows="7" spellcheck="false"></textarea>
           </div>
-          <p class="hint">규칙은 대표 위험(락·WHERE 없는 대량 변경·DROP·NOT NULL 추가)만 봅니다. 강제 차단이 아니라 조언이며, 최종 판단은 사람이 합니다.</p>
-        </div>
-        <div id="review-list" class="review-list muted">이 인스턴스의 리뷰 요청이 여기 표시됩니다.</div>
-      </div>
-      <div class="monitor-card incident-card">
-        <h3>인시던트 리포트 <span class="hint">(장애 구간을 주면 그 시간의 신호를 한 장으로 — 시점 비교·설정 변경·플랜 플립·대기·가용성 + AI 요약 · 신규 수집 0, 기존 신호 재구성 · ADMIN)</span></h3>
-        <div class="incident-controls">
-          <label class="hint">구간 시작 <input type="datetime-local" id="incident-from" class="incident-time"></label>
-          <label class="hint">구간 끝 <input type="datetime-local" id="incident-to" class="incident-time"></label>
-          <button id="btn-incident" class="btn btn-primary btn-small">리포트 생성</button>
-          <button id="btn-incident-dl" class="btn btn-small" hidden>마크다운 다운로드</button>
-        </div>
-        <p class="hint">감지 알림은 영속 이력이 없어(웹훅 전용) 타임라인에 미포함 — 영속된 신호로 재구성합니다. 구간이 24시간을 넘으면 잘립니다.</p>
-        <div id="incident-result" class="incident-result muted">구간을 고르고 리포트 생성을 누르세요.</div>
-      </div>
-      <div class="monitor-card monthly-card">
-        <h3>월간 점검 리포트 <span class="hint">(기간 전체의 건강을 한 장으로 — 헬스 스코어·백업 신선도·Advisor·용량 예측·낭비 신호·설정 변경 · 매월 자동 발행 + 수동 생성 · ADMIN)</span></h3>
-        <div class="incident-controls">
-          <label class="hint">기간(일) <input type="number" id="monthly-days" class="incident-time" value="30" min="1" max="90" style="width:70px"></label>
-          <button id="btn-monthly" class="btn btn-primary btn-small">리포트 생성</button>
-          <button id="btn-monthly-dl" class="btn btn-small" hidden>마크다운 다운로드</button>
-        </div>
-        <p class="hint">읽고 종합한 신호·조언입니다. 대상 DB는 바꾸지 않으며 조치·실행은 사람이 합니다.</p>
-        <div id="monthly-result" class="incident-result muted">기간을 고르고 리포트 생성을 누르세요.</div>
-      </div>
-      <div class="monitor-card online-ddl-card">
-        <h3>온라인 스키마 변경 <span class="hint">(gh-ost · MySQL 전용 — 대형 테이블 ALTER를 락 최소화로)</span></h3>
-        <div class="online-ddl-controls">
-          <input type="text" id="ddl-table" class="ddl-input" placeholder="테이블 (예: orders)">
-          <input type="text" id="ddl-alter" class="ddl-input ddl-alter" placeholder="ALTER 절 (예: ADD COLUMN memo VARCHAR(64) NULL)">
-          <button id="btn-ddl-noop" class="btn btn-primary btn-small">dry-run (noop)</button>
-          <button id="btn-ddl-exec" class="btn btn-small btn-danger">실제 실행</button>
-        </div>
-        <p class="hint">기본은 dry-run — 실제 테이블은 바뀌지 않습니다. "실제 실행"은 ADMIN 확인 후 적용됩니다.</p>
-        <div id="ddl-result" class="ddl-result muted">테이블과 ALTER 절을 입력하고 dry-run으로 먼저 검증하세요.</div>
-      </div>
-      <div class="monitor-card latency-card">
-        <h3>레이턴시 백분위 p95/p99 <span class="hint">(평균은 멀쩡한데 꼬리가 아프다 — 같은 지표라도 기종마다 원자료가 다르다)</span></h3>
-        <p class="hint latency-legend">
-          <span class="src-badge src-native">실측누적</span> MySQL QUANTILE(리셋 이후 누적) ·
-          <span class="src-badge src-native">실측구간</span> MySQL 히스토그램 차분(최근 구간, 버킷 상한 근사) ·
-          <span class="src-badge src-native">히스토그램</span> Mongo opLatencies 보간(프로파일러 무관, 인스턴스 단위) ·
-          <span class="src-badge src-computed">직접계산</span> Mongo profile 원샘플 ·
-          <span class="src-badge src-estimated">추정</span> PostgreSQL/SQL Server 평균+표준편차(꼬리 무거우면 과소평가) ·
-          <span class="src-badge src-unsupported">미지원</span> Oracle(원자료 없음)
-        </p>
-        <div class="table-scroll">
-          <table class="qtable" id="latency-table">
-            <thead></thead>
-            <tbody><tr><td class="muted">조회 중...</td></tr></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="monitor-card slo-card">
-        <h3>SLO / 에러 버짓 <span class="hint">(사용자 경험 지표 — 인프라 지표(CPU)가 아니라 레이턴시·가용성 · Google SRE)</span></h3>
-        <p class="hint">레이턴시 SLI는 D4a 백분위(source 표기) 우선, 미지원 기종은 평균 레이턴시로 폴백 · 가용성 SLI는 헬스 샘플 이력 · 버짓 산식은 응답 note에 명시</p>
-        <div id="slo-result" class="slo-result muted">조회 중...</div>
-      </div>
-      <div class="monitor-card partition-card">
-        <h3>파티션 <span class="hint">(테이블이 어떻게 쪼개져 있고 각 조각이 얼마나 큰가 — 조회 전용)</span></h3>
-        <p class="hint">MySQL/PostgreSQL/Oracle/SQL Server는 각 카탈로그를 통합한 뷰 · MongoDB는 파티션 개념이 없어 미지원 · 파티션 없는 테이블/DB는 빈 결과</p>
-        <div class="table-scroll">
-          <table class="qtable" id="partition-table">
-            <thead></thead>
-            <tbody><tr><td class="muted">조회 중...</td></tr></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="monitor-grid">
-        <div class="monitor-card">
-          <h3>복제 상태</h3>
-          <pre id="replication-box" class="codeblock">조회 중...</pre>
-          <div id="replication-slots" class="advisor-note muted"></div>
-        </div>
-        <div class="monitor-card">
-          <h3>Wait Events <span class="hint">(그 시간에 무엇을 기다렸나 — CPU/IO/Lock)</span></h3>
-          <div class="table-scroll">
-            <table class="qtable" id="wait-table">
-              <thead></thead>
-              <tbody><tr><td class="muted">조회 중...</td></tr></tbody>
-            </table>
+          <div class="detail-section" id="plan-section" hidden>
+            <h3>실행계획 결과</h3>
+            <pre id="detail-plan" class="codeblock"></pre>
+            <div id="detail-findings" class="findings"></div>
+          </div>
+          <div class="detail-section" id="advisor-section" hidden>
+            <h3>인덱스 제안 <span class="hint">(PostgreSQL만 — HypoPG 가상 인덱스로 실제 생성 없이 before/after 비용 비교. 타 기종은 미지원)</span></h3>
+            <div class="advisor-input">
+              <input id="advisor-columns" class="advisor-cols" placeholder="후보 인덱스 컬럼 — 예: users(category)" spellcheck="false" />
+              <button id="btn-advisor-run" class="btn btn-primary btn-small">시뮬레이션</button>
+            </div>
+            <div id="advisor-result" class="findings"></div>
+          </div>
+          <div class="detail-section" id="schema-section" hidden>
+            <h3>관련 테이블 구조 <span class="hint">(쿼리가 참조하는 테이블의 컬럼·인덱스·대략 행수 — 조인 컬럼 인덱스·타입 불일치 진단용. 문의 시 자동 첨부됩니다)</span></h3>
+            <div id="schema-result" class="findings"></div>
+          </div>
+          <div class="detail-section" id="ai-section" hidden>
+            <h3>AI 1차 분석 <span class="hint">(docs/ai-analysis-rules.md 판단 기준 기반)</span></h3>
+            <pre id="detail-ai" class="codeblock ai"></pre>
+          </div>
+          <div class="detail-section" id="deep-section" hidden>
+            <h3>심층 원인 진단 <span class="hint">(실제 실행 계획으로 "왜 인덱스를 못 타나"를 짚습니다 — 쿼리를 실제 실행하므로 ADMIN·타임아웃 적용. 파라미터 자리는 실제 값으로 채우세요)</span></h3>
+            <div id="deep-result" class="findings"></div>
+          </div>
+          <div class="detail-section" id="inquiry-section" hidden>
+            <h3>DB팀 문의 <span class="hint">(현재 패널의 쿼리·실행계획·규칙 지적·AI 분석을 함께 첨부합니다)</span></h3>
+            <textarea id="inquiry-note" class="codeblock" rows="3" placeholder="비고 (선택): 상황·요청 사항을 적어주세요"></textarea>
+            <div id="inquiry-result" class="findings"></div>
           </div>
         </div>
-        <div class="monitor-card">
-          <h3>대시보드</h3>
-          <p class="muted">시계열 지표는 표준 도구에 위임합니다 — 플랫폼은 쿼리 수준 분석에 집중.</p>
-          <p>
-            <a class="btn btn-primary btn-small" href="http://localhost:3000" target="_blank" rel="noopener">Grafana 열기</a>
-            <a class="btn btn-small" href="http://localhost:9090" target="_blank" rel="noopener">Prometheus 열기</a>
-          </p>
-        </div>
       </div>
-      <div class="monitor-card audit-card">
-        <h3>감사 로그 <span class="hint">(누가 언제 무엇을 했나 — ADMIN 전용)</span></h3>
-        <div class="audit-filters">
-          <input type="text" id="audit-principal" placeholder="사용자 (예: admin)">
-          <input type="text" id="audit-action" placeholder="action 부분일치 (예: explain)">
-          <input type="number" id="audit-outcome" placeholder="결과코드 (예: 403)">
-          <button class="btn btn-primary btn-small" id="audit-search-btn">검색</button>
-          <button class="btn btn-small" id="audit-reset-btn">초기화</button>
-        </div>
+
+      <div id="tab-slow" class="tab-body" hidden>
         <div class="table-scroll">
-          <table class="qtable" id="audit-table">
-            <thead><tr><th>시각</th><th>주체</th><th>역할</th><th>action</th><th>결과</th><th>ms</th></tr></thead>
-            <tbody><tr><td class="muted" colspan="6">검색을 눌러 조회하세요.</td></tr></tbody>
+          <table class="qtable" id="slow-table">
+            <thead></thead>
+            <tbody></tbody>
           </table>
         </div>
+        <p id="slow-source-note" class="muted" style="font-size:12px; margin:6px 2px 0;"></p>
       </div>
-      <div class="monitor-card mcp-card">
-        <h3>MCP 연동 — AI 에이전트가 DBTower를 도구로 씁니다</h3>
-        <p class="muted">앱이 떠 있으면 준비 완료. 아래 명령 한 줄이면 Claude Code가 시점 비교·실행계획 분석을 직접 수행합니다.</p>
-        <div class="mcp-cmd-row">
-          <code id="mcp-cmd-http" class="mcp-cmd">claude mcp add --transport http dbtower http://localhost:8080/mcp   (ADMIN 로그인 시 토큰 포함 명령으로 완성됩니다)</code>
-          <button class="btn btn-primary btn-small" data-copy="mcp-cmd-http">복사</button>
-        </div>
-        <div class="mcp-cmd-row">
-          <code id="mcp-cmd-stdio" class="mcp-cmd">claude mcp add dbtower -- sh scripts/dbtower-mcp.sh   (stdio 방식 — 앱과 분리 실행)</code>
-          <button class="btn btn-small" data-copy="mcp-cmd-stdio">복사</button>
-        </div>
-        <h3 class="mcp-tools-title">제공 도구 <span class="hint">(이 목록 자체가 POST /mcp tools/list 응답입니다)</span></h3>
-        <div id="mcp-tools" class="mcp-tools muted">불러오는 중...</div>
-      </div>
-    </div>
-  </section>
 
-</main>
+      <div id="tab-monitor" class="tab-body" hidden>
+        <!-- 카테고리 서브내비 — ~20개 섹션을 성능/진단/거버넌스/백업·리포트/비용·인프라로 묶어 한 번에 하나씩 -->
+        <div class="mon-subnav">
+          <button class="mon-tab active" data-mon="perf">성능</button>
+          <button class="mon-tab" data-mon="diag">진단</button>
+          <button class="mon-tab" data-mon="gov">거버넌스</button>
+          <button class="mon-tab" data-mon="backup">백업·리포트</button>
+          <button class="mon-tab" data-mon="infra">비용·인프라</button>
+        </div>
+
+        <!-- 성능 -->
+        <div class="mon-group" data-group="perf">
+          <div class="monitor-card metric-card">
+            <h3>Metric <span class="hint">(Prometheus exporter 시계열 — CPU는 호스트 수준 node_exporter, Connections는 기종 exporter · 미수집은 사유를 그대로 표기)</span>
+              <a class="metric-full-link" href="http://localhost:13000" target="_blank" rel="noopener">전체 화면으로 보기 ↗</a></h3>
+            <div class="metric-chart-box">
+              <h4>CPU (%)</h4>
+              <svg id="cpu-chart" width="100%" height="140" preserveAspectRatio="none"></svg>
+              <div id="cpu-empty" class="muted center" hidden></div>
+            </div>
+            <div class="metric-chart-box">
+              <h4>Connections</h4>
+              <svg id="conn-chart" width="100%" height="140" preserveAspectRatio="none"></svg>
+              <div id="conn-empty" class="muted center" hidden></div>
+            </div>
+            <div class="metric-chart-box">
+              <h4>Query Activity (QPS)</h4>
+              <svg id="qps-chart" width="100%" height="140" preserveAspectRatio="none"></svg>
+              <div id="qps-empty" class="muted center" hidden></div>
+            </div>
+            <!-- 명령/행 연산 세분 차트 — MySQL은 Com_* rate, PG는 tup_* rate(명령 카운터 부재의 정직한 등가), 그 외 미지원 사유 표기 -->
+            <div id="command-charts" class="command-grid"></div>
+          </div>
+          <div class="monitor-card diagnose-card">
+            <h3>자연어 근본원인 진단 <span class="hint">(AI가 읽기 도구를 스스로 연쇄 호출해 원인을 서술 — 대상 DB는 바꾸지 않습니다)</span></h3>
+            <div class="diagnose-input">
+              <input type="text" id="diagnose-question" class="diagnose-q" placeholder="예: 어제 오후에 왜 느려졌어? / 어떤 쿼리가 부하를 일으키고 왜 느린가?" spellcheck="false">
+              <button id="btn-diagnose" class="btn btn-primary btn-small">진단</button>
+            </div>
+            <p class="hint">AI가 compare·explain·wait_events 같은 읽기 도구를 필요한 만큼 호출해 근거를 모읍니다. 근거가 없으면 "모른다"고 답합니다. (ANTHROPIC_API_KEY 또는 claude CLI 필요)</p>
+            <div id="diagnose-result" class="diagnose-result muted">질문을 입력하고 진단을 누르세요.</div>
+          </div>
+          <div class="monitor-card latency-card">
+            <h3>레이턴시 백분위 p95/p99 <span class="hint">(평균은 멀쩡한데 꼬리가 아프다 — 같은 지표라도 기종마다 원자료가 다르다)</span></h3>
+            <p class="hint latency-legend">
+              <span class="src-badge src-native">실측누적</span> MySQL QUANTILE(리셋 이후 누적) ·
+              <span class="src-badge src-native">실측구간</span> MySQL 히스토그램 차분(최근 구간, 버킷 상한 근사) ·
+              <span class="src-badge src-native">히스토그램</span> Mongo opLatencies 보간(프로파일러 무관, 인스턴스 단위) ·
+              <span class="src-badge src-computed">직접계산</span> Mongo profile 원샘플 ·
+              <span class="src-badge src-estimated">추정</span> PostgreSQL/SQL Server 평균+표준편차(꼬리 무거우면 과소평가) ·
+              <span class="src-badge src-unsupported">미지원</span> Oracle(원자료 없음)
+            </p>
+            <div class="table-scroll">
+              <table class="qtable" id="latency-table">
+                <thead></thead>
+                <tbody><tr><td class="muted">조회 중...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="monitor-card slo-card">
+            <h3>SLO / 에러 버짓 <span class="hint">(사용자 경험 지표 — 인프라 지표(CPU)가 아니라 레이턴시·가용성 · Google SRE)</span></h3>
+            <p class="hint">레이턴시 SLI는 D4a 백분위(source 표기) 우선, 미지원 기종은 평균 레이턴시로 폴백 · 가용성 SLI는 헬스 샘플 이력 · 버짓 산식은 응답 note에 명시</p>
+            <div id="slo-result" class="slo-result muted">조회 중...</div>
+          </div>
+          <div class="monitor-card session-card">
+            <h3>세션 / 블로킹 <span class="hint">(지금 누가 누구를 막고 있나 — blockedBy가 있으면 강조)</span></h3>
+            <div class="table-scroll">
+              <table class="qtable" id="session-table">
+                <thead></thead>
+                <tbody><tr><td class="muted">조회 중...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 진단 -->
+        <div class="mon-group" data-group="diag" hidden>
+          <div class="monitor-card advisors-card">
+            <h3>Advisors <span class="hint">(자동 점검 — 읽고 조언만, 대상 DB는 바꾸지 않습니다 / 심각도별)</span></h3>
+            <div id="advisors-summary" class="advisors-summary"></div>
+            <div id="advisors-result" class="advisors-result muted">점검 중...</div>
+          </div>
+          <div class="monitor-card anomaly-card">
+            <h3>이상 감지 <span class="hint">(평소=이 요일·시간대 베이스라인 대비 z-score 이탈 — 고정 임계와 별개로 "평소와 다른가"를 본다)</span></h3>
+            <div id="anomaly-result" class="anomaly-result muted">조회 중...</div>
+          </div>
+          <div class="monitor-card deadlock-card">
+            <h3>최근 데드락 <span class="hint">(DB가 이미 남긴 흔적을 설정 변경 0으로 읽음 — MSSQL system_health XE·MySQL INNODB STATUS. 롤링이라 "최근"만, PG는 카운터라 알림으로)</span></h3>
+            <div id="deadlock-result" class="anomaly-result muted">조회 중...</div>
+          </div>
+          <div class="monitor-card plan-change-card">
+            <h3>실행계획 변경 <span class="hint">("쿼리도 데이터도 그대로인데 느려짐 = 플랜 플립" — 회귀 감지된 쿼리만 계획을 떠서 비교, 첫 관측은 기준선)</span></h3>
+            <div id="plan-change-result" class="anomaly-result muted">조회 중...</div>
+          </div>
+          <div class="monitor-card">
+            <h3>Wait Events <span class="hint">(그 시간에 무엇을 기다렸나 — CPU/IO/Lock)</span></h3>
+            <div class="table-scroll">
+              <table class="qtable" id="wait-table">
+                <thead></thead>
+                <tbody><tr><td class="muted">조회 중...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 거버넌스 -->
+        <div class="mon-group" data-group="gov" hidden>
+          <div class="monitor-card review-gate-card">
+            <h3>스키마 변경 리뷰 게이트 <span class="hint">(배포 전 DDL/대량 DML을 규칙으로 자동 판정 + AI 소견 → ADMIN 승인 · 실행은 안 함, 판정·기록까지)</span></h3>
+            <div class="review-submit">
+              <textarea id="review-sql" class="codeblock sql-edit" rows="4" spellcheck="false" placeholder="리뷰할 변경 SQL — 예: ALTER TABLE orders ADD COLUMN memo VARCHAR(64) NOT NULL"></textarea>
+              <div class="review-submit-row">
+                <input type="text" id="review-reason" class="ddl-input" placeholder="사유 (선택) — 왜 이 변경이 필요한가">
+                <button id="btn-review-submit" class="btn btn-primary btn-small">리뷰 요청</button>
+              </div>
+              <p class="hint">규칙은 대표 위험(락·WHERE 없는 대량 변경·DROP·NOT NULL 추가)만 봅니다. 강제 차단이 아니라 조언이며, 최종 판단은 사람이 합니다.</p>
+            </div>
+            <div id="review-list" class="review-list muted">이 인스턴스의 리뷰 요청이 여기 표시됩니다.</div>
+          </div>
+          <div class="monitor-card config-drift-card">
+            <h3>설정 변경 이력 <span class="hint">(시간축 — 이 인스턴스의 파라미터가 언제부터 무엇이 어떻게 바뀌었나 · "누가"는 대상 DB 감사 로그의 몫 · ADMIN 전용)</span></h3>
+            <div class="config-drift-controls">
+              <button id="btn-config-drift" class="btn btn-primary btn-small">변경 이력 조회</button>
+              <span class="hint">주기 수집이 직전 상태와 diff해 변경분만 기록 · 첫 수집은 기준선(변경 아님)</span>
+            </div>
+            <div id="config-drift-result" class="config-drift-result muted">조회를 누르면 최근 설정 변경을 최신순으로 보여줍니다.</div>
+          </div>
+          <div class="monitor-card schema-diff-card">
+            <h3>Schema Diff <span class="hint">(같은 역할의 두 인스턴스 구조 비교 — 왜 저 장비만 다르지)</span></h3>
+            <div class="schema-diff-controls">
+              <select id="schema-left" class="schema-select"></select>
+              <span class="schema-arrow">→</span>
+              <select id="schema-right" class="schema-select"></select>
+              <button id="btn-schema-diff" class="btn btn-primary btn-small">비교</button>
+              <span class="hint">추가=초록(right에만) · 삭제=빨강(left에만) · 변경=주황</span>
+            </div>
+            <div id="schema-diff-warning" class="schema-warning" hidden></div>
+            <div id="schema-diff-result" class="schema-diff-result muted">좌/우 인스턴스를 고르고 비교를 누르세요.</div>
+          </div>
+          <div class="monitor-card param-diff-card">
+            <h3>파라미터 드리프트 <span class="hint">(같은 역할 두 인스턴스 설정값 비교 — 왜 저 장비만 느리지)</span></h3>
+            <div class="schema-diff-controls">
+              <select id="param-left" class="schema-select"></select>
+              <span class="schema-arrow">→</span>
+              <select id="param-right" class="schema-select"></select>
+              <button id="btn-param-diff" class="btn btn-primary btn-small">비교</button>
+              <span class="hint">값이 다른 항목 + 한쪽에만 있는 항목만 표시 · ADMIN 전용</span>
+            </div>
+            <div id="param-diff-warning" class="schema-warning" hidden></div>
+            <div id="param-diff-result" class="schema-diff-result muted">좌/우 인스턴스를 고르고 비교를 누르세요.</div>
+          </div>
+          <div class="monitor-card online-ddl-card">
+            <h3>온라인 스키마 변경 <span class="hint">(gh-ost · MySQL 전용 — 대형 테이블 ALTER를 락 최소화로)</span></h3>
+            <div class="online-ddl-controls">
+              <input type="text" id="ddl-table" class="ddl-input" placeholder="테이블 (예: orders)">
+              <input type="text" id="ddl-alter" class="ddl-input ddl-alter" placeholder="ALTER 절 (예: ADD COLUMN memo VARCHAR(64) NULL)">
+              <button id="btn-ddl-noop" class="btn btn-primary btn-small">dry-run (noop)</button>
+              <button id="btn-ddl-exec" class="btn btn-small btn-danger">실제 실행</button>
+            </div>
+            <p class="hint">기본은 dry-run — 실제 테이블은 바뀌지 않습니다. "실제 실행"은 ADMIN 확인 후 적용됩니다.</p>
+            <div id="ddl-result" class="ddl-result muted">테이블과 ALTER 절을 입력하고 dry-run으로 먼저 검증하세요.</div>
+          </div>
+          <div class="monitor-card audit-card">
+            <h3>감사 로그 <span class="hint">(누가 언제 무엇을 했나 — ADMIN 전용)</span></h3>
+            <div class="audit-filters">
+              <input type="text" id="audit-principal" placeholder="사용자 (예: admin)">
+              <input type="text" id="audit-action" placeholder="action 부분일치 (예: explain)">
+              <input type="number" id="audit-outcome" placeholder="결과코드 (예: 403)">
+              <button class="btn btn-primary btn-small" id="audit-search-btn">검색</button>
+              <button class="btn btn-small" id="audit-reset-btn">초기화</button>
+            </div>
+            <div class="table-scroll">
+              <table class="qtable" id="audit-table">
+                <thead><tr><th>시각</th><th>주체</th><th>역할</th><th>action</th><th>결과</th><th>ms</th></tr></thead>
+                <tbody><tr><td class="muted" colspan="6">검색을 눌러 조회하세요.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 백업·리포트 -->
+        <div class="mon-group" data-group="backup" hidden>
+          <div class="monitor-card backup-card">
+            <h3>백업 / 시점 복구 <span class="hint">(이력·복원 가능 창 — 실행은 API/폴러, 복원 문안 생성까지만: 실행은 사람이)</span></h3>
+            <div id="pitr-window" class="pitr-window muted">조회 중...</div>
+            <details class="pitr-guide-box"><summary>복원 명령 문안 보기 (생성·안내 — 실행은 사람)</summary>
+              <pre id="pitr-guide" class="codeblock"></pre></details>
+            <div class="table-scroll">
+              <table class="qtable" id="backup-table">
+                <thead></thead>
+                <tbody><tr><td class="muted">조회 중...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="monitor-card incident-card">
+            <h3>인시던트 리포트 <span class="hint">(장애 구간을 주면 그 시간의 신호를 한 장으로 — 시점 비교·설정 변경·플랜 플립·대기·가용성 + AI 요약 · 신규 수집 0, 기존 신호 재구성 · ADMIN)</span></h3>
+            <div class="incident-controls">
+              <label class="hint">구간 시작 <input type="datetime-local" id="incident-from" class="incident-time"></label>
+              <label class="hint">구간 끝 <input type="datetime-local" id="incident-to" class="incident-time"></label>
+              <button id="btn-incident" class="btn btn-primary btn-small">리포트 생성</button>
+              <button id="btn-incident-dl" class="btn btn-small" hidden>마크다운 다운로드</button>
+            </div>
+            <p class="hint">감지 알림은 영속 이력이 없어(웹훅 전용) 타임라인에 미포함 — 영속된 신호로 재구성합니다. 구간이 24시간을 넘으면 잘립니다.</p>
+            <div id="incident-result" class="incident-result muted">구간을 고르고 리포트 생성을 누르세요.</div>
+          </div>
+          <div class="monitor-card monthly-card">
+            <h3>월간 점검 리포트 <span class="hint">(기간 전체의 건강을 한 장으로 — 헬스 스코어·백업 신선도·Advisor·용량 예측·낭비 신호·설정 변경 · 매월 자동 발행 + 수동 생성 · ADMIN)</span></h3>
+            <div class="incident-controls">
+              <label class="hint">기간(일) <input type="number" id="monthly-days" class="incident-time" value="30" min="1" max="90" style="width:70px"></label>
+              <button id="btn-monthly" class="btn btn-primary btn-small">리포트 생성</button>
+              <button id="btn-monthly-dl" class="btn btn-small" hidden>마크다운 다운로드</button>
+            </div>
+            <p class="hint">읽고 종합한 신호·조언입니다. 대상 DB는 바꾸지 않으며 조치·실행은 사람이 합니다.</p>
+            <div id="monthly-result" class="incident-result muted">기간을 고르고 리포트 생성을 누르세요.</div>
+          </div>
+        </div>
+
+        <!-- 비용·인프라 -->
+        <div class="mon-group" data-group="infra" hidden>
+          <div class="monitor-card finops-card">
+            <h3>비용/효율 (FinOps) <span class="hint">(낭비 후보를 신호로 — 절감액은 산출하지 않고 검토 지점까지, 대상 DB는 바꾸지 않습니다)</span></h3>
+            <p class="hint">미사용 인덱스(사용 통계) · 중복·잉여 인덱스(D2 재사용) · 큰 테이블·과다 인덱싱 · 오버프로비저닝(연결·메모리) · 사용 통계 없는 기종은 미지원으로 정직 표기</p>
+            <div id="finops-summary" class="advisors-summary"></div>
+            <div id="finops-result" class="advisors-result muted">분석 중...</div>
+          </div>
+          <div class="monitor-card partition-card">
+            <h3>파티션 <span class="hint">(테이블이 어떻게 쪼개져 있고 각 조각이 얼마나 큰가 — 조회 전용)</span></h3>
+            <p class="hint">MySQL/PostgreSQL/Oracle/SQL Server는 각 카탈로그를 통합한 뷰 · MongoDB는 파티션 개념이 없어 미지원 · 파티션 없는 테이블/DB는 빈 결과</p>
+            <div class="table-scroll">
+              <table class="qtable" id="partition-table">
+                <thead></thead>
+                <tbody><tr><td class="muted">조회 중...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="monitor-card">
+            <h3>복제 상태</h3>
+            <pre id="replication-box" class="codeblock">조회 중...</pre>
+            <div id="replication-slots" class="advisor-note muted"></div>
+          </div>
+          <div class="monitor-card">
+            <h3>대시보드</h3>
+            <p class="muted">시계열 지표는 표준 도구에 위임합니다 — 플랫폼은 쿼리 수준 분석에 집중.</p>
+            <p>
+              <a class="btn btn-primary btn-small" href="http://localhost:3000" target="_blank" rel="noopener">Grafana 열기</a>
+              <a class="btn btn-small" href="http://localhost:9090" target="_blank" rel="noopener">Prometheus 열기</a>
+            </p>
+          </div>
+          <div class="monitor-card mcp-card">
+            <h3>MCP 연동 — AI 에이전트가 DBTower를 도구로 씁니다</h3>
+            <p class="muted">앱이 떠 있으면 준비 완료. 아래 명령 한 줄이면 Claude Code가 시점 비교·실행계획 분석을 직접 수행합니다.</p>
+            <div class="mcp-cmd-row">
+              <code id="mcp-cmd-http" class="mcp-cmd">claude mcp add --transport http dbtower http://localhost:8080/mcp   (ADMIN 로그인 시 토큰 포함 명령으로 완성됩니다)</code>
+              <button class="btn btn-primary btn-small" data-copy="mcp-cmd-http">복사</button>
+            </div>
+            <div class="mcp-cmd-row">
+              <code id="mcp-cmd-stdio" class="mcp-cmd">claude mcp add dbtower -- sh scripts/dbtower-mcp.sh   (stdio 방식 — 앱과 분리 실행)</code>
+              <button class="btn btn-small" data-copy="mcp-cmd-stdio">복사</button>
+            </div>
+            <h3 class="mcp-tools-title">제공 도구 <span class="hint">(이 목록 자체가 POST /mcp tools/list 응답입니다)</span></h3>
+            <div id="mcp-tools" class="mcp-tools muted">불러오는 중...</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
 
 <footer class="foot">
   DBTower — DbmsOperator 추상화 위의 컨트롤 플레인. MySQL / PostgreSQL / SQL Server / Oracle / MongoDB.
