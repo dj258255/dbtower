@@ -70,9 +70,37 @@ body {
   font-size: 12.5px; font-family: inherit; background: #fff; color: var(--text);
 }
 
+/* 커스텀 드롭다운 — 네이티브 select를 값의 원천으로 감추고, 버튼+패널로 시각화(OS 피커 확대 방지·디자인 일치) */
+.cs { position: relative; flex: 1 1 46%; min-width: 0; }
+.cs-native { display: none !important; }
+.cs-btn {
+  width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 7px;
+  padding: 6px 26px 6px 9px; font-size: 12.5px; font-family: inherit; color: var(--text);
+  background: #fff; cursor: pointer; position: relative;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cs-btn::after {
+  content: ""; position: absolute; right: 10px; top: 50%; width: 7px; height: 7px;
+  border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
+  transform: translateY(-70%) rotate(45deg); transition: transform .15s;
+}
+.cs-btn.open::after { transform: translateY(-30%) rotate(225deg); }
+.cs-btn:hover { border-color: #b9c0cc; }
+.cs-panel {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 40;
+  background: #fff; border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, .14); max-height: 260px; overflow-y: auto; padding: 4px;
+}
+.cs-opt { padding: 6px 10px; border-radius: 6px; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.cs-opt:hover { background: #f2f4f8; }
+.cs-opt.sel { background: #eef1ff; color: var(--primary); font-weight: 600; }
+
 /* 함대 개요 — 헬스 스코어 + 백업 신선도 나란히 */
-.fleet-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.fleet-row .panel { margin-bottom: 16px; }
+/* 함대 개요 — 반응형: 각 패널이 600px 이상 확보되면 2열, 아니면 1열로 쌓인다(짤림 방지) */
+.fleet-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 16px; }
+.fleet-row .panel { margin-bottom: 16px; min-width: 0; }
+/* 한 줄 표가 패널보다 넓으면 잘리지 말고 가로 스크롤 */
+#score-result, #freshness-result { overflow-x: auto; }
 
 /* Monitoring 카테고리 서브내비 (세그먼트 컨트롤) */
 .mon-subnav {

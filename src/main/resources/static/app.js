@@ -348,8 +348,10 @@ function loadInstanceMeta(rendered) {
 
 function populateInstanceFilterOptions(list) {
   const opts = (id, placeholder, values) => {
-    $(`#${id}`).innerHTML = `<option value="">${placeholder}</option>`
+    const sel = $(`#${id}`);
+    sel.innerHTML = `<option value="">${placeholder}</option>`
       + [...new Set(values.filter(Boolean))].sort().map((v) => `<option>${esc(v)}</option>`).join("");
+    sel._csSync?.(); // 커스텀 드롭다운 버튼 텍스트 동기화
   };
   opts("inst-engine", "기종 전체", list.map((i) => i.type));
   opts("inst-env", "환경 전체", list.map((i) => i.environment));
@@ -363,6 +365,49 @@ function setupInstanceFilter() {
   ["inst-search", "inst-engine", "inst-env", "inst-region", "inst-cluster", "inst-team"].forEach((id) => {
     const el = $(`#${id}`);
     el.addEventListener(id === "inst-search" ? "input" : "change", renderInstanceMatches);
+  });
+  // 네이티브 select는 OS 피커가 커지고 스타일이 안 먹어 커스텀 드롭다운으로 감싼다(디자인 일치, 라이브러리 0)
+  ["inst-engine", "inst-env", "inst-region", "inst-cluster", "inst-team"].forEach((id) => enhanceSelect($(`#${id}`)));
+}
+
+// 네이티브 select를 값의 원천으로 두고, 시각은 커스텀 버튼+패널로. 옵션 변경/선택은 그대로 change로 흐른다.
+function enhanceSelect(sel) {
+  if (sel.dataset.csDone) return;
+  sel.dataset.csDone = "1";
+  sel.classList.add("cs-native");
+  const wrap = document.createElement("span");
+  wrap.className = "cs";
+  sel.parentNode.insertBefore(wrap, sel);
+  wrap.appendChild(sel);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "cs-btn";
+  wrap.appendChild(btn);
+  const sync = () => { btn.textContent = sel.options[sel.selectedIndex]?.text ?? ""; };
+  sync();
+  sel._csSync = sync;
+  let panel = null;
+  const close = () => { if (panel) { panel.remove(); panel = null; btn.classList.remove("open"); document.removeEventListener("click", onDoc, true); } };
+  const onDoc = (e) => { if (!wrap.contains(e.target)) close(); };
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (panel) { close(); return; }
+    panel = document.createElement("div");
+    panel.className = "cs-panel";
+    [...sel.options].forEach((o, i) => {
+      const it = document.createElement("div");
+      it.className = "cs-opt" + (i === sel.selectedIndex ? " sel" : "");
+      it.textContent = o.text;
+      it.addEventListener("click", () => {
+        sel.selectedIndex = i; sync();
+        sel.dispatchEvent(new Event("change"));
+        close();
+      });
+      panel.appendChild(it);
+    });
+    wrap.appendChild(panel);
+    btn.classList.add("open");
+    document.addEventListener("click", onDoc, true);
   });
 }
 
