@@ -500,10 +500,105 @@ record TableDetail(String table, String engine, long rowCount, long dataBytes, l
 | reverse ETL: 장기 베이스라인 | **완료(100절)** — V24 `baseline_longterm` + BaselineService 가중 병합(충분통계량 복원, QPS 축만·/3600 스케일, 빈 테이블=회귀 0). 라이브: 실측 스파이크 z=7.42·관측 101(=장기100+단기1). lakehouse 쪽 D5~D7(마트·되쓰기 32,498행 왕복)은 그쪽 VERIFICATION 14절 | 방향 유지: lakehouse가 메타DB에 `baseline_longterm`(instance_id, query_id, dow, hour, mean, stddev, observations, computed_at) **되쓰기**, DBTower는 Flyway로 테이블 정의 + `BaselineService` 가중 병합(관측 충분 시 결합, 없으면 현행 — 미존재/빈 테이블이면 회귀 0). 실분석으로 확정된 제약: **(1) lakehouse의 원천 접속은 계약·코드(세션 readonly) 양쪽에서 읽기전용 봉인** — 되쓰기는 별도 역할(`lakehouse_writer`, 해당 테이블만 INSERT/DELETE)·별도 WritebackConfig로만(SourceConfig 재사용 금지), CONTRACT에 되쓰기 절 신설. (2) **일간 마트(fct_query_daily)로는 dow×hour 통계 불가** — staging에서 시간대별 델타 `fct_query_hourly`(증분+워터마크 리터럴 패턴 복제) 신설이 선행. (3) 볼륨 가드: instance×query×168버킷이라 min_observations 필터(BaselineService 8관측 게이트와 정렬)+top-K로 눌러야 함. (4) 스케줄은 publish와 heartbeat 사이 writeback 태스크(단일 트랜잭션 DELETE+INSERT, publish의 원자성·행수 대조 불변식 이식) — 베이스라인 변화가 느리므로 @weekly 별도 DAG도 유효(deadman 감시 편입 조건). **착수 명세는 lakehouse ROADMAP 14단계 D5~D8로 이관(2026-07-17)** | 장기 테이블 주입 후 이상 판정이 계절성(예: 월요일 피크)을 오탐하지 않는 것 실측, 미존재 시 현행 동작 회귀 없음 |
 | 용량 예측(디스크 포화 ETA) | **완료(78절)** | 구현: (a) node_exporter — 정석화 완료(`/:/host:ro` + `--path.rootfs=/host`, 기존 구성은 rootfs 마운트가 없어 컨테이너 자신만 보였음), (b) `insight.PrometheusClient`(루트 공개 API로 승격) + `queryScalar` 즉시값 조회, (c) 인스턴스-노드 매핑 `node_filter` **V16**(라벨 셀렉터, label="value" 형식만 허용해 PromQL 주입 방지 — nodeFilter가 mountpoint를 직접 지정하면 기본 "/" 양보: 데이터 전용 마운트가 실무 정석), (d) `advisor/internal/DiskForecastAdvisor` — 선형 ETA avail/(-deriv(avail[6h])), ETA≤3일 CRITICAL·≤14일 WARNING·추세 없어도 여유<10% WARNING, Prometheus 미설정·미수집 시 조용히 스킵(기능 게이트), 일일 스윕(웹훅)은 AdvisorService 경유 기존 경로 재사용. **실측**: 실쓰기 ~17MB/s → CRITICAL "약 0.7일 내 (여유 76.8%)" — 여유가 넉넉해도 속도가 빠르면 치명(잔량 경보만으론 침묵하는 케이스). 단위 9건, 총 419건 그린. **잔여**: 같은 nodeFilter 공유 인스턴스 간 호스트당 경보 dedup(Phase 4 호스트 그룹핑과 함께), RDS CloudWatch `FreeStorageSpace` 소스 추상화(후속). 스케일 실행은 여전히 범위 밖 — 프로비저닝 계층 소유, DBTower는 신호까지 | 데모 스택에서 대량 적재로 여유 감소 → 예측 ETA 산출·경보 실측 — **충족(78절)**. Prometheus 미설정 시 스킵은 단위로 고정 |
 
+## 운영 병목 아크 — 현업 DBA 병목 5종 (미착수 — 착수 명세, 2026-07-18)
+
+목표는 하나다: **관리 대상이 늘수록 사람 손이 선형으로 늘어나는 지점을 끊는다.** 다섯 기능
+전부 "읽고 판정하고 기록하는 것은 깊게, 대상을 바꾸는 실행은 기존 경계(ADMIN·gh-ost·사람) 뒤로"
+원칙을 유지한다. 추천 구현 순서: B1 → B2 → B3 → B4 → B5 (구현 비용 대비 임팩트 순).
+
+### 공통 가드레일 (전 아크)
+
+- **Flyway 버전은 하드코딩하지 않는다** — 병렬 세션이 버전을 선점할 수 있으므로, 구현 시점의
+  `ls db/migration | sort -V | tail -1` + 1을 쓴다(아래 명세의 V27·V28은 자리 표시).
+- 대상 DB에 임의 DML/DDL 실행 금지 원칙 유지. 새 수집은 전부 읽기 전용 + 타임아웃 15s + 백오프.
+- 기종별 미확보는 UNSUPPORTED/미확보 정직 표기(값 지어내기 금지). 수치는 조건과 함께.
+- 아크마다: 동작 검증 테스트 + VERIFICATION 절 + 라이브 실측(실물 스크린샷) + 한국어 커밋 분리.
+- 외부 발신(웹훅·리포트)에 실리는 SQL은 QueryMasker 경유(문의 카드와 동일 원칙).
+
+### 아크 B1 — 설정 드리프트 이력: "언제부터 무엇이 바뀌었나" (Operator 0줄)
+
+현재 파라미터 diff는 공간축("A와 B가 다른가")뿐이다. 시간축("어제와 오늘이 다른가")을 붙인다.
+원천은 기존 `parameters()`(5기종 구현 완료) 재사용 — 신규 Operator 코드 0줄.
+
+| ID | 항목 | 내용 | 검증 기준 |
+|---|---|---|---|
+| P1 | 스냅샷 잡 | `param_snapshot`(V27 자리) — instance_id·name·value·captured_at. 주기 1시간, ShedLock. **전체 저장이 아니라 변경분만**: 직전 스냅샷과 비교해 바뀐 행 + 전체 해시 1행(무변경 증거)만 저장해 폭증 방지 | 무변경 주기에 해시 1행만 쌓이는 것 실측 |
+| P2 | 변경 감지·경보 | diff 발생 시 웹훅(리치 embed): 파라미터명·old→new·감지 시각. 알림 폭주 제어(분당 상한·묶음 요약) 기존 경로 재사용 — 재시작 직후 대량 diff가 한 카드로 묶이는지 | 라이브로 파라미터 1개 변경 → 카드 실물 |
+| P3 | 콘솔 타임라인 | 인스턴스 상세에 "설정 변경 이력" — 언제·무엇이·어떻게. "누가"는 대상 DB가 안 주는 정보이므로 **표기하지 않는다**(정직): 안내 문구로 대상 DB 감사 로그의 몫임을 명시 | 변경 2건 이상 시간순 표시 |
+| P4 | 플랜 플립 대조 | 플랜 플립 감지 카드에 "±24h 내 설정 변경 N건" 링크 — 설정 변경이 플랜을 갈아탄 원인 후보라는 진단 서사 연결 | 파라미터 변경 후 플립 유도 → 카드에 대조 링크 실물 |
+
+함정: (1) PG `pg_settings`는 수백 개 — 내부 파생·세션 로컬 값 제외 목록을 두고 시작(노이즈가
+기능을 죽인다). (2) `pending_restart` 상태(바꿨지만 미적용)는 별도 표기. (3) 기동 시 첫
+스냅샷은 "변경"이 아니라 "기준선"으로 기록(첫 수집이 경보 폭탄이 되면 안 된다).
+
+### 아크 B2 — 스키마 변경 사전 리뷰 게이트 (범위 밖 항목의 부분 재결정)
+
+**재결정 기록(2026-07-18)**: "범위 밖"의 SQL 변경 심의(Bytebase형) 제외 사유는 (a) gh-ost가
+MySQL 전용, (b) 쓰기 거버넌스는 다른 DNA였다. 이번 범위는 **판정·승인·기록까지**로 좁힌다 —
+실행 오케스트레이션은 여전히 범위 밖(실행은 기존 gh-ost 경로 또는 사람). (a)는 실행을 안 하므로
+해소되고, (b)는 판정이 읽기·진단 DNA 그 자체(규칙 엔진 재사용)라 성립하지 않는다. 현업 DBA
+병목 1순위(변경 요청 리뷰 대기)를 겨냥한다. 명령별 차트의 "Grafana 위임 부분 재결정" 전례를 따른다.
+
+| ID | 항목 | 내용 | 검증 기준 |
+|---|---|---|---|
+| R1 | 제출 모델 | `review` 모듈 신설: `review_request`(V28 자리) — 대상 인스턴스·SQL·사유·요청자·상태(PENDING/APPROVED/REJECTED)·판정 결과 JSON. 제출 API + 콘솔 폼 | 제출→PENDING 저장·감사 기록 |
+| R2 | 자동 판정기 | analysis 규칙 엔진 패턴으로 DDL/DML 위험 규칙 신설: WHERE 없는 UPDATE/DELETE, 대테이블 ALTER 락 위험(**tableDetail 행수 재사용** — N만 행 이상이면 온라인 DDL 권고), DROP TABLE/COLUMN 경고, 인덱스 추가 시 참조 테이블 구조 자동 첨부(ReferencedSchemaService 재사용). 판정은 **조언이지 차단이 아니다**(강제력은 조직 프로세스의 몫임을 명시) | 위험 SQL 3종(락·WHERE 없음·DROP) 제출 → 규칙 지적 실물 |
+| R3 | AI 1차 소견 | ai-analysis-rules 패턴 승계 — 판단 기준은 사람이 문서로, AI는 그 위에서 1차 소견. "근거 없으면 모른다" | 소견에 규칙 문서 근거 인용 확인 |
+| R4 | 승인 워크플로 | ADMIN이 승인/반려 + 코멘트. 상태 전이 전부 감사 로그(audit 모듈). LBAC: 팀 사용자는 자기 팀 인스턴스 요청만 | 승인·반려 각 1회 감사 로그 실물 |
+| R5 | Discord 카드 | 문의 카드 인프라 재사용 — 제출 시 "리뷰 요청" 카드(SQL 마스킹·판정 요약·승인 딥링크), 결정 시 결과 카드 | 카드 실발사 스크린샷 |
+| R6 | 실행 연계(안내만) | 승인된 MySQL DDL이면 "온라인 DDL(gh-ost dry-run) 경로" 딥링크 안내. **플랫폼이 실행하지 않는다** | 안내 링크가 기존 onlineddl 화면으로 |
+
+함정: (1) SQL 파싱은 완전 파서가 아니다 — ReferencedTables 정규식 수준의 한계(서브쿼리·다중
+문장)를 판정 결과에 정직 표기. (2) 다중 문장 제출은 문장별 분리 판정 또는 거부. (3) 판정
+결과 JSON은 스키마 버전을 넣어 둔다(규칙이 늘면 과거 판정과 비교 가능).
+
+### 아크 B3 — 인덱스 사용 통계 주기 영속 (lakehouse 장기 판정의 원료, V25·V26 패턴)
+
+"이 인덱스 지워도 되나"는 재시작-누적 카운터의 순간 관측으론 답할 수 없다(지난주 재시작이면
+전부 0). 분기 단위 "스캔 0" 판정은 lakehouse 몫이고, DBTower는 원료(주기 영속)를 낳는다.
+
+| ID | 항목 | 내용 | 검증 기준 |
+|---|---|---|---|
+| I1 | Operator 메서드 | `indexUsageStats()` — PG `pg_stat_user_indexes`(idx_scan), MSSQL `dm_db_index_usage_stats`(seeks+scans+lookups), MySQL `table_io_waits_summary_by_index_usage`(count_star), Mongo `$indexStats`(accesses.ops). **Oracle은 UNSUPPORTED 정직** — MONITORING USAGE는 대상 변경(침습), AWR/DBA_HIST는 Diagnostics Pack 라이선스. 각 값에 "재시작 이후 누적" 의미 명시 | 4기종 실값 + Oracle UNSUPPORTED 표기 |
+| I2 | 스냅샷 잡 | `index_usage_snapshot`(V29 자리) — instance_id·table·index·scans·captured_at. 6시간 주기·7일 보존(offload 후 삭제, size_snapshot과 동일 수명) | 첫 사이클 기종별 행수 실측 |
+| I3 | FinOps 라벨 정직화 | 기존 미사용 인덱스 신호에 "관측 기간"(서버 uptime 또는 스냅샷 축적 기간) 라벨 — "미사용(관측 3일)"과 "미사용(관측 90일)"은 다른 말이다 | 신호에 기간 라벨 표시 |
+| I4 | lakehouse 인계 | 레지스트리 편입·장기 마트(`mart_index_verdict`)·판정 규칙은 lakehouse ROADMAP 16단계로 이관(아래 함정 목록 포함해 명세 전달) | 그쪽 16단계 명세 존재 |
+
+함정(판정 규칙에 반드시): (1) **unique/FK 제약을 받치는 인덱스는 스캔 0이어도 삭제 불가** —
+제약 백업 여부를 판정에 포함. (2) **레플리카에서만 쓰이는 인덱스** — 프라이머리 통계만 보면
+오판. 레플리카 통계 미수집이면 그 한계를 판정문에 명시. (3) 카운터 리셋 처리(재시작)는
+lakehouse first-vs-last·클램프 패턴 재사용. (4) 월말 배치·분기 결산용 인덱스(장주기 사용)는
+판정 창보다 주기가 길 수 있음 — "분기" 창 근거.
+
+### 아크 B4 — 인시던트 리포트 원클릭 (기존 API 조합, 신규 수집 0)
+
+장애 후 보고서 작성이라는 순수 사람 병목 제거. 구간을 주면 그 시간의 이야기를 조립한다.
+
+| ID | 항목 | 내용 | 검증 기준 |
+|---|---|---|---|
+| N1 | 타임라인 수집기 | 입력: 인스턴스+시간 구간(콘솔 드래그 재사용). 조합: 경보 이력·시점 비교(구간 vs 직전 동일 길이)·플랜 플립·wait event·설정 변경(B1 연계)·헬스 스코어 추이 — 전부 기존 API | 수치가 개별 API 응답과 일치 |
+| N2 | AI 요약 | 조립된 재료만으로 요약(1차 분석기 원칙 — 재료에 없는 수치·원인 생성 금지를 프롬프트 규칙으로) | 요약 속 수치 전수가 재료에 존재 |
+| N3 | 산출·발행 | 마크다운 리포트(타임라인·표·요약) + 웹훅 발행 + 콘솔 다운로드 | 실제 스파이크 구간으로 리포트 실물 |
+
+함정: 구간이 길면 재료 폭증 — 구간 상한(예: 24h)과 항목별 top-N 절단을 명시하고 절단 사실을
+리포트에 표기(silent truncation 금지).
+
+### 아크 B5 — 월간 정기 점검 리포트 (스케줄 발행)
+
+DBA가 매달 손으로 만드는 정기 점검 보고서의 자동화. B4의 조립기를 재사용하되 관점이 다르다
+(장애 구간이 아니라 기간 전체의 건강).
+
+| ID | 항목 | 내용 | 검증 기준 |
+|---|---|---|---|
+| M1 | 스케줄 잡 | @monthly ShedLock 잡 + 수동 트리거 API(데모·검증용) | 수동 트리거로 실물 1부 |
+| M2 | 종합 내용 | 인스턴스별: 헬스 스코어 추이·백업 성공률과 신선도·Advisor 스윕 지적 누계·FinOps 신호(B3 기간 라벨 포함)·설정 변경 요약(B1)·용량 예측 ETA | 각 절 수치가 원본과 일치 |
+| M3 | 발행 | 웹훅 요약 카드 + 전문 마크다운(콘솔 보관·다운로드) | 카드 실발사 + 파일 보관 확인 |
+
 ## 범위 밖 (여전히 의도적으로 안 한다)
 
-- **SQL 변경 심의·승인 워크플로 (Bytebase/Archery형)** — gh-ost류가 MySQL 전용이라 이기종 정체성과
-  충돌하고, 쓰기 경로 거버넌스는 읽기·진단 DNA와 다른 카테고리. 인상적이지만 초점을 흐린다.
+- **SQL 변경의 실행 오케스트레이션 (Bytebase/Archery형의 실행 부분)** — 심의·승인·기록은
+  운영 병목 아크 B2로 부분 재결정(2026-07-18)했으나, **승인된 변경을 플랫폼이 실행하는 것**은
+  여전히 안 한다. 실행은 기존 경계(gh-ost 경로는 MySQL 한정·ADMIN·기본 dry-run) 또는 사람의 몫.
 - **자동 인덱스 생성, 파티션 자동 관리** — Phase D는 "조회·조언"까지만(pganalyze의 "AI-assisted but
   developer-driven" 원칙). 대상 DB를 스스로 바꾸는 순간 다른 제품이 된다.
 - **엔진 패치/업그레이드 오케스트레이션** — 플랫폼별 도구(K8s Operator 롤링 업데이트, RDS 유지관리
