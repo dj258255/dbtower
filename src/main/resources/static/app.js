@@ -41,6 +41,9 @@ const state = {
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// AI 서술 출력에서 이모지만 제거(우리 규칙: 이모지 금지). →·✓ 같은 기술 기호는 보존.
+const stripEmoji = (s) => String(s ?? "").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{26FF}✨️‍]/gu, "");
+
 // datetime-local 입력값(로컬 시각)과 LocalDateTime(ISO) 사이 변환
 const toLocalInput = (date) => {
   const p = (n) => String(n).padStart(2, "0");
@@ -1105,7 +1108,7 @@ async function runAiAnalysis() {
     $("#detail-plan").textContent = data.plan;
     $("#detail-findings").innerHTML = (data.findings ?? []).map((f) =>
       `<div class="finding-item">${esc(f)}</div>`).join("");
-    $("#detail-ai").textContent = data.aiAnalysis ??
+    $("#detail-ai").textContent = stripEmoji(data.aiAnalysis) ||
       "AI 분석 비활성화 상태입니다 (ANTHROPIC_API_KEY도 claude CLI도 없음) — 규칙 기반 지적까지만 표시합니다.";
     state.lastPlan = data.plan;
     state.lastFindings = data.findings ?? [];
@@ -2154,8 +2157,8 @@ async function runDiagnose() {
         <span class="src-badge conf-${conf}">확신도 ${conf}</span>
         <span class="muted">${esc(d.backend || "")} · 사용 도구 ${d.toolCallCount}개</span>
       </div>
-      ${d.rootCause ? `<div class="diagnose-rootcause">${esc(d.rootCause)}</div>` : ""}
-      <div class="diagnose-text">${esc(d.answer || "(답변 없음)")}</div>
+      ${d.rootCause ? `<div class="diagnose-rootcause">${esc(stripEmoji(d.rootCause))}</div>` : ""}
+      <div class="diagnose-text">${esc(stripEmoji(d.answer) || "(답변 없음)")}</div>
     </div>
     <div class="diagnose-steps">
       <div class="diagnose-steps-head muted">AI가 부른 도구 (근거·투명성)</div>
