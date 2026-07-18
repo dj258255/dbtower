@@ -196,15 +196,20 @@ public class InsightController {
     public record ExplainRequest(@NotBlank String sql) {
     }
 
-    public record ExplainResponse(String plan, List<String> findings) {
+    /** planTable: 표시용 표 형태 계획(MySQL 클래식 EXPLAIN). 비었으면 프론트가 plan(JSON/트리)을 그대로 표시. */
+    public record ExplainResponse(String plan, List<String> findings,
+                                  List<java.util.Map<String, Object>> planTable) {
     }
 
     /** 실행계획 + 규칙 기반 비효율 분석을 함께 돌려준다 */
     @PostMapping("/explain")
     public ExplainResponse explain(@PathVariable Long id, @RequestBody ExplainRequest req) {
         DatabaseInstance instance = registryService.findById(id);
-        String plan = operatorFactory.create(instance).explain(req.sql());
-        return new ExplainResponse(plan, analyzer.analyze(instance.getType(), plan));
+        var operator = operatorFactory.create(instance);
+        String plan = operator.explain(req.sql()); // JSON/트리 — 규칙 분석용(SELECT-only 강제)
+        // 표시용 표(MySQL만 비지 않음) — explain이 통과한 뒤라 SQL은 검증된 SELECT
+        return new ExplainResponse(plan, analyzer.analyze(instance.getType(), plan),
+                operator.explainTabular(req.sql()));
     }
 
     public record IndexAdviceRequest(@NotBlank String sql, String columns) {

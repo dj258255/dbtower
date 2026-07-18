@@ -45,8 +45,8 @@ body {
 
 /* 앱 셸 — 좌측 사이드바(인스턴스) + 우측 워크스페이스(대시보드) */
 .app-shell {
-  display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px;
-  max-width: 1560px; margin: 16px auto 60px; padding: 0 20px; align-items: start;
+  display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 18px;
+  max-width: min(2200px, 98vw); margin: 16px auto 60px; padding: 0 20px; align-items: start;
 }
 .workspace { min-width: 0; } /* 그리드 자식 오버플로 방지 */
 
@@ -306,6 +306,14 @@ input[type="datetime-local"] {
 .t-id { color: #cdd6e3; }
 .t-com { color: #6b7684; font-style: italic; }
 .t-op { color: #aab4c2; }
+
+/* 표 형태 실행계획(MySQL 클래식 EXPLAIN) — 다크 코드블록 위 모노스페이스 표(레퍼런스 #236) */
+.plan-table { border-collapse: collapse; width: 100%; font-size: 11.5px; }
+.plan-table th, .plan-table td {
+  border: 1px solid #2a313c; padding: 5px 9px; text-align: left; white-space: nowrap; color: #cdd6e3;
+}
+.plan-table th { color: #7cc7ff; font-weight: 600; background: #1a1f27; }
+.plan-table td .muted { color: #55606e; }
 .findings { margin-top: 8px; }
 .finding-item {
   background: #fff7e8; border: 1px solid #f0dcb4; border-radius: 6px;

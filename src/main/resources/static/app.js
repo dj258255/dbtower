@@ -152,6 +152,23 @@ function renderPlanInto(el, plan) {
   el.innerHTML = planHtml(plan);
 }
 
+// 표 형태 실행계획(MySQL 클래식 EXPLAIN 등) — 레퍼런스처럼 id/type/key/rows/Extra 컬럼 표로. 컬럼은 응답 그대로.
+function renderPlanTable(rows) {
+  const cols = Object.keys(rows[0]);
+  const head = cols.map((c) => `<th>${esc(c)}</th>`).join("");
+  const body = rows.map((r) => `<tr>${cols.map((c) => {
+    const v = r[c];
+    return `<td>${v == null || v === "" ? '<span class="muted">—</span>' : esc(String(v))}</td>`;
+  }).join("")}</tr>`).join("");
+  return `<table class="plan-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+// 실행계획 섹션 채우기 — 표(planTable)가 오면 표로, 아니면 색상 JSON/트리로.
+function fillPlan(el, data) {
+  if (data.planTable && data.planTable.length) el.innerHTML = renderPlanTable(data.planTable);
+  else renderPlanInto(el, data.plan);
+}
+
 // datetime-local 입력값(로컬 시각)과 LocalDateTime(ISO) 사이 변환
 const toLocalInput = (date) => {
   const p = (n) => String(n).padStart(2, "0");
@@ -1098,7 +1115,7 @@ async function runExplain() {
       $("#detail-findings").innerHTML = "";
       return;
     }
-    renderPlanInto($("#detail-plan"), data.plan);
+    fillPlan($("#detail-plan"), data);
     $("#detail-findings").innerHTML = (data.findings ?? []).map((f) =>
       `<div class="finding-item">${esc(f)}</div>`).join("") ||
       '<div class="muted">규칙 기반 지적 없음 — 비효율 신호가 발견되지 않았습니다.</div>';
@@ -1238,7 +1255,7 @@ async function runAiAnalysis() {
     } catch (e) { $("#detail-ai").textContent = `실패: ${e.message}`; return; }
     // 실행계획 섹션도 함께 갱신 (같은 응답에 plan/findings 포함)
     $("#plan-section").hidden = false;
-    renderPlanInto($("#detail-plan"), data.plan);
+    fillPlan($("#detail-plan"), data);
     $("#detail-findings").innerHTML = (data.findings ?? []).map((f) =>
       `<div class="finding-item">${esc(f)}</div>`).join("");
     $("#detail-ai").textContent = stripEmoji(data.aiAnalysis) ||

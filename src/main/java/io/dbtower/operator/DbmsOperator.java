@@ -54,6 +54,16 @@ public interface DbmsOperator {
     String explain(String sql);
 
     /**
+     * 표시용 <b>표 형태</b> 실행계획 — 컬럼별 행 목록(id/select_type/table/type/key/rows/Extra 등).
+     * explain()의 JSON/트리는 규칙 분석·형태 비교에 쓰고, 이건 레퍼런스식 표로 보여주기 위한 것.
+     * 기본은 빈 목록(플랫 표가 자연스럽지 않은 기종 — 트리/JSON을 그대로 표시). MySQL만 클래식 EXPLAIN을
+     * 표로 오버라이드한다. explain()이 먼저 SELECT-only를 강제하므로 그 뒤에만 호출된다.
+     */
+    default java.util.List<java.util.Map<String, Object>> explainTabular(String sql) {
+        return java.util.List.of();
+    }
+
+    /**
      * 파라미터 플레이스홀더가 남은 <b>정규화 텍스트</b>의 실행계획 — 플랜 변경 감지용.
      * 통계 소스의 쿼리 텍스트는 리터럴이 지워진 형태($1·?)라 일반 explain이 실패한다.
      * PostgreSQL 16+는 EXPLAIN (GENERIC_PLAN)으로 플레이스홀더 채로 계획을 뽑을 수 있어 오버라이드하고,

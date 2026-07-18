@@ -672,6 +672,33 @@ public class MySqlOperator extends AbstractJdbcOperator {
     }
 
     /**
+     * 표시용 클래식 EXPLAIN — id/select_type/table/partitions/type/possible_keys/key/key_len/ref/rows/
+     * filtered/Extra 컬럼을 그대로 표로. JSON(explain)은 규칙 분석용이고 이건 레퍼런스식 표를 위한 것.
+     * requireSelect로 SELECT-only 강제(실행 아님, 계획만). 컬럼은 메타데이터로 동적 수집(MySQL 버전차 흡수).
+     */
+    @Override
+    public java.util.List<java.util.Map<String, Object>> explainTabular(String sql) {
+        requireSelect(sql);
+        try {
+            return jdbc().query("EXPLAIN " + sql, rs -> {
+                var meta = rs.getMetaData();
+                int cols = meta.getColumnCount();
+                java.util.List<java.util.Map<String, Object>> rows = new java.util.ArrayList<>();
+                while (rs.next()) {
+                    java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                    for (int c = 1; c <= cols; c++) {
+                        row.put(meta.getColumnLabel(c), rs.getObject(c));
+                    }
+                    rows.add(row);
+                }
+                return rows;
+            });
+        } catch (DataAccessException e) {
+            return java.util.List.of(); // 표는 부가 표시 — 실패해도 JSON 계획으로 충분(정직하게 표만 생략)
+        }
+    }
+
+    /**
      * 플랜 변경 감지용 shape (plan flip) — MySQL엔 PG의 GENERIC_PLAN 상당물이 없다. 대신
      * performance_schema가 digest마다 저장해 둔 <b>리터럴 샘플</b>(QUERY_SAMPLE_TEXT)을 EXPLAIN한다
      * (Datadog DBM과 같은 방식). queryId = DIGEST.
