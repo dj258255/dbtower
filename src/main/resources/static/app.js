@@ -664,7 +664,7 @@ async function loadBackupFreshness() {
       ? `<span class="verify-badge verify-VERIFIED" title="${esc(f.remoteLocation)}">원격 보관</span>`
       : '<span class="muted">로컬만</span>';
     return `
-      <tr class="fresh-row fresh-row-${esc(f.status)}" data-id="${f.instanceId}" title="클릭하면 이 인스턴스를 선택해 대시보드를 엽니다">
+      <tr class="fresh-row fresh-row-${esc(f.status)}" data-id="${esc(String(f.instanceId))}" title="클릭하면 이 인스턴스를 선택해 대시보드를 엽니다">
         <td><span class="cell-inst">${typeBadge(f.type)} ${esc(f.instanceName)}</span></td>
         <td><span class="fresh-badge fresh-${esc(f.status)}">${esc(FRESHNESS_LABEL[f.status] ?? f.status)}</span></td>
         <td>${last}</td>
