@@ -244,19 +244,18 @@ function instanceCardHtml(i) {
          data-env="${esc(i.environment || "")}" data-region="${esc(i.region || "")}" data-cluster="${esc(i.cluster || "")}">
       <div class="instance-name">
         ${engineIcon(i.type)}
-        <span class="type-badge type-${esc(i.type)}">${esc(i.type)}</span>
         <span class="inst-name-text">${esc(i.name)}</span>
         <span class="repl-role" id="role-${i.id}"></span>
         <span class="health-dot" id="health-${i.id}"></span>
-        <button class="collect-toggle ${i.collectionEnabled ? "" : "isolated"}" data-id="${i.id}"
-          title="수집 격리 토글 — 끄면 스냅샷 수집·운영 경보에서 이 인스턴스를 뺀다(등록은 유지)">
-          ${i.collectionEnabled ? "수집중" : "격리됨"}</button>
       </div>
       <div class="instance-detail">
+        <div class="inst-field"><span class="k">기종</span><span class="v"><span class="type-badge type-${esc(i.type)}">${esc(i.type)}</span></span></div>
         <div class="inst-field"><span class="k">호스트</span><span class="v">${esc(i.host)}:${i.port}</span></div>
         <div class="inst-field"><span class="k">DB</span><span class="v">${esc(i.dbName)}${sharedNames.length ? ` <span class="server-shared-badge" title="같은 서버(${esc(serverKey)})에 등록된 다른 인스턴스: ${esc(sharedNames.join(", "))} — 서버 전역 경보(복제·세션·데드락)는 그룹당 1회">서버 공유 ×${cnt}</span>` : ""}</span></div>
         <div class="inst-field"><span class="k">응답</span><span class="v" id="ping-${i.id}">—</span></div>
-        <div class="inst-field"><span class="k">버전</span><span class="v ver" id="ver-${i.id}">—</span></div>
+        <div class="inst-field"><span class="k">버전</span><span class="v ver" id="ver-${i.id}" title="">—</span></div>
+        <div class="inst-field"><span class="k">수집</span><span class="v"><button class="collect-toggle ${i.collectionEnabled ? "" : "isolated"}" data-id="${i.id}"
+          title="수집 격리 토글 — 끄면 스냅샷 수집·운영 경보에서 이 인스턴스를 뺀다(등록은 유지)">${i.collectionEnabled ? "수집중" : "격리됨"}</button></span></div>
         ${i.environment || i.region || i.cluster || i.teamLabel || i.consoleUrl ? `<div class="instance-meta">
           ${i.environment ? `<span class="tag-badge tag-env" title="환경">${esc(i.environment)}</span>` : ""}
           ${i.region ? `<span class="tag-badge tag-region" title="리전">${esc(i.region)}</span>` : ""}
@@ -312,6 +311,10 @@ function bindInstanceCards() {
   box.querySelectorAll(".instance-card").forEach((card) => {
     card.addEventListener("click", () => selectInstance(state.instances.find((i) => i.id == card.dataset.id), card));
   });
+  // 버전은 기본 한 줄(말줄임) — 클릭하면 전체 펼침/접힘 토글(사이드바 공간 활용)
+  box.querySelectorAll(".v.ver").forEach((el) => {
+    el.addEventListener("click", (e) => { e.stopPropagation(); el.classList.toggle("ver-full"); });
+  });
   box.querySelectorAll(".collect-toggle").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -325,6 +328,13 @@ function bindInstanceCards() {
   });
 }
 
+// 버전 문자열 축약 — MSSQL 등은 개행·빌드시각·저작권까지 붙어 길다. 첫 줄의 의미 있는 머리만, 전체는 title로.
+function shortVersion(v) {
+  if (!v) return "—";
+  const head = String(v).split(/[\n\r]/)[0].replace(/\s+/g, " ").trim();
+  return head.length > 60 ? head.slice(0, 60).trim() + "…" : head;
+}
+
 // 렌더된 카드에만 헬스(핑·버전)·복제 역할을 비동기로 채운다 — 화면에 보이는 만큼만 조회(수천 대 확장).
 function loadInstanceMeta(rendered) {
   rendered.forEach(async (i) => {
@@ -332,7 +342,8 @@ function loadInstanceMeta(rendered) {
       const h = await api(`/api/instances/${i.id}/health`);
       const dot = $(`#health-${i.id}`); if (dot) dot.classList.add(h.up ? "up" : "down");
       const ping = $(`#ping-${i.id}`), ver = $(`#ver-${i.id}`);
-      if (h.up) { if (ping) ping.textContent = `${h.pingMillis}ms`; if (ver) ver.textContent = h.version || "—"; }
+      // 버전은 전체를 textContent에 담고 축약은 CSS(한 줄 말줄임)에 맡긴다 — 클릭하면 전체가 그대로 펼쳐지게
+      if (h.up) { if (ping) ping.textContent = `${h.pingMillis}ms`; if (ver) { ver.textContent = h.version || "—"; ver.title = h.version || ""; } }
       else if (ping) ping.textContent = h.message;
     } catch { const dot = $(`#health-${i.id}`); if (dot) dot.classList.add("down"); }
     try {
@@ -358,6 +369,43 @@ function populateInstanceFilterOptions(list) {
   opts("inst-region", "리전 전체", list.map((i) => i.region));
   opts("inst-cluster", "클러스터 전체", list.map((i) => i.cluster));
   opts("inst-team", "팀 전체", list.map((i) => i.teamLabel));
+}
+
+// 커스텀 호버 툴팁 — 네이티브 title은 느리고 스타일이 안 먹어 못생겼다. title을 전역에서 가로채
+// data-tip으로 옮기고(네이티브 억제) 스타일 툴팁으로 보여준다. 모든 title[data-tip] 요소에 자동 적용.
+function setupTooltip() {
+  const tip = document.createElement("div");
+  tip.className = "tooltip"; tip.hidden = true;
+  document.body.appendChild(tip);
+  let cur = null;
+  const place = (el) => {
+    const r = el.getBoundingClientRect(), t = tip.getBoundingClientRect();
+    let top = r.top - t.height - 8;
+    const below = top < 4;
+    if (below) top = r.bottom + 8;
+    let left = Math.max(6, Math.min(r.left + r.width / 2 - t.width / 2, window.innerWidth - t.width - 6));
+    tip.style.top = `${top}px`; tip.style.left = `${left}px`;
+    tip.classList.toggle("below", below);
+  };
+  const show = (el) => {
+    // 네이티브 title이 남아 있으면 data-tip으로 옮겨 이중 툴팁을 막는다
+    const native = el.getAttribute("title");
+    if (native != null && native !== "") { el.dataset.tip = native; el.removeAttribute("title"); }
+    const text = el.dataset.tip;
+    if (!text) return;
+    cur = el; tip.textContent = text; tip.hidden = false; place(el);
+  };
+  const hide = () => { if (cur) { tip.hidden = true; cur = null; } };
+  document.addEventListener("mouseover", (e) => {
+    const el = e.target.closest("[title],[data-tip]");
+    if (el && el !== cur) show(el);
+  });
+  document.addEventListener("mouseout", (e) => {
+    if (cur && !(e.relatedTarget && cur.contains(e.relatedTarget))) hide();
+  });
+  // 스크롤·리사이즈 시 위치가 어긋나면 그냥 숨긴다(따라다니게 하지 않음 — 단순·확실)
+  window.addEventListener("scroll", hide, true);
+  window.addEventListener("resize", hide);
 }
 
 // 검색·필터 이벤트 → 재렌더(입력·선택할 때만 매칭분을 그린다). 앱 로딩 시 한 번 연결.
@@ -588,8 +636,12 @@ async function loadHealthScore() {
     const reasons = penalized.length
       ? penalized.map((c) => `${SCORE_SIGNAL_LABEL[c.signal] ?? c.signal} −${fmtNum(c.penalty, 0)}`).join(" · ")
       : '<span class="muted">감점 없음</span>';
-    // 행 클릭 시 펼칠 신호별 기여 분해(투명성) — 데이터 부족·수집 실패도 그대로 노출
-    const detail = s.contributions.map((c) => `
+    // 행 클릭 시 펼칠 신호별 기여 분해(투명성) — 데이터 부족·수집 실패도 그대로 노출. 첫 줄은 기종(아이콘이 행에 있으니 배지는 여기로).
+    const detail =
+      `<div class="score-contrib"><span class="score-contrib-signal">기종</span>`
+      + `<span class="type-badge type-${esc(s.type)}">${esc(s.type)}</span>`
+      + `<span class="score-contrib-penalty"></span><span class="score-contrib-summary">${esc(s.instanceName)}</span></div>`
+      + s.contributions.map((c) => `
       <div class="score-contrib score-state-${esc(c.state)}">
         <span class="score-contrib-signal">${esc(SCORE_SIGNAL_LABEL[c.signal] ?? c.signal)}</span>
         <span class="score-contrib-state score-state-badge-${esc(c.state)}">${esc(SCORE_STATE_LABEL[c.state] ?? c.state)}</span>
@@ -599,7 +651,7 @@ async function loadHealthScore() {
     return `
       <tbody class="score-group" data-id="${s.instanceId}">
         <tr class="score-row score-grade-${esc(s.grade)}">
-          <td><span class="cell-inst">${typeBadge(s.type)} ${esc(s.instanceName)}</span>
+          <td><span class="cell-inst">${engineIcon(s.type)} ${esc(s.instanceName)}</span>
             ${s.down ? '<span class="score-down">DOWN</span>' : ""}
             ${s.partial ? '<span class="score-partial-dot" title="일부 신호가 데이터 부족·수집 실패">부분</span>' : ""}</td>
           <td class="num score-num">${s.score}<span class="score-outof">/100</span></td>
@@ -663,30 +715,85 @@ async function loadBackupFreshness() {
     const remote = f.remoteLocation
       ? `<span class="verify-badge verify-VERIFIED" title="${esc(f.remoteLocation)}">원격 보관</span>`
       : '<span class="muted">로컬만</span>';
+    // 클릭 시 펼칠 상세 — 헬스 스코어처럼 그 서버의 상태를 신호별로 분해(가용성은 펼칠 때 조회)
+    const inst = state.instances.find((i) => i.id == f.instanceId);
+    const server = inst ? `${esc(inst.host)}:${inst.port} / ${esc(inst.dbName)}` : "—";
+    const tags = inst ? [inst.environment, inst.region, inst.cluster, inst.teamLabel].filter(Boolean).map(esc).join(" · ") : "";
+    const freshState = f.status === "FRESH" ? "OK" : "PENALIZED";
+    const verifyState = f.verifyStatus === "VERIFIED" ? "OK" : (f.verifyStatus === "FAILED" ? "PENALIZED" : "INSUFFICIENT_DATA");
+    const remoteState = f.remoteLocation ? "OK" : "INSUFFICIENT_DATA";
+    const detail =
+      `<div class="score-contrib"><span class="score-contrib-signal">기종</span>`
+      + `<span class="type-badge type-${esc(f.type)}">${esc(f.type)}</span>`
+      + `<span class="score-contrib-penalty"></span><span class="score-contrib-summary">${esc(f.instanceName)}</span></div>`
+      + freshContrib("가용성", "INSUFFICIENT_DATA", "조회 중", "핑·응답 조회 중…", `fresh-av-${f.instanceId}`)
+      + freshContrib("서버", "OK", "등록", `${server}${tags ? ` · ${tags}` : ""}`)
+      + freshContrib("백업 신선도", freshState, FRESHNESS_LABEL[f.status] ?? f.status,
+          `마지막 ${last} · ${elapsed} 경과 (임계 ${report.thresholdHours}h)`)
+      + freshContrib("복원 검증", verifyState, f.verifyStatus || "미검증",
+          f.verifyStatus === "VERIFIED" ? "복원 리허설 통과" : (f.verifyStatus === "FAILED" ? "복원 검증 실패 — 즉시 확인" : "아직 복원 검증 안 됨"))
+      + freshContrib("원격 보관", remoteState, f.remoteLocation ? "원격 보관" : "로컬만",
+          f.remoteLocation ? `오프사이트: ${f.remoteLocation}` : "3-2-1 오프사이트 사본 없음");
     return `
-      <tr class="fresh-row fresh-row-${esc(f.status)}" data-id="${esc(String(f.instanceId))}" title="클릭하면 이 인스턴스를 선택해 대시보드를 엽니다">
-        <td><span class="cell-inst">${typeBadge(f.type)} ${esc(f.instanceName)}</span></td>
-        <td><span class="fresh-badge fresh-${esc(f.status)}">${esc(FRESHNESS_LABEL[f.status] ?? f.status)}</span></td>
-        <td>${last}</td>
-        <td class="num">${elapsed}</td>
-        <td>${verify}</td>
-        <td>${remote}</td>
-      </tr>`;
+      <tbody class="fresh-group" data-id="${esc(String(f.instanceId))}">
+        <tr class="fresh-row fresh-row-${esc(f.status)}" title="클릭하면 이 서버의 상태를 여기서 펼쳐 봅니다">
+          <td><span class="cell-inst">${engineIcon(f.type)} ${esc(f.instanceName)}</span></td>
+          <td><span class="fresh-badge fresh-${esc(f.status)}">${esc(FRESHNESS_LABEL[f.status] ?? f.status)}</span></td>
+          <td>${last}</td>
+          <td class="num">${elapsed}</td>
+          <td>${verify}</td>
+          <td>${remote}</td>
+        </tr>
+        <tr class="fresh-detail-row" hidden><td colspan="6"><div class="score-detail">${detail}</div></td></tr>
+      </tbody>`;
   }).join("");
   box.innerHTML = `
     <div class="table-scroll">
       <table class="qtable freshness-table">
         <thead><tr><th>인스턴스</th><th>신선도</th><th>마지막 백업</th><th>경과</th><th>복원 검증</th><th>원격 보관</th></tr></thead>
-        <tbody>${rows}</tbody>
+        ${rows}
       </table>
     </div>`;
-  // 행 클릭 → 그 인스턴스를 선택해 대시보드를 연다(함대 표에서 바로 드릴인)
+  // 행 클릭 → 그 서버 상태를 인라인으로 펼친다(자동 선택 대신). 처음 펼칠 때 가용성 1회 조회.
   box.querySelectorAll(".fresh-row").forEach((row) => {
     row.addEventListener("click", () => {
-      const inst = state.instances.find((i) => i.id == row.dataset.id);
-      if (inst) { selectInstance(inst, null); $("#time-panel").scrollIntoView({ behavior: "smooth", block: "start" }); }
+      const group = row.parentElement;
+      const detailRow = group.querySelector(".fresh-detail-row");
+      detailRow.hidden = !detailRow.hidden;
+      row.classList.toggle("fresh-row-open", !detailRow.hidden);
+      if (!detailRow.hidden) fillFreshnessHealth(group.dataset.id);
     });
   });
+}
+
+// 펼침 상세의 신호 한 줄 — 헬스 스코어의 기여 분해와 같은 시각(라벨·상태 배지·요약)
+function freshContrib(signal, state, stateLabel, summary, id) {
+  return `<div class="score-contrib score-state-${state}"${id ? ` id="${esc(id)}"` : ""}>
+    <span class="score-contrib-signal">${esc(signal)}</span>
+    <span class="score-contrib-state score-state-badge-${state}">${esc(stateLabel)}</span>
+    <span class="score-contrib-penalty"></span>
+    <span class="score-contrib-summary">${esc(summary)}</span>
+  </div>`;
+}
+
+// 펼칠 때 그 서버의 가용성(핑·버전)을 1회 조회해 '가용성' 줄만 갱신 — 함대가 커도 보이는 만큼만 조회
+async function fillFreshnessHealth(id) {
+  const row = $(`#fresh-av-${id}`);
+  if (!row || row.dataset.filled) return;
+  row.dataset.filled = "1";
+  try {
+    const h = await api(`/api/instances/${id}/health`);
+    const st = h.up ? "OK" : "PENALIZED";
+    row.className = `score-contrib score-state-${st}`;
+    row.querySelector(".score-contrib-state").className = `score-contrib-state score-state-badge-${st}`;
+    row.querySelector(".score-contrib-state").textContent = h.up ? "가용" : "응답 없음";
+    row.querySelector(".score-contrib-summary").textContent = h.up
+      ? `핑 ${h.pingMillis}ms · ${shortVersion(h.version)}` : (h.message || "접속 실패");
+  } catch (e) {
+    row.querySelector(".score-contrib-state").textContent = "조회 실패";
+    row.querySelector(".score-contrib-summary").textContent = e.message;
+    row.dataset.filled = "";
+  }
 }
 
 // ---------- 활동 그래프 (드래그 구간 선택) ----------
@@ -1923,7 +2030,7 @@ async function loadSessions() {
         <td class="num">${esc(s.pid)}</td>
         <td>${esc(s.user ?? "-")}</td>
         <td>${esc(s.state ?? "-")}</td>
-        <td>${esc(s.waitEvent ?? "-")}</td>
+        <td title="${esc(s.waitEvent ?? "")}">${esc(s.waitEvent ?? "-")}</td>
         <td class="num">${s.blockedByPid != null ? `<span class="blocked-by">${esc(s.blockedByPid)}</span>` : "-"}</td>
         <td class="num">${fmtNum(s.elapsedMs)}</td>
         <td class="qtext" title="${esc(s.query)}">${esc(s.query ?? "-")}</td>
@@ -2461,6 +2568,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadBackupFreshness(); // 함대 전체 백업 신선도 (D7) — 인스턴스 선택과 무관한 상시 뷰
   setupTabs();
   setupMonitorNav();
+  setupTooltip();        // 네이티브 title을 예쁜 커스텀 툴팁으로 자동 승격(전역 위임)
   setupInstanceFilter(); // 검색·필터 이벤트 연결(검색·필터 구동 렌더)
   setupPresets();
   // SQL 편집 시 하이라이트 레이어를 따라 갱신·스크롤 동기화(투명 textarea 오버레이)
