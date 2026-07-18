@@ -6,6 +6,8 @@ import io.dbtower.operator.model.ColumnSchema;
 import io.dbtower.operator.model.IndexSchema;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.TableDetail;
+import io.dbtower.operator.model.TableDetail.DdlSource;
+import io.dbtower.operator.model.TableDetail.IndexDetail;
 import io.dbtower.operator.model.TableSchema;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.registry.RegistryService;
@@ -107,7 +109,7 @@ public class ReferencedSchemaService {
         } catch (RuntimeException e) {
             // 상세 실패는 요약 폴백으로 흡수 — 구조 요약만으로도 첨부는 유효하다
         }
-        if (detail == null || detail.ddlSource() == TableDetail.DdlSource.UNSUPPORTED) {
+        if (detail == null || detail.ddlSource() == DdlSource.UNSUPPORTED) {
             return new RefTable(t.name(), rows, -1, -1, null, null, columns(t.columns()), indexes(t.indexes()));
         }
         long detailRows = detail.rowCount() >= 0 ? detail.rowCount() : rows;
@@ -238,9 +240,9 @@ public class ReferencedSchemaService {
         return out;
     }
 
-    private static List<RefIndex> fromDetail(List<TableDetail.IndexDetail> idx) {
+    private static List<RefIndex> fromDetail(List<IndexDetail> idx) {
         List<RefIndex> out = new ArrayList<>();
-        for (TableDetail.IndexDetail i : idx) {
+        for (IndexDetail i : idx) {
             out.add(new RefIndex(i.name(), i.columns(), i.unique(), i.type(), i.cardinality()));
         }
         return out;

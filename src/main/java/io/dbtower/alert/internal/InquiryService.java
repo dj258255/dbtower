@@ -1,5 +1,9 @@
 package io.dbtower.alert.internal;
 
+import io.dbtower.alert.internal.ReferencedSchemaService.RefTable;
+import io.dbtower.alert.internal.ReferencedSchemaService.ReferencedSchema;
+import io.dbtower.alert.internal.WebhookNotifier.Embed;
+import io.dbtower.alert.internal.WebhookNotifier.Embed.Field;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
@@ -67,7 +71,7 @@ public class InquiryService {
         // 대상 조회 실패가 문의 자체를 막지 않게 격리한다(구조가 없어도 쿼리·플랜은 보낸다).
         // 파싱은 원문으로(FROM·JOIN 추출 정확도), 외부 발신 렌더링은 마스킹본으로 — 문의 창의 SQL은
         // 사용자가 직접 친 원문이라 실값(고객 이메일·ID 등)이 그대로 실려 오는 대표 경로다.
-        ReferencedSchemaService.ReferencedSchema schema = safeSchema(instanceId, req.sql());
+        ReferencedSchema schema = safeSchema(instanceId, req.sql());
         String schemaSummary = schema == null ? "" : ReferencedSchemaService.formatCompact(schema);
         InquiryRequest masked = new InquiryRequest(queryMasker.apply(req.sql()),
                 req.plan(), req.findings(), req.aiAnalysis(), req.note());
@@ -76,7 +80,7 @@ public class InquiryService {
         return new InquiryResult(true, null);
     }
 
-    private ReferencedSchemaService.ReferencedSchema safeSchema(Long instanceId, String sql) {
+    private ReferencedSchema safeSchema(Long instanceId, String sql) {
         try {
             return referencedSchema.describe(instanceId, sql);
         } catch (RuntimeException e) {
@@ -97,41 +101,41 @@ public class InquiryService {
      * SQL·실행계획은 코드블록으로 감싸되, Discord 필드 한도(1024자) 안에서 코드블록이 닫히도록
      * 본문을 먼저 900자로 줄인다 — 한도 절단이 코드블록 백틱을 삼키면 이후 텍스트 전체가 코드로 렌더된다.
      */
-    private WebhookNotifier.Embed buildEmbed(DatabaseInstance instance, InquiryRequest req,
-                                             String principal, ReferencedSchemaService.ReferencedSchema schema) {
-        List<WebhookNotifier.Embed.Field> fields = new ArrayList<>();
-        fields.add(new WebhookNotifier.Embed.Field("요청자", principal, true));
-        fields.add(new WebhookNotifier.Embed.Field("인스턴스", instance.getName() + " (" + instance.getType() + ")", true));
+    private Embed buildEmbed(DatabaseInstance instance, InquiryRequest req,
+                             String principal, ReferencedSchema schema) {
+        List<Field> fields = new ArrayList<>();
+        fields.add(new Field("요청자", principal, true));
+        fields.add(new Field("인스턴스", instance.getName() + " (" + instance.getType() + ")", true));
         // 담당 팀 — 문의가 어느 팀 소관 DB에 대한 것인지 embed 자체가 말하게 한다(심화 아크 4)
         if (hasText(instance.getTeamLabel())) {
-            fields.add(new WebhookNotifier.Embed.Field("담당", instance.getTeamLabel(), true));
+            fields.add(new Field("담당", instance.getTeamLabel(), true));
         }
-        fields.add(new WebhookNotifier.Embed.Field("쿼리", codeBlock("sql", blankToDash(req.sql())), false));
+        fields.add(new Field("쿼리", codeBlock("sql", blankToDash(req.sql())), false));
         if (schema != null) {
             addSchemaFields(fields, schema);
         }
         if (hasText(req.plan())) {
-            fields.add(new WebhookNotifier.Embed.Field("실행계획", codeBlock("", req.plan().strip()), false));
+            fields.add(new Field("실행계획", codeBlock("", req.plan().strip()), false));
         }
         List<String> findings = req.findings();
         if (findings != null && !findings.isEmpty()) {
-            fields.add(new WebhookNotifier.Embed.Field("규칙 지적",
+            fields.add(new Field("규칙 지적",
                     String.join("\n", findings.stream().map(f -> "- " + f).toList()), false));
         }
         if (hasText(req.aiAnalysis())) {
-            fields.add(new WebhookNotifier.Embed.Field("AI 분석", req.aiAnalysis().strip(), false));
+            fields.add(new Field("AI 분석", req.aiAnalysis().strip(), false));
         }
         if (hasText(req.note())) {
-            fields.add(new WebhookNotifier.Embed.Field("비고", req.note().strip(), false));
+            fields.add(new Field("비고", req.note().strip(), false));
         }
         // 진단 딥링크(감지 알림과 같은 결) — 클릭하면 콘솔이 이 인스턴스+문의 SQL 진단 질문 프리필로 열린다.
         // base-url 미설정이면 링크 생략. 질문은 짧게(URL 단축 — Discord 마스킹 링크 렌더 조건).
         if (!baseUrl.isBlank()) {
             String question = URLEncoder.encode("이 쿼리가 왜 느린지 분석해줘", StandardCharsets.UTF_8);
             String deeplink = baseUrl + "/?instance=" + instance.getId() + "&diagnose=" + question;
-            fields.add(new WebhookNotifier.Embed.Field("진단", AlertEmbeds.link("콘솔에서 진단하기", deeplink), false));
+            fields.add(new Field("진단", AlertEmbeds.link("콘솔에서 진단하기", deeplink), false));
         }
-        return new WebhookNotifier.Embed("DBTower DB팀 문의", EMBED_COLOR, fields);
+        return new Embed("DBTower DB팀 문의", EMBED_COLOR, fields);
     }
 
     private static String codeBlock(String lang, String body) {
@@ -155,11 +159,10 @@ public class InquiryService {
      * PG/MSSQL=카탈로그 재구성 — "재구성" 라벨로 정직 표기, Mongo=컬렉션 JSON).
      * 참조 테이블이 많으면 앞 2개만 DDL로, 나머지는 인덱스 중심 요약 필드 하나로 묶는다(한도 25 방어).
      */
-    private static void addSchemaFields(List<WebhookNotifier.Embed.Field> fields,
-                                        ReferencedSchemaService.ReferencedSchema schema) {
+    private static void addSchemaFields(List<Field> fields, ReferencedSchema schema) {
         int ddlShown = 0;
-        List<ReferencedSchemaService.RefTable> rest = new ArrayList<>();
-        for (ReferencedSchemaService.RefTable t : schema.tables()) {
+        List<RefTable> rest = new ArrayList<>();
+        for (RefTable t : schema.tables()) {
             if (ddlShown >= DDL_TABLES_MAX || !hasText(t.ddl())) {
                 rest.add(t);
                 continue;
@@ -176,20 +179,20 @@ public class InquiryService {
             if (!card.isEmpty()) {
                 v.append('\n').append(card);
             }
-            fields.add(new WebhookNotifier.Embed.Field("관련 테이블 구조 — " + t.name(), v.toString(), false));
+            fields.add(new Field("관련 테이블 구조 — " + t.name(), v.toString(), false));
             ddlShown++;
         }
         if (!rest.isEmpty() || !schema.notFound().isEmpty()) {
             String compact = ReferencedSchemaService.formatCompact(
-                    new ReferencedSchemaService.ReferencedSchema(rest, schema.notFound(), schema.truncated()));
+                    new ReferencedSchema(rest, schema.notFound(), schema.truncated()));
             if (hasText(compact)) {
-                fields.add(new WebhookNotifier.Embed.Field("관련 테이블 구조(요약)", codeBlock("", compact), false));
+                fields.add(new Field("관련 테이블 구조(요약)", codeBlock("", compact), false));
             }
         }
     }
 
     /** 인덱스 카디널리티 — DDL엔 없는 선택도 재료. 확보된 인덱스만, 앞 4개까지(필드 한도 방어). */
-    private static String cardinalityLine(ReferencedSchemaService.RefTable t) {
+    private static String cardinalityLine(RefTable t) {
         List<String> parts = t.indexes().stream()
                 .filter(i -> i.cardinality() != null)
                 .limit(4)
