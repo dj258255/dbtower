@@ -1,5 +1,6 @@
 package io.dbtower.operator.internal;
 
+import io.dbtower.operator.model.VolumeStat;
 import io.dbtower.operator.model.BackupPolicy;
 import io.dbtower.operator.model.BackupPolicy.BackupType;
 import io.dbtower.operator.model.BackupResult;
@@ -1151,4 +1152,27 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         }
         return s.length() > max ? s.substring(0, max) + "..." : s;
     }
+
+    /**
+     * 볼륨 총량/여유(임계 원천 ②) — DB 파일이 사는 볼륨들의 물리 한도.
+     * VIEW SERVER STATE 필요(모니터링 계정이 DMV 조회에 이미 보유). 실패는 empty 강등(보강 신호).
+     */
+    @Override
+    public java.util.Optional<VolumeStat> volumeStat() {
+        String sql = """
+                SELECT SUM(total_bytes) AS total_bytes, SUM(available_bytes) AS available_bytes
+                FROM (SELECT DISTINCT vs.volume_mount_point, vs.total_bytes, vs.available_bytes
+                      FROM sys.master_files mf
+                      CROSS APPLY sys.dm_os_volume_stats(mf.database_id, mf.file_id) vs) v
+                """;
+        try {
+            return jdbc().query(sql, rs -> rs.next()
+                    ? java.util.Optional.of(new VolumeStat(rs.getLong("total_bytes"),
+                            rs.getLong("available_bytes"), null))
+                    : java.util.Optional.empty());
+        } catch (Exception e) {
+            return java.util.Optional.empty();
+        }
+    }
+
 }

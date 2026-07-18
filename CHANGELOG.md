@@ -9,6 +9,8 @@
 ## [Unreleased]
 
 ### Added
+- volumeStat() 공급(임계 원천 ②): MSSQL 볼륨 총량/여유·Oracle autoextend 상한을
+  size_snapshot에 스탬프 — lakehouse 용량 D-day가 seed 없이도 잡힌다(volume_reported).
 - 자연어 서빙 MCP 도구 2종: `lakehouse_query`(장기 마트 SELECT — 가드·행 상한)·
   `lakehouse_card_create`(Metabase 카드 생성, "DBTower AI" 컬렉션 격리) — Metabase API
   경유로 DuckLake 마트를 에이전트에 연다(셀프호스트에 없는 Metabot의 대체 경로).

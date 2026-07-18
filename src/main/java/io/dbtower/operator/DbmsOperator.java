@@ -1,5 +1,6 @@
 package io.dbtower.operator;
 
+import io.dbtower.operator.model.VolumeStat;
 import io.dbtower.operator.model.WaitEvent;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.operator.model.TableBloat;
@@ -124,6 +125,15 @@ public interface DbmsOperator {
      * 기종별 의미 차이(누적 vs 순간 스냅샷 vs 큐 지표)는 WaitEvent 주석 참고.
      */
     List<WaitEvent> waitEvents(int limit);
+
+    /**
+     * 인스턴스 저장 용량 한도 — 용량 예측의 임계 원천 ②(기종이 스스로 아는 볼륨/상한).
+     * 기본은 empty(UNSUPPORTED — MySQL/PG/Mongo는 SQL로 볼륨을 못 본다, 지어내지 않는다).
+     * MSSQL(dm_os_volume_stats)·Oracle(dba_data_files)만 구현한다. 조회 실패도 empty(보강 신호).
+     */
+    default java.util.Optional<VolumeStat> volumeStat() {
+        return java.util.Optional.empty();
+    }
 
     /**
      * 현재 활성 세션과 블로킹 관계 (B2) — "지금 누가 누구를 막고 있나". 읽기 전용.

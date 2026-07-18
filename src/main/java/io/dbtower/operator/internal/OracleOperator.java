@@ -1,5 +1,6 @@
 package io.dbtower.operator.internal;
 
+import io.dbtower.operator.model.VolumeStat;
 import io.dbtower.operator.model.BackupPolicy;
 import io.dbtower.operator.model.BackupPolicy.BackupType;
 import io.dbtower.operator.model.BackupResult;
@@ -831,4 +832,27 @@ public class OracleOperator extends AbstractJdbcOperator {
             throw new OperatorException("Oracle 복제 상태 조회 실패: " + e.getMessage(), e);
         }
     }
+
+    /**
+     * 데이터파일 할당/상한(임계 원천 ②) — totalBytes=현재 할당 합,
+     * maxBytes=autoextend 상한 합(autoextend 아니면 현재 크기가 상한). 볼륨 여유는 모른다(null).
+     * dba_data_files 권한이 없으면 empty 강등(least-privilege 환경 정직).
+     */
+    @Override
+    public java.util.Optional<VolumeStat> volumeStat() {
+        String sql = """
+                SELECT SUM(bytes) AS total_bytes,
+                       SUM(CASE WHEN autoextensible = 'YES' THEN maxbytes ELSE bytes END) AS max_bytes
+                FROM dba_data_files
+                """;
+        try {
+            return jdbc().query(sql, rs -> rs.next()
+                    ? java.util.Optional.of(new VolumeStat(rs.getLong("total_bytes"), null,
+                            rs.getLong("max_bytes")))
+                    : java.util.Optional.empty());
+        } catch (Exception e) {
+            return java.util.Optional.empty();
+        }
+    }
+
 }
