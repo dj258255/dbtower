@@ -343,13 +343,13 @@ public class InsightController {
     }
 
     /** 명령/행 연산 시계열 한 종 — Mean/Max/Min은 서버가 계산해 범례로 내려준다(레퍼런스 하단 표기). */
-    public record SeriesStat(String name, List<MetricPoint> points, Double mean, Double max, Double min) {
-        static SeriesStat of(String name, List<MetricPoint> points) {
+    public record SeriesStat(String name, String group, List<MetricPoint> points, Double mean, Double max, Double min) {
+        static SeriesStat of(String name, String group, List<MetricPoint> points) {
             if (points.isEmpty()) {
-                return new SeriesStat(name, points, null, null, null);
+                return new SeriesStat(name, group, points, null, null, null);
             }
             var stats = points.stream().mapToDouble(MetricPoint::value).summaryStatistics();
-            return new SeriesStat(name, points, stats.getAverage(), stats.getMax(), stats.getMin());
+            return new SeriesStat(name, group, points, stats.getAverage(), stats.getMax(), stats.getMin());
         }
     }
 
@@ -375,27 +375,41 @@ public class InsightController {
         Instant t = to.atZone(ZoneId.systemDefault()).toInstant();
         int step = (int) Math.max(15, Duration.between(f, t).getSeconds() / 200);
 
+        // PromQL 구간 조회 → 포인트. 시리즈가 늘어 헬퍼로 접는다. group은 프론트의 묶음 헤더(Query Activity·Row Operation).
+        java.util.function.Function<String, List<MetricPoint>> pts =
+                q -> toMetricPoints(prometheusClient.queryRange(q, f, t, step));
+        record Metric(String promql, String label, String group) { }
         List<SeriesStat> series = new java.util.ArrayList<>();
         switch (instance.getType()) {
             case MYSQL -> {
-                for (String cmd : List.of("select", "insert", "update", "delete")) {
-                    series.add(SeriesStat.of(cmd.toUpperCase() + " Commands", toMetricPoints(
-                            prometheusClient.queryRange(
-                                    "rate(mysql_global_status_commands_total{command=\"" + cmd + "\"}[3m])",
-                                    f, t, step))));
+                // Query Activity — 전체 Queries + 명령별 rate + PS 호출 + 슬로우 쿼리 + 풀스캔.
+                // Row Operation — InnoDB 행 연산 rate. 전부 mysqld_exporter가 노출하는 global status 지표.
+                for (Metric m : List.of(
+                        new Metric("rate(mysql_global_status_queries[3m])", "Queries", "Query Activity"),
+                        new Metric("rate(mysql_global_status_commands_total{command=\"select\"}[3m])", "SELECT Commands", "Query Activity"),
+                        new Metric("rate(mysql_global_status_commands_total{command=\"insert\"}[3m])", "INSERT Commands", "Query Activity"),
+                        new Metric("rate(mysql_global_status_commands_total{command=\"update\"}[3m])", "UPDATE Commands", "Query Activity"),
+                        new Metric("rate(mysql_global_status_commands_total{command=\"delete\"}[3m])", "DELETE Commands", "Query Activity"),
+                        new Metric("rate(mysql_global_status_commands_total{command=\"stmt_execute\"}[3m])", "Prepared Statement Calls", "Query Activity"),
+                        new Metric("rate(mysql_global_status_slow_queries[3m])", "Slow Query", "Query Activity"),
+                        new Metric("rate(mysql_global_status_select_scan[3m])", "TABLE FULL SCAN", "Query Activity"),
+                        // 행 연산은 exporter가 handlers_total(핸들러 콜)로 노출 — innodb_rows_*는 이 버전에 없어 핸들러 등가로 낸다
+                        new Metric("rate(mysql_global_status_handlers_total{handler=\"read_rnd_next\"}[3m])", "Rows read", "Row Operation"),
+                        new Metric("rate(mysql_global_status_handlers_total{handler=\"write\"}[3m])", "Rows inserted", "Row Operation"),
+                        new Metric("rate(mysql_global_status_handlers_total{handler=\"update\"}[3m])", "Rows updated", "Row Operation"),
+                        new Metric("rate(mysql_global_status_handlers_total{handler=\"delete\"}[3m])", "Rows deleted", "Row Operation"))) {
+                    series.add(SeriesStat.of(m.label(), m.group(), pts.apply(m.promql())));
                 }
             }
             case POSTGRESQL -> {
+                // PG exporter에 명령별 카운터가 없어 pg_stat_database의 tup_* rate(행 연산)를 같은 자리의 정직한 등가로 낸다.
                 String datname = instance.getDbName().replaceAll("[\"\\\\]", "");
-                record Tup(String metric, String label) { }
-                for (Tup tup : List.of(new Tup("tup_returned", "Rows returned"),
-                        new Tup("tup_inserted", "Rows inserted"),
-                        new Tup("tup_updated", "Rows updated"),
-                        new Tup("tup_deleted", "Rows deleted"))) {
-                    series.add(SeriesStat.of(tup.label(), toMetricPoints(
-                            prometheusClient.queryRange(
-                                    "rate(pg_stat_database_" + tup.metric() + "{datname=\"" + datname + "\"}[3m])",
-                                    f, t, step))));
+                for (Metric m : List.of(
+                        new Metric("rate(pg_stat_database_tup_returned{datname=\"" + datname + "\"}[3m])", "Rows returned", "Row Operation"),
+                        new Metric("rate(pg_stat_database_tup_inserted{datname=\"" + datname + "\"}[3m])", "Rows inserted", "Row Operation"),
+                        new Metric("rate(pg_stat_database_tup_updated{datname=\"" + datname + "\"}[3m])", "Rows updated", "Row Operation"),
+                        new Metric("rate(pg_stat_database_tup_deleted{datname=\"" + datname + "\"}[3m])", "Rows deleted", "Row Operation"))) {
+                    series.add(SeriesStat.of(m.label(), m.group(), pts.apply(m.promql())));
                 }
             }
             default -> {

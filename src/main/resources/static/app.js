@@ -521,13 +521,22 @@ async function loadCommandMetrics(from, to) {
     return;
   }
   const fmtStat = (v) => v == null ? "-" : fmtNum(v, v >= 10 ? 1 : 2);
-  box.innerHTML = cm.series.map((s, idx) => `
+  // group 필드로 묶어 렌더(Query Activity·Row Operation) — 쿼리 지표는 쿼리끼리 모여 읽기 쉽게.
+  // 원래 인덱스(idx)로 svg id를 매겨 아래 draw 루프와 일치시킨다.
+  const groups = {};
+  cm.series.forEach((s, idx) => { (groups[s.group || "지표"] ??= []).push({ s, idx }); });
+  const chartBox = ({ s, idx }) => `
     <div class="metric-chart-box command-box">
       <h4>${esc(s.name)}</h4>
       <svg id="cmd-chart-${idx}" width="100%" height="120" preserveAspectRatio="none"></svg>
       <div id="cmd-empty-${idx}" class="muted center" hidden></div>
       <div class="cmd-legend"><span>Mean <b>${fmtStat(s.mean)}</b></span>
         <span>Max <b>${fmtStat(s.max)}</b></span><span>Min <b>${fmtStat(s.min)}</b></span></div>
+    </div>`;
+  box.innerHTML = Object.entries(groups).map(([g, items]) => `
+    <div class="command-group">
+      <h4 class="command-group-title">${esc(g)}</h4>
+      <div class="command-grid">${items.map(chartBox).join("")}</div>
     </div>`).join("");
   cm.series.forEach((s, idx) => {
     drawSimpleChart(`#cmd-chart-${idx}`, `#cmd-empty-${idx}`, s.points ?? [], "#2f9e6e",

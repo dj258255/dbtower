@@ -216,8 +216,9 @@
               <svg id="qps-chart" width="100%" height="140" preserveAspectRatio="none"></svg>
               <div id="qps-empty" class="muted center" hidden></div>
             </div>
-            <!-- 명령/행 연산 세분 차트 — MySQL은 Com_* rate, PG는 tup_* rate(명령 카운터 부재의 정직한 등가), 그 외 미지원 사유 표기 -->
-            <div id="command-charts" class="command-grid"></div>
+            <!-- 명령/행 연산 세분 차트 — Query Activity·Row Operation 묶음. MySQL은 global status rate,
+                 PG는 tup_* rate(명령 카운터 부재의 정직한 등가), 그 외 미지원 사유 표기 -->
+            <div id="command-charts" class="command-groups"></div>
           </div>
           <div class="monitor-card diagnose-card">
             <h3>자연어 근본원인 진단 <span class="hint">(AI가 읽기 도구를 스스로 연쇄 호출해 원인을 서술 — 대상 DB는 바꾸지 않습니다)</span></h3>

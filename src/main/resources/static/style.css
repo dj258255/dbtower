@@ -621,9 +621,15 @@ input[type="datetime-local"] {
 .repl-role { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; margin-left: 4px; }
 .role-primary { background: #e6f4ea; color: #137333; }
 .role-replica { background: #e8f0fe; color: #1a56db; }
-.command-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.command-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .command-box h4 { margin-bottom: 4px; }
 .cmd-legend { display: flex; gap: 14px; font-size: 11px; color: #7b8494; margin-top: 2px; }
+/* 명령/행 연산 묶음 — Query Activity·Row Operation 그룹 헤더로 쿼리는 쿼리끼리 */
+.command-groups { margin-top: 12px; display: flex; flex-direction: column; gap: 18px; }
+.command-group-title {
+  font-size: 12.5px; font-weight: 700; color: var(--text); margin: 0 0 8px;
+  padding-bottom: 6px; border-bottom: 1px solid var(--line);
+}
 
 /* 설정 변경 이력 (B1) — 시간축 드리프트 타임라인 */
 .config-drift-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }

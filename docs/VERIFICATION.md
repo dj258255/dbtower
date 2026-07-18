@@ -2965,6 +2965,21 @@ docs/images/webui/62-redesign-overview.png(사이드바+함대), 63-redesign-mon
 확인(데이터 max 23.4). 둘째 행 클릭 시 detailRightAfterSelected=true(상세가 그 행 바로 다음).
 화면: docs/images/webui/64-inline-detail.png.
 
-**다음 배치(백엔드 필요)**: Metric에 Queries(전체)·Prepared Statement Calls·Slow Query·
-TABLE FULL SCAN·Row Operation 시계열 추가(mysqld_exporter PromQL) + Query Activity 그룹 묶음,
-테이블 상세 정보 토글 스타일 심화.
+## 114. Metric 시계열 확장 + Query Activity/Row Operation 그룹 묶음
+
+레퍼런스 대조에서 빠졌던 MySQL 메트릭을 추가하고, 명령/행 연산 차트를 카테고리로 묶었다.
+
+- **신규 시계열(MySQL)**: Queries(전체)·Prepared Statement Calls(stmt_execute)·Slow Query·
+  TABLE FULL SCAN(select_scan) — Query Activity 그룹. Rows read/inserted/updated/deleted —
+  Row Operation 그룹. 전부 mysqld_exporter의 global status rate.
+- **행 연산 지표명 교정**: 이 exporter 버전은 `innodb_rows_*`가 없어 처음엔 "데이터 없음"으로
+  떴다. Prometheus 라벨을 확인해 `handlers_total{handler=read_rnd_next|write|update|delete}`로
+  교체(핸들러 콜의 정직한 등가). PostgreSQL은 pg_stat_database tup_* rate를 Row Operation으로.
+- **그룹 렌더**: SeriesStat에 group 필드 추가, 프론트가 group별로 헤더+2열 그리드로 묶어 렌더
+  (쿼리는 쿼리끼리). Mean/Max/Min 범례 유지.
+
+**라이브 검증**(2026-07-18, local-mysql, Playwright): Query Activity 8종·Row Operation 4종 렌더,
+Rows read Mean 351·Max 1,802.3, Rows inserted Mean 55.2, Queries Mean 0.97·TABLE FULL SCAN
+Mean 0.37 등 실데이터. 화면: docs/images/webui/65-metric-groups.png.
+
+**다음 배치**: 테이블 상세 정보 토글 스타일 심화, 슬로우 쿼리 표 스타일, AI 분석 이모지 제거 점검.
