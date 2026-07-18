@@ -39,15 +39,16 @@ public class RegistryService {
      */
     public DatabaseInstance upsert(String name, DbmsType type, String host, int port,
                                    String dbName, String username, String password, boolean useTls,
-                                   String teamLabel, String consoleUrl, String nodeFilter) {
+                                   String teamLabel, String consoleUrl, String nodeFilter,
+                                   String environment, String region, String clusterLabel) {
         DatabaseInstance existing = repository.findByName(name).orElse(null);
         if (existing == null) {
             DatabaseInstance created = new DatabaseInstance(name, type, host, port, dbName, username, password, useTls);
-            created.updateMeta(teamLabel, consoleUrl, nodeFilter);
+            created.updateMeta(teamLabel, consoleUrl, nodeFilter, environment, region, clusterLabel);
             return register(created);
         }
         existing.updateConnection(type, host, port, dbName, username, password, useTls);
-        existing.updateMeta(teamLabel, consoleUrl, nodeFilter);
+        existing.updateMeta(teamLabel, consoleUrl, nodeFilter, environment, region, clusterLabel);
         HealthStatus health = operations.health(existing);
         if (!health.up()) {
             throw new IllegalArgumentException("접속 실패로 갱신 거부: " + health.message());

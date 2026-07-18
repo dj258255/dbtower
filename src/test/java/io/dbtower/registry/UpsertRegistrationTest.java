@@ -26,7 +26,7 @@ class UpsertRegistrationTest {
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         DatabaseInstance result = service.upsert("prod-orders", DbmsType.MYSQL,
-                "10.0.0.1", 3306, "orders", "monitor", "pw", false, null, null, null);
+                "10.0.0.1", 3306, "orders", "monitor", "pw", false, null, null, null, null, null, null);
 
         assertEquals("prod-orders", result.getName());
         verify(operations).health(any());
@@ -43,13 +43,28 @@ class UpsertRegistrationTest {
 
         // 같은 이름으로 host가 바뀐 재등록(예: 페일오버로 새 엔드포인트)
         DatabaseInstance result = service.upsert("prod-orders", DbmsType.MYSQL,
-                "10.0.0.2", 3306, "orders", "monitor", "new-pw", false, "db-core", "https://grafana.example/d/1", null);
+                "10.0.0.2", 3306, "orders", "monitor", "new-pw", false, "db-core", "https://grafana.example/d/1", null, null, null, null);
 
         assertEquals("10.0.0.2", result.getHost());
         assertEquals("new-pw", result.getPassword());
         // 접속 정보가 바뀌었으니 기존 풀은 정리돼야 한다
         verify(operations).release(any());
         verify(repository, never()).save(argThat(i -> i != existing)); // 새 엔티티가 아니라 기존 것을 갱신
+    }
+
+    @Test
+    void 환경_리전_클러스터_태그가_보존된다() {
+        when(repository.findByName("prod-orders")).thenReturn(java.util.Optional.empty());
+        when(operations.health(any())).thenReturn(HealthStatus.up("v1", 1));
+        when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        DatabaseInstance result = service.upsert("prod-orders", DbmsType.MYSQL,
+                "10.0.0.1", 3306, "orders", "monitor", "pw", false, null, null, null,
+                "prod", "ap-northeast-2", "orders-cluster");
+
+        assertEquals("prod", result.getEnvironment());
+        assertEquals("ap-northeast-2", result.getRegion());
+        assertEquals("orders-cluster", result.getClusterLabel());
     }
 
     @Test
@@ -60,7 +75,7 @@ class UpsertRegistrationTest {
         when(operations.health(any())).thenReturn(HealthStatus.down("접속 불가"));
 
         assertThrows(IllegalArgumentException.class, () -> service.upsert("prod-orders",
-                DbmsType.MYSQL, "10.0.0.9", 3306, "orders", "monitor", "pw", false, null, null, null));
+                DbmsType.MYSQL, "10.0.0.9", 3306, "orders", "monitor", "pw", false, null, null, null, null, null, null));
         verify(repository, never()).save(any());
     }
 }

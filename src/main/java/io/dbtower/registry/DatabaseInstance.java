@@ -131,11 +131,29 @@ public class DatabaseInstance {
     @Column(length = 200)
     private String nodeFilter;
 
-    /** 담당 라벨·콘솔 링크·노드 매핑 갱신 — 접속 정보와 별개의 운영 메타라 updateConnection과 분리. */
-    public void updateMeta(String teamLabel, String consoleUrl, String nodeFilter) {
+    /**
+     * 조직 태그 (V30 — 레퍼런스의 환경·리전·클러스터 선택 대응). 전부 선택(null=미지정)이고 필터·표기용.
+     * environment=prod/staging/dev, region=자유 라벨(ap-northeast-2·on-prem-dc1 등),
+     * clusterLabel=복제 그룹·서비스 묶음. AWS 고유 개념을 셀프호스트 이기종에 일반화해 담는다.
+     */
+    @Column(length = 50)
+    private String environment;
+
+    @Column(length = 50)
+    private String region;
+
+    @Column(length = 100)
+    private String clusterLabel;
+
+    /** 담당 라벨·콘솔 링크·노드 매핑·조직 태그 갱신 — 접속 정보와 별개의 운영 메타라 updateConnection과 분리. */
+    public void updateMeta(String teamLabel, String consoleUrl, String nodeFilter,
+                           String environment, String region, String clusterLabel) {
         this.teamLabel = teamLabel;
         this.consoleUrl = consoleUrl;
         this.nodeFilter = nodeFilter;
+        this.environment = environment;
+        this.region = region;
+        this.clusterLabel = clusterLabel;
     }
 
     /**

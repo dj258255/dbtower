@@ -101,7 +101,8 @@ async function loadInstances() {
       : [];
     return `
     <div class="instance-card" data-id="${i.id}" data-name="${esc(i.name.toLowerCase())}"
-         data-host="${esc(i.host.toLowerCase())}" data-type="${esc(i.type)}" data-team="${esc(i.teamLabel || "")}">
+         data-host="${esc(i.host.toLowerCase())}" data-type="${esc(i.type)}" data-team="${esc(i.teamLabel || "")}"
+         data-env="${esc(i.environment || "")}" data-region="${esc(i.region || "")}" data-cluster="${esc(i.cluster || "")}">
       <div class="instance-name">
         <span class="type-badge type-${esc(i.type)}">${esc(i.type)}</span>
         ${esc(i.name)}
@@ -115,7 +116,10 @@ async function loadInstances() {
         ${sharedNames.length ? `<span class="server-shared-badge"
           title="같은 서버(${esc(serverKey)})에 등록된 다른 인스턴스: ${esc(sharedNames.join(", "))} — 서버 전역 경보(복제·세션·데드락)는 그룹당 1회">서버 공유 ×${serverCount[serverKey]}</span>` : ""}
         <span class="health-ms" id="healthms-${i.id}"></span></div>
-      ${i.teamLabel || i.consoleUrl ? `<div class="instance-meta">
+      ${i.environment || i.region || i.cluster || i.teamLabel || i.consoleUrl ? `<div class="instance-meta">
+        ${i.environment ? `<span class="tag-badge tag-env" title="환경">${esc(i.environment)}</span>` : ""}
+        ${i.region ? `<span class="tag-badge tag-region" title="리전">${esc(i.region)}</span>` : ""}
+        ${i.cluster ? `<span class="tag-badge tag-cluster" title="클러스터">${esc(i.cluster)}</span>` : ""}
         ${i.teamLabel ? `<span class="team-badge" title="담당 팀/Slack">${esc(i.teamLabel)}</span>` : ""}
         ${i.consoleUrl && /^https?:\/\//.test(i.consoleUrl) ? `<a class="console-link" href="${esc(i.consoleUrl)}" target="_blank" rel="noopener" title="콘솔 딥링크(PI·Grafana 등)">콘솔 ↗</a>` : ""}
       </div>` : ""}
@@ -197,19 +201,31 @@ async function loadInstances() {
 }
 
 // 검색·필터 — 카드 data 속성만 보고 표시/숨김(재렌더 없음). 필터 결과 수를 함께 표기.
+// 차원: 기종·환경·리전·클러스터·팀 (레퍼런스의 환경/리전/클러스터 선택 대응 — 이기종에 일반화).
 function initInstanceFilter(list) {
-  const engineSel = $("#inst-engine"), teamSel = $("#inst-team");
-  const engines = [...new Set(list.map((i) => i.type))].sort();
-  const teams = [...new Set(list.map((i) => i.teamLabel).filter(Boolean))].sort();
-  engineSel.innerHTML = '<option value="">기종 전체</option>' + engines.map((e) => `<option>${esc(e)}</option>`).join("");
-  teamSel.innerHTML = '<option value="">팀 전체</option>' + teams.map((t) => `<option>${esc(t)}</option>`).join("");
+  const engineSel = $("#inst-engine"), envSel = $("#inst-env"),
+        regionSel = $("#inst-region"), clusterSel = $("#inst-cluster"), teamSel = $("#inst-team");
+  // 각 셀렉트를 데이터에 있는 distinct 값으로 채운다(빈 값 제외). 미지정 태그가 하나도 없으면 옵션도 안 생긴다.
+  const opts = (sel, placeholder, values) => {
+    sel.innerHTML = `<option value="">${placeholder}</option>`
+      + [...new Set(values.filter(Boolean))].sort().map((v) => `<option>${esc(v)}</option>`).join("");
+  };
+  opts(engineSel, "기종 전체", list.map((i) => i.type));
+  opts(envSel, "환경 전체", list.map((i) => i.environment));
+  opts(regionSel, "리전 전체", list.map((i) => i.region));
+  opts(clusterSel, "클러스터 전체", list.map((i) => i.cluster));
+  opts(teamSel, "팀 전체", list.map((i) => i.teamLabel));
   const apply = () => {
     const q = $("#inst-search").value.trim().toLowerCase();
-    const eng = engineSel.value, team = teamSel.value;
+    const eng = engineSel.value, env = envSel.value, region = regionSel.value,
+          cluster = clusterSel.value, team = teamSel.value;
     let shown = 0;
     document.querySelectorAll(".instance-card").forEach((c) => {
       const hit = (!q || c.dataset.name.includes(q) || c.dataset.host.includes(q))
         && (!eng || c.dataset.type === eng)
+        && (!env || c.dataset.env === env)
+        && (!region || c.dataset.region === region)
+        && (!cluster || c.dataset.cluster === cluster)
         && (!team || c.dataset.team === team);
       c.style.display = hit ? "" : "none";
       if (hit) shown++;
@@ -217,8 +233,7 @@ function initInstanceFilter(list) {
     $("#inst-count").textContent = shown === list.length ? "" : `${shown}/${list.length}`;
   };
   $("#inst-search").oninput = apply;
-  engineSel.onchange = apply;
-  teamSel.onchange = apply;
+  [engineSel, envSel, regionSel, clusterSel, teamSel].forEach((s) => { s.onchange = apply; });
 }
 
 async function selectInstance(instance, card) {

@@ -2983,3 +2983,21 @@ Rows read Mean 351·Max 1,802.3, Rows inserted Mean 55.2, Queries Mean 0.97·TAB
 Mean 0.37 등 실데이터. 화면: docs/images/webui/65-metric-groups.png.
 
 **다음 배치**: 테이블 상세 정보 토글 스타일 심화, 슬로우 쿼리 표 스타일, AI 분석 이모지 제거 점검.
+
+## 115. 인스턴스 조직 태그 — 환경/리전/클러스터
+
+레퍼런스의 환경·리전·클러스터 선택을 셀프호스트 이기종에 일반화해 인스턴스 메타로 넣었다.
+
+- **스키마**(V30): database_instance에 environment(50)·region(50)·cluster_label(100) 컬럼 추가.
+  전부 선택(null=미지정). teamLabel과 같은 운영 메타 성격이라 updateMeta 계열에 합류.
+- **API**: RegisterRequest/InstanceResponse에 environment·region·cluster 추가(@Size 검증),
+  register·upsert가 updateMeta로 보존. RegistryService.upsert 시그니처 확장(호출부·테스트 반영).
+- **프론트**: 사이드바에 환경/리전/클러스터 필터 셀렉트(distinct 값 자동 채움) 추가, 인스턴스 카드에
+  색상 구분 배지(환경=초록·리전=파랑·클러스터=보라). 필터는 AND 결합(기종·환경·리전·클러스터·팀).
+- **원칙**: 환경/리전/클러스터는 AWS RDS 고유지만 라벨로 일반화 — prod/staging/dev, 자유 리전 라벨,
+  복제 그룹·서비스 묶음. 강제 아니라 필터·표기용.
+
+**라이브 검증**(2026-07-18, Playwright): Flyway V30 적용(now at v30), 데모 7대에 태그 부여 후
+필터 셀렉트에 환경(dev/prod/staging)·리전(ap-northeast-2/us-east-1)·클러스터(billing/catalog/
+legacy/orders/platform) 자동 채움, 카드 배지 렌더, 환경=staging 필터 시 local-postgres·mssql-pitr
+2대만 표시. 단위 테스트 1건 추가(태그 보존). 전체 515건 그린. 화면: docs/images/webui/66-env-region-cluster.png.
