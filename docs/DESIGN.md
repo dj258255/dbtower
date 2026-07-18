@@ -12,7 +12,7 @@
 
 ## 2. 아키텍처
 
-> 아래 그림은 MVP 시점(모듈 5개·3기종)의 기록이다. 현재는 모듈 14개·5기종 —
+> 아래 그림은 MVP 시점(모듈 5개·3기종)의 기록이다. 현재는 모듈 15개·5기종 —
 > 최신 그림은 [architecture-detail.svg](architecture-detail.svg), 모듈 경계는 docs/modules/ 참고.
 
 ```

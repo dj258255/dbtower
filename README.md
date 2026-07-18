@@ -194,7 +194,7 @@ Seq Scan, Clustered Index Scan, TABLE ACCESS FULL, COLLSCAN 등)으로 비효율
 claude mcp add --transport http dbtower http://localhost:8080/mcp
 ```
 
-![MCP 연동 카드 — 도구 목록은 tools/list 실시간 응답, 현재 13종](docs/images/webui/06-mcp.png)
+![MCP 연동 카드 — 도구 목록은 tools/list 실시간 응답, 현재 16종](docs/images/webui/06-mcp.png)
 
 ## 보안 — 사람은 세션, 기계는 토큰
 
@@ -359,14 +359,14 @@ POST {base}/backup                 즉시 백업                  POST {base}/ba
 PUT  {base}/backup-policy          백업 정책                  POST {base}/online-ddl     gh-ost (기본 dry-run)
 POST {base}/sessions/{pid}/kill    세션 종료                  GET  /api/audit            감사 로그 검색
 
-POST /mcp                          MCP (Streamable HTTP) — 도구 13종
+POST /mcp                          MCP (Streamable HTTP) — 도구 16종
 ```
 
 ## 문서
 
 - [PRESENTATION.md](docs/PRESENTATION.md) — 문제 정의부터 설계·실측·교훈까지 전체 서사
 - [DESIGN.md](docs/DESIGN.md) — 인터페이스 경계, 시점 비교 데이터 모델
-- [VERIFICATION.md](docs/VERIFICATION.md) — 62개 절의 실측 기록 (명령·출력·스크린샷)
+- [VERIFICATION.md](docs/VERIFICATION.md) — 109개 절의 실측 기록 (명령·출력·스크린샷)
 - [ai-analysis-rules.md](docs/ai-analysis-rules.md) — 기종별 실행계획 판단 규칙: 근거와 예외
 - [operations.md](docs/operations.md) — 운영 규칙: 통계 소스의 함정과 대응 (digest 포화·PS 가시성·AAS)
 - [least-privilege.md](docs/least-privilege.md) — 기종별 최소 권한 모니터링 계정 (실측 확정)

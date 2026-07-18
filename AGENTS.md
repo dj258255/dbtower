@@ -18,7 +18,7 @@ DBTOWER_WEBHOOK_URL="" ./gradlew bootRun   # 앱 기동 (http://localhost:8080)
 ## 저장소 구조
 
 ```text
-src/main/java/io/dbtower/    Spring Modulith 모듈 14개 (경계는 ModularityTests가 빌드에서 강제)
+src/main/java/io/dbtower/    Spring Modulith 모듈 15개 (경계는 ModularityTests가 빌드에서 강제)
 ├── operator/    DbmsOperator 인터페이스 + 5기종 구현(MySQL/PostgreSQL/MSSQL/Oracle/MongoDB), 커넥션 풀/클라이언트 캐시
 ├── registry/    인스턴스 등록·헬스체크
 ├── insight/     스냅샷 수집, 시점 비교, 활동 그래프, 파라미터/스키마 diff
