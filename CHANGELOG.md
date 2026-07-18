@@ -9,6 +9,8 @@
 ## [Unreleased]
 
 ### Added
+- 대기 이벤트 주기 영속(D1): V25 `wait_event_snapshot` + 5분 수집·7일 보존 잡 —
+  lakehouse 장기 추세 분석의 공급원(첫 사이클 6인스턴스 134행 실측).
 - 장기 베이스라인 수신·병합(D8): V24 `baseline_longterm`(lakehouse 되쓰기 수신) +
   BaselineService 가중 병합 — 요일x시간대 장기 통계를 QPS 축에 결합해 주간 계절성
   오탐을 줄인다(빈 테이블이면 현행 그대로, 회귀 0). `dbtower.baseline.longterm-enabled`.
