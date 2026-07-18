@@ -854,9 +854,17 @@ function renderReferencedSchema(data) {
   }
   let html = "";
   for (const t of tables) {
-    const rows = t.rowCountApprox >= 0 ? ` <span class="muted">≈ ${t.rowCountApprox.toLocaleString()}행</span>` : "";
+    // 행수·크기·인덱스 타입/카디널리티는 tableDetail 원천 — 미확보(-1/null)면 표기 생략(위장 금지)
+    const facts = [];
+    if (t.rowCountApprox >= 0) facts.push(`≈ ${t.rowCountApprox.toLocaleString()}행`);
+    if (t.dataBytes >= 0) facts.push(`데이터 ${fmtBytes(t.dataBytes)}`);
+    if (t.indexBytes >= 0) facts.push(`인덱스 ${fmtBytes(t.indexBytes)}`);
+    const rows = facts.length ? ` <span class="muted">${facts.join(" · ")}</span>` : "";
     const idx = (t.indexes ?? []).length
-      ? (t.indexes.map((i) => `${esc(i.name)}${i.unique ? "<span class=\"idx-u\">[U]</span>" : ""}(${esc((i.columns ?? []).join(","))})`).join(", "))
+      ? (t.indexes.map((i) => {
+          const extra = [i.type ? esc(i.type) : "", i.cardinality != null ? `card≈${Number(i.cardinality).toLocaleString()}` : ""].filter(Boolean).join("·");
+          return `${esc(i.name)}${i.unique ? "<span class=\"idx-u\">[U]</span>" : ""}(${esc((i.columns ?? []).join(","))})${extra ? ` <span class="muted">${extra}</span>` : ""}`;
+        }).join(", "))
       : '<span class="muted">없음</span>';
     const cols = (t.columns ?? []).map((c) => `${esc(c.name)} <span class="muted">${esc(c.type)}${c.nullable ? "?" : ""}</span>`).join(", ");
     html += `<div class="finding-item schema-table"><b>${esc(t.name)}</b>${rows}

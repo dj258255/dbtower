@@ -709,11 +709,25 @@ public class PostgresOperator extends AbstractJdbcOperator {
         try {
             // 기본 통계 — reltuples(통계 추정 행수), pg_table_size(TOAST 포함 데이터), pg_indexes_size.
             // to_regclass가 아니라 pg_class JOIN으로 잡되 시스템 스키마는 제외한다(describeSchema와 동일 원칙).
+            // 파티션 부모(relkind='p')는 자체 저장소가 없어 reltuples=-1·크기 0으로 나온다 — pg_partition_tree로
+            // 리프 파티션을 합산해야 실제 값이다. FILTER(reltuples>=0)는 미ANALYZE 리프(-1)를 합산에서 제외하고,
+            // 전 리프가 미ANALYZE면 합계 NULL → -1(미확보 정직).
             String statsSql = """
                     SELECT c.oid,
-                           c.reltuples::bigint AS row_count,
-                           pg_table_size(c.oid)   AS data_bytes,
-                           pg_indexes_size(c.oid) AS index_bytes
+                           CASE WHEN c.relkind = 'p'
+                                THEN (SELECT COALESCE(sum(pc.reltuples) FILTER (WHERE pc.reltuples >= 0), -1)::bigint
+                                      FROM pg_partition_tree(c.oid) pt
+                                      JOIN pg_class pc ON pc.oid = pt.relid
+                                      WHERE pt.isleaf)
+                                ELSE c.reltuples::bigint END AS row_count,
+                           CASE WHEN c.relkind = 'p'
+                                THEN (SELECT COALESCE(sum(pg_table_size(pt.relid)), 0)::bigint
+                                      FROM pg_partition_tree(c.oid) pt WHERE pt.isleaf)
+                                ELSE pg_table_size(c.oid) END AS data_bytes,
+                           CASE WHEN c.relkind = 'p'
+                                THEN (SELECT COALESCE(sum(pg_indexes_size(pt.relid)), 0)::bigint
+                                      FROM pg_partition_tree(c.oid) pt WHERE pt.isleaf)
+                                ELSE pg_indexes_size(c.oid) END AS index_bytes
                     FROM pg_class c
                     JOIN pg_namespace n ON n.oid = c.relnamespace
                     WHERE c.relname = ?
@@ -864,6 +878,9 @@ public class PostgresOperator extends AbstractJdbcOperator {
                     note.append(triggers > 0 ? "와" : "").append(" 파티션");
                 }
                 note.append(" 정의는 DDL에 포함하지 않음.");
+            }
+            if (partitioned) {
+                note.append(" 파티션 테이블 — 행수·데이터·인덱스 크기는 리프 파티션 합산.");
             }
             return new TableDetail(tableName, null, stats.rowCount(), stats.dataBytes(), stats.indexBytes(),
                     avgRowBytes, null, ddl, TableDetail.DdlSource.RECONSTRUCTED, indexes, note.toString());
@@ -1356,6 +1373,8 @@ public class PostgresOperator extends AbstractJdbcOperator {
      * DDL 텍스트라 컬럼 리스트·유니크를 파싱해야 해서, 대신 카탈로그를 직접 조인했다.
      * 시스템 스키마(pg_catalog, information_schema)는 제외. 표현식 인덱스의 attnum=0 요소는
      * pg_attribute 조인에서 빠진다(컬럼으로 환원 불가) — diff 요약에서는 그 부분만 비는 것을 허용한다.
+     * relkind는 일반('r')과 파티션 부모('p')를 함께 잡는다 — 'r'만 잡으면 파티션 부모의 인덱스가
+     * 통째로 빠져 "idx: (없음)"으로 오판된다(문의 첨부에서 실제로 겪은 회귀).
      */
     @Override
     public SchemaSnapshot describeSchema() {
@@ -1375,7 +1394,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
                 JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
                 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
                 WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-                  AND t.relkind = 'r'
+                  AND t.relkind IN ('r', 'p')
                 ORDER BY t.relname, i.relname, k.ord
                 """;
         try {

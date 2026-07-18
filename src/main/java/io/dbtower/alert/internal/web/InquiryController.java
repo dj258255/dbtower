@@ -2,6 +2,7 @@ package io.dbtower.alert.internal.web;
 
 import io.dbtower.alert.internal.InquiryService;
 import io.dbtower.alert.internal.ReferencedSchemaService;
+import io.dbtower.operator.model.TableDetail;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -41,8 +42,8 @@ public class InquiryController {
 
     /** 테이블 하나의 상세 — 테이블 상세 정보(CREATE TABLE·기본 통계·인덱스 카디널리티, 심화 아크 3) */
     @PostMapping("/api/instances/{id}/table-detail")
-    public io.dbtower.operator.model.TableDetail tableDetail(@PathVariable Long id,
-                                                             @RequestBody TableRequest req) {
+    public TableDetail tableDetail(@PathVariable Long id,
+                                   @RequestBody TableRequest req) {
         return referencedSchema.tableDetail(id, req.table());
     }
 

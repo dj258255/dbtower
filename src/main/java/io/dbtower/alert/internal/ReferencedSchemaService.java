@@ -22,7 +22,8 @@ import java.util.Set;
  * 문의·진단에 붙일 "이 쿼리가 참조하는 테이블들의 구조" (심화 아크 2, I1·I3).
  *
  * SQL에서 뽑은 후보 테이블명을 describeSchema 결과와 교집합으로 검증하고(존재하지 않는 후보=CTE·별칭은
- * 자동 탈락, notFound로 정직 표기), 인덱스 중심 요약에 tableStats의 대략 행수("≈")를 얹는다.
+ * 자동 탈락, notFound로 정직 표기), 존재가 확인된 테이블은 tableDetail로 승격해 행수·데이터/인덱스 크기·
+ * 인덱스 타입·카디널리티까지 얹는다. tableDetail이 실패하면 describeSchema+tableStats 요약으로 폴백.
  *
  * 스코프: 전용 describeTables(IN-조회) 대신 기존 describeSchema를 재사용해 필터한다. 대부분의 스키마는
  * describeSchema 상한(200) 안이라 실효는 같고, 상한 밖 테이블은 notFound로 드러낸다(향후 최적화 여지).
@@ -42,11 +43,13 @@ public class ReferencedSchemaService {
     public record RefColumn(String name, String type, boolean nullable) {
     }
 
-    public record RefIndex(String name, List<String> columns, boolean unique) {
+    /** type·cardinality는 tableDetail이 준 값(기종별 미확보면 null) — 선택도 판단 재료 */
+    public record RefIndex(String name, List<String> columns, boolean unique, String type, Long cardinality) {
     }
 
-    /** rowCountApprox < 0 이면 행수 미확보(tableStats 상한 밖 등) */
-    public record RefTable(String name, long rowCountApprox, List<RefColumn> columns, List<RefIndex> indexes) {
+    /** rowCountApprox/dataBytes/indexBytes < 0 이면 미확보(tableStats 상한 밖, tableDetail 실패 등) */
+    public record RefTable(String name, long rowCountApprox, long dataBytes, long indexBytes,
+                           List<RefColumn> columns, List<RefIndex> indexes) {
     }
 
     /** notFound = SQL엔 있으나 스키마에 없던 후보(CTE·별칭·상한 밖·오탈자). truncated = 스키마 상한에 걸림 */
@@ -81,10 +84,32 @@ public class ReferencedSchemaService {
                 notFound.add(name);
                 continue;
             }
-            long rows = rowCounts.getOrDefault(t.name().toLowerCase(Locale.ROOT), -1L);
-            tables.add(new RefTable(t.name(), rows, columns(t.columns()), indexes(t.indexes())));
+            tables.add(enrich(operator, t, rowCounts));
         }
         return new ReferencedSchema(tables, notFound, snapshot.truncated());
+    }
+
+    /**
+     * 테이블 상세(tableDetail)를 우선 원천으로 쓴다 — describeSchema 요약보다 정확하다.
+     * 특히 파티션 부모는 describeSchema/tableStats 경로에서 행수 0·인덱스 누락으로 오판된 전례가 있어
+     * (V18 파티셔닝 이후 문의 첨부 회귀), 리프 합산을 아는 tableDetail이 정답이다.
+     * tableDetail 실패 시엔 기존 요약 경로로 폴백한다(첨부가 문의를 막지 않는 원칙 그대로).
+     */
+    private RefTable enrich(DbmsOperator operator, TableSchema t, Map<String, Long> rowCounts) {
+        long rows = rowCounts.getOrDefault(t.name().toLowerCase(Locale.ROOT), -1L);
+        TableDetail detail = null;
+        try {
+            detail = operator.tableDetail(t.name());
+        } catch (RuntimeException e) {
+            // 상세 실패는 요약 폴백으로 흡수 — 구조 요약만으로도 첨부는 유효하다
+        }
+        if (detail == null || detail.ddlSource() == TableDetail.DdlSource.UNSUPPORTED) {
+            return new RefTable(t.name(), rows, -1, -1, columns(t.columns()), indexes(t.indexes()));
+        }
+        long detailRows = detail.rowCount() >= 0 ? detail.rowCount() : rows;
+        List<RefIndex> idx = detail.indexes().isEmpty() ? indexes(t.indexes()) : fromDetail(detail.indexes());
+        return new RefTable(t.name(), detailRows, detail.dataBytes(), detail.indexBytes(),
+                columns(t.columns()), idx);
     }
 
     /** tableStats로 대략 행수 맵 — 없거나 실패하면 빈 맵(행수는 부가 정보라 없어도 구조는 보여준다) */
@@ -102,7 +127,11 @@ public class ReferencedSchemaService {
         return map;
     }
 
-    /** 인덱스 중심 요약 텍스트 — 문의 embed·본문 공용. 컬럼은 타입+NULL, 인덱스는 유니크 표기. */
+    /**
+     * 인덱스 중심 요약 텍스트 — 문의 embed·본문 공용. 행수에 데이터·인덱스 크기를 얹고,
+     * 인덱스는 유니크·타입·카디널리티(확보 시)까지 — 테이블 상세 화면과 같은 재료를 텍스트로 압축한다.
+     * DDL 전문은 embed 필드 한도(1024자) 밖이라 콘솔 상세 패널(진단 딥링크)로 위임한다.
+     */
     public static String formatCompact(ReferencedSchema schema) {
         if (schema.tables().isEmpty() && schema.notFound().isEmpty()) {
             return "";
@@ -110,14 +139,24 @@ public class ReferencedSchemaService {
         StringBuilder sb = new StringBuilder();
         for (RefTable t : schema.tables()) {
             sb.append(t.name());
+            List<String> facts = new ArrayList<>();
             if (t.rowCountApprox() >= 0) {
-                sb.append(" (≈ ").append(String.format(Locale.ROOT, "%,d", t.rowCountApprox())).append("행)");
+                facts.add("≈ " + String.format(Locale.ROOT, "%,d", t.rowCountApprox()) + "행");
+            }
+            if (t.dataBytes() >= 0) {
+                facts.add("데이터 " + humanBytes(t.dataBytes()));
+            }
+            if (t.indexBytes() >= 0) {
+                facts.add("인덱스 " + humanBytes(t.indexBytes()));
+            }
+            if (!facts.isEmpty()) {
+                sb.append(" (").append(String.join(" · ", facts)).append(")");
             }
             sb.append('\n');
             if (!t.indexes().isEmpty()) {
                 sb.append("  idx: ");
                 sb.append(String.join(", ", t.indexes().stream()
-                        .map(i -> i.name() + (i.unique() ? "[U]" : "") + "(" + String.join(",", i.columns()) + ")")
+                        .map(ReferencedSchemaService::formatIndex)
                         .toList()));
                 sb.append('\n');
             } else {
@@ -144,6 +183,34 @@ public class ReferencedSchemaService {
         return sb.toString().strip();
     }
 
+    /** 인덱스 하나의 표기 — 이름[U](컬럼들) 타입·card≈카디널리티. 미확보 항목은 표기 자체를 생략(위장 금지). */
+    private static String formatIndex(RefIndex i) {
+        StringBuilder sb = new StringBuilder(i.name());
+        if (i.unique()) {
+            sb.append("[U]");
+        }
+        sb.append("(").append(String.join(",", i.columns())).append(")");
+        if (i.type() != null) {
+            sb.append(" ").append(i.type());
+        }
+        if (i.cardinality() != null) {
+            sb.append("·card≈").append(String.format(Locale.ROOT, "%,d", i.cardinality()));
+        }
+        return sb.toString();
+    }
+
+    /** 1024 진법, 소수 한 자리 — 콘솔 fmtBytes와 같은 표기 규칙 */
+    private static String humanBytes(long bytes) {
+        double n = bytes;
+        String[] units = {"B", "KB", "MB", "GB", "TB"};
+        int u = 0;
+        while (n >= 1024 && u < units.length - 1) {
+            n /= 1024;
+            u++;
+        }
+        return u == 0 ? bytes + "B" : String.format(Locale.ROOT, "%.1f%s", n, units[u]);
+    }
+
     private static List<RefColumn> columns(List<ColumnSchema> cols) {
         List<RefColumn> out = new ArrayList<>();
         for (ColumnSchema c : cols) {
@@ -152,10 +219,19 @@ public class ReferencedSchemaService {
         return out;
     }
 
+    /** describeSchema 요약 경로의 폴백 변환 — 타입·카디널리티는 이 경로에선 미확보(null) */
     private static List<RefIndex> indexes(List<IndexSchema> idx) {
         List<RefIndex> out = new ArrayList<>();
         for (IndexSchema i : idx) {
-            out.add(new RefIndex(i.name(), i.columns(), i.unique()));
+            out.add(new RefIndex(i.name(), i.columns(), i.unique(), null, null));
+        }
+        return out;
+    }
+
+    private static List<RefIndex> fromDetail(List<TableDetail.IndexDetail> idx) {
+        List<RefIndex> out = new ArrayList<>();
+        for (TableDetail.IndexDetail i : idx) {
+            out.add(new RefIndex(i.name(), i.columns(), i.unique(), i.type(), i.cardinality()));
         }
         return out;
     }
