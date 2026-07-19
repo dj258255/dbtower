@@ -366,7 +366,7 @@ POST /mcp                          MCP (Streamable HTTP) — 도구 16종
 
 - [PRESENTATION.md](docs/PRESENTATION.md) — 문제 정의부터 설계·실측·교훈까지 전체 서사
 - [DESIGN.md](docs/DESIGN.md) — 인터페이스 경계, 시점 비교 데이터 모델
-- [VERIFICATION.md](docs/VERIFICATION.md) — 109개 절의 실측 기록 (명령·출력·스크린샷)
+- [VERIFICATION.md](docs/VERIFICATION.md) — 117개 절의 실측 기록 (명령·출력·스크린샷)
 - [ai-analysis-rules.md](docs/ai-analysis-rules.md) — 기종별 실행계획 판단 규칙: 근거와 예외
 - [operations.md](docs/operations.md) — 운영 규칙: 통계 소스의 함정과 대응 (digest 포화·PS 가시성·AAS)
 - [least-privilege.md](docs/least-privilege.md) — 기종별 최소 권한 모니터링 계정 (실측 확정)
