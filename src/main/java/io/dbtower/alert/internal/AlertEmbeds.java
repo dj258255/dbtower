@@ -179,12 +179,14 @@ public final class AlertEmbeds {
         }
         // 지적은 불릿 한 덩어리 — 항목 사이에 빈 줄(\n\n)을 넣어 다닥다닥 붙지 않게 한다(가독성).
         // Discord 필드 값 한도(1024)는 WebhookNotifier가 경계에서 자른다.
+        // 백틱 제거: MySQL digest가 식별자를 `로 감싸는데, Discord가 이를 인라인 코드로 해석해
+        // 문장이 코드 조각들로 갈라져 보인다. 식별자 따옴표일 뿐이라 걷어내도 SQL 의미는 그대로다.
         StringBuilder bullets = new StringBuilder();
         for (String f : findings) {
             if (bullets.length() > 0) {
                 bullets.append("\n\n");
             }
-            bullets.append("• ").append(f);
+            bullets.append("• ").append(f.replace("`", ""));
         }
         fields.add(new Embed.Field("감지 내용", bullets.toString(), false));
         if (analysis != null && !analysis.isBlank()) {
