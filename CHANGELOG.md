@@ -8,7 +8,15 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-19
+
+DBTower를 실제 운영 도구로 밀어붙인 릴리즈. 현업 DBA의 병목이 남는 다섯 지점(설정 드리프트·스키마 변경 리뷰 게이트·인덱스 사용 통계·인시던트·월간 리포트)을 기능으로 끊고, 웹 콘솔을 좌측 사이드바+모니터링 서브내비 구조로 전면 개편했으며, lakehouse 장기 분석계와 양방향 루프를 닫았다. 모듈 15개, MCP 도구 16종, 테스트 515건 CI, VERIFICATION 117개 절.
+
 ### Added
+- 운영 병목 다섯 곳 끊기(B1~B5): 설정 드리프트 이력(파라미터 diff의 공간축에 시간축 — 거울 테이블+변경 로그로 무변경 주기엔 스냅샷 한 줄, work_mem 변경 감지해 카드), 스키마 변경 리뷰 게이트(배포 전 DDL/대량 DML을 JSqlParser 구문 트리로 판정 — 락 위험·DEFAULT 없는 NOT NULL·DROP·WHERE 없는 대량 변경, 실제 행수로 락 확정 + AI 1차 소견 + ADMIN 승인·자동 감사, 실행은 안 하고 gh-ost 경로만 안내), 인덱스 사용 통계 주기 영속(FinOps 미사용 인덱스 관측기간 라벨), 인시던트 리포트(장애 구간 시점비교·설정변경·플랜플립·대기·가용성 재구성 + AI 요약), 월간 점검 리포트(@monthly 자동 발행). 신규 모듈 review, 공개 파사드 score·finops로 Modulith 경계를 순환 없이 유지
+- 웹 콘솔 전면 개편(의존성 0·빌드체인 0 유지): 좌측 사이드바(검색·필터 구동 인스턴스 선택기 — 초기 빈 리스트, 매칭분만 렌더해 수백~수천 대 확장) + 함대 개요 행 + 모니터링 카테고리 서브내비(성능·진단·거버넌스·백업/리포트·비용/인프라). 5기종 공식 브랜드 로고(devicon SVG 스프라이트 <use>), 모니터링 차트 호버 툴팁(커서 최근점 정확 수치·시각), 쿼리 상세를 클릭 행 바로 아래 인라인 확장, MySQL 클래식 EXPLAIN 실행계획 표, SQL·실행계획 JSON 구문 색상강조(경량 토크나이저), 커스텀 드롭다운·전역 커스텀 툴팁, 전체 반응형 레이아웃
+- Metric 시계열 확장: MySQL Query Activity(Queries·Prepared Statement Calls·Slow Query·TABLE FULL SCAN)·Row Operation 그룹 렌더
+- 인스턴스 조직 태그(V30): 환경/리전/클러스터 라벨 + 사이드바 5차원 필터(AWS RDS 개념을 이기종에 라벨로 일반화)
 - volumeStat() 공급(임계 원천 ②): MSSQL 볼륨 총량/여유·Oracle autoextend 상한을
   size_snapshot에 스탬프 — lakehouse 용량 D-day가 seed 없이도 잡힌다(volume_reported).
 - 자연어 서빙 MCP 도구 2종: `lakehouse_query`(장기 마트 SELECT — 가드·행 상한)·
