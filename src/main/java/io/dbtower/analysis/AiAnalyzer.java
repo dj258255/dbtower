@@ -2,12 +2,15 @@ package io.dbtower.analysis;
 
 import com.anthropic.client.AnthropicClient;
 import com.anthropic.client.okhttp.AnthropicOkHttpClient;
+import com.anthropic.models.messages.CacheControlEphemeral;
 import com.anthropic.models.messages.Message;
+import com.anthropic.models.messages.MessageCreateParams;
+import com.anthropic.models.messages.OutputConfig;
+import com.anthropic.models.messages.StopReason;
+import com.anthropic.models.messages.TextBlockParam;
+import com.anthropic.models.messages.ThinkingConfigAdaptive;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.anthropic.models.messages.MessageCreateParams;
-import com.anthropic.models.messages.StopReason;
-import com.anthropic.models.messages.ThinkingConfigAdaptive;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,6 +19,7 @@ import org.springframework.stereotype.Component;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
@@ -52,6 +56,7 @@ public class AiAnalyzer {
     private final String model;
     private final Path rulesPath;
     private final long maxTokens;
+    private final String effort;
     private final Mode mode;
     private volatile AnthropicClient client;
 
@@ -59,10 +64,16 @@ public class AiAnalyzer {
                       @Value("${dbtower.ai.rules-path:docs/ai-analysis-rules.md}") String rulesPath,
                       // adaptive thinking이 켜져 있어 이 예산은 "추론 + 응답"의 합산 상한이다.
                       // 너무 낮으면 추론이 예산을 먹고 응답이 중간에서 잘린다(D3 루프가 그걸 형식 오류로 오인).
-                      @Value("${dbtower.ai.max-tokens:8192}") long maxTokens) {
+                      @Value("${dbtower.ai.max-tokens:8192}") long maxTokens,
+                      // 추론 깊이(low~max). 배포별 튜닝 손잡이다.
+                      // 기본은 high — 낮추면 싸질 것으로 봤으나 실측에서 근거가 나오지 않았다.
+                      // D3 진단 1건 기준 medium이 high 대비 -1.4%(출력 2782 vs 2796 토큰)로 노이즈 수준이라,
+                      // 근거 없이 기본 동작을 바꾸지 않는다(VERIFICATION 121절).
+                      @Value("${dbtower.ai.effort:high}") String effort) {
         this.model = model;
         this.rulesPath = Path.of(rulesPath);
         this.maxTokens = maxTokens;
+        this.effort = effort;
         this.mode = detectMode();
         switch (mode) {
             case API -> log.info("AI 1차 분석 활성화 — Anthropic API (model={})", model);
@@ -141,14 +152,7 @@ public class AiAnalyzer {
     }
 
     private String callApi(String system, String user) {
-        MessageCreateParams params = MessageCreateParams.builder()
-                .model(model)
-                .maxTokens(maxTokens)
-                .thinking(ThinkingConfigAdaptive.builder().build())
-                .system(system)
-                .addUserMessage(user)
-                .build();
-        Message message = client().messages().create(params);
+        Message message = client().messages().create(buildParams(model, maxTokens, effort, system, user));
         logUsage(message);
         if (message.stopReason().filter(StopReason.MAX_TOKENS::equals).isPresent()) {
             // 절단본을 그대로 올리면 안 된다 — 잘린 JSON을 받은 D3 루프가 "형식 밖 텍스트"로
@@ -160,6 +164,34 @@ public class AiAnalyzer {
                 .flatMap(block -> block.text().stream())
                 .map(t -> t.text())
                 .reduce("", String::concat);
+    }
+
+    /**
+     * API 요청 조립 — 시스템 프롬프트에 캐시 브레이크포인트를 건다.
+     *
+     * <p>{@code .system(String)} 오버로드는 cache control을 실을 수 없어 블록 형태로 넘긴다.
+     * 시스템 프롬프트(판단 기준 문서 + 도구 카탈로그)는 호출 간 불변이라 두 번째 호출부터 읽기
+     * 요금(정가의 10분의 1)으로 받는다. 휘발성 값을 여기 섞으면 프리픽스가 깨져 무효가 되므로
+     * 대상·시각은 사용자 메시지에 싣는다(DiagnosisService 참고).
+     *
+     * <p>Spring 없이도 테스트 가능하도록 static — 네트워크 없이 조립 자체를 검증한다.
+     */
+    static MessageCreateParams buildParams(String model, long maxTokens, String effort,
+                                           String system, String user) {
+        return MessageCreateParams.builder()
+                .model(model)
+                .maxTokens(maxTokens)
+                .thinking(ThinkingConfigAdaptive.builder().build())
+                .outputConfig(OutputConfig.builder()
+                        .effort(OutputConfig.Effort.of(effort))
+                        .build())
+                .systemOfTextBlockParams(List.of(
+                        TextBlockParam.builder()
+                                .text(system)
+                                .cacheControl(CacheControlEphemeral.builder().build())
+                                .build()))
+                .addUserMessage(user)
+                .build();
     }
 
     /**
@@ -188,8 +220,9 @@ public class AiAnalyzer {
         // 어떤 로컬 환경에서도 같은 형식의 결과가 나오게 한다.
         // --output-format json: 본문만이 아니라 usage·stop_reason이 실린 봉투를 받는다 —
         // 구독(CLI) 경로에도 API 경로와 같은 관측점을 두어야 캐시·절단을 짝비교로 잴 수 있다.
+        // --effort: API 경로의 outputConfig.effort와 같은 손잡이를 구독 경로에도 둔다(두 경로 동일 설정)
         Process p = new ProcessBuilder("claude", "-p", "--output-format", "json",
-                "--setting-sources", "", "--append-system-prompt", system)
+                "--effort", effort, "--setting-sources", "", "--append-system-prompt", system)
                 .redirectErrorStream(false).start();
         try (var stdin = p.getOutputStream()) {
             stdin.write(user.getBytes(StandardCharsets.UTF_8));

@@ -47,6 +47,20 @@ class AiAnalyzerTest {
     }
 
     @Test
+    void API_요청은_시스템_프롬프트에_캐시_브레이크포인트를_건다() {
+        // .system(String) 오버로드는 cache control을 실을 수 없다 — 블록 형태로 넘겨야 캐시가 걸린다.
+        // 네트워크 없이 조립만 검증한다(잘못 조립하면 API 키가 있는 환경에서만 터진다).
+        var params = AiAnalyzer.buildParams("claude-opus-4-8", 8192L, "medium", "판단 기준 문서", "질문");
+
+        var blocks = params.system().orElseThrow().textBlockParams().orElseThrow();
+        assertThat(blocks).hasSize(1);
+        assertThat(blocks.get(0).text()).isEqualTo("판단 기준 문서");
+        assertThat(blocks.get(0).cacheControl()).isPresent();
+        assertThat(params.outputConfig().orElseThrow().effort().orElseThrow().asString())
+                .isEqualTo("medium");
+    }
+
+    @Test
     void 봉투가_아니면_평문으로_그대로_올린다() {
         // 구버전 CLI나 형식 변경에 대비한 폴백 — 형식이 바뀌었다고 진단이 죽으면 안 된다
         assertThat(extractCliResult("Seq Scan 하나로는 단정할 수 없다."))
