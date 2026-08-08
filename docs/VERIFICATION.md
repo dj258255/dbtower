@@ -3046,3 +3046,54 @@ ORDER BY 개행, PG EXPLAIN JSON 들여쓰기(Sort→Aggregate→Merge Append→
 - 백업 인라인 펼침: 자동 선택 없이 5신호 분해, 가용성 lazy "가용·핑 1ms·8.4.10".
 - 세션 표 폭: 1920 카드에 꽉(넘침 없음), 1440 카드 내 가로 스크롤, 전 폭에서 페이지 가로 넘침 0.
 - 레이아웃 반응형: 1920 뷰포트→app-shell 1882px(98vw)·workspace 1464px 확장 확인(고정 폭 아님).
+
+## 118. AI 응답 절단 감지 — "형식 밖 텍스트" 오귀속 해소 + 구독 경로 계측
+
+D3 진단이 잘린 응답을 받으면 원인을 틀리게 보고하고 남은 스텝을 돌지 않은 채 끝났다. `maxTokens`가
+2048인데 adaptive thinking이 켜져 있어 이 예산은 "추론 + 응답"의 합산 상한이다. 추론이 예산을 먹으면
+결정 JSON이 중간에서 잘리고, `extractJson`이 null을 돌려주고, 루프가 "AI가 형식 밖 텍스트를 반환했다"는
+note와 함께 즉시 종료했다. 형식을 안 지킨 게 아니라 예산이 모자랐던 것이다.
+
+`stop_reason`을 아무도 보지 않는 게 원인이었다(코드베이스 전체 0건). 절단과 정상 종료가 구분되지 않았다.
+
+- **API 경로**: `Message.stopReason()`이 `MAX_TOKENS`면 예외를 던진다. 기존 `complete()`의 catch가
+  받아 `Optional.empty()`로 내리고, 루프의 "응답 못 받음" 분기가 처리한다. 새 경로를 만들지 않고
+  이미 있던 정직한 실패 경로를 재사용했다. note 문구에 "토큰 예산 초과"를 추가해 오귀속을 없앴다.
+- **예산**: 2048 → 8192, `dbtower.ai.max-tokens`로 외부화. adaptive thinking이 켜진 상태에서 2048은
+  추론이 다 먹을 수 있는 값이다.
+- **구독(CLI) 경로 계측**: `claude -p`에 `--output-format json`을 붙여 usage·stop_reason이 실린 봉투를
+  받는다. API 경로에만 관측점이 있으면 두 경로를 같은 눈금으로 비교할 수 없다. 봉투가 아니면 평문으로
+  간주하는 폴백을 둬서 CLI 형식이 바뀌어도 진단이 죽지 않는다.
+- **usage 로깅**: 두 경로 모두 `stop / input / cacheWrite / cacheRead / output`을 같은 필드 순서로
+  DEBUG 로깅. 캐시가 실제로 걸리는지는 이 로그로만 보인다.
+
+**검증**(2026-08-08):
+- `AiAnalyzerTest` 4건 — 정상 봉투에서 본문 추출, `stop_reason=max_tokens` 예외, `is_error` 예외,
+  봉투가 아닌 평문 폴백.
+- 실앱 라이브(claude CLI 구독 경로, local-postgres): D3 진단 2회 × 6호출 전부 `stop=end_turn`,
+  절단 0건. 로그 예시 `stop=end_turn input=2 cacheWrite=5369 cacheRead=31040 output=196 costUsd=0.0762`.
+- 판단 기준 문서 전문(7,791자)을 `--append-system-prompt`로 넘겨도 argv 한계에 걸리지 않음을 확인.
+
+## 119. MCP 도구 화이트리스트 동기화 — 조용히 안 보이던 읽기 도구 2종
+
+MCP에 등록된 도구 16개 중 3개가 D3 진단 에이전트에게 노출되지 않고 있었다. `partitions`(D5, 설명에
+"조회 전용 — 파티션 생성·삭제는 하지 않는다")와 `lakehouse_query`(15단계, "SELECT 전용")는 둘 다
+읽기인데 도구를 추가하면서 `READ_ONLY_TOOLS` 갱신을 잊은 것이다.
+
+에러가 나지 않아 아무도 몰랐다. `toolCatalog()`가 화이트리스트로 필터링하므로 에이전트는 그 도구의
+존재 자체를 모르고, 요청하지 않으니 거부 로그도 남지 않는다. 파티션 관련 질문에도 다른 도구로
+그럴듯한 답을 만들고 "못 봤다"는 말을 하지 않는다.
+
+- `partitions`·`lakehouse_query`를 화이트리스트에 추가.
+- `DELIBERATELY_HIDDEN_TOOLS`를 신설해 `lakehouse_card_create`(Metabase 카드 생성, POST)를 등록.
+  **"빼기로 한 것"과 "넣는 걸 잊은 것"을 코드에서 구분**하려는 것 — 이 구분이 없으면 정합성 테스트가
+  의도적 제외까지 실패로 잡고, 사람이 테스트를 느슨하게 만들어 방어가 사라진다.
+- 정합성 테스트 추가: 등록된 도구 중 화이트리스트에도 제외 목록에도 없는 것이 있으면 실패. 반대 방향
+  (화이트리스트에만 있고 등록되지 않은 유령 도구)도 함께 검사.
+
+**검증**(2026-08-08):
+- 테스트가 실제로 회귀를 잡는지 확인 — 화이트리스트를 수정 전 상태로 되돌려 실행:
+  `expected: <[]> but was: <[lakehouse_query, partitions]>`. 복구 후 통과.
+- 커밋 이력으로 원인 확인: `partitions` 2026-07-05 추가, 화이트리스트 최종 수정 07-15,
+  `lakehouse_query` 07-18 추가. 두 번 모두 갱신 누락.
+

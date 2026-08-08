@@ -2,7 +2,11 @@ package io.dbtower.analysis;
 
 import com.anthropic.client.AnthropicClient;
 import com.anthropic.client.okhttp.AnthropicOkHttpClient;
+import com.anthropic.models.messages.Message;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anthropic.models.messages.MessageCreateParams;
+import com.anthropic.models.messages.StopReason;
 import com.anthropic.models.messages.ThinkingConfigAdaptive;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,6 +36,8 @@ public class AiAnalyzer {
 
     private static final Logger log = LoggerFactory.getLogger(AiAnalyzer.class);
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     private enum Mode { API, CLI, OFF }
 
     private static final String SYSTEM_PROMPT = """
@@ -45,13 +51,18 @@ public class AiAnalyzer {
 
     private final String model;
     private final Path rulesPath;
+    private final long maxTokens;
     private final Mode mode;
     private volatile AnthropicClient client;
 
     public AiAnalyzer(@Value("${dbtower.ai.model:claude-opus-4-8}") String model,
-                      @Value("${dbtower.ai.rules-path:docs/ai-analysis-rules.md}") String rulesPath) {
+                      @Value("${dbtower.ai.rules-path:docs/ai-analysis-rules.md}") String rulesPath,
+                      // adaptive thinking이 켜져 있어 이 예산은 "추론 + 응답"의 합산 상한이다.
+                      // 너무 낮으면 추론이 예산을 먹고 응답이 중간에서 잘린다(D3 루프가 그걸 형식 오류로 오인).
+                      @Value("${dbtower.ai.max-tokens:8192}") long maxTokens) {
         this.model = model;
         this.rulesPath = Path.of(rulesPath);
+        this.maxTokens = maxTokens;
         this.mode = detectMode();
         switch (mode) {
             case API -> log.info("AI 1차 분석 활성화 — Anthropic API (model={})", model);
@@ -132,15 +143,40 @@ public class AiAnalyzer {
     private String callApi(String system, String user) {
         MessageCreateParams params = MessageCreateParams.builder()
                 .model(model)
-                .maxTokens(2048L)
+                .maxTokens(maxTokens)
                 .thinking(ThinkingConfigAdaptive.builder().build())
                 .system(system)
                 .addUserMessage(user)
                 .build();
-        return client().messages().create(params).content().stream()
+        Message message = client().messages().create(params);
+        logUsage(message);
+        if (message.stopReason().filter(StopReason.MAX_TOKENS::equals).isPresent()) {
+            // 절단본을 그대로 올리면 안 된다 — 잘린 JSON을 받은 D3 루프가 "형식 밖 텍스트"로
+            // 오귀속해 남은 스텝을 돌지 않고 진단을 끝낸다. 예산 부족은 예산 부족이라고 말한다.
+            throw new IllegalStateException(
+                    "응답이 max_tokens(" + maxTokens + ")에 걸려 잘렸습니다 — 예산을 올리거나 effort를 낮추세요");
+        }
+        return message.content().stream()
                 .flatMap(block -> block.text().stream())
                 .map(t -> t.text())
                 .reduce("", String::concat);
+    }
+
+    /**
+     * 토큰 사용량 관측점 — 캐시가 실제로 걸리는지, 응답이 예산에 걸리는지는 이 로그로만 보인다.
+     * cacheRead가 반복 호출에서 계속 0이면 프리픽스를 깨는 값이 프롬프트 앞쪽에 남아 있다는 뜻이다.
+     */
+    private static void logUsage(Message message) {
+        if (!log.isDebugEnabled()) {
+            return;
+        }
+        var usage = message.usage();
+        log.debug("AI usage — stop={} input={} cacheWrite={} cacheRead={} output={}",
+                message.stopReason().map(StopReason::asString).orElse("-"),
+                usage.inputTokens(),
+                usage.cacheCreationInputTokens().orElse(0L),
+                usage.cacheReadInputTokens().orElse(0L),
+                usage.outputTokens());
     }
 
     /**
@@ -149,9 +185,11 @@ public class AiAnalyzer {
      */
     private String callCli(String system, String user) throws Exception {
         // --setting-sources "": 사용자/프로젝트 설정(출력 스타일 등)을 배제해
-        // 어떤 로컬 환경에서도 같은 형식의 순수 텍스트가 나오게 한다
-        Process p = new ProcessBuilder("claude", "-p", "--setting-sources", "",
-                "--append-system-prompt", system)
+        // 어떤 로컬 환경에서도 같은 형식의 결과가 나오게 한다.
+        // --output-format json: 본문만이 아니라 usage·stop_reason이 실린 봉투를 받는다 —
+        // 구독(CLI) 경로에도 API 경로와 같은 관측점을 두어야 캐시·절단을 짝비교로 잴 수 있다.
+        Process p = new ProcessBuilder("claude", "-p", "--output-format", "json",
+                "--setting-sources", "", "--append-system-prompt", system)
                 .redirectErrorStream(false).start();
         try (var stdin = p.getOutputStream()) {
             stdin.write(user.getBytes(StandardCharsets.UTF_8));
@@ -165,7 +203,52 @@ public class AiAnalyzer {
             String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
             throw new IllegalStateException("claude CLI 종료 코드 " + p.exitValue() + ": " + err.trim());
         }
-        return out;
+        return extractCliResult(out);
+    }
+
+    /**
+     * claude CLI의 JSON 봉투에서 본문을 꺼내고, 그 김에 usage·절단을 관측한다.
+     *
+     * <p>봉투가 아니면(구버전 CLI·형식 변경) 평문으로 간주해 그대로 올린다 — 형식이 바뀌었다고
+     * 진단 자체가 죽으면 안 된다. Spring 없이도 테스트 가능하도록 static.
+     */
+    static String extractCliResult(String raw) {
+        JsonNode env;
+        try {
+            env = MAPPER.readTree(raw);
+        } catch (Exception e) {
+            log.debug("claude CLI JSON 봉투 파싱 실패 — 평문으로 처리: {}", e.getMessage());
+            return raw;
+        }
+        if (env == null || !env.isObject() || !env.hasNonNull("result")) {
+            return raw;
+        }
+        logCliUsage(env);
+
+        // API 경로와 같은 규칙 — 절단본을 그대로 올리면 호출부가 "형식 밖 텍스트"로 오귀속한다
+        if ("max_tokens".equals(env.path("stop_reason").asText(""))) {
+            throw new IllegalStateException("claude CLI 응답이 max_tokens에 걸려 잘렸습니다");
+        }
+        if (env.path("is_error").asBoolean(false)) {
+            throw new IllegalStateException(
+                    "claude CLI 오류: " + env.path("subtype").asText("unknown"));
+        }
+        return env.path("result").asText("");
+    }
+
+    /** API 경로의 logUsage와 같은 필드 순서로 찍는다 — 두 경로를 같은 눈금으로 비교하기 위함. */
+    private static void logCliUsage(JsonNode env) {
+        if (!log.isDebugEnabled()) {
+            return;
+        }
+        JsonNode u = env.path("usage");
+        log.debug("AI usage(cli) — stop={} input={} cacheWrite={} cacheRead={} output={} costUsd={}",
+                env.path("stop_reason").asText("-"),
+                u.path("input_tokens").asLong(),
+                u.path("cache_creation_input_tokens").asLong(),
+                u.path("cache_read_input_tokens").asLong(),
+                u.path("output_tokens").asLong(),
+                env.path("total_cost_usd").asDouble());
     }
 
     private AnthropicClient client() {

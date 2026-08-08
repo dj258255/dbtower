@@ -30,6 +30,7 @@ src/main/java/io/dbtower/    Spring Modulith 모듈 15개 (경계는 ModularityT
 ├── finops/      미사용·중복 인덱스 등 낭비 신호
 ├── mcp/         MCP 서버 (프로토콜 코어 + stdio/HTTP 전송) + 자연어 진단
 ├── onlineddl/   gh-ost 온라인 스키마 변경 (MySQL)
+├── review/      스키마 변경 리뷰 게이트 (판정·승인·기록, 실행은 안 함)
 ├── score/       통합 헬스 스코어
 ├── security/    인증·인가, 비밀번호 암호화, API 토큰
 └── slo/         SLO/에러 버짓

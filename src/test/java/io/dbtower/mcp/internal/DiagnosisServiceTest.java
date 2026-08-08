@@ -1,5 +1,8 @@
 package io.dbtower.mcp.internal;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpServer;
 import io.dbtower.mcp.McpProtocolHandler;
 import io.dbtower.analysis.QueryMasker;
@@ -14,6 +17,8 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -138,6 +143,36 @@ class DiagnosisServiceTest {
         // 목 REST에는 그 어떤 파괴적 호출도 도달하지 않았다
         assertTrue(hitPaths.isEmpty(), "화이트리스트 밖 도구는 REST로 나가지 않는다");
         assertFalse(DiagnosisService.READ_ONLY_TOOLS.contains("kill_session"));
+    }
+
+    @Test
+    void 등록된_읽기_도구는_전부_AI에_노출된다() {
+        // 새 읽기 도구를 MCP에 추가하면서 화이트리스트를 갱신하지 않으면 에이전트는 그 도구의
+        // 존재조차 모른다 — 요청을 안 하니 거부 로그도, 에러도 없다. 그 조용한 누락을 여기서 잡는다.
+        // tools/list는 등록 맵만 읽고 REST로 위임하지 않으므로 목 서버 없이 안전하다.
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode req = mapper.createObjectNode();
+        req.put("jsonrpc", "2.0");
+        req.put("id", 1);
+        req.put("method", "tools/list");
+
+        JsonNode tools = new McpProtocolHandler("http://unused")
+                .handle(req).path("result").path("tools");
+        assertTrue(tools.isArray() && !tools.isEmpty(), "tools/list가 도구를 돌려줘야 한다");
+
+        Set<String> registered = new TreeSet<>();
+        tools.forEach(t -> registered.add(t.path("name").asText()));
+
+        Set<String> unaccounted = new TreeSet<>(registered);
+        unaccounted.removeAll(DiagnosisService.READ_ONLY_TOOLS);
+        unaccounted.removeAll(DiagnosisService.DELIBERATELY_HIDDEN_TOOLS);
+        assertEquals(Set.of(), unaccounted,
+                "등록됐지만 AI에 노출되지도, 의도적 제외 목록에도 없는 도구 — 화이트리스트 갱신 누락");
+
+        // 반대 방향 — 도구를 지웠는데 화이트리스트에 이름만 남은 경우
+        Set<String> phantom = new TreeSet<>(DiagnosisService.READ_ONLY_TOOLS);
+        phantom.removeAll(registered);
+        assertEquals(Set.of(), phantom, "화이트리스트에 있으나 MCP에 등록되지 않은 유령 도구");
     }
 
     @Test

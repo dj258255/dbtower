@@ -49,7 +49,18 @@ public class DiagnosisService {
     static final Set<String> READ_ONLY_TOOLS = Set.of(
             "list_instances", "health", "query_stats", "slow_queries", "compare",
             "activity", "explain", "wait_events", "replication", "sessions",
-            "schema", "schema_diff", "metrics");
+            "schema", "schema_diff", "metrics",
+            // D5 파티션(조회 전용)·15단계 장기 마트(SELECT 가드). 둘 다 읽기인데 도구 추가 때
+            // 이 목록을 갱신하지 않아 진단 에이전트에게 보이지 않고 있었다.
+            "partitions", "lakehouse_query");
+
+    /**
+     * 읽기 도구지만 의도적으로 AI에게 노출하지 않는 것 — "빼기로 한 것"과 "넣는 걸 잊은 것"을 구분한다.
+     * 이 목록에 없으면서 화이트리스트에도 없는 등록 도구는 갱신 누락이며, 아래 정합성 테스트가 잡는다.
+     */
+    static final Set<String> DELIBERATELY_HIDDEN_TOOLS = Set.of(
+            // 결과를 Metabase 카드로 생성(POST)한다 — 외부 산출물을 만드는 행위라 사람이 결정한다.
+            "lakehouse_card_create");
 
     /** 도구 결과를 다음 프롬프트에 넣을 때 상한 — 큰 결과가 컨텍스트를 폭주시키지 않게 자른다. */
     private static final int OBSERVATION_CAP = 6000;
@@ -126,7 +137,8 @@ public class DiagnosisService {
             Optional<String> out = ai.complete(systemPrompt, transcript.toString());
             if (out.isEmpty()) {
                 return build(question, null, null, "low", traces,
-                        "AI가 응답을 반환하지 못했습니다(백엔드 오류 또는 시간 초과). 부분 근거만 수집됨.");
+                        "AI가 응답을 반환하지 못했습니다(백엔드 오류·시간 초과·토큰 예산 초과). "
+                                + "부분 근거만 수집됨 — 서버 로그의 'AI 호출 실패' 사유를 확인하세요.");
             }
             JsonNode decision = extractJson(out.get());
             if (decision == null) {
