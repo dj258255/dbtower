@@ -127,8 +127,13 @@ public class DiagnosisService {
                             + "개별 도구(비교·실행계획·대기 이벤트)는 웹 콘솔에서 직접 사용하세요.");
         }
 
-        String systemPrompt = buildSystemPrompt(instanceId, instanceType, instanceName);
+        String systemPrompt = buildSystemPrompt();
+        // 대상·시각은 호출마다 달라진다 — 시스템 프롬프트에 두면 캐시 프리픽스가 매번 깨지므로 여기에 싣는다
         StringBuilder transcript = new StringBuilder()
+                .append("[대상] instanceId=").append(instanceId)
+                .append(", 기종=").append(instanceType)
+                .append(", 이름=").append(instanceName)
+                .append(". 현재 시각=").append(LocalDateTime.now()).append("\n\n")
                 .append("사용자 질문: ").append(question)
                 .append("\n\n지금 첫 판단을 내려라. call_tool 또는 final JSON 하나만 출력한다.");
         List<ToolCallTrace> traces = new ArrayList<>();
@@ -225,7 +230,15 @@ public class DiagnosisService {
         return resp.path("error").path("message").asText("(빈 결과)");
     }
 
-    private String buildSystemPrompt(long instanceId, String type, String name) {
+    /**
+     * 시스템 프롬프트 — 대상·시각 같은 휘발성 값은 여기 넣지 않는다.
+     *
+     * <p>프롬프트 캐싱은 프리픽스 바이트 매칭이라, 호출마다 달라지는 값이 하나라도 섞이면 그 뒤가 전부
+     * 무효화된다. 예전에는 끝에 {@code 현재 시각}을 붙여 캐시가 매번 깨졌다(실측: 호출당 write 14k 고정).
+     * 휘발성 컨텍스트는 사용자 메시지 첫머리의 [대상] 블록으로 내렸다 — 그래서 이 문자열은 전 인스턴스·
+     * 전 진단에 걸쳐 바이트 동일하고, 캐시 엔트리 하나를 모두가 공유한다.
+     */
+    private String buildSystemPrompt() {
         return """
                 당신은 DBTower의 DB 장애 근본원인 진단 에이전트다. 사용자의 자연어 질문에 답하기 위해,
                 아래 "사용 가능한 도구"를 스스로 골라 여러 번 호출해 근거를 모은 뒤 근본원인을 서술한다.
@@ -238,15 +251,14 @@ public class DiagnosisService {
                 - 최소 2개 이상의 도구를 엮어 교차 검증한 근거로 결론을 낸다. 예: compare로 급증·신규 쿼리를 찾고 →
                   그 쿼리를 explain으로 실행계획 확인 → wait_events로 병목(IO/Lock)을 확인해 종합한다.
                 - 근거가 없으면 지어내지 말고 confidence를 low로 두고 "확실치 않다/모른다"고 정직하게 답한다. 수치를 지어내지 않는다.
-                - 도구의 instanceId 인자에는 항상 %d 를 쓴다. 시각 인자는 ISO LocalDateTime(예: 2026-07-03T15:20:30)로 준다.
+                - 도구의 instanceId 인자에는 사용자 메시지 첫머리 [대상] 블록에 주어진 값을 쓴다.
+                  시각 인자는 ISO LocalDateTime(예: 2026-07-03T15:20:30)로 준다.
 
                 [사용 가능한 도구] — 전부 읽기 전용이다. 대상 DB를 바꾸는 도구(세션 종료·백업·스키마 변경)는 노출되지 않으며 요청해도 거부된다.
                 %s
                 [판단 기준 문서 — 반드시 이 기준에 근거해서만 판정한다]
                 %s
-
-                [대상] instanceId=%d, 기종=%s, 이름=%s. 현재 시각=%s.
-                """.formatted(instanceId, toolCatalog(), loadRules(), instanceId, type, name, LocalDateTime.now());
+                """.formatted(toolCatalog(), loadRules());
     }
 
     /** MCP 핸들러의 tools/list에서 읽기 전용 도구만 골라 이름·설명·입력 스키마를 프롬프트용으로 나열한다. */
