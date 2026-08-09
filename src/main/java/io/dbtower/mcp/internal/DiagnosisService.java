@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.dbtower.analysis.AiAnalyzer;
+import io.dbtower.analysis.AiAnalyzer.CallSite;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.mcp.McpProtocolHandler;
 import io.dbtower.security.ApiTokenProvider;
@@ -88,8 +89,10 @@ public class DiagnosisService {
                             QueryMasker queryMasker,
                             @Value("${dbtower.ai.rules-path:docs/ai-analysis-rules.md}") String rulesPath,
                             @Value("${dbtower.ai.diagnose-max-steps:5}") int maxSteps) {
+        // AiTurn은 오케스트레이션 시임이라 호출처 태그를 모른다 — 여기서 DIAGNOSE로 묶어 넘긴다.
         this(new McpProtocolHandler("http://localhost:" + port, tokens.token()),
-                analyzer::complete, analyzer.isEnabled(), analyzer.backend(), queryMasker, rulesPath, maxSteps);
+                (system, user) -> analyzer.complete(CallSite.DIAGNOSE, system, user),
+                analyzer.isEnabled(), analyzer.backend(), queryMasker, rulesPath, maxSteps);
     }
 
     // 테스트 생성자 — 스크립트된 AI와 (목 REST를 가리키는) 실제 MCP 핸들러를 주입해

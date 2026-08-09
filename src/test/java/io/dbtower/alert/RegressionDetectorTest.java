@@ -45,7 +45,7 @@ class RegressionDetectorTest {
         DatabaseInstance instance = new DatabaseInstance(
                 "test-db", DbmsType.MYSQL, "127.0.0.1", 3306, "sample", "root", "pw");
         when(instanceRepository.findAll()).thenReturn(List.of(instance));
-        when(aiAnalyzer.analyze(anyString())).thenReturn(Optional.empty());
+        when(aiAnalyzer.analyze(any(), anyString())).thenReturn(Optional.empty());
         // Mockito 기본 반환은 null이라 Optional 반환 메서드는 명시 스텁 필요
         when(planChangeTracker.check(any(), any(), any())).thenReturn(Optional.empty());
     }

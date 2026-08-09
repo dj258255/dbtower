@@ -3152,3 +3152,81 @@ API 경로는 `cache_control`이 없어 캐싱 자체를 하지 않았다(코드
 동작하며, 구독은 SDK API 호출에 쓸 수 없다. 조립 검증(테스트)까지가 이 환경의 한계이고, 절감 수치는
 주장하지 않는다. API 키가 있는 환경에서 `usage.cacheReadInputTokens()`가 2번째 호출부터 0이 아닌지
 확인하면 된다(로깅은 118절에서 이미 붙였다).
+
+## 122. 캐시 파손 회귀 방어(테스트) + 토큰 계수 노출 — 경고가 아니라 비율로 보는 이유
+
+118절은 응답 절단을 시끄럽게 만들었고, 119절은 화이트리스트 드리프트를 테스트로 잡았다. 같은
+"조용한 실패" 목록에서 캐시 프리픽스 파손만 남아 있었다. `logUsage`의 주석은 문제를 알고 있었지만
+(`cacheRead가 계속 0이면 프리픽스를 깨는 값이 남아 있다는 뜻`) DEBUG 로그일 뿐이라, 누가
+`buildSystemPrompt()`에 휘발성 값을 다시 넣어도 에러도 품질 저하도 없이 120절의 절감만 사라진다.
+
+**런타임 경고를 넣지 않은 이유(수치 근거).** 120절 기록상 버그는 진단 *사이*에서 났다. 진단 1건
+안에서는 `systemPrompt`가 지역 변수라 바뀔 수 없고, 실제로 파손 상태(before)에서도 2~6번째 호출은
+캐시를 타고 있었다(`read=31074`). 그래서 진단 내 경고는 이 버그 클래스에서 한 번도 울리지 않는다.
+반대로 진단 사이의 첫 호출 `cacheRead=0`은 TTL(5분)이 지나면 정당하므로, 거기에 경고를 걸면
+운영에서 대부분이 오탐이 된다. **단일 호출로는 판정이 불가능하고 비율로만 보인다** — 그래서 경고가
+아니라 계수를 올리고 `cache_read / (cache_read + cache_write)`를 본다.
+
+- **회귀 방어(테스트)**: `DiagnosisServiceTest.시스템_프롬프트는_대상이_달라도_바이트_동일하다` —
+  인스턴스·기종·이름·질문이 전부 다른 두 진단이 AI에 넘긴 시스템 프롬프트를 포착해 바이트 비교.
+  `cache_control`을 거는 쪽은 121절의 `buildParams` 테스트가 이미 검증하므로, **그 캐시가 걸릴
+  대상이 안정적인지**가 빠진 반쪽이었다.
+- **토큰 계수**: `dbtower.ai.tokens{type, backend, call_site}` — API·CLI 두 경로가 같은
+  `recordTokens` 순수 함수로 올린다(118절의 "두 경로 같은 눈금" 원칙). 절단 예외보다 먼저 올린다 —
+  잘렸어도 토큰은 이미 청구됐다.
+- **호출처는 enum(`CallSite`)**: 자유 문자열이면 카디널리티가 터지고, 기본값을 두면 새 호출처가
+  조용히 "기타"로 흘러든다. REGRESSION·EXPLAIN·INCIDENT·REVIEW·DIAGNOSE 5축으로 고정하고
+  5개 호출부가 각자 선언한다. D3 진단은 1건이 6호출이라 회귀 1차 분석과 비용 구조가 달라, 합산하면
+  어느 쪽을 손대야 하는지 알 수 없다.
+
+**검증**(2026-08-09):
+- **테스트가 실제로 회귀를 잡는지 확인**(119절과 같은 방식) — `buildSystemPrompt()` 끝에 120절
+  이전의 `현재 시각=%s`를 되돌려 실행: `시스템_프롬프트는_대상이_달라도_바이트_동일하다 FAILED`.
+  복구 후 통과.
+- 계수 단위 4건: 타입·백엔드·호출처 분리, 호출처 간 미혼입, 0도 시계열 생성, 절단 응답의 토큰 보존.
+- 노출 계약(`AiTokenMetricIntegrationTest`, 실 스프링 컨텍스트): `/actuator/prometheus`에
+  `dbtower_ai_tokens_total{call_site="diagnose",type="cache_read"}` 형태로 노출됨을 확인.
+  점→밑줄·Counter→`_total` 변환을 못박은 것 — 이름이 바뀌면 대시보드 쿼리는 에러 없이 빈 결과를 준다.
+- **날짜 단위 휘발성 가드도 회귀를 잡는지 확인** — 바이트 비교만으로는 못 잡는 형태(`LocalDate.now()`,
+  같은 실행 안에서는 두 호출이 같은 문자열)를 주입해 실행: `오늘 날짜가 시스템 프롬프트에 있다 —
+  자정마다 캐시 프리픽스가 깨진다`로 FAILED. "날짜꼴 문자열 금지"가 아니라 "오늘 날짜 금지"인 이유는
+  행동 규약의 고정 예시(`2026-07-03T15:20:30`)가 정상인데도 걸리기 때문. 복구 후 통과.
+- 전체 스위트 `./gradlew test` BUILD SUCCESSFUL, `@Test` 521 → 526
+  (날짜 가드는 새 메서드가 아니라 위 프롬프트 안정성 테스트에 붙인 단언이라 개수가 늘지 않는다).
+
+**부수 발견 — Boot 4의 테스트 메트릭 스위치.** `/actuator/prometheus`가 테스트 컨텍스트에서 404였다.
+Spring Boot가 테스트에서 메트릭 익스포터를 끄기 때문(`MeterRegistry`가 `SimpleMeterRegistry`로
+떨어지고 `PrometheusScrapeEndpoint`가 등록되지 않는다). `@SpringBootTest(properties=...)`로는 못
+뒤집는다 — 끄는 쪽 property source(`test`)가 `Inlined Test Properties`보다 우선한다. Boot 3의
+`@AutoConfigureObservability`는 4에서 사라졌고, `spring-boot-micrometer-metrics-test`의
+`@AutoConfigureMetrics`가 그 자리를 대신한다.
+
+**라이브 실측**(2026-08-09, docker compose postgres + `./gradlew bootRun`, claude CLI 구독 경로,
+local-postgres(id=2)에 같은 질문으로 D3 진단 2회. 진단 1건 = AI 6호출):
+
+계수 baseline 0 → 진단 1회 후 네 시계열이 전부 등장했다.
+
+```
+dbtower_ai_tokens_total{backend="cli",call_site="diagnose",type="cache_read"}  171911
+dbtower_ai_tokens_total{backend="cli",call_site="diagnose",type="cache_write"}  42587
+dbtower_ai_tokens_total{backend="cli",call_site="diagnose",type="input"}           12
+dbtower_ai_tokens_total{backend="cli",call_site="diagnose",type="output"}        3264
+```
+
+| | cache_read | cache_write | 히트 비율 |
+|---|---:|---:|---:|
+| 진단 1 | 171,911 | 42,587 | 80.1% |
+| 진단 2 (증분) | 187,554 | 33,786 | 84.7% |
+| 누적 | 359,465 | 76,373 | 82.5% |
+
+두 번째 진단의 `cache_write`가 첫 진단의 79.3%로 줄었다 — 120절이 고친 진단 간 프리픽스 재사용이
+비율에 나타난다. **이게 계수를 만든 이유다.** 단일 호출로는 이 차이가 보이지 않는다.
+
+부수 관측 — 진단 1의 가중 토큰(입력 1 : 출력 5 : 캐시읽기 0.1 : 캐시쓰기 1.25) 기준 **출력 비중은
+18.8%**다. 출력 단가가 입력의 5배인데도 비용의 5분의 4는 입력 측이고, 그중 대부분이 캐시 트래픽이다.
+
+**남은 한계.** `ANTHROPIC_API_KEY`가 없어(구독 인증) API 경로 계수는 실제 응답으로 확인하지 못했다 —
+121절과 같은 구조적 제약이다. 두 경로는 같은 `recordTokens`를 같은 인자 순서로 부르고, 조립·노출은
+테스트가 덮는다. 또한 CLI 경로 수치는 Claude Code 자체 프롬프트가 앞에 붙은 복합체라 절대값이 아니라
+같은 하네스 안의 짝비교로만 유효하다(120절과 같은 단서). 두 진단의 도구 연쇄가 동일했는지는 기록하지
+않았으므로, 위 79.3%는 재현 1회분의 관측이지 확정된 절감률이 아니다.

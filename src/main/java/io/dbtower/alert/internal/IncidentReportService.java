@@ -4,6 +4,7 @@ import io.dbtower.alert.internal.domain.PlanSnapshot;
 import io.dbtower.alert.internal.persistence.ConfigDriftDao.ParamChangeRow;
 import io.dbtower.alert.internal.persistence.PlanSnapshotRepository;
 import io.dbtower.analysis.AiAnalyzer;
+import io.dbtower.analysis.AiAnalyzer.CallSite;
 import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.ComparisonService.CompareResult;
 import io.dbtower.insight.QueryDiff;
@@ -97,7 +98,7 @@ public class IncidentReportService {
         List<HealthPoint> health = sloService.healthInWindow(instanceId, from, to);
 
         String facts = renderFacts(instance, from, to, compare, configChanges, planFlips, waits, health);
-        String aiSummary = aiAnalyzer.complete(AI_SYSTEM_PROMPT, facts).orElse(null);
+        String aiSummary = aiAnalyzer.complete(CallSite.INCIDENT, AI_SYSTEM_PROMPT, facts).orElse(null);
         String markdown = renderMarkdown(instance, from, to, compare, configChanges, planFlips, waits, health, aiSummary, notes);
 
         return new IncidentReport(instanceId, instance.getName(), TS.format(from), TS.format(to), markdown, notes);

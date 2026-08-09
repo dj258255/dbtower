@@ -54,7 +54,7 @@ class IncidentReportServiceTest {
         when(plans.findTop50ByInstanceIdOrderByCapturedAtDesc(anyLong())).thenReturn(List.of());
         when(waits.inWindow(anyLong(), any(), any(), anyInt())).thenReturn(List.of());
         when(slo.healthInWindow(anyLong(), any(), any())).thenReturn(List.of());
-        when(ai.complete(anyString(), anyString())).thenReturn(Optional.empty());
+        when(ai.complete(any(), anyString(), anyString())).thenReturn(Optional.empty());
     }
 
     @Test

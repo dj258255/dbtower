@@ -9,6 +9,7 @@ import io.dbtower.operator.model.IndexAdvice;
 import io.dbtower.operator.model.DeadlockEvent;
 import io.dbtower.insight.PrometheusClient;
 import io.dbtower.analysis.AiAnalyzer;
+import io.dbtower.analysis.AiAnalyzer.CallSite;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.analysis.DeepAnalyzer;
 import io.dbtower.analysis.DeepDiagnosis;
@@ -471,6 +472,6 @@ public class InsightController {
                 %s
                 규칙 기반 지적: %s""".formatted(instance.getType(), queryMasker.applyForAiPrompt(req.sql()), plan,
                 findings.isEmpty() ? "(없음)" : String.join(" / ", findings));
-        return new AiAnalysisResponse(plan, findings, aiAnalyzer.analyze(context).orElse(null));
+        return new AiAnalysisResponse(plan, findings, aiAnalyzer.analyze(CallSite.EXPLAIN, context).orElse(null));
     }
 }

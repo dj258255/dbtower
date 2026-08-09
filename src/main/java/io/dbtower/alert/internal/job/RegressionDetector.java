@@ -4,6 +4,7 @@ import io.dbtower.alert.internal.AlertEmbeds;
 import io.dbtower.alert.internal.PlanChangeTracker;
 import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.analysis.AiAnalyzer;
+import io.dbtower.analysis.AiAnalyzer.CallSite;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.QueryDiff;
@@ -179,7 +180,7 @@ public class RegressionDetector {
         findings.forEach(f -> message.append("- ").append(f).append("\n"));
 
         // AI 1차 분석은 감지 묶음당 1회만 — 비용과 알림 지연을 묶어서 관리
-        String analysis = aiAnalyzer.analyze(message.toString()).orElse(null);
+        String analysis = aiAnalyzer.analyze(CallSite.REGRESSION, message.toString()).orElse(null);
         if (analysis != null) {
             message.append("\nAI 1차 분석: ").append(analysis);
         }

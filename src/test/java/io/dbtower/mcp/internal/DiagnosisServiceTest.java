@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
@@ -173,6 +174,49 @@ class DiagnosisServiceTest {
         Set<String> phantom = new TreeSet<>(DiagnosisService.READ_ONLY_TOOLS);
         phantom.removeAll(registered);
         assertEquals(Set.of(), phantom, "화이트리스트에 있으나 MCP에 등록되지 않은 유령 도구");
+    }
+
+    @Test
+    void 시스템_프롬프트는_대상이_달라도_바이트_동일하다() {
+        // 프롬프트 캐싱은 프리픽스 바이트 매칭이라, 대상·시각이 시스템 프롬프트에 섞이면 진단마다
+        // 캐시가 깨진다. 실제로 그랬다 — buildSystemPrompt() 끝에 "현재 시각"이 박혀 있어 진단 사이
+        // 프리픽스가 매번 달라졌고, 첫 호출 cacheWrite가 19171로 고정이었다(VERIFICATION 120절).
+        //
+        // 에러가 나지 않는 종류의 회귀라 여기서 계약으로 못박는다: 대상이 무엇이든, 몇 번째 진단이든,
+        // AI가 받는 시스템 프롬프트는 같은 문자열이어야 한다. cache_control을 거는 쪽은
+        // AiAnalyzerTest가 검증하고, 그 캐시가 걸릴 대상이 안정적인지는 여기가 검증한다.
+        List<String> systems = new CopyOnWriteArrayList<>();
+        String finalJson = "{\"action\":\"final\",\"answer\":\"근거 부족.\",\"rootCause\":\"미상\","
+                + "\"confidence\":\"low\"}";
+
+        // 인스턴스·기종·이름·질문을 전부 다르게 준 두 진단
+        for (var target : List.of(new String[]{"1", "POSTGRESQL", "orders-prod", "왜 느려?"},
+                new String[]{"2", "MYSQL", "billing-replica", "커넥션이 왜 튀지?"})) {
+            DiagnosisService svc = new DiagnosisService(
+                    new McpProtocolHandler(baseUrl),
+                    (system, user) -> {
+                        systems.add(system);
+                        return Optional.of(finalJson);
+                    },
+                    true, "mock", new QueryMasker(true, false), "docs/ai-analysis-rules.md", 5);
+            svc.diagnose(Long.parseLong(target[0]), target[1], target[2], target[3]);
+        }
+
+        assertEquals(2, systems.size(), "두 진단이 각각 AI를 한 번씩 불렀어야 한다");
+        assertEquals(systems.get(0), systems.get(1),
+                "시스템 프롬프트가 진단마다 다르다 — 캐시 프리픽스가 깨진다. "
+                        + "휘발성 값은 사용자 메시지의 [대상] 블록으로 내려야 한다(VERIFICATION 120절)");
+
+        // 프리픽스를 깨는 값이 실제로 어느 쪽에 실렸는지도 못박는다 — 시스템에 없고 사용자에 있다.
+        assertFalse(systems.get(0).contains("orders-prod"), "인스턴스 이름이 시스템 프롬프트에 샜다");
+        assertFalse(systems.get(0).contains("instanceId=1"), "instanceId가 시스템 프롬프트에 샜다");
+
+        // 위의 바이트 비교는 같은 실행 안에서 두 번 부르므로 날짜 단위 휘발성을 놓친다 —
+        // LocalDate.now()를 넣으면 두 호출이 같은 문자열이라 통과하지만 캐시는 자정마다 깨진다.
+        // "날짜꼴 문자열 금지"로는 못 잡는다: 행동 규약에 고정 예시(2026-07-03T15:20:30)가 들어 있어
+        // 정상인데도 걸린다. 그래서 오늘 날짜만 금지한다 — 고정 예시는 통과하고 now()만 걸린다.
+        assertFalse(systems.get(0).contains(LocalDate.now().toString()),
+                "오늘 날짜가 시스템 프롬프트에 있다 — 자정마다 캐시 프리픽스가 깨진다");
     }
 
     @Test

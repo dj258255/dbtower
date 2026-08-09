@@ -1,6 +1,7 @@
 package io.dbtower.review.internal;
 
 import io.dbtower.analysis.AiAnalyzer;
+import io.dbtower.analysis.AiAnalyzer.CallSite;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.TableDetail;
@@ -186,7 +187,7 @@ public class ReviewService {
         // AI 프롬프트에도 마스킹본을 쓴다(외부로 나갈 수 있는 경로) — 토글은 QueryMasker가 관장
         String context = "변경 SQL:\n" + queryMasker.applyForAiPrompt(sql)
                 + "\n\n규칙 지적:\n- " + String.join("\n- ", findings);
-        return aiAnalyzer.complete(AI_SYSTEM_PROMPT, context).orElse(null);
+        return aiAnalyzer.complete(CallSite.REVIEW, AI_SYSTEM_PROMPT, context).orElse(null);
     }
 
     private static boolean isDdl(String sql) {
