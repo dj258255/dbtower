@@ -500,7 +500,12 @@ record TableDetail(String table, String engine, long rowCount, long dataBytes, l
 | reverse ETL: 장기 베이스라인 | **완료(100절)** — V24 `baseline_longterm` + BaselineService 가중 병합(충분통계량 복원, QPS 축만·/3600 스케일, 빈 테이블=회귀 0). 라이브: 실측 스파이크 z=7.42·관측 101(=장기100+단기1). lakehouse 쪽 D5~D7(마트·되쓰기 32,498행 왕복)은 그쪽 VERIFICATION 14절 | 방향 유지: lakehouse가 메타DB에 `baseline_longterm`(instance_id, query_id, dow, hour, mean, stddev, observations, computed_at) **되쓰기**, DBTower는 Flyway로 테이블 정의 + `BaselineService` 가중 병합(관측 충분 시 결합, 없으면 현행 — 미존재/빈 테이블이면 회귀 0). 실분석으로 확정된 제약: **(1) lakehouse의 원천 접속은 계약·코드(세션 readonly) 양쪽에서 읽기전용 봉인** — 되쓰기는 별도 역할(`lakehouse_writer`, 해당 테이블만 INSERT/DELETE)·별도 WritebackConfig로만(SourceConfig 재사용 금지), CONTRACT에 되쓰기 절 신설. (2) **일간 마트(fct_query_daily)로는 dow×hour 통계 불가** — staging에서 시간대별 델타 `fct_query_hourly`(증분+워터마크 리터럴 패턴 복제) 신설이 선행. (3) 볼륨 가드: instance×query×168버킷이라 min_observations 필터(BaselineService 8관측 게이트와 정렬)+top-K로 눌러야 함. (4) 스케줄은 publish와 heartbeat 사이 writeback 태스크(단일 트랜잭션 DELETE+INSERT, publish의 원자성·행수 대조 불변식 이식) — 베이스라인 변화가 느리므로 @weekly 별도 DAG도 유효(deadman 감시 편입 조건). **착수 명세는 lakehouse ROADMAP 14단계 D5~D8로 이관(2026-07-17)** | 장기 테이블 주입 후 이상 판정이 계절성(예: 월요일 피크)을 오탐하지 않는 것 실측, 미존재 시 현행 동작 회귀 없음 |
 | 용량 예측(디스크 포화 ETA) | **완료(78절)** | 구현: (a) node_exporter — 정석화 완료(`/:/host:ro` + `--path.rootfs=/host`, 기존 구성은 rootfs 마운트가 없어 컨테이너 자신만 보였음), (b) `insight.PrometheusClient`(루트 공개 API로 승격) + `queryScalar` 즉시값 조회, (c) 인스턴스-노드 매핑 `node_filter` **V16**(라벨 셀렉터, label="value" 형식만 허용해 PromQL 주입 방지 — nodeFilter가 mountpoint를 직접 지정하면 기본 "/" 양보: 데이터 전용 마운트가 실무 정석), (d) `advisor/internal/DiskForecastAdvisor` — 선형 ETA avail/(-deriv(avail[6h])), ETA≤3일 CRITICAL·≤14일 WARNING·추세 없어도 여유<10% WARNING, Prometheus 미설정·미수집 시 조용히 스킵(기능 게이트), 일일 스윕(웹훅)은 AdvisorService 경유 기존 경로 재사용. **실측**: 실쓰기 ~17MB/s → CRITICAL "약 0.7일 내 (여유 76.8%)" — 여유가 넉넉해도 속도가 빠르면 치명(잔량 경보만으론 침묵하는 케이스). 단위 9건, 총 419건 그린. **잔여**: 같은 nodeFilter 공유 인스턴스 간 호스트당 경보 dedup(Phase 4 호스트 그룹핑과 함께), RDS CloudWatch `FreeStorageSpace` 소스 추상화(후속). 스케일 실행은 여전히 범위 밖 — 프로비저닝 계층 소유, DBTower는 신호까지 | 데모 스택에서 대량 적재로 여유 감소 → 예측 ETA 산출·경보 실측 — **충족(78절)**. Prometheus 미설정 시 스킵은 단위로 고정 |
 
-## 운영 병목 아크 — 현업 DBA 병목 5종 (미착수 — 착수 명세, 2026-07-18)
+## 운영 병목 아크 — 현업 DBA 병목 5종 (착수 명세, 2026-07-18)
+
+> **구현 완료** (VERIFICATION 105~109절). B1 설정 드리프트 이력(105), B2 스키마 변경 리뷰
+> 게이트(106), B3 인덱스 사용 통계 주기 영속(107), B4 인시던트 리포트 원클릭(108),
+> B5 월간 정기 점검 리포트(109) — 다섯 전부 구현·검증하고 v1.2.0으로 릴리즈했다.
+> 알림 카드 실물은 README 접이식 섹션. 아래 명세는 기록.
 
 목표는 하나다: **관리 대상이 늘수록 사람 손이 선형으로 늘어나는 지점을 끊는다.** 다섯 기능
 전부 "읽고 판정하고 기록하는 것은 깊게, 대상을 바꾸는 실행은 기존 경계(ADMIN·gh-ost·사람) 뒤로"
