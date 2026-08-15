@@ -15,6 +15,7 @@ import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
 import io.dbtower.operator.model.QueryStat;
 import io.dbtower.operator.model.ReplicationState;
+import io.dbtower.operator.RestoreSupport;
 import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SessionInfo;
@@ -123,24 +124,133 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 ? location.substring("(server) ".length()) : location;
     }
 
+    /** RESTORE HEADERONLY의 BackupType — 1=전체(Database), 2=트랜잭션 로그, 5=차등. */
+    private static final int BACKUP_TYPE_FULL = 1;
+
     /**
-     * SQL Server 복원 검증 = RESTORE VERIFYONLY (서버 사이드 T-SQL).
-     * 백업이 서버 측 파일(.bak)이라 플랫폼이 파일에 직접 접근하지 못한다 — 전체 복원은 범위 밖.
-     * 대신 서버가 백업셋의 완전성/판독성(헤더·페이지·체크섬)을 확인하는 VERIFYONLY까지가
-     * 여기서 정직하게 할 수 있는 최선이다. "복원 가능성의 신호"이지 전체 데이터 재구성은 아니다.
+     * SQL Server 복원 검증 = 임시 DB로 실제 RESTORE (서버 사이드 T-SQL).
+     *
+     * 백업이 서버 측 .bak라 플랫폼이 파일을 직접 읽지는 못하지만, 복원도 서버가 하는 일이라
+     * 임시 DB 이름 + MOVE(논리 파일을 새 경로로)면 원본을 건드리지 않고 전체 복원까지 확인할 수 있다.
+     * VERIFYONLY는 "서버가 이 백업셋을 유효한 것으로 읽는가"까지고 "복원해서 쓸 수 있는가"의 증명이
+     * 아니어서, FULL이면 실제 RESTORE로 판정한다. 로그·차등은 FULL 체인 없이 단독 복원이 성립하지
+     * 않으므로 그때만 VERIFYONLY로 남기고, 실제 복원을 안 했다는 사실을 개체 수 null로 드러낸다.
      */
     @Override
     public RestoreVerification verifyRestore(String location) {
-        // backup()이 "(server) <path>"로 돌려주므로 접두사를 떼어 실제 경로만 남긴다
-        String path = location.startsWith("(server) ") ? location.substring("(server) ".length()) : location;
-        try (Connection conn = open();
-             PreparedStatement ps = conn.prepareStatement("RESTORE VERIFYONLY FROM DISK = ?")) {
+        String path = stripServerPrefix(location);
+        String target = RestoreSupport.verifyTargetName();
+        RestoreSupport.requireSafeName(target); // 식별자로 그대로 들어가는 자리 — 심층 방어
+        try (Connection conn = open()) {
+            int backupType = backupType(conn, path);
+            return backupType == BACKUP_TYPE_FULL
+                    ? fullRestore(conn, path, target)
+                    : verifyOnly(conn, path, backupType);
+        } catch (SQLException e) {
+            return RestoreVerification.failed("복원 검증 실패: " + e.getMessage());
+        }
+    }
+
+    /** 백업 종류를 먼저 읽는다 — 단독 복원이 되는 FULL인지에 따라 검증 수준이 갈린다. */
+    private int backupType(Connection conn, String path) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("RESTORE HEADERONLY FROM DISK = ?")) {
             ps.setString(1, path);
             ps.execute();
+            try (ResultSet rs = ps.getResultSet()) {
+                return rs != null && rs.next() ? rs.getInt("BackupType") : -1;
+            }
+        }
+    }
+
+    /**
+     * FULL 백업을 임시 DB로 실제 복원하고, 사용자 테이블 수를 세고, 반드시 지운다.
+     * MOVE가 없으면 원본과 같은 물리 경로를 쓰려다 충돌한다 — 임시 DB 이름으로 파일도 함께 옮긴다.
+     */
+    private RestoreVerification fullRestore(Connection conn, String path, String target) throws SQLException {
+        String dataDir = defaultDataPath(conn, path);
+        StringBuilder moves = new StringBuilder();
+        int files = 0;
+        int dataSeen = 0;
+        try (PreparedStatement ps = conn.prepareStatement("RESTORE FILELISTONLY FROM DISK = ?")) {
+            ps.setString(1, path);
+            ps.execute();
+            try (ResultSet rs = ps.getResultSet()) {
+                while (rs != null && rs.next()) {
+                    String logical = rs.getString("LogicalName");
+                    String ext = "L".equalsIgnoreCase(rs.getString("Type"))
+                            ? ".ldf" : (dataSeen++ == 0 ? ".mdf" : ".ndf");
+                    moves.append(", MOVE N'").append(logical.replace("'", "''")).append("' TO N'")
+                            .append(dataDir).append(target).append('_').append(files).append(ext).append('\'');
+                    files++;
+                }
+            }
+        }
+        if (files == 0) {
+            return RestoreVerification.failed("백업셋에서 논리 파일 목록을 읽지 못했습니다: " + path);
+        }
+        try {
+            // REPLACE는 일부러 안 붙인다 — 이름이 겹치면 덮어쓰지 말고 실패해야 한다
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "RESTORE DATABASE [" + target + "] FROM DISK = ? WITH RECOVERY" + moves)) {
+                ps.setString(1, path);
+                ps.execute();
+            }
+            int tables;
+            try (Statement st = conn.createStatement();
+                 ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM ["
+                         + target + "].sys.tables WHERE is_ms_shipped = 0")) {
+                tables = rs.next() ? rs.getInt(1) : -1;
+            }
             return RestoreVerification.verified(
-                    "RESTORE VERIFYONLY 통과 — 백업셋 판독/완전성 확인(전체 복원 아님): " + path, null);
+                    "임시 DB로 전체 복원 성공 — RESTORE DATABASE + 사용자 테이블 조회 (target=" + target + ")",
+                    tables);
+        } finally {
+            dropVerifyDatabase(conn, target);
+        }
+    }
+
+    /** 단독 복원이 성립하지 않는 백업 — 판독 검사까지만 하고, 개체 수를 비워 수준 차이를 남긴다. */
+    private RestoreVerification verifyOnly(Connection conn, String path, int backupType) {
+        try (PreparedStatement ps = conn.prepareStatement("RESTORE VERIFYONLY FROM DISK = ?")) {
+            ps.setString(1, path);
+            ps.execute();
         } catch (SQLException e) {
             return RestoreVerification.failed("RESTORE VERIFYONLY 실패: " + e.getMessage());
+        }
+        return RestoreVerification.verified(
+                "RESTORE VERIFYONLY 통과 — BackupType=" + backupType
+                        + " 은 FULL 체인 없이 단독 복원이 안 되어 백업셋 판독까지만 확인: " + path, null);
+    }
+
+    /** 임시 DB 파일을 놓을 서버 경로 — 인스턴스 기본 데이터 경로, 못 읽으면 백업 파일과 같은 디렉터리. */
+    private String defaultDataPath(Connection conn, String backupPath) throws SQLException {
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery(
+                     "SELECT CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS nvarchar(4000))")) {
+            if (rs.next()) {
+                String dir = rs.getString(1);
+                if (dir != null && !dir.isBlank()) {
+                    return dir.endsWith("/") || dir.endsWith("\\") ? dir : dir + separatorOf(dir);
+                }
+            }
+        }
+        int cut = Math.max(backupPath.lastIndexOf('/'), backupPath.lastIndexOf('\\'));
+        return cut >= 0 ? backupPath.substring(0, cut + 1) : "/var/opt/mssql/data/";
+    }
+
+    private static String separatorOf(String path) {
+        return path.contains("\\") ? "\\" : "/";
+    }
+
+    /**
+     * 임시 DB는 반드시 지운다 — 복원이 중간에 죽어 RESTORING 상태로 남아도 DROP은 통한다.
+     * 여기서 던지면 원래 판정(성공/실패)을 덮어써 버리므로 삼키고 경고만 남긴다.
+     */
+    private void dropVerifyDatabase(Connection conn, String target) {
+        try (Statement st = conn.createStatement()) {
+            st.execute("IF DB_ID(N'" + target + "') IS NOT NULL DROP DATABASE [" + target + "]");
+        } catch (SQLException e) {
+            log.warn("복원 검증 임시 DB 정리 실패 — 수동 삭제 필요: {} ({})", target, e.getMessage());
         }
     }
 

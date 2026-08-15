@@ -10,6 +10,7 @@ import io.dbtower.operator.model.DbParameter;
 import io.dbtower.operator.model.IndexUsage;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
+import io.dbtower.operator.RestoreSupport;
 import io.dbtower.operator.model.QueryStat;
 import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.model.RestoreVerification;
@@ -27,14 +28,19 @@ import org.springframework.jdbc.core.ConnectionCallback;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.SecureRandom;
 import java.sql.CallableStatement;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -638,18 +644,175 @@ public class OracleOperator extends AbstractJdbcOperator {
         }
     }
 
+    /** 복원 검증에만 필요한 시스템 권한 — 관제(조회)에는 없어도 되는 것들이다. */
+    private static final List<String> IMPORT_PRIVILEGES = List.of("CREATE USER", "ALTER USER", "DROP USER");
+
+    /** 남의 스키마로 임포트(REMAP_SCHEMA)하려면 있어야 하는 롤. */
+    private static final String IMPORT_ROLE = "DATAPUMP_IMP_FULL_DATABASE";
+
     /**
-     * Oracle 복원 검증 = UNSUPPORTED (정직한 한계 표시).
-     * Data Pump 덤프는 서버 측 DATA_PUMP_DIR에 생기고 플랫폼이 파일에 접근하지 못한다.
-     * 자동 복원 검증을 하려면 임시 스키마로의 IMPDP(DBMS_DATAPUMP IMPORT) 실행과 그 스키마의
-     * 사후 정리·권한이 필요해 현재 범위 밖 — 여기서는 "확인 못 함"을 통과로 위장하지 않는다.
-     * (MSSQL의 RESTORE VERIFYONLY 같은 단발 무결성 검증 API가 Data Pump에는 없다.)
+     * Oracle 복원 검증 = Data Pump 임포트를 임시 스키마로 REMAP_SCHEMA (서버 사이드 API).
+     *
+     * 덤프는 서버 측 DATA_PUMP_DIR에 생겨 플랫폼이 파일을 직접 읽지 못하지만, 임포트도 서버가 하는
+     * 일이라 새 스키마로 REMAP하면 원본을 건드리지 않고 실제 복원까지 확인할 수 있다.
+     * (MSSQL의 RESTORE VERIFYONLY 같은 단발 무결성 검증 API가 Data Pump에는 없어서, 여기서는
+     *  "판독만" 같은 중간 단계 없이 실제 임포트냐 아니냐로 갈린다.)
+     *
+     * 다만 임시 스키마를 만들고 남의 스키마로 임포트하려면 관제보다 강한 권한이 필요하다. 없으면
+     * 되는 척하지 않고 무엇이 없는지 적어 UNSUPPORTED로 낸다 — 엔진의 한계가 아니라 이 계정의 한계다.
      */
     @Override
     public RestoreVerification verifyRestore(String location) {
-        return RestoreVerification.unsupported(
-                "Oracle Data Pump 덤프는 서버 측 산출물 — 임시 스키마 IMPDP가 필요해 자동 복원 검증 범위 밖: "
-                        + location);
+        String dumpFile = stripDataPumpPrefix(location);
+        String target = RestoreSupport.verifyTargetName();
+        RestoreSupport.requireSafeName(target); // 식별자로 그대로 들어가는 자리 — 심층 방어
+        String targetSchema = target.toUpperCase(Locale.ROOT);
+        String sourceSchema = instance.getUsername().toUpperCase(Locale.ROOT);
+        try (Connection conn = open()) {
+            String missing = missingImportPrivileges(conn);
+            if (missing != null) {
+                return RestoreVerification.unsupported(
+                        "임시 스키마 임포트 권한이 없어 자동 복원 검증 범위 밖 — 없는 것: " + missing
+                                + " (Oracle에 방법이 없는 것이 아니라 이 계정이 거기까지 못 간다)");
+            }
+            boolean created = false;
+            try {
+                createVerifySchema(conn, targetSchema, sourceSchema);
+                created = true;
+                importRemapped(conn, dumpFile, sourceSchema, targetSchema);
+                return RestoreVerification.verified(
+                        "임시 스키마로 실제 임포트 성공 — DBMS_DATAPUMP REMAP_SCHEMA (target=" + targetSchema + ")",
+                        countTables(conn, targetSchema));
+            } finally {
+                if (created) {
+                    dropVerifySchema(conn, targetSchema);
+                }
+            }
+        } catch (SQLException e) {
+            return RestoreVerification.failed("복원 검증 실패: " + e.getMessage());
+        }
+    }
+
+    /** backup()이 남기는 "(server) DATA_PUMP_DIR/<파일>" 에서 Data Pump가 받는 파일명만 남긴다. */
+    private static String stripDataPumpPrefix(String location) {
+        int slash = location.lastIndexOf('/');
+        return slash >= 0 ? location.substring(slash + 1) : location;
+    }
+
+    /** 없는 권한을 모아서 돌려준다(다 있으면 null) — 사유를 뭉뚱그리지 않고 이름으로 남기려고. */
+    private String missingImportPrivileges(Connection conn) throws SQLException {
+        List<String> missing = new ArrayList<>();
+        for (String privilege : IMPORT_PRIVILEGES) {
+            if (countOf(conn, "SELECT COUNT(*) FROM session_privs WHERE privilege = ?", privilege) == 0) {
+                missing.add(privilege);
+            }
+        }
+        // session_roles 는 중첩 부여까지 펼쳐 보여 준다(IMP_FULL_DATABASE 를 품은 롤도 여기 잡힌다)
+        if (countOf(conn, "SELECT COUNT(*) FROM session_roles WHERE role = ?", IMPORT_ROLE) == 0) {
+            missing.add(IMPORT_ROLE + "(REMAP_SCHEMA)");
+        }
+        return missing.isEmpty() ? null : String.join(", ", missing);
+    }
+
+    /**
+     * 검증용 임시 스키마. CREATE SESSION을 일부러 안 준다 — 임포트 대상일 뿐 로그인할 계정이 아니다.
+     * 세그먼트는 소유자 쿼터로 검사되므로 원본이 실제로 쓰는 테이블스페이스마다 쿼터를 준다.
+     */
+    private void createVerifySchema(Connection conn, String targetSchema, String sourceSchema) throws SQLException {
+        execute(conn, "CREATE USER \"" + targetSchema + "\" IDENTIFIED BY \"" + verifyPassword() + "\"");
+        for (String tablespace : sourceTablespaces(conn, sourceSchema)) {
+            execute(conn, "ALTER USER \"" + targetSchema + "\" QUOTA UNLIMITED ON \"" + tablespace + "\"");
+        }
+    }
+
+    /** 로그인 자체가 불가한 계정이지만 고정 암호는 소스에 안 남긴다. */
+    private static String verifyPassword() {
+        byte[] bytes = new byte[12];
+        new SecureRandom().nextBytes(bytes);
+        return "Dv1#" + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    /** 원본이 실제로 세그먼트를 둔 테이블스페이스들 — 아직 비었으면 그 계정의 기본 테이블스페이스. */
+    private List<String> sourceTablespaces(Connection conn, String sourceSchema) throws SQLException {
+        List<String> names = queryStrings(conn,
+                "SELECT DISTINCT tablespace_name FROM dba_segments "
+                        + "WHERE owner = ? AND tablespace_name IS NOT NULL", sourceSchema);
+        return names.isEmpty()
+                ? queryStrings(conn, "SELECT default_tablespace FROM dba_users WHERE username = ?", sourceSchema)
+                : names;
+    }
+
+    /**
+     * 익명 PL/SQL 블록이라 롤로 받은 권한이 그대로 산다(정의자 권한 프로시저였으면 안 산다).
+     * WAIT_FOR_JOB이 돌려주는 상태가 COMPLETED가 아니면 임포트를 성공으로 치지 않는다.
+     */
+    private void importRemapped(Connection conn, String dumpFile, String from, String to) throws SQLException {
+        String block = """
+                DECLARE
+                  h NUMBER;
+                BEGIN
+                  h := DBMS_DATAPUMP.OPEN(operation => 'IMPORT', job_mode => 'SCHEMA');
+                  DBMS_DATAPUMP.ADD_FILE(h, ?, 'DATA_PUMP_DIR');
+                  DBMS_DATAPUMP.METADATA_REMAP(h, 'REMAP_SCHEMA', ?, ?);
+                  DBMS_DATAPUMP.START_JOB(h);
+                  DBMS_DATAPUMP.WAIT_FOR_JOB(h, ?);
+                END;
+                """;
+        try (CallableStatement cs = conn.prepareCall(block)) {
+            cs.setString(1, dumpFile);
+            cs.setString(2, from);
+            cs.setString(3, to);
+            cs.registerOutParameter(4, Types.VARCHAR);
+            cs.execute();
+            String state = cs.getString(4);
+            if (!"COMPLETED".equalsIgnoreCase(state)) {
+                throw new SQLException("Data Pump 임포트가 COMPLETED 로 안 끝났습니다: " + state);
+            }
+        }
+    }
+
+    private int countTables(Connection conn, String schema) throws SQLException {
+        return countOf(conn, "SELECT COUNT(*) FROM all_tables WHERE owner = ?", schema);
+    }
+
+    /**
+     * 임시 스키마는 반드시 지운다 — 남으면 대상 DB에 남의 스키마가 쌓인다.
+     * 여기서 던지면 원래 판정을 덮어써 버리므로 삼키고 경고만 남긴다.
+     */
+    private void dropVerifySchema(Connection conn, String targetSchema) {
+        try {
+            execute(conn, "DROP USER \"" + targetSchema + "\" CASCADE");
+        } catch (SQLException e) {
+            LOG.warn("복원 검증 임시 스키마 정리 실패 — 수동 삭제 필요: {} ({})", targetSchema, e.getMessage());
+        }
+    }
+
+    private void execute(Connection conn, String sql) throws SQLException {
+        try (Statement st = conn.createStatement()) {
+            st.execute(sql);
+        }
+    }
+
+    private int countOf(Connection conn, String sql, String param) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, param);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        }
+    }
+
+    private List<String> queryStrings(Connection conn, String sql, String param) throws SQLException {
+        List<String> out = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, param);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(rs.getString(1));
+                }
+            }
+        }
+        return out;
     }
 
     /**
