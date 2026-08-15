@@ -30,14 +30,23 @@ class RestoreVerificationTest {
         assertNull(u.restoredObjectCount());
     }
 
+    /**
+     * Oracle은 이제 임시 스키마로 REMAP_SCHEMA 임포트까지 간다(OracleRestoreVerifyIT).
+     * 그래서 UNSUPPORTED는 "기종이라서"가 아니라 "이 계정에 임포트 권한이 없어서"로 좁혀졌고,
+     * 그 판정은 대상에 붙어 session_privs를 봐야 나온다 — 라이브 IT의 몫이다.
+     * 여기서 못 박는 것은 붙지도 못했을 때다: 확인을 못 했으면 통과로 위장하지 않는다.
+     */
     @Test
-    void Oracle은_서버_사이드_산출물이라_UNSUPPORTED로_정직하게_보고한다() {
-        // verifyRestore는 커넥션을 열지 않고 즉시 UNSUPPORTED를 돌려주므로 pools 없이도 검증 가능
+    void 대상에_못_붙으면_되는_척하지_않고_FAILED로_낸다() {
         DatabaseInstance oracle = new DatabaseInstance(
-                "ora", DbmsType.ORACLE, "127.0.0.1", 1521, "FREEPDB1", "system", "pw");
-        RestoreVerification v = new OracleOperator(oracle, null, null)
+                "ora", DbmsType.ORACLE, "127.0.0.1", 1, "FREEPDB1", "system", "pw"); // 닫힌 포트
+        ConnectionPools pools = new ConnectionPools(
+                new VaultCredentials("", ""), 5, 1, 1000, 60_000, 60_000, 30, 60_000);
+
+        RestoreVerification v = new OracleOperator(oracle, pools, null)
                 .verifyRestore("(server) DATA_PUMP_DIR/oracle-ora.dmp");
-        assertEquals(RestoreVerification.Status.UNSUPPORTED, v.status());
-        assertTrue(v.detail().contains("IMPDP") || v.detail().contains("범위 밖"), v.detail());
+
+        assertEquals(RestoreVerification.Status.FAILED, v.status(), v.detail());
+        assertNull(v.restoredObjectCount(), "복원을 못 했으면 개체 수는 비어 있어야 한다");
     }
 }

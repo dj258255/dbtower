@@ -7,6 +7,13 @@ GRANT SELECT_CATALOG_ROLE TO sample;
 GRANT SELECT ANY DICTIONARY TO sample;
 GRANT READ, WRITE ON DIRECTORY DATA_PUMP_DIR TO sample;
 
+-- 복원 검증(verifyRestore)에만 필요한 롤. 관제와 백업은 위 세 줄로 끝나고, "덤프가 실제로
+-- 복원되는가"까지 확인하려면 임시 스키마를 만들어 REMAP_SCHEMA 로 임포트해야 해서 더 필요하다.
+-- 이 롤 하나가 IMP_FULL_DATABASE 를 통해 CREATE USER / ALTER USER / DROP USER / CREATE ANY TABLE
+-- 을 함께 준다(실측: dba_sys_privs 조회). 즉 복원 검증은 관제보다 강한 권한을 요구한다 —
+-- 안 주면 OracleOperator 가 없는 권한 이름을 적어 UNSUPPORTED 로 내고 통과로 위장하지 않는다.
+GRANT DATAPUMP_IMP_FULL_DATABASE TO sample;
+
 -- 샘플 데이터 시드 (인덱스는 PK 없음: TABLE ACCESS FULL 시나리오 재현용)
 CREATE TABLE sample.users AS
 SELECT level AS id,
