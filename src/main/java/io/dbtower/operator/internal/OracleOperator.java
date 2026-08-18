@@ -1033,13 +1033,19 @@ public class OracleOperator extends AbstractJdbcOperator {
                 // 스탠바이의 적용 지연은 v$dataguard_stats('apply lag')가 원천이다. 이 뷰는 Data Guard가
                 // 구성된 스탠바이에서만 행이 있고, 값 형식이 '+00 00:00:03'(INTERVAL DAY TO SECOND)이라
                 // 초로 환산한다. 예전에는 -1을 실어서 Oracle은 복제 지연 알림이 구조적으로 불가능했다.
+                //
+                // value != '' 을 걸면 안 된다 — Oracle은 빈 문자열을 NULL로 취급하므로 value != '' 는
+                // value != NULL, 즉 3값 논리에서 항상 UNKNOWN이 되어 apply lag 이 정상값이어도 행이 절대
+                // 안 나온다. 그러면 늘 unavailable로 강등돼 Oracle은 MEASURED가 구조적으로 불가능했다.
+                // (실측: LONDON 스탠바이에서 apply lag='+00 00:03:50'인데도 이 절 때문에 0행이었다.)
+                // 빈 값 배제는 value IS NOT NULL 하나로 충분하다(Oracle에선 ''이 곧 NULL).
                 Double applyLagSec = jdbc().query("""
                         SELECT EXTRACT(DAY FROM TO_DSINTERVAL(value)) * 86400
                              + EXTRACT(HOUR FROM TO_DSINTERVAL(value)) * 3600
                              + EXTRACT(MINUTE FROM TO_DSINTERVAL(value)) * 60
                              + EXTRACT(SECOND FROM TO_DSINTERVAL(value)) AS lag_sec
                         FROM v$dataguard_stats
-                        WHERE name = 'apply lag' AND value IS NOT NULL AND value != ''
+                        WHERE name = 'apply lag' AND value IS NOT NULL
                         """, r2 -> r2.next() ? r2.getDouble("lag_sec") : null);
                 return applyLagSec == null
                         ? ReplicationState.unavailable(role, detail

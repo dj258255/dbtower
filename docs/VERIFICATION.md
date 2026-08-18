@@ -3612,6 +3612,11 @@ GET /actuator/health -> {"groups":["liveness","readiness"],"status":"UP"}
   이것도 Data Guard 구성이 있어야 만들 수 있다. 데모 Oracle은 PRIMARY라 `NOT_APPLICABLE`로 답한다
   — 즉 Oracle에서 확인된 것은 세 경로 중 하나뿐이다.
 
+**닫힘(이 세션, 123.15)** — 위 두 항목은 이제 실측으로 닫혔다. OCI VM에 Oracle 19c EE로
+Data Guard(Primary BOSTON + 물리 Standby LONDON)를 실제로 세워 `MEASURED`(apply lag 41초 등)와
+`UNAVAILABLE`(완전 동기 시 apply lag이 NULL)을 모두 관측했다. 그리고 그 과정에서 **Oracle에서
+`MEASURED`가 구조적으로 불가능했던 결함**을 찾아 고쳤다 — 123.15 참고.
+
 나머지 항목(gh-ost 가드레일, 여유공간 부족 거부, Discord 전달 경로)은
 123.12·123.13·123.14에서 실측했다.
 
@@ -3776,3 +3781,62 @@ alert_history
 
 응답에서 파싱한 id가 `AlertMessageIndex.record`로 저장되는 것까지 확인했다 —
 이게 이모지 반응 진단이 특권 인텐트 없이 대상 인스턴스를 찾는 근간이다.
+
+### 123.15 Oracle Data Guard — MEASURED 실측, 그리고 그 과정에서 드러난 빈문자열 결함
+
+123.10에 "확인하지 못한 것"으로 남겨둔 Oracle `MEASURED`/`UNAVAILABLE`을 실제로 재현했다.
+공식 Docker 이미지가 "Data Guard is not supported"라 컨테이너로는 못 잰다 — VM에 직접 세웠다.
+
+**세운 것** (OCI VM, Rocky 9 aarch64, Oracle 19c EE)
+- glibc 2.34에서 사라진 stat64/fstat64/lstat64 심볼을 `syscall(SYS_newfstatat)` 심으로 메워
+  링크 통과(sysliblist에 심 라이브러리 추가). SQL*Plus 19.0.0.0.0 기동 확인.
+- Primary `BOSTON`(ARCHIVELOG, force logging, SRL 4개) + 물리 Standby `LONDON`을
+  한 VM에 SID·데이터파일 경로·db_unique_name 분리해 구성. RMAN `DUPLICATE ... FOR STANDBY
+  FROM ACTIVE DATABASE`로 복제. redo transport는 리스너 정적 등록 + 인라인 TNS 디스크립터.
+- Standby를 `READ ONLY WITH APPLY`(Active Data Guard)로 열어 DBTower 일반 유저(SYSTEM)가
+  `v$dataguard_stats`를 읽을 수 있게 함. DBTower(로컬)→VM 리스너는 SSH 터널(1521).
+- 복제 실증: Primary에서 만든 `dg_test` 5000행이 Standby에서 그대로 조회됨.
+
+**드러난 결함 — Oracle에서 `MEASURED`가 구조적으로 불가능했다**
+
+apply를 멈춰 apply lag을 실제로 쌓았는데도(`v$dataguard_stats`에 `apply lag = +00 00:03:13`,
+12자, 명백한 실값) DBTower는 계속 `UNAVAILABLE`을 답했다. 쿼리를 분해해 원인을 특정했다.
+
+```
+-- Standby(LONDON)에서 SYSTEM 계정으로, DBTower가 쓰던 그대로:
+raw:                 apply lag = [+00 00:03:13]   len=12      <- 실값 존재
+TO_DSINTERVAL(value):[+000000000 00:03:13...]                 <- 변환 정상
+WHERE ... value != '' 의 count():  0                          <- 행이 사라진다
+WHERE ... (value != '' 제거) 의 lag_sec:  230                 <- 제거하면 나온다
+```
+
+원인은 Oracle의 빈문자열 = NULL 규칙이다. `value != ''`는 `value != NULL`이 되고,
+3값 논리에서 이는 **항상 UNKNOWN**(참이 될 수 없음)이라 `value IS NOT NULL AND value != ''`
+전체가 무너져 apply lag이 아무리 정상값이어도 0행이 된다. 그 결과 Oracle은 늘 `UNAVAILABLE`로
+강등돼, 세 경로(MEASURED/NOT_APPLICABLE/UNAVAILABLE) 중 `MEASURED`가 원천적으로 나올 수 없었다.
+MySQL/PostgreSQL은 `''`이 NULL이 아니라 이 관용구가 통했다 — Oracle에만 있는 함정이라
+단위 테스트(H2/목)로는 안 잡히고, 실제 Data Guard 앞에 세워야만 드러난다.
+
+**고친 것** — `OracleOperator.replicationState()`의 apply lag 쿼리에서 `AND value != ''` 제거.
+Oracle에선 `value IS NOT NULL` 하나가 빈 값 배제를 이미 정확히 수행한다. 왜인지를 주석으로 남겼다.
+전 소스에서 SQL 문자열의 `!= ''`/`<> ''`를 전수 검색 — 이 한 곳이 유일했다.
+
+**수정 후 실측** (DBTower REST `GET /api/instances/{id}/replication`, 수정 코드 재기동)
+
+서버 원천값과 DBTower 파싱값이 정확히 일치한다:
+
+```
+서버 v$dataguard_stats:  apply lag = +00 00:00:41   transport lag = +00 00:00:00
+같은 시점 DBTower REST:  {"role":"PHYSICAL STANDBY","lagSeconds":41.0,
+                         "lagSource":"MEASURED","detail":"... apply lag"}
+```
+
+전 구간을 관측했다:
+- apply 정지 → 지연 축적: `MEASURED` 336 → 379초 (증가)
+- 실시간 apply 재개 → 배수 → 완전 동기: `MEASURED` 375 → 0.0초
+- 완전 동기 상태에서 heartbeat가 끊기면 apply lag이 NULL이 되어 `UNAVAILABLE` — 이건 결함이
+  아니라 "잴 지연이 없다"는 정직한 답. 결함(항상 UNAVAILABLE)과는 구분된다.
+
+수정 전이라면 위 41초·336초·0초 전부 `UNAVAILABLE`로 나갔을 것이다.
+이 결함은 "실측이 없으면 검증이 아니다"의 살아있는 사례다 — 코드는 빈 값 거르기로 보였고
+테스트는 초록불이었지만, 실제 스탠바이 앞에서 Oracle은 한 번도 지연을 답한 적이 없었다.
