@@ -3840,3 +3840,38 @@ Oracle에선 `value IS NOT NULL` 하나가 빈 값 배제를 이미 정확히 �
 수정 전이라면 위 41초·336초·0초 전부 `UNAVAILABLE`로 나갔을 것이다.
 이 결함은 "실측이 없으면 검증이 아니다"의 살아있는 사례다 — 코드는 빈 값 거르기로 보였고
 테스트는 초록불이었지만, 실제 스탠바이 앞에서 Oracle은 한 번도 지연을 답한 적이 없었다.
+
+### 123.16 5기종 복제 지연 실측 — 종합
+
+복제 지연의 `MEASURED` 경로를 5기종 모두 **실제 복제 토폴로지를 꾸며** 관측했다.
+처음엔 단일 노드만 찔러 전부 `NOT_APPLICABLE`이 나온 것을 "3-값 확인"이라 적었지만, 그건
+센티넬이 사라진 것만 본 것이고 지연 계산은 한 번도 실행되지 않았다(123.1 첫 문단). 그래서
+기종마다 프라이머리/스탠바이를 실제로 세워 다시 쟀고, Oracle만 컨테이너 제약으로 남아 있던 것을
+이 세션에서 OCI VM에 Data Guard를 세워 닫았다(123.15). 아래가 그 전부다.
+
+| 기종 | 실측 토폴로지 | 지연 원천 | 감사 전 | MEASURED 관측(따라잡음 → 지연) | 실측이 드러낸 결함 | 절 |
+|---|---|---|---|---|---|---|
+| PostgreSQL | primary + standby (`pg_basebackup -R`) | `pg_stat_replication.replay_lag` | 프라이머리 `0` 고정 | 0.0s → 35.9s (재생 정지 + 80,000행) | 프라이머리 지연이 `0` 하드코딩이라 프라이머리만 등록한 환경은 알림 구조적 불가 | 123.1 |
+| MySQL | source + replica (파일/포지션) | `Seconds_Behind_Source` | `NULL`을 `-1`로 뭉갬 | 0.0s (정상) | `NULL`("복제 끊김")을 `-1`로 뭉개 알림 게이트가 조용히 스킵 → 단절 시 `UNAVAILABLE`로 분리 | 123.1 |
+| MongoDB | 2멤버 레플리카셋 | `members[].optimeDate` 차 | `-1` 하드코딩 | 0.0s → 110.0s (`fsyncLock` + `w:1` 쓰기) | (측정 자체는 정상 확인 — 깨진 rs `UNAVAILABLE`은 123.2(a)에서 별도 실측) | 123.1 |
+| SQL Server | AlwaysOn AG (`CLUSTER_TYPE = NONE`) | `dm_hadr_database_replica_states` redo_queue/last_redone | `-1` 하드코딩 | 0.0s → 102.0s (HADR SUSPEND + 40,000행, redo_queue 3160KB) | 복제본 수를 세컨더리 로컬 행에서 세어 2노드 AG인데 `replicas=1` → `sys.availability_replicas`로 `replicas=2` | 123.1 |
+| Oracle | Data Guard 물리 standby (OCI VM, 19c EE) | `v$dataguard_stats` apply lag | `-1` 하드코딩 | 0.0s → 379s (서버 41s ↔ REST `lagSeconds:41.0` 일치) | `value != ''` — Oracle은 빈문자열=NULL이라 항상 UNKNOWN → apply lag이 실값이어도 0행 → 늘 `UNAVAILABLE` | 123.15 |
+
+임계 초과 알림도 실제로 발사됐다(`alert_history`):
+
+```
+PostgreSQL  31|SENT 복제 지연 role=PRIMARY   lag=105.0s (임계 30s)
+            32|SENT 복제 지연 role=REPLICA   lag=125.2s
+MySQL       34|SENT 복제 상태를 읽지 못했습니다 role=REPLICA (IO=No, SQL=Yes)
+MongoDB     62|SENT 복제 지연 role=PRIMARY   lag=100.0s
+            63|SENT 복제 지연 role=SECONDARY lag=100.0s
+```
+
+세 경로가 5기종에서 각각 확인됐다:
+- `MEASURED` — 5기종 전부 (위 표)
+- `UNAVAILABLE` — MySQL 복제 스레드 단절(123.1), MongoDB 깨진 rs(123.2(a)), Oracle 완전동기 시 apply lag NULL(123.15)
+- `NOT_APPLICABLE`/`UNSUPPORTED`/`STANDALONE` — 복제 미구성 단일 노드, AG 프라이머리 로컬 행 등
+
+**실측이 없었으면 드러나지 않았을 결함이 기종마다 하나씩 나왔다** — PG 프라이머리 `0` 고정,
+MySQL `NULL` 뭉갬, MSSQL 복제본 수 오표기, Oracle 빈문자열=NULL. 넷 다 코드는 정상으로 보였고
+단위 테스트(H2/목)는 초록불이었다. "복제를 걸어 지연을 잰 것이 없다"는 이제 5기종 전부에 무효다.
