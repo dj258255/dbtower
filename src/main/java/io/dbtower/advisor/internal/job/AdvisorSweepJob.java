@@ -5,7 +5,7 @@ import io.dbtower.advisor.AdvisorService;
 import io.dbtower.advisor.InstanceAdvisorReport;
 
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.RegistryService;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,16 +34,16 @@ public class AdvisorSweepJob {
 
     private static final Logger log = LoggerFactory.getLogger(AdvisorSweepJob.class);
 
-    private final DatabaseInstanceRepository instanceRepository;
+    private final RegistryService registryService;
     private final AdvisorService advisorService;
     private final List<Advisor> advisors;
 
     /** 인스턴스별 마지막 스윕 리포트 — 캐시(결과 저장). */
     private final Map<Long, InstanceAdvisorReport> latest = new ConcurrentHashMap<>();
 
-    public AdvisorSweepJob(DatabaseInstanceRepository instanceRepository, AdvisorService advisorService,
+    public AdvisorSweepJob(RegistryService registryService, AdvisorService advisorService,
                            List<Advisor> advisors) {
-        this.instanceRepository = instanceRepository;
+        this.registryService = registryService;
         this.advisorService = advisorService;
         this.advisors = advisors;
     }
@@ -58,7 +58,7 @@ public class AdvisorSweepJob {
         // 같은 호스트(+같은 nodeFilter — 다른 마운트를 보면 다른 점검이다)를 공유하는 인스턴스들엔
         // 그룹당 1회만 실행하고 나머지는 SHARED로 표기한다. 대표는 id 오름차순의 첫 인스턴스(결정적).
         // 포트는 키에서 뺀다 — 디스크는 포트가 아니라 머신의 자원이다(같은 머신의 MySQL과 PG는 디스크를 공유).
-        List<DatabaseInstance> targets = new ArrayList<>(instanceRepository.findAll());
+        List<DatabaseInstance> targets = new ArrayList<>(registryService.findAll());
         targets.sort(Comparator.comparing(DatabaseInstance::getId,
                 Comparator.nullsLast(Comparator.naturalOrder())));
         Map<String, String> hostCoveredBy = new HashMap<>();

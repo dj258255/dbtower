@@ -18,7 +18,7 @@ class WebhookEmbedTest {
         final List<Embed> embeds = new ArrayList<>();
 
         Capturing(int ratePerMinute) {
-            super("", ratePerMinute, null, null);
+            super("", ratePerMinute, null, null, null);
         }
 
         @Override
@@ -27,8 +27,9 @@ class WebhookEmbedTest {
         }
 
         @Override
-        void deliverEmbed(String textFallback, String suppressedNote, Embed embed, Long instanceId) {
+        boolean deliverEmbed(String textFallback, String suppressedNote, Embed embed, Long instanceId) {
             embeds.add(embed);
+            return true;   // 캡처 성공 = 전달 성공
         }
     }
 
@@ -45,7 +46,7 @@ class WebhookEmbedTest {
 
     @Test
     void discord_페이로드는_embeds와_멘션잠금을_담고_빈_필드는_뺀다() {
-        WebhookNotifier n = new WebhookNotifier("https://discord.com/api/webhooks/x", 12, null, null);
+        WebhookNotifier n = new WebhookNotifier("https://discord.com/api/webhooks/x", 12, null, null, null);
         var e = new WebhookNotifier.Embed("DB팀 문의", 0x6366F1, List.of(
                 new WebhookNotifier.Embed.Field("요청자", "alice", true),
                 new WebhookNotifier.Embed.Field("비고", "", false)));   // 빈 값 — 제외돼야 함
@@ -60,7 +61,7 @@ class WebhookEmbedTest {
 
     @Test
     void 필드_값은_디스코드_한도에서_잘리고_잘림_표시가_붙는다() {
-        WebhookNotifier n = new WebhookNotifier("https://discord.com/api/webhooks/x", 12, null, null);
+        WebhookNotifier n = new WebhookNotifier("https://discord.com/api/webhooks/x", 12, null, null, null);
         var e = new WebhookNotifier.Embed("t", 0, List.of(
                 new WebhookNotifier.Embed.Field("쿼리", "x".repeat(3000), false)));
         String payload = n.discordEmbedPayload(e, "");

@@ -263,7 +263,7 @@ public class MySqlOperator extends AbstractJdbcOperator {
             RestoreSupport.ExecResult count = RestoreSupport.exec(RestoreSupport.concat(base, "-N", "-B", "-e",
                     "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='" + target + "'"), env, null);
             return RestoreVerification.verified(
-                    "임시 DB로 덤프 복원 성공 (mysql 클라이언트, target=" + target + ")",
+                    "임시 DB로 덤프 복원 성공 (mysql 클라이언트, target=" + backupTools.verifyLocationNote() + target + ")",
                     RestoreSupport.parseCount(count));
         } finally {
             if (created) {
@@ -300,7 +300,7 @@ public class MySqlOperator extends AbstractJdbcOperator {
                 return RestoreVerification.failed("xbstream 추출/prepare 실패: " + r.errorTail());
             }
             return RestoreVerification.verified(
-                    "xbstream 추출 + xtrabackup --prepare 성공 — 크래시 복구까지 적용된 복원 가능한 물리 백업", null);
+                    "xbstream 추출 + xtrabackup --prepare 성공 — 크래시 복구까지 적용된 복원 가능한 물리 백업" + backupTools.verifyLocationNote(), null);
         } catch (Exception e) {
             return RestoreVerification.failed("물리 산출물 검증 실행 실패: " + e.getMessage());
         }
@@ -464,6 +464,16 @@ public class MySqlOperator extends AbstractJdbcOperator {
 
     /** 상위 digest의 누적 QUANTILE(폴백용)과 텍스트를 잠깐 담는 내부 운반체. */
     private record TopDigest(String digest, String text, Double p95, Double p99) {
+    }
+
+    /** 복제 오류 문구는 버전·상황마다 다른 컬럼에 담긴다 — 처음 채워진 것을 쓴다. */
+    private static String firstNonBlank(String... values) {
+        for (String v : values) {
+            if (v != null && !v.isBlank()) {
+                return v;
+            }
+        }
+        return null;
     }
 
     private static double round2(double v) {
@@ -949,13 +959,30 @@ public class MySqlOperator extends AbstractJdbcOperator {
         // 두 SHOW 문은 세션 지역 상태를 공유하지 않아 각각 실행해도 결과가 같다
         try {
             ReplicationState asReplica = jdbc().query("SHOW REPLICA STATUS", rs -> {
-                if (rs.next()) {
-                    double lag = rs.getObject("Seconds_Behind_Source") == null
-                            ? -1 : rs.getDouble("Seconds_Behind_Source");
-                    return new ReplicationState("REPLICA", lag,
-                            "source=" + rs.getString("Source_Host") + ":" + rs.getInt("Source_Port"));
+                if (!rs.next()) {
+                    return null;
                 }
-                return null;
+                String source = "source=" + rs.getString("Source_Host") + ":" + rs.getInt("Source_Port");
+                // 스레드 상태를 먼저 본다 — 여기가 예전 구현의 결정적 공백이었다.
+                // Seconds_Behind_Source가 NULL인 것은 "지연 미상"이 아니라 복제 스레드가 죽었다는 신호인데,
+                // 그걸 -1로 뭉개서 알림 게이트가 조용히 스킵했다(가장 알려야 할 사건에서 침묵).
+                String ioRunning = rs.getString("Replica_IO_Running");
+                String sqlRunning = rs.getString("Replica_SQL_Running");
+                boolean healthy = "Yes".equalsIgnoreCase(ioRunning) && "Yes".equalsIgnoreCase(sqlRunning);
+                if (!healthy) {
+                    String lastError = firstNonBlank(
+                            rs.getString("Last_Error"), rs.getString("Last_IO_Error"), rs.getString("Last_SQL_Error"));
+                    return ReplicationState.unavailable("REPLICA", String.format(
+                            "%s — 복제 스레드 중단(IO=%s, SQL=%s)%s", source, ioRunning, sqlRunning,
+                            lastError == null ? "" : ": " + lastError));
+                }
+                Object behind = rs.getObject("Seconds_Behind_Source");
+                if (behind == null) {
+                    // 스레드는 살아 있는데 값이 비는 경우(전환 중 등) — 못 읽은 것이지 지연 0이 아니다
+                    return ReplicationState.unavailable("REPLICA",
+                            source + " — Seconds_Behind_Source 미확보(복제 전환 중이거나 소스 접속 대기)");
+                }
+                return ReplicationState.measured("REPLICA", rs.getDouble("Seconds_Behind_Source"), source);
             });
             if (asReplica != null) {
                 return asReplica;
@@ -965,9 +992,12 @@ public class MySqlOperator extends AbstractJdbcOperator {
                 while (rs.next()) {
                     replicas++;
                 }
+                // SHOW REPLICAS는 연결된 레플리카 목록만 주고 지연을 주지 않는다. 예전에는 0을 실어서
+                // "지연 없음"으로 읽혔는데, 프라이머리만 등록한 환경에서는 임계를 영원히 못 넘었다.
                 return replicas > 0
-                        ? new ReplicationState("PRIMARY", 0, "replicas=" + replicas)
-                        : new ReplicationState("STANDALONE", 0, "복제 구성 없음");
+                        ? ReplicationState.unsupported("PRIMARY", "replicas=" + replicas
+                                + " — SHOW REPLICAS는 지연을 제공하지 않는다(레플리카 쪽을 등록해야 지연이 보인다)")
+                        : ReplicationState.standalone("복제 구성 없음");
             });
         } catch (DataAccessException e) {
             throw new OperatorException("MySQL 복제 상태 조회 실패: " + e.getMessage(), e);

@@ -4,7 +4,7 @@ import io.dbtower.backup.internal.domain.BackupPolicyEntity;
 import io.dbtower.backup.internal.persistence.BackupPolicyRepository;
 import io.dbtower.operator.model.BackupPolicy;
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.RegistryService;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -24,7 +24,7 @@ import static org.mockito.Mockito.when;
  */
 class WalStreamManagerTest {
 
-    private final DatabaseInstanceRepository instances = Mockito.mock(DatabaseInstanceRepository.class);
+    private final RegistryService instances = Mockito.mock(RegistryService.class);
     private final BackupPolicyRepository policies = Mockito.mock(BackupPolicyRepository.class);
 
     private DatabaseInstance instance(long id, DbmsType type, boolean collecting) {
@@ -50,7 +50,7 @@ class WalStreamManagerTest {
                 policy(2, BackupPolicy.BackupType.LOG),      // MySQL — 제외
                 policy(3, BackupPolicy.BackupType.LOG),      // 격리 — 제외(문제 대상을 두드리지 않기)
                 policy(4, BackupPolicy.BackupType.FULL)));   // LOG 아님 — 제외
-        when(instances.findById(anyLong())).thenAnswer(inv -> switch (((Long) inv.getArgument(0)).intValue()) {
+        when(instances.findOptional(anyLong())).thenAnswer(inv -> switch (((Long) inv.getArgument(0)).intValue()) {
             case 1 -> Optional.of(pg);
             case 2 -> Optional.of(mysql);
             case 3 -> Optional.of(pgIsolated);

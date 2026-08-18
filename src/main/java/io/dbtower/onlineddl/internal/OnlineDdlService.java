@@ -37,7 +37,7 @@ public class OnlineDdlService {
     public OnlineDdlService(
             RegistryService registryService,
             @Value("${dbtower.online-ddl.ghost-command:gh-ost}") String ghostCommand,
-            @Value("${dbtower.online-ddl.ghost-flags:--allow-on-master --assume-rbr --initially-drop-ghost-table --ok-to-drop-table}") String ghostFlags,
+            @Value("${dbtower.online-ddl.ghost-flags:--allow-on-master --assume-rbr --max-load=Threads_running=25 --critical-load=Threads_running=75 --critical-load-interval-millis=1000 --max-lag-millis=1500 --chunk-size=1000 --default-retries=3}") String ghostFlags,
             @Value("${dbtower.online-ddl.timeout-seconds:1800}") long timeoutSeconds) {
         this.registryService = registryService;
         this.ghostBase = OnlineDdlCommands.tokenize(ghostCommand);

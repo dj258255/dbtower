@@ -83,9 +83,14 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 .formatted(safeFileName(instance.getName()), backupTimestamp());
         // 식별자는 바인딩이 안 되므로 ]를 ]]로 이스케이프해 대괄호 탈출을 막는다 (등록 시 패턴 검증 + 심층 방어)
         String escapedDb = instance.getDbName().replace("]", "]]");
+        // COPY_ONLY는 선택이 아니라 필수다 — 운영 인스턴스의 백업 체인은 대개 사이트의 별도 백업 제품이
+        // 소유한다. 이걸 빼면 BACKUP DATABASE는 차등 베이스(differential bitmap)를 리셋해 기존 DIFF를
+        // 복원 불가로 만들고, BACKUP LOG는 로그 체인의 그 구간을 이 파일로 가져가 사이트 체인에 구멍을
+        // 낸다. 이미 잘린 로그는 되돌릴 수 없다(DML은 롤백되지만 백업 체인은 롤백되지 않는다).
+        // CHECKSUM은 손상된 페이지를 조용히 백업에 담지 않기 위한 것 — 복원 시점이 아니라 백업 시점에 잡는다.
         String sql = policy.type() == BackupType.LOG
-                ? "BACKUP LOG [%s] TO DISK = ?".formatted(escapedDb)
-                : "BACKUP DATABASE [%s] TO DISK = ?".formatted(escapedDb);
+                ? "BACKUP LOG [%s] TO DISK = ? WITH COPY_ONLY, CHECKSUM".formatted(escapedDb)
+                : "BACKUP DATABASE [%s] TO DISK = ? WITH COPY_ONLY, CHECKSUM".formatted(escapedDb);
         try (Connection conn = open(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, serverPath);
             ps.execute();
@@ -162,6 +167,43 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /** 복원본이 운영 볼륨을 채우지 않도록 남기는 여유 비율 — 복원 중 로그 증가·autogrow 몫이다. */
+    private static final double RESTORE_HEADROOM = 1.2;
+
+    /**
+     * 복원 전 여유공간 사전 검사 — 부족하면 <b>시도하지 않고</b> 거부한다.
+     *
+     * <p>복원 대상 경로는 {@code InstanceDefaultDataPath}, 즉 <b>운영 데이터 파일과 같은 볼륨</b>이다.
+     * 예전에는 FILELISTONLY가 주는 Size 컬럼을 읽지도 않고 그냥 복원을 걸었다. 볼륨이 차면 복원이
+     * 실패하는 데서 끝나지 않는다 — 운영 DB의 autogrow와 로그 증가가 함께 막혀 9002/1105로
+     * <b>서비스가 멈춘다</b>. 복구 검증 잡이 운영을 죽이는 전형적 사고다.
+     *
+     * <p>여유를 확인할 수 없으면(volumeStat 미확보) 막지 않는다 — 알 수 없는 것을 위험으로 단정하지 않는다.
+     *
+     * @return 거부 사유. 통과면 null
+     */
+    private String refuseIfNotEnoughSpace(long neededBytes) {
+        if (neededBytes <= 0) {
+            return null;   // 크기를 못 읽었으면 판단 근거가 없다
+        }
+        // availableBytes는 nullable이다(VolumeStat 계약 — 파일 관점 소스는 볼륨 여유를 모른다).
+        // 자동 언박싱에 맡기면 NPE라, 명시적으로 확인한다.
+        Long availableBoxed = volumeStat().map(VolumeStat::availableBytes).orElse(null);
+        if (availableBoxed == null || availableBoxed <= 0) {
+            return null;   // 여유를 모르면 막지 않는다(정직 — 미확보는 위험이 아니다)
+        }
+        long available = availableBoxed;
+        long required = (long) (neededBytes * RESTORE_HEADROOM);
+        if (available >= required) {
+            return null;
+        }
+        return ("복원 검증을 중단했습니다 — 대상 인스턴스의 데이터 볼륨 여유가 부족합니다 "
+                + "(필요 약 %dMB, 여유 %dMB). ").formatted(required / 1048576, available / 1048576)
+                + "이 복원은 운영 데이터 파일과 같은 볼륨을 쓰므로, 강행하면 복원 실패에서 끝나지 않고 "
+                + "운영 DB의 파일 증가까지 막혀 서비스가 멈출 수 있습니다. "
+                + "별도 검증 인스턴스로 복원 명령을 지정하거나 볼륨 여유를 확보하세요.";
+    }
+
     /**
      * FULL 백업을 임시 DB로 실제 복원하고, 사용자 테이블 수를 세고, 반드시 지운다.
      * MOVE가 없으면 원본과 같은 물리 경로를 쓰려다 충돌한다 — 임시 DB 이름으로 파일도 함께 옮긴다.
@@ -171,6 +213,7 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         StringBuilder moves = new StringBuilder();
         int files = 0;
         int dataSeen = 0;
+        long neededBytes = 0;
         try (PreparedStatement ps = conn.prepareStatement("RESTORE FILELISTONLY FROM DISK = ?")) {
             ps.setString(1, path);
             ps.execute();
@@ -181,12 +224,17 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                             ? ".ldf" : (dataSeen++ == 0 ? ".mdf" : ".ndf");
                     moves.append(", MOVE N'").append(logical.replace("'", "''")).append("' TO N'")
                             .append(dataDir).append(target).append('_').append(files).append(ext).append('\'');
+                    neededBytes += rs.getLong("Size");   // 복원이 실제로 잡을 파일 크기
                     files++;
                 }
             }
         }
         if (files == 0) {
             return RestoreVerification.failed("백업셋에서 논리 파일 목록을 읽지 못했습니다: " + path);
+        }
+        String capacityRefusal = refuseIfNotEnoughSpace(neededBytes);
+        if (capacityRefusal != null) {
+            return RestoreVerification.failed(capacityRefusal);
         }
         try {
             // REPLACE는 일부러 안 붙인다 — 이름이 겹치면 덮어쓰지 말고 실패해야 한다
@@ -202,7 +250,8 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 tables = rs.next() ? rs.getInt(1) : -1;
             }
             return RestoreVerification.verified(
-                    "임시 DB로 전체 복원 성공 — RESTORE DATABASE + 사용자 테이블 조회 (target=" + target + ")",
+                    "임시 DB로 전체 복원 성공 — RESTORE DATABASE + 사용자 테이블 조회 (target=" + target + ")."
+                            + backupTools.verifyLocationNote(),
                     tables);
         } finally {
             dropVerifyDatabase(conn, target);
@@ -332,6 +381,7 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                        SUM(CASE WHEN ps.index_id > 1 THEN ps.used_page_count ELSE 0 END) * 8192 AS index_bytes
                 FROM sys.dm_db_partition_stats ps
                 JOIN sys.tables t ON t.object_id = ps.object_id
+                WHERE SCHEMA_NAME(t.schema_id) = SCHEMA_NAME()
                 GROUP BY t.name
                 ORDER BY SUM(ps.used_page_count) DESC
                 """;
@@ -368,6 +418,7 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 LEFT JOIN sys.dm_db_index_usage_stats u
                        ON u.object_id = i.object_id AND u.index_id = i.index_id AND u.database_id = DB_ID()
                 WHERE i.index_id > 0 AND i.name IS NOT NULL
+                  AND SCHEMA_NAME(t.schema_id) = SCHEMA_NAME()
                 ORDER BY scan_count ASC
                 """;
         try {
@@ -582,17 +633,50 @@ public class MsSqlOperator extends AbstractJdbcOperator {
     /** 복제 상태 — AlwaysOn 가용성 그룹의 DMV. AG 미구성 단독 인스턴스면 행이 없다 */
     @Override
     public ReplicationState replicationState() {
+        // 예전 쿼리는 dm_hadr_database_replica_states를 database_id 필터 없이 읽어 (DB x 복제본) 행을
+        // 그대로 세었다 — DB 3개 x 복제본 2개면 "replicas=6"이 나오고, 첫 행이 다른 DB의 역할일 수도
+        // 있었다. 이 DB로 좁히고, 복제본 수는 availability_replica_states에서 따로 센다.
+        //
+        // 그리고 지연을 -1 하드코딩으로 비워 두는 바람에 AlwaysOn은 복제 지연 알림이 구조적으로
+        // 불가능했다. 같은 DMV에 redo_queue_size(재생 대기 KB)와 last_redone_time이 있다 —
+        // 초 단위 지연의 정직한 원천은 동기화 상태와 redo 큐다.
         String sql = """
-                SELECT rs.is_primary_replica, COUNT(*) OVER () AS replica_count
-                FROM sys.dm_hadr_database_replica_states rs
+                SELECT drs.synchronization_state_desc,
+                       drs.is_primary_replica,
+                       drs.redo_queue_size,
+                       drs.log_send_queue_size,
+                       DATEDIFF(SECOND, drs.last_redone_time, SYSUTCDATETIME()) AS redo_age_sec,
+                       (SELECT COUNT(*) FROM sys.dm_hadr_availability_replica_states) AS replica_count
+                FROM sys.dm_hadr_database_replica_states drs
+                WHERE drs.database_id = DB_ID()
+                  AND drs.is_local = 1
                 """;
         try {
             return jdbc().query(sql, rs -> {
-                if (rs.next()) {
-                    String role = rs.getBoolean("is_primary_replica") ? "PRIMARY" : "REPLICA";
-                    return new ReplicationState(role, -1, "AlwaysOn replicas=" + rs.getInt("replica_count"));
+                if (!rs.next()) {
+                    return ReplicationState.standalone("AlwaysOn 가용성 그룹 미구성");
                 }
-                return new ReplicationState("STANDALONE", 0, "AlwaysOn 가용성 그룹 미구성");
+                String role = rs.getBoolean("is_primary_replica") ? "PRIMARY" : "REPLICA";
+                String syncState = rs.getString("synchronization_state_desc");
+                long redoKb = rs.getLong("redo_queue_size");
+                long sendKb = rs.getLong("log_send_queue_size");
+                String detail = "AlwaysOn replicas=%d state=%s redo_queue=%dKB send_queue=%dKB"
+                        .formatted(rs.getInt("replica_count"), syncState, redoKb, sendKb);
+                if (!"SYNCHRONIZED".equalsIgnoreCase(syncState) && !"SYNCHRONIZING".equalsIgnoreCase(syncState)) {
+                    // NOT SYNCHRONIZING / REVERTING / INITIALIZING — 복제가 정상 동작 중이 아니다
+                    return ReplicationState.unavailable(role, detail + " — 동기화 상태 비정상");
+                }
+                // 프라이머리의 로컬 행에는 재생 지연 개념이 없다(자기 자신이 원본).
+                if (rs.getBoolean("is_primary_replica")) {
+                    return ReplicationState.unsupported(role, detail
+                            + " — 프라이머리 로컬 행에는 재생 지연이 없다(세컨더리 복제본을 등록해야 지연이 보인다)");
+                }
+                Object redoAge = rs.getObject("redo_age_sec");
+                if (redoAge == null) {
+                    return ReplicationState.unavailable(role, detail + " — last_redone_time 미확보");
+                }
+                // redo 큐가 비었으면 재생을 따라잡은 것이라, last_redone_time 경과는 지연이 아니다.
+                return ReplicationState.measured(role, redoKb == 0 ? 0 : rs.getInt("redo_age_sec"), detail);
             });
         } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 복제 상태 조회 실패: " + e.getMessage(), e);
@@ -620,7 +704,7 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                            ELSE NULL END + ')', '') AS COLUMN_TYPE,
                        IS_NULLABLE, ORDINAL_POSITION
                 FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA NOT IN ('sys', 'INFORMATION_SCHEMA')
+                WHERE TABLE_SCHEMA = SCHEMA_NAME()
                 ORDER BY TABLE_NAME, ORDINAL_POSITION
                 """;
         String indexesSql = """
@@ -631,6 +715,7 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 JOIN sys.index_columns ic ON ic.object_id = ind.object_id AND ic.index_id = ind.index_id
                 JOIN sys.columns col ON col.object_id = ic.object_id AND col.column_id = ic.column_id
                 WHERE ind.name IS NOT NULL AND t.is_ms_shipped = 0 AND ic.is_included_column = 0
+                  AND SCHEMA_NAME(t.schema_id) = SCHEMA_NAME()
                 ORDER BY t.name, ind.name, ic.key_ordinal
                 """;
         try {
@@ -676,7 +761,7 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                        SUM(CASE WHEN ps.index_id > 1 THEN ps.used_page_count ELSE 0 END) * 8192 AS index_bytes
                 FROM sys.tables t
                 JOIN sys.dm_db_partition_stats ps ON ps.object_id = t.object_id
-                WHERE t.name = ?
+                WHERE t.name = ? AND SCHEMA_NAME(t.schema_id) = SCHEMA_NAME()
                 GROUP BY t.create_date
                 """;
         // 인덱스: 힙(index_id=0, name NULL)은 제외하고 키 컬럼만(INCLUDE 컬럼은 인덱스 키가 아니라 제외). type_desc=CLUSTERED 등.
@@ -686,7 +771,8 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 JOIN sys.tables t ON t.object_id = i.object_id
                 JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
                 JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
-                WHERE t.name = ? AND i.index_id > 0 AND i.name IS NOT NULL AND ic.is_included_column = 0
+                WHERE t.name = ? AND SCHEMA_NAME(t.schema_id) = SCHEMA_NAME()
+                  AND i.index_id > 0 AND i.name IS NOT NULL AND ic.is_included_column = 0
                 ORDER BY i.name, ic.key_ordinal
                 """;
         // DDL 재구성용 컬럼 — describeSchema와 같은 방식으로 DATA_TYPE에 길이/정밀도를 붙여 기종 표기에 가깝게.
@@ -701,7 +787,7 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                            ELSE NULL END + ')', '') AS COLUMN_TYPE,
                        IS_NULLABLE, COLUMN_DEFAULT
                 FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_NAME = ?
+                WHERE TABLE_NAME = ? AND TABLE_SCHEMA = SCHEMA_NAME()
                 ORDER BY ORDINAL_POSITION
                 """;
         // PK 컬럼 — TABLE_CONSTRAINTS(PRIMARY KEY)에 KEY_COLUMN_USAGE를 붙여 키 순서대로.
@@ -710,7 +796,8 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
                 JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
                        ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME AND kcu.TABLE_NAME = tc.TABLE_NAME
-                WHERE tc.TABLE_NAME = ? AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+                WHERE tc.TABLE_NAME = ? AND tc.TABLE_SCHEMA = SCHEMA_NAME()
+                  AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
                 ORDER BY kcu.ORDINAL_POSITION
                 """;
         try {
@@ -762,7 +849,10 @@ public class MsSqlOperator extends AbstractJdbcOperator {
             }
             String ddl = TableDetailSupport.reconstructDdl(table, columns, pkColumns, indexDefs);
 
-            String note = "SQL Server는 스토리지 엔진 개념이 없어 engine=null. "
+            String note = "조회 범위는 접속 세션의 기본 스키마(SCHEMA_NAME())다 — 예전에는 스키마 한정이 없어 "
+                    + "dbo와 다른 스키마에 같은 이름의 테이블이 있으면 통계는 임의의 하나를, 컬럼·인덱스는 "
+                    + "둘을 합쳐서 냈다. 다른 스키마를 보려면 그 스키마를 기본으로 하는 계정으로 등록한다. "
+                    + "SQL Server는 스토리지 엔진 개념이 없어 engine=null. "
                     + "카디널리티는 SQL Server 기본 노출이 아니라 미확보(DBCC SHOW_STATISTICS는 무거워 조회 안 함). "
                     + "DDL은 단일 CREATE 명령이 없어 카탈로그(INFORMATION_SCHEMA)로 재구성했으며, "
                     + "제약조건(FK/CHECK)·트리거·계산열 정의는 아직 담지 못함.";

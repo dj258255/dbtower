@@ -5,14 +5,15 @@ import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.backup.BackupFreshness;
 import io.dbtower.backup.BackupFreshness.Status;
 import io.dbtower.backup.BackupFreshnessService;
-import io.dbtower.insight.QuerySnapshotRepository;
+import io.dbtower.insight.ComparisonService;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.model.DeadlockEvent;
 import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.HealthStatus;
+import io.dbtower.registry.RegistryService;
 import io.dbtower.registry.InstanceDeletedEvent;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
@@ -53,9 +54,9 @@ public class OpsAlertDetector {
     /** activeSessions 조회 상한 — 장기 유휴 세션은 소수라 이 정도면 충분하다(elapsed 내림차순이라 앞쪽에 몰린다) */
     private static final int SESSION_SCAN_LIMIT = 200;
 
-    private final DatabaseInstanceRepository instanceRepository;
+    private final RegistryService registryService;
     private final DbmsOperatorFactory operatorFactory;
-    private final QuerySnapshotRepository snapshotRepository;
+    private final ComparisonService comparisonService;
     private final BackupFreshnessService backupFreshnessService;
     private final WebhookNotifier notifier;
 
@@ -68,15 +69,26 @@ public class OpsAlertDetector {
     /** key = instanceId:종류(:식별자), value = 마지막 알림 시각 */
     private final Map<String, LocalDateTime> lastAlerted = new ConcurrentHashMap<>();
 
+    /**
+     * 이번 인스턴스 패스에서 쿨다운을 통과한 키 — <b>전송이 실제로 성공해야 확정한다.</b>
+     *
+     * <p>예전에는 passCooldown이 판정과 동시에 lastAlerted를 갱신했다. 그래서 웹훅이 잠깐 죽거나
+     * 레이트리밋에 걸린 순간에 발생한 경보는, 쿨다운(기본 30분) 때문에 <b>재감지조차 되지 않고
+     * 영구히 사라졌다</b>. 알림 이력 테이블도 없어 사후에 "그때 알림이 왔었나"를 확인할 방법도 없었다.
+     *
+     * <p>detect()는 ShedLock + fixedDelay로 한 시점에 한 번만 도는 단일 흐름이라 평범한 필드로 충분하다.
+     */
+    private final List<String> pendingCooldown = new ArrayList<>();
+
     /** PG 데드락 누적 카운터의 직전 값(instanceId → count) — 폴 사이 델타로 "새 데드락"을 센다. */
     private final Map<Long, Long> lastDeadlockCount = new ConcurrentHashMap<>();
 
     /** MSSQL/MySQL 최근 데드락의 직전 식별 문자열(instanceId → sig) — 같은 사건 반복 알림을 막는다. */
     private final Map<Long, String> lastDeadlockSig = new ConcurrentHashMap<>();
 
-    public OpsAlertDetector(DatabaseInstanceRepository instanceRepository,
+    public OpsAlertDetector(RegistryService registryService,
                             DbmsOperatorFactory operatorFactory,
-                            QuerySnapshotRepository snapshotRepository,
+                            ComparisonService comparisonService,
                             BackupFreshnessService backupFreshnessService,
                             WebhookNotifier notifier,
                             @Value("${dbtower.ops-alert.idle-txn-seconds:300}") int idleTxnSeconds,
@@ -84,9 +96,9 @@ public class OpsAlertDetector {
                             @Value("${dbtower.ops-alert.snapshot-stall-minutes:10}") int snapshotStallMinutes,
                             @Value("${dbtower.ops-alert.cooldown-minutes:30}") int cooldownMinutes,
                             @Value("${dbtower.ops-alert.slot-retained-mb:1024}") long slotRetainedMb) {
-        this.instanceRepository = instanceRepository;
+        this.registryService = registryService;
         this.operatorFactory = operatorFactory;
-        this.snapshotRepository = snapshotRepository;
+        this.comparisonService = comparisonService;
         this.backupFreshnessService = backupFreshnessService;
         this.notifier = notifier;
         this.idleTxnSeconds = idleTxnSeconds;
@@ -107,7 +119,7 @@ public class OpsAlertDetector {
         // 신호(세션·복제·데드락)는 그룹 대표 1개에서만 탐침한다 — 중복 경보와 중복 대상 부하를 함께 줄인다.
         // id 오름차순 순회라 대표는 그룹 내 최소 id(결정적). 대표가 삭제되면 다음 폴부터 차순위가 대표가
         // 되는데, 델타 기반 데드락 감지는 첫 관측을 건너뛰므로 한 주기 놓칠 수 있다(감수 — 오탐보다 낫다).
-        List<DatabaseInstance> instances = new ArrayList<>(instanceRepository.findAll());
+        List<DatabaseInstance> instances = new ArrayList<>(registryService.findAll());
         instances.sort(Comparator.comparing(DatabaseInstance::getId,
                 Comparator.nullsLast(Comparator.naturalOrder())));
         Map<String, List<String>> serverGroups = new LinkedHashMap<>();
@@ -125,10 +137,26 @@ public class OpsAlertDetector {
             boolean serverRepresentative = probedServers.add(instance.serverKey());
             // 인스턴스 하나의 실패(접속 불가·권한 부족 등)가 다른 인스턴스 감지를 막지 않도록 개별 격리.
             List<String> findings = new ArrayList<>();
+            // Operator는 인스턴스당 한 번만 만든다 — 아래 두 블록이 같은 것을 쓴다.
+            DbmsOperator operator = null;
             try {
-                if (serverRepresentative) {
+                operator = operatorFactory.create(instance);
+            } catch (Exception e) {
+                log.warn("Operator 생성 실패 instance={} cause={}", instance.getName(), e.getMessage());
+            }
+            // 다운 감지가 제일 먼저다 — 그리고 서버 대표 여부와 무관하게 인스턴스마다 본다.
+            // 같은 호스트라도 DB 하나만 죽을 수 있고, "이 DB가 죽었다"는 대표에게 위임할 신호가 아니다.
+            // health()는 접속 실패를 예외가 아니라 down 상태로 돌려주므로(AbstractJdbcOperator) 여기서 잡힌다.
+            if (operator != null) {
+                try {
+                    findings.addAll(detectInstanceDown(instance, operator, now));
+                } catch (Exception e) {
+                    log.warn("다운 감지 실패 instance={} cause={}", instance.getName(), e.getMessage());
+                }
+            }
+            try {
+                if (serverRepresentative && operator != null) {
                     // findings에 바로 누적한다 — 중간 감지 하나가 죽어도 그 전까지의 신호는 알려야 한다
-                    DbmsOperator operator = operatorFactory.create(instance);
                     findings.addAll(detectIdleTransactions(instance, operator, now));
                     findings.addAll(detectReplicationLag(instance, operator, now));
                     findings.addAll(detectReplicationSlots(instance, operator, now));
@@ -141,10 +169,17 @@ public class OpsAlertDetector {
                                 .formatted(instance.serverKey(), String.join(", ", group)));
                     }
                 }
-                findings.addAll(detectSnapshotStall(instance, now));
             } catch (Exception e) {
                 // 폴러가 죽으면 안 된다 — 감지 실패는 로그로만 남기고 넘어간다
                 log.warn("운영 감지 실패 instance={} cause={}", instance.getName(), e.getMessage());
+            }
+            // 수집 정지(A) 판정은 대상 접속과 무관한 메타 DB 판정이라 위 operator try 밖에 둔다.
+            // 안에 있으면 대상이 죽는 순간 activeSessions에서 예외가 나 이 줄에 도달조차 못 했다 —
+            // "대상이 죽어서 수집이 멈춘" 케이스, 이 규칙이 존재하는 바로 그 이유에서 침묵했다.
+            try {
+                findings.addAll(detectSnapshotStall(instance, now));
+            } catch (Exception e) {
+                log.warn("수집 정지 감지 실패 instance={} cause={}", instance.getName(), e.getMessage());
             }
             // 백업 신선도(D7)는 대상 접속과 무관한 메타 DB 판정이라 별도 try로 분리한다.
             // 위의 operator 기반 감지가 접속 실패로 죽어도 백업 경보는 계속 울려야 한다
@@ -154,8 +189,16 @@ public class OpsAlertDetector {
             } catch (Exception e) {
                 log.warn("백업 신선도 감지 실패 instance={} cause={}", instance.getName(), e.getMessage());
             }
-            if (!findings.isEmpty()) {
-                notify(instance, findings);
+            if (findings.isEmpty()) {
+                pendingCooldown.clear();
+            } else if (notify(instance, findings)) {
+                commitCooldown(now);
+            } else {
+                // 전송 실패·레이트리밋 — 쿨다운을 확정하지 않는다. 다음 폴에서 같은 신호를 다시 감지해
+                // 재시도한다(예전에는 여기서 경보가 영구히 사라졌다).
+                pendingCooldown.clear();
+                log.warn("운영 경보 전송 실패 instance={} — 쿨다운 미확정, 다음 주기에 재시도한다",
+                        instance.getName());
             }
         }
     }
@@ -187,22 +230,82 @@ public class OpsAlertDetector {
     }
 
     /**
-     * 복제 지연 — lagSeconds가 임계를 넘으면 알린다.
-     * STANDALONE(복제 미구성)과 lag 음수(-1: 미지원/미상)는 판단 근거가 아니라 스킵한다.
+     * 인스턴스 다운 (다관점 감사) — <b>이 플랫폼에 없던 가장 기본적인 알림</b>이다.
+     *
+     * <p>감사 전에는 웹훅 발사 지점 9곳 어디에도 "대상이 죽었다"를 알리는 경로가 없었다.
+     * up/down은 SloHealthPoller가 HealthSample에 적재하고 헬스 스코어에서 감점될 뿐,
+     * 아무도 채널로 보내지 않아 다운은 대시보드를 켜야만 알 수 있었다.
+     *
+     * <p>{@code health()}는 접속 실패를 예외가 아니라 {@code HealthStatus.down}으로 돌려주므로
+     * (AbstractJdbcOperator가 DataAccessException을 잡는다) 대상이 죽어도 이 판정에 도달한다 —
+     * 다른 감지들이 예외로 무너지는 상황이 바로 여기서 신호가 되는 순간이다.
+     *
+     * <p>회복은 알리지 않는다. 다운 알림에 쿨다운이 걸려 있어 복구 후 다시 죽으면 쿨다운 만료 뒤
+     * 다시 울린다 — 회복 알림까지 넣으면 플래핑하는 대상이 채널을 두 배로 채운다.
+     */
+    private List<String> detectInstanceDown(DatabaseInstance instance, DbmsOperator operator, LocalDateTime now) {
+        HealthStatus health = operator.health();
+        if (health == null) {
+            // Operator가 헬스 객체 자체를 안 준 것 — 대상이 죽은 게 아니라 플랫폼 쪽 버그다.
+            // 다운으로 단정해 알리면 오탐이고, 조용히 넘기면 이번 감사가 잡아낸 침묵과 같아진다.
+            log.warn("헬스 응답 없음 instance={} — Operator 구현 확인 필요", instance.getName());
+            return List.of();
+        }
+        if (health.up()) {
+            return List.of();
+        }
+        if (!passCooldown("instance-down", instance, now)) {
+            return List.of();
+        }
+        String reason = health.message();
+        return List.of("인스턴스 접속 불가 — %s:%d/%s (%s)".formatted(
+                instance.getHost(), instance.getPort(), instance.getDbName(),
+                reason == null || reason.isBlank() ? "사유 미상" : reason));
+    }
+
+    /**
+     * 복제 지연 — 실측 지연이 임계를 넘으면 알린다.
+     *
+     * <p>예전에는 {@code lagSeconds < 0}이면 조용히 스킵했다. 그런데 {@code -1}은 "미지원"과
+     * "지금 못 읽었다"를 함께 실은 센티넬이었고, Oracle·SQL Server AlwaysOn·MongoDB는 그 값이
+     * 하드코딩이라 복제 지연 알림이 구조적으로 불가능했다. 더 나쁜 것은 MySQL이었다 —
+     * 복제가 끊기면 {@code Seconds_Behind_Source}가 NULL이 되어 {@code -1}로 내려왔고,
+     * <b>가장 알려야 할 사건에서 알림이 침묵</b>했다.
+     *
+     * <p>이제 {@link ReplicationState.LagSource}가 넷을 구분한다:
+     * NOT_APPLICABLE(복제 없음)·UNSUPPORTED(구조적 미지원)는 조용히 넘어가고,
+     * <b>UNAVAILABLE(복제는 있는데 지연을 못 읽음)은 그 자체가 신호</b>라 알린다.
      */
     private List<String> detectReplicationLag(DatabaseInstance instance, DbmsOperator operator, LocalDateTime now) {
         ReplicationState state = operator.replicationState();
-        if (state == null || "STANDALONE".equalsIgnoreCase(state.role()) || state.lagSeconds() < 0) {
+        if (state == null) {
             return List.of();
         }
-        if (state.lagSeconds() <= replicationLagSeconds) {
-            return List.of();
+        switch (state.lagSource()) {
+            case NOT_APPLICABLE, UNSUPPORTED -> {
+                // 복제가 없거나 이 기종·역할에서 잴 수단이 없다 — 알릴 사건이 아니다.
+                // 화면에는 detail로 사유가 그대로 표시되므로 사각지대가 감춰지지는 않는다.
+                return List.of();
+            }
+            case UNAVAILABLE -> {
+                if (!passCooldown("replication-unavailable", instance, now)) {
+                    return List.of();
+                }
+                return List.of("복제 상태를 읽지 못했습니다 role=%s (%s) — 복제 단절·권한 부족일 수 있어 확인이 필요합니다"
+                        .formatted(state.role(), state.detail()));
+            }
+            case MEASURED -> {
+                if (state.lagSeconds() <= replicationLagSeconds) {
+                    return List.of();
+                }
+                if (!passCooldown("replication", instance, now)) {
+                    return List.of();
+                }
+                return List.of("복제 지연 role=%s lag=%.1fs (임계 %ds 초과, %s)"
+                        .formatted(state.role(), state.lagSeconds(), replicationLagSeconds, state.detail()));
+            }
         }
-        if (!passCooldown("replication", instance, now)) {
-            return List.of();
-        }
-        return List.of("복제 지연 role=%s lag=%.1fs (임계 %ds 초과, %s)"
-                .formatted(state.role(), state.lagSeconds(), replicationLagSeconds, state.detail()));
+        return List.of();
     }
 
     /**
@@ -292,7 +395,7 @@ public class OpsAlertDetector {
         if (instance.getCreatedAt() != null && instance.getCreatedAt().isAfter(windowStart)) {
             return List.of(); // 등록 직후 — 아직 수집 전이라 판단 보류
         }
-        boolean hasRecent = !snapshotRepository.sumByBatch(instance.getId(), windowStart, now).isEmpty();
+        boolean hasRecent = comparisonService.batchCount(instance.getId(), windowStart, now) > 0;
         if (hasRecent || !passCooldown("snapshot-stall", instance, now)) {
             return List.of();
         }
@@ -342,8 +445,15 @@ public class OpsAlertDetector {
         if (last != null && last.plusMinutes(cooldownMinutes).isAfter(now)) {
             return false;
         }
-        lastAlerted.put(key, now);
+        // 아직 확정하지 않는다 — 전송이 성공한 뒤 commitCooldown이 기록한다
+        pendingCooldown.add(key);
         return true;
+    }
+
+    /** 전송 성공 — 이번 패스에서 통과한 키들의 쿨다운을 그때 확정한다. */
+    private void commitCooldown(LocalDateTime now) {
+        pendingCooldown.forEach(k -> lastAlerted.put(k, now));
+        pendingCooldown.clear();
     }
 
     /**
@@ -364,13 +474,13 @@ public class OpsAlertDetector {
         lastDeadlockSig.remove(instanceId);
     }
 
-    private void notify(DatabaseInstance instance, List<String> findings) {
+    private boolean notify(DatabaseInstance instance, List<String> findings) {
         StringBuilder message = new StringBuilder();
         message.append("[DBTower 운영 경보] instance=").append(instance.getName()).append("\n");
         findings.forEach(f -> message.append("- ").append(f).append("\n"));
         log.info("운영 경보 instance={} findings={}", instance.getName(), findings.size());
         // 운영 경보는 지금-위험 신호라 빨강. 텍스트(Slack·미설정)는 폴백으로 그대로 나간다.
-        notifier.sendEmbed(message.toString(), instance.getId(), AlertEmbeds.forDetection(
+        return notifier.sendEmbed(message.toString(), instance.getId(), AlertEmbeds.forDetection(
                 "운영 경보", AlertEmbeds.RED, instance,
                 null, null, findings, null, null));
     }

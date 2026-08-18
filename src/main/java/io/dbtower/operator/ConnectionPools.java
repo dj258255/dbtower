@@ -98,6 +98,20 @@ public class ConnectionPools {
         return Math.max(configuredMs, floor);
     }
 
+    /**
+     * 인스턴스당 커넥션 상한 — MongoDB 클라이언트 캐시도 이 값을 쓴다.
+     * 드라이버 기본값(100)을 그대로 두면 "관제 도구가 대상 커넥션 슬롯을 많이 점유하면 안 된다"는
+     * 이 클래스의 원칙이 한 기종에서만 깨진다. 정책의 단일 출처를 여기로 둔다.
+     */
+    public int maxPoolSize() {
+        return maxPoolSize;
+    }
+
+    /** 유휴 커넥션 회수 시각(하한 가드 적용 후) — 기종별 클라이언트가 같은 값을 쓰게 공개한다. */
+    public long idleTimeoutMs() {
+        return idleTimeoutMs;
+    }
+
     public int queryTimeoutSeconds() {
         return queryTimeoutSeconds;
     }

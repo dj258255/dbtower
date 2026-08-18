@@ -6,7 +6,6 @@ import io.dbtower.operator.ConnectionPools;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.model.IndexAdvice;
 import io.dbtower.operator.model.LatencyPercentile;
-import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.model.RestoreVerification;
 
 import io.dbtower.registry.DatabaseInstance;
@@ -72,11 +71,6 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
         }
     }
 
-    @Override
-    public ReplicationState replicationState() {
-        throw new UnsupportedOperationException("확장2에서 구현 예정: " + instance.getType());
-    }
-
     /**
      * 기본값은 UNSUPPORTED — 복원 검증 능력을 실제로 갖춘 기종만 오버라이드한다.
      * "자동 검증 못 함"을 "통과"로 위장하지 않기 위해, 미구현은 예외가 아니라 명시적 UNSUPPORTED로.
@@ -113,45 +107,194 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
     }
 
     /**
-     * explain 대상은 SELECT만 허용한다 — 관리 플랫폼이 임의 DML을 실행하면 안 되기 때문.
+     * 데이터를 바꾸는 키워드 — 단어 경계로 본다. 식별자 일부({@code updated_at}·{@code audit_delete_log})는
+     * 앞뒤가 {@code _}(단어 문자)라 경계가 성립하지 않아 걸리지 않고, 인용된 식별자는 canonical에서 지워진다.
+     * WITH가 허용되면서 PostgreSQL의 data-modifying CTE
+     * ({@code WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x})가 SELECT처럼 위장할 수 있어 필요하다.
      *
-     * <p>A-2: startsWith("select")만 보면 {@code SELECT 1; DROP TABLE x} 같은 스택 쿼리(다중문)가
-     * 게이트를 통과해 배치로 실행될 수 있다(읽기 전용 불변식 위반). 그래서 문자열 리터럴을 걷어낸 뒤
-     * <b>문장 중간</b>에 세미콜론이 남으면 거부한다. 끝에 붙은 단일 세미콜론은 정상 종결이라 허용하고,
-     * 리터럴 안의 세미콜론({@code SELECT ';' AS x})은 데이터라 문제 삼지 않는다. 완전한 SQL 파서를
-     * 들이지 않는 실용적 방어 — 목적은 "여러 문장의 동시 실행"만 확실히 막는 것이다.
+     * <p>전부 전 기종 예약어만 남긴다 — 맨 컬럼명으로 쓰이려면 인용이 필요해 오탐이 나지 않는다.
+     * {@code cluster}·{@code set}·{@code call}·{@code copy}처럼 컬럼명으로 흔한 것은 넣지 않는다
+     * (이 저장소의 {@code DatabaseInstance}에도 {@code cluster} 필드가 있다). 앞의 두 검사가 이미
+     * "select/with로 시작 + 다중문 없음"을 강제하므로, 여기서 막아야 할 것은 CTE·서브쿼리에 숨는 형태뿐이다.
+     */
+    private static final java.util.regex.Pattern MUTATING = java.util.regex.Pattern.compile(
+            "(?i)\\b(insert|update|delete|merge|truncate|drop|alter|grant|revoke)\\b");
+
+    /**
+     * EXPLAIN에 절대 필요 없으면서 부작용이 확실한 형태 — 텍스트로 명확히 식별되는 것만 막는다.
+     * {@code FOR UPDATE}/{@code FOR SHARE}는 운영 테이블에 락을 걸고,
+     * {@code INTO OUTFILE}/{@code DUMPFILE}은 서버에 파일을 쓴다.
+     */
+    private static final java.util.regex.Pattern SIDE_EFFECTING = java.util.regex.Pattern.compile(
+            "(?i)\\bfor\\s+(update|share|no\\s+key\\s+update|key\\s+share)\\b"
+                    + "|\\binto\\s+(outfile|dumpfile)\\b");
+
+    /**
+     * explain 대상은 읽기 전용 조회만 허용한다 — 관리 플랫폼이 임의 DML을 실행하면 안 되기 때문.
+     *
+     * <p>판정은 원문이 아니라 {@link #canonical(String)}로 <b>주석과 인용 구간을 지운 사본</b>에서 한다.
+     * 이전 구현은 홑따옴표만 추적해서, 주석 안의 아포스트로피 하나가 "문자열 안" 상태를 켜버리면
+     * 그 뒤 세미콜론 검사가 통째로 무력화됐다 — {@code SELECT 1 /* ' *&#47;; DROP TABLE x}가 통과했다.
+     * 반대로 {@code SELECT 1 /* ; *&#47;}처럼 주석 안의 세미콜론은 거부되는 오탐도 있었다. 양방향 파손이었다.
+     *
+     * <p>같은 저장소의 {@code LakehouseController}가 이미 "주석을 걷어낸 뒤 판정"을 쓰고 있었다.
+     * 두 read-only 게이트가 서로 다른 강도로 병존하던 것을 여기서 맞춘다.
+     *
+     * <p>CTE({@code WITH ... SELECT})도 허용한다 — 실무 SQL의 상당 비중인데 거부되고 있었다.
+     * 대신 데이터 변경 키워드가 보이면 거부해 data-modifying CTE를 막는다.
+     *
+     * <p><b>한계(정직 표기)</b>: 텍스트 게이트는 volatile 함수의 부작용
+     * ({@code SELECT pg_terminate_backend(pid)}, autonomous transaction PL/SQL)을 막지 못한다.
+     * 그건 대상 DB에서 읽기 전용 계정·트랜잭션으로 막아야 한다.
      */
     protected void requireSelect(String sql) {
-        if (sql == null || !sql.trim().toLowerCase().startsWith("select")) {
+        if (sql == null || sql.isBlank()) {
             throw new IllegalArgumentException("EXPLAIN은 SELECT 쿼리만 허용합니다");
         }
-        if (hasStatementSeparator(sql)) {
+        String canonical = canonical(sql);
+        String head = canonical.stripLeading().toLowerCase();
+        if (!head.startsWith("select") && !head.startsWith("with")) {
+            throw new IllegalArgumentException("EXPLAIN은 SELECT 쿼리만 허용합니다");
+        }
+        if (hasStatementSeparator(canonical)) {
             throw new IllegalArgumentException("EXPLAIN은 단일 SELECT 문만 허용합니다 (다중문 불가)");
+        }
+        // 구체적인 쪽을 먼저 본다 — FOR UPDATE는 MUTATING의 update에도 걸려서, 순서가 반대면
+        // "락을 건다"가 아니라 "데이터를 변경한다"는 덜 정확한 메시지가 나간다.
+        if (SIDE_EFFECTING.matcher(canonical).find()) {
+            throw new IllegalArgumentException(
+                    "EXPLAIN은 락·파일 쓰기를 유발하는 절을 허용하지 않습니다 (FOR UPDATE / INTO OUTFILE 등)");
+        }
+        if (MUTATING.matcher(canonical).find()) {
+            throw new IllegalArgumentException("EXPLAIN은 데이터를 변경하지 않는 조회만 허용합니다");
         }
     }
 
     /**
-     * 문자열 리터럴('...') 밖에서 문장 구분자 세미콜론이 문장 <b>중간</b>에 있는지 검사한다.
-     * 작은따옴표 안(''로 이스케이프된 따옴표 포함)은 데이터로 보고 건너뛰며, 끝에 하나 붙은
-     * 세미콜론(뒤가 공백뿐)은 정상 종결로 허용한다.
+     * 판정용 정규화 — 주석({@code --}, 중첩 가능한 블록 주석)과 인용 구간(문자열·식별자·달러 인용)을
+     * 같은 길이의 공백으로 지운 사본을 만든다. 원문은 그대로 실행하고 판정만 이 사본으로 한다.
+     *
+     * <p>백슬래시는 <b>이스케이프로 보지 않는다</b>(PostgreSQL의 standard_conforming_strings=on 동작).
+     * 이게 fail-closed인 이유: {@code 'a\'; DROP TABLE x}에서 백슬래시를 이스케이프로 보면 문자열이
+     * 계속 이어진다고 판단해 세미콜론을 놓치지만(통과), 안 보면 문자열이 거기서 끝나 세미콜론을 발견한다(거부).
+     * 놓치는 쪽보다 더 거부하는 쪽이 안전하다. 다만 PostgreSQL의 {@code E'...'}는 명세상 백슬래시가
+     * 이스케이프라 그때만 예외로 처리한다 — {@code SELECT E'\''; DROP TABLE x}가 정확히 이 경로로 뚫렸었다.
+     *
+     * <p>인용이 닫히지 않으면 남은 전체를 삼키지만, 그런 SQL은 DB가 문법 오류로 거부하므로
+     * "우리에게는 숨기면서 DB에서는 실행되는" 조합이 성립하지 않는다.
      */
-    private static boolean hasStatementSeparator(String sql) {
-        boolean inString = false;
-        for (int i = 0; i < sql.length(); i++) {
+    static String canonical(String sql) {
+        StringBuilder out = new StringBuilder(sql.length());
+        int i = 0;
+        int n = sql.length();
+        while (i < n) {
             char c = sql.charAt(i);
-            if (c == '\'') {
-                // 리터럴 안의 '' 는 이스케이프된 따옴표라 상태를 토글하지 않고 건너뛴다
-                if (inString && i + 1 < sql.length() && sql.charAt(i + 1) == '\'') {
+            if (c == '-' && i + 1 < n && sql.charAt(i + 1) == '-') {          // 라인 주석
+                while (i < n && sql.charAt(i) != '\n') {
+                    out.append(' ');
                     i++;
+                }
+                continue;
+            }
+            if (c == '/' && i + 1 < n && sql.charAt(i + 1) == '*') {          // 블록 주석 (PostgreSQL은 중첩 허용)
+                int depth = 0;
+                while (i < n) {
+                    if (sql.charAt(i) == '/' && i + 1 < n && sql.charAt(i + 1) == '*') {
+                        depth++;
+                        out.append("  ");
+                        i += 2;
+                    } else if (sql.charAt(i) == '*' && i + 1 < n && sql.charAt(i + 1) == '/') {
+                        depth--;
+                        out.append("  ");
+                        i += 2;
+                        if (depth == 0) {
+                            break;
+                        }
+                    } else {
+                        out.append(' ');
+                        i++;
+                    }
+                }
+                continue;
+            }
+            if (c == '$') {                                                   // 달러 인용 $tag$ ... $tag$
+                int close = sql.indexOf('$', i + 1);
+                if (close > i && isDollarTag(sql, i + 1, close)) {
+                    String tag = sql.substring(i, close + 1);
+                    int end = sql.indexOf(tag, close + 1);
+                    int stop = end < 0 ? n : end + tag.length();
+                    out.append(" ".repeat(stop - i));
+                    i = stop;
                     continue;
                 }
-                inString = !inString;
-            } else if (c == ';' && !inString) {
-                // 뒤에 공백 외 다른 문장이 남아 있으면 다중문 — 끝의 단일 세미콜론만 허용
-                if (!sql.substring(i + 1).isBlank()) {
-                    return true;
-                }
             }
+            if (c == '\'' || c == '"' || c == '`') {                          // 문자열·식별자 인용
+                boolean backslashEscapes = c == '\'' && isEscapeStringPrefix(sql, i);
+                out.append(' ');
+                i++;
+                while (i < n) {
+                    char d = sql.charAt(i);
+                    if (backslashEscapes && d == '\\' && i + 1 < n) {
+                        out.append("  ");
+                        i += 2;
+                        continue;
+                    }
+                    if (d == c) {
+                        if (i + 1 < n && sql.charAt(i + 1) == c) {            // '' "" `` 는 이스케이프된 인용부호
+                            out.append("  ");
+                            i += 2;
+                            continue;
+                        }
+                        out.append(' ');
+                        i++;
+                        break;
+                    }
+                    out.append(' ');
+                    i++;
+                }
+                continue;
+            }
+            out.append(c);
+            i++;
+        }
+        return out.toString();
+    }
+
+    /** 달러 인용 태그는 비었거나 영숫자·밑줄만 (PostgreSQL 규약) */
+    private static boolean isDollarTag(String sql, int from, int toExclusive) {
+        for (int k = from; k < toExclusive; k++) {
+            char c = sql.charAt(k);
+            if (!Character.isLetterOrDigit(c) && c != '_') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** PostgreSQL의 E'...' — 이 안에서만 백슬래시가 이스케이프다. 앞 글자가 식별자면 E가 아니라 이름의 끝이다. */
+    private static boolean isEscapeStringPrefix(String sql, int quoteIndex) {
+        if (quoteIndex == 0) {
+            return false;
+        }
+        char prev = sql.charAt(quoteIndex - 1);
+        if (prev != 'E' && prev != 'e') {
+            return false;
+        }
+        return quoteIndex < 2 || !(Character.isLetterOrDigit(sql.charAt(quoteIndex - 2))
+                || sql.charAt(quoteIndex - 2) == '_');
+    }
+
+    /**
+     * 문장 구분자 세미콜론이 문장 <b>중간</b>에 있는지 검사한다(입력은 canonical 사본).
+     * 끝에 하나 붙은 세미콜론(뒤가 공백뿐)은 정상 종결로 허용한다.
+     */
+    private static boolean hasStatementSeparator(String canonical) {
+        int idx = canonical.indexOf(';');
+        while (idx >= 0) {
+            if (!canonical.substring(idx + 1).isBlank()) {
+                return true;
+            }
+            idx = canonical.indexOf(';', idx + 1);
         }
         return false;
     }

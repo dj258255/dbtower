@@ -9,7 +9,7 @@ import io.dbtower.analysis.QueryMasker;
 import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.QueryDiff;
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.RegistryService;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,7 +39,7 @@ public class RegressionDetector {
 
     private static final Logger log = LoggerFactory.getLogger(RegressionDetector.class);
 
-    private final DatabaseInstanceRepository instanceRepository;
+    private final RegistryService registryService;
     private final ComparisonService comparisonService;
     private final WebhookNotifier notifier;
     private final AiAnalyzer aiAnalyzer;
@@ -53,9 +53,17 @@ public class RegressionDetector {
     /** key = instanceId:queryId:종류, value = 마지막 알림 시각 */
     private final Map<String, LocalDateTime> lastAlerted = new ConcurrentHashMap<>();
 
+    /**
+     * 이번 인스턴스 패스에서 쿨다운을 통과한 키 — <b>전송이 실제로 성공해야 확정한다.</b>
+     * 예전에는 판정과 동시에 확정해서, 웹훅이 잠깐 죽거나 레이트리밋에 걸린 순간의 경보가
+     * 쿨다운 때문에 재감지조차 되지 않고 영구히 사라졌다. 폴러는 ShedLock으로 단일 흐름이다.
+     */
+    private final java.util.List<String> pendingCooldown = new java.util.ArrayList<>();
+
+
     private final PlanChangeTracker planChangeTracker;
 
-    public RegressionDetector(DatabaseInstanceRepository instanceRepository,
+    public RegressionDetector(RegistryService registryService,
                               ComparisonService comparisonService,
                               WebhookNotifier notifier,
                               AiAnalyzer aiAnalyzer,
@@ -65,7 +73,7 @@ public class RegressionDetector {
                               @Value("${dbtower.regression.baseline-minutes:15}") int baselineMinutes,
                               @Value("${dbtower.regression.cooldown-minutes:30}") int cooldownMinutes,
                               @Value("${dbtower.base-url:}") String baseUrl) {
-        this.instanceRepository = instanceRepository;
+        this.registryService = registryService;
         this.comparisonService = comparisonService;
         this.notifier = notifier;
         this.aiAnalyzer = aiAnalyzer;
@@ -96,7 +104,7 @@ public class RegressionDetector {
     @SchedulerLock(name = "regression-detect", lockAtLeastFor = "PT110S", lockAtMostFor = "PT4M")
     public void detect() {
         LocalDateTime now = LocalDateTime.now();
-        for (DatabaseInstance instance : instanceRepository.findAll()) {
+        for (DatabaseInstance instance : registryService.findAll()) {
             try {
                 ComparisonService.CompareResult result = comparisonService.compare(
                         instance.getId(),
@@ -104,7 +112,13 @@ public class RegressionDetector {
                         now.minusMinutes(recentMinutes), now);
                 List<String> findings = evaluate(instance, result, now);
                 if (!findings.isEmpty()) {
-                    notify(instance, findings);
+                    if (notify(instance, findings)) {
+                        commitCooldown(now);
+                    } else {
+                        // 전송 실패·레이트리밋 — 쿨다운 미확정. 다음 폴에서 다시 감지해 재시도한다.
+                        pendingCooldown.clear();
+                        log.warn("회귀 감지 알림 전송 실패 instance={} — 쿨다운 미확정", instance.getName());
+                    }
                 }
             } catch (IllegalArgumentException e) {
                 // 스냅샷 배치 부족 — 데이터가 쌓이면 자연히 동작한다
@@ -162,11 +176,17 @@ public class RegressionDetector {
         if (last != null && last.plusMinutes(cooldownMinutes).isAfter(now)) {
             return false;
         }
-        lastAlerted.put(key, now);
+        pendingCooldown.add(key);   // 확정은 전송 성공 후(commitCooldown)
         return true;
     }
 
-    private void notify(DatabaseInstance instance, List<String> findings) {
+    /** 전송 성공 — 이번 패스에서 통과한 키들의 쿨다운을 그때 확정한다. */
+    private void commitCooldown(java.time.LocalDateTime now) {
+        pendingCooldown.forEach(k -> lastAlerted.put(k, now));
+        pendingCooldown.clear();
+    }
+
+    private boolean notify(DatabaseInstance instance, List<String> findings) {
         StringBuilder message = new StringBuilder();
         message.append("[DBTower 회귀 감지] instance=").append(instance.getName())
                 .append(" (최근 ").append(recentMinutes).append("분 vs 직전 ").append(baselineMinutes).append("분)\n");
@@ -199,7 +219,7 @@ public class RegressionDetector {
 
         log.info("회귀 감지 알림 instance={} findings={}", instance.getName(), findings.size());
         // 리치 embed(문의 카드와 같은 결) — 회귀는 성능 신호라 앰버. Slack·미설정은 텍스트 폴백.
-        notifier.sendEmbed(message.toString(), instance.getId(), AlertEmbeds.forDetection(
+        return notifier.sendEmbed(message.toString(), instance.getId(), AlertEmbeds.forDetection(
                 "회귀 감지", AlertEmbeds.AMBER, instance,
                 "구간", "최근 " + recentMinutes + "분 vs 직전 " + baselineMinutes + "분",
                 findings, analysis, deeplink));

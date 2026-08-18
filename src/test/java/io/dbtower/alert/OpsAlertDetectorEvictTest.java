@@ -4,12 +4,12 @@ import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.alert.internal.job.OpsAlertDetector;
 import io.dbtower.backup.BackupFreshness;
 import io.dbtower.backup.BackupFreshnessService;
-import io.dbtower.insight.QuerySnapshotRepository;
+import io.dbtower.insight.ComparisonService;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.RegistryService;
 import io.dbtower.registry.DbmsType;
 import io.dbtower.registry.InstanceDeletedEvent;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,9 +32,9 @@ import static org.mockito.Mockito.*;
  */
 class OpsAlertDetectorEvictTest {
 
-    private final DatabaseInstanceRepository instanceRepository = Mockito.mock(DatabaseInstanceRepository.class);
+    private final RegistryService instanceRepository = Mockito.mock(RegistryService.class);
     private final DbmsOperatorFactory operatorFactory = Mockito.mock(DbmsOperatorFactory.class);
-    private final QuerySnapshotRepository snapshotRepository = Mockito.mock(QuerySnapshotRepository.class);
+    private final ComparisonService comparisonService = Mockito.mock(ComparisonService.class);
     private final BackupFreshnessService backupFreshnessService = Mockito.mock(BackupFreshnessService.class);
     private final WebhookNotifier notifier = Mockito.mock(WebhookNotifier.class);
     private final DbmsOperator operator = Mockito.mock(DbmsOperator.class);
@@ -43,8 +43,12 @@ class OpsAlertDetectorEvictTest {
 
     @BeforeEach
     void setUp() {
+        // 쿨다운은 이제 전송이 성공해야 확정된다 — mock 기본값(false)이면 확정되지 않아
+        // "쿨다운 동안 다시 안 울린다"가 성립하지 않는다. 전달 성공을 기본 전제로 둔다.
+        Mockito.when(notifier.sendEmbed(Mockito.anyString(), Mockito.any(), Mockito.any()))
+                .thenReturn(true);
         // idle-txn 5s, replication-lag 30s, snapshot-stall 10m, cooldown 30m
-        detector = new OpsAlertDetector(instanceRepository, operatorFactory, snapshotRepository,
+        detector = new OpsAlertDetector(instanceRepository, operatorFactory, comparisonService,
                 backupFreshnessService, notifier, 5, 30, 10, 30, 1024);
 
         // 데드락 dedup·evict는 instanceId 키를 쓰므로 id 있는 인스턴스로 검증한다.
@@ -57,7 +61,8 @@ class OpsAlertDetectorEvictTest {
 
         when(operatorFactory.create(any())).thenReturn(operator);
         when(operator.activeSessions(anyInt())).thenReturn(List.of());
-        when(operator.replicationState()).thenReturn(new io.dbtower.operator.model.ReplicationState("STANDALONE", 0, "없음"));
+        when(operator.health()).thenReturn(io.dbtower.registry.HealthStatus.up("16", 3));
+        when(operator.replicationState()).thenReturn(io.dbtower.operator.model.ReplicationState.standalone("없음"));
         when(operator.deadlockCount()).thenReturn(Optional.empty());
         when(backupFreshnessService.freshnessFor(any(DatabaseInstance.class))).thenReturn(fresh());
     }

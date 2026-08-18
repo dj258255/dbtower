@@ -5,7 +5,7 @@ import io.dbtower.backup.internal.persistence.BackupPolicyRepository;
 import io.dbtower.operator.BackupCommands;
 import io.dbtower.operator.model.BackupPolicy.BackupType;
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.RegistryService;
 import io.dbtower.registry.DbmsType;
 import io.dbtower.registry.InstanceDeletedEvent;
 import jakarta.annotation.PreDestroy;
@@ -49,7 +49,7 @@ public class WalStreamManager {
 
     private static final Logger log = LoggerFactory.getLogger(WalStreamManager.class);
 
-    private final DatabaseInstanceRepository instanceRepository;
+    private final RegistryService registryService;
     private final BackupPolicyRepository policyRepository;
     private final String receivewalCommand;
 
@@ -57,10 +57,10 @@ public class WalStreamManager {
     /** 재시작 횟수(관측용) — e2e가 "죽인 프로세스가 되살아났다"를 이 카운터·로그로 확인한다. */
     private final Map<Long, Integer> restarts = new ConcurrentHashMap<>();
 
-    public WalStreamManager(DatabaseInstanceRepository instanceRepository,
+    public WalStreamManager(RegistryService registryService,
                             BackupPolicyRepository policyRepository,
                             @Value("${dbtower.backup.pg-receivewal-command:}") String receivewalCommand) {
-        this.instanceRepository = instanceRepository;
+        this.registryService = registryService;
         this.policyRepository = policyRepository;
         this.receivewalCommand = receivewalCommand == null ? "" : receivewalCommand;
     }
@@ -83,7 +83,7 @@ public class WalStreamManager {
             if (p != null && p.isAlive()) {
                 continue;
             }
-            instanceRepository.findById(id).ifPresent(instance -> {
+            registryService.findOptional(id).ifPresent(instance -> {
                 if (p != null) {
                     int n = restarts.merge(id, 1, Integer::sum);
                     log.warn("WAL 스트림 사망 감지 — instance={} 재시작 {}회차 (슬롯이 공백 구간을 보존한다)",
@@ -101,7 +101,7 @@ public class WalStreamManager {
             if (policy.getType() != BackupType.LOG) {
                 continue;
             }
-            instanceRepository.findById(policy.getInstanceId()).ifPresent(i -> {
+            registryService.findOptional(policy.getInstanceId()).ifPresent(i -> {
                 if (i.getType() == DbmsType.POSTGRESQL && i.isCollectionEnabled()) {
                     desired.add(i.getId());
                 }

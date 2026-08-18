@@ -38,8 +38,14 @@ public class MongoClientCache {
      */
     private final int socketReadTimeoutSeconds;
 
+    /** 인스턴스당 커넥션 상한·유휴 회수 — JDBC 4기종과 같은 정책을 쓴다(ConnectionPools가 단일 출처). */
+    private final int maxPoolSize;
+    private final long idleTimeoutSeconds;
+
     public MongoClientCache(ConnectionPools pools) {
         this.socketReadTimeoutSeconds = pools.queryTimeoutSeconds();
+        this.maxPoolSize = pools.maxPoolSize();
+        this.idleTimeoutSeconds = pools.idleTimeoutMs() / 1000;
     }
 
     /** id가 있으면 캐시에서, 없으면(등록 전 검증) 1회용으로 생성 — 1회용은 호출자가 닫는다 */
@@ -66,6 +72,13 @@ public class MongoClientCache {
                         .readTimeout(socketReadTimeoutSeconds, TimeUnit.SECONDS))
                 // useTls면 TLS 강제 — Atlas 등 TLS 필수 서비스 대응. 인증서 검증은 JVM truststore 기본
                 .applyToSslSettings(b -> b.enabled(instance.isUseTls()))
+                // 풀 상한을 명시하지 않으면 드라이버 기본값 100이 그대로 적용된다 — JDBC 4기종의
+                // max-per-instance(기본 6)와 어긋나, "관제 도구가 대상 커넥션 슬롯을 많이 점유하면
+                // 안 된다"는 원칙이 MongoDB에서만 깨져 있었다(20대 등록 = 이론 상한 2,000).
+                .applyToConnectionPoolSettings(b -> b
+                        .maxSize(maxPoolSize)
+                        .minSize(0)
+                        .maxConnectionIdleTime(idleTimeoutSeconds, TimeUnit.SECONDS))
                 .credential(MongoCredential.createCredential(
                         instance.getUsername(), "admin", instance.getPassword().toCharArray()))
                 .applicationName("dbtower")

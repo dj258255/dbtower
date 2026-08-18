@@ -88,6 +88,20 @@ public class RegistryService {
         return instance;
     }
 
+    /**
+     * 없으면 예외 대신 빈 Optional — 백그라운드 잡이 "있으면 처리, 없으면 넘어감"으로 쓰는 자리.
+     * 스코프 규칙은 {@link #findById(Long)}와 동일하다(잡은 인증이 없어 전역).
+     * 이게 없어서 잡들이 registry의 리포지토리를 직접 참조했고, 그 결과 이 클래스가 주장하는
+     * "단일 경계"가 실제로는 우회되고 있었다.
+     */
+    public java.util.Optional<DatabaseInstance> findOptional(Long id) {
+        try {
+            return java.util.Optional.of(findById(id));
+        } catch (InstanceNotFoundException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
     /** 라벨 없는 인스턴스는 전역(모든 팀이 봄), 라벨이 있으면 같은 팀만. */
     private static boolean inScope(DatabaseInstance instance, String team) {
         return instance.getTeamLabel() == null || instance.getTeamLabel().isBlank()

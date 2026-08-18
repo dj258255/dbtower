@@ -85,7 +85,7 @@ public class InsightController {
 
     @GetMapping("/query-stats")
     public List<QueryStatView> queryStats(@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
-        List<QueryStat> stats = operatorFactory.create(registryService.findById(id)).queryStats(limit);
+        List<QueryStat> stats = operatorFactory.create(registryService.findById(id)).queryStats(DbmsOperator.clampLimit(limit));
         double totalTime = stats.stream().mapToDouble(QueryStat::totalTimeMs).sum();
         Map<String, Double> qpsByQuery = baselineService.recentQps(id, LocalDateTime.now());
         return stats.stream()
@@ -101,7 +101,7 @@ public class InsightController {
 
     @GetMapping("/table-stats")
     public List<TableStat> tableStats(@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
-        return operatorFactory.create(registryService.findById(id)).tableStats(limit);
+        return operatorFactory.create(registryService.findById(id)).tableStats(DbmsOperator.clampLimit(limit));
     }
 
     /** 복제 상태 통합 뷰 — SHOW REPLICA STATUS / pg_stat_replication / AlwaysOn DMV를 하나의 모델로 */
@@ -128,7 +128,7 @@ public class InsightController {
     public java.util.List<io.dbtower.operator.model.DeadlockEvent> deadlocks(
             @PathVariable Long id,
             @RequestParam(defaultValue = "10") int limit) {
-        return operatorFactory.create(registryService.findById(id)).recentDeadlocks(limit);
+        return operatorFactory.create(registryService.findById(id)).recentDeadlocks(DbmsOperator.clampLimit(limit));
     }
 
     /**
@@ -138,12 +138,12 @@ public class InsightController {
     @GetMapping("/wait-events")
     public List<io.dbtower.operator.model.WaitEvent> waitEvents(@PathVariable Long id,
                                                           @RequestParam(defaultValue = "20") int limit) {
-        return operatorFactory.create(registryService.findById(id)).waitEvents(limit);
+        return operatorFactory.create(registryService.findById(id)).waitEvents(DbmsOperator.clampLimit(limit));
     }
 
     @GetMapping("/slow-queries")
     public List<SlowQuery> slowQueries(@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
-        return operatorFactory.create(registryService.findById(id)).slowQueries(limit);
+        return operatorFactory.create(registryService.findById(id)).slowQueries(DbmsOperator.clampLimit(limit));
     }
 
     /**
@@ -155,7 +155,7 @@ public class InsightController {
     @GetMapping("/latency-percentiles")
     public List<io.dbtower.operator.model.LatencyPercentile> latencyPercentiles(
             @PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
-        return operatorFactory.create(registryService.findById(id)).latencyPercentiles(limit);
+        return operatorFactory.create(registryService.findById(id)).latencyPercentiles(DbmsOperator.clampLimit(limit));
     }
 
     /**
@@ -167,7 +167,7 @@ public class InsightController {
     @GetMapping("/partitions")
     public List<io.dbtower.operator.model.PartitionInfo> partitions(
             @PathVariable Long id, @RequestParam(defaultValue = "50") int limit) {
-        return operatorFactory.create(registryService.findById(id)).partitions(limit);
+        return operatorFactory.create(registryService.findById(id)).partitions(DbmsOperator.clampLimit(limit));
     }
 
     /**
@@ -176,7 +176,7 @@ public class InsightController {
      */
     @GetMapping("/sessions")
     public List<SessionInfo> sessions(@PathVariable Long id, @RequestParam(defaultValue = "50") int limit) {
-        return operatorFactory.create(registryService.findById(id)).activeSessions(limit);
+        return operatorFactory.create(registryService.findById(id)).activeSessions(DbmsOperator.clampLimit(limit));
     }
 
     /** kill 결과 — 어떤 pid를 어떤 방식으로 처리했는지 그대로 돌려준다(감사와 화면 피드백용) */

@@ -8,7 +8,7 @@ import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.QueryDiff;
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.RegistryService;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,7 +30,7 @@ import static org.mockito.Mockito.*;
  */
 class RegressionDetectorTest {
 
-    private final DatabaseInstanceRepository instanceRepository = Mockito.mock(DatabaseInstanceRepository.class);
+    private final RegistryService instanceRepository = Mockito.mock(RegistryService.class);
     private final ComparisonService comparisonService = Mockito.mock(ComparisonService.class);
     private final WebhookNotifier notifier = Mockito.mock(WebhookNotifier.class);
     private final AiAnalyzer aiAnalyzer = Mockito.mock(AiAnalyzer.class);
@@ -40,6 +40,10 @@ class RegressionDetectorTest {
 
     @BeforeEach
     void setUp() {
+        // 쿨다운은 이제 전송이 성공해야 확정된다 — mock 기본값(false)이면 확정되지 않아
+        // "쿨다운 동안 다시 안 울린다"가 성립하지 않는다. 전달 성공을 기본 전제로 둔다.
+        Mockito.when(notifier.sendEmbed(Mockito.anyString(), Mockito.any(), Mockito.any()))
+                .thenReturn(true);
         detector = new RegressionDetector(instanceRepository, comparisonService, notifier, aiAnalyzer,
                 new QueryMasker(true, false), planChangeTracker, 5, 15, 30, "");
         DatabaseInstance instance = new DatabaseInstance(

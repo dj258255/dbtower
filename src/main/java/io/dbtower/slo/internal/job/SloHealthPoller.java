@@ -4,9 +4,8 @@ import io.dbtower.slo.internal.domain.HealthSample;
 import io.dbtower.slo.internal.persistence.HealthSampleRepository;
 
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
-import io.dbtower.registry.HealthStatus;
 import io.dbtower.registry.RegistryService;
+import io.dbtower.registry.HealthStatus;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,14 +28,11 @@ public class SloHealthPoller {
 
     private static final Logger log = LoggerFactory.getLogger(SloHealthPoller.class);
 
-    private final DatabaseInstanceRepository instanceRepository;
     private final RegistryService registryService;
     private final HealthSampleRepository sampleRepository;
 
-    public SloHealthPoller(DatabaseInstanceRepository instanceRepository,
-                           RegistryService registryService,
+    public SloHealthPoller(RegistryService registryService,
                            HealthSampleRepository sampleRepository) {
-        this.instanceRepository = instanceRepository;
         this.registryService = registryService;
         this.sampleRepository = sampleRepository;
     }
@@ -48,7 +44,7 @@ public class SloHealthPoller {
     public void sample() {
         LocalDateTime now = LocalDateTime.now();
         List<HealthSample> rows = new ArrayList<>();
-        for (DatabaseInstance instance : instanceRepository.findAll()) {
+        for (DatabaseInstance instance : registryService.findAll()) {
             // 수집 격리(Phase F)는 헬스 핑에도 적용한다 — 격리의 목적이 "문제 대상을 두드리지 않기"인데
             // SLO 핑이 60초마다 계속 나가면 격리가 무의미하다(커넥션 온디맨드의 풀 정리도 막는다).
             // 격리 기간의 가용성 이력은 공백으로 남는다 — down으로 지어내지 않고 "관제에서 뺀 기간"으로 정직하게.

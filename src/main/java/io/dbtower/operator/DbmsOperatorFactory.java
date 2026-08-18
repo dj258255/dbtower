@@ -45,7 +45,10 @@ public class DbmsOperatorFactory {
                                @Value("${dbtower.backup.mysql-xtrabackup-command:}") String mysqlXtrabackupCommand,
                                @Value("${dbtower.backup.mysql-xtrabackup-args:}") String mysqlXtrabackupArgs,
                                @Value("${dbtower.backup.mysql-xtrabackup-verify-command:}") String mysqlXtrabackupVerifyCommand,
-                               @Value("${dbtower.backup.dir:./backups}") String backupDir) {
+                               @Value("${dbtower.backup.dir:./backups}") String backupDir,
+                               // 복원 검증 명령이 별도 검증기를 가리키는지에 대한 운영자 선언 —
+                               // 플랫폼은 명령 문자열만 보고 알 수 없다(BackupTools 주석 참고).
+                               @Value("${dbtower.backup.verify-isolated:false}") boolean verifyIsolated) {
         this.pools = pools;
         this.mongoClients = mongoClients;
         this.histogramStore = histogramStore;
@@ -54,7 +57,8 @@ public class DbmsOperatorFactory {
                 mysqlRestoreCommand, pgRestoreCommand, mongoRestoreCommand,
                 mysqlBinlogCommand, mongoOplogCommand, pgWalCommand, oracleArchiveCommand,
                 pgBaseBackupCommand, oracleRmanCommand,
-                mysqlXtrabackupCommand, mysqlXtrabackupArgs, mysqlXtrabackupVerifyCommand, backupDir);
+                mysqlXtrabackupCommand, mysqlXtrabackupArgs, mysqlXtrabackupVerifyCommand, backupDir,
+                verifyIsolated);
     }
 
     public DbmsOperator create(DatabaseInstance instance) {

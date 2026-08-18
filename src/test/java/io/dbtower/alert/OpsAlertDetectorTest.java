@@ -4,7 +4,7 @@ import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.alert.internal.job.OpsAlertDetector;
 import io.dbtower.backup.BackupFreshness;
 import io.dbtower.backup.BackupFreshnessService;
-import io.dbtower.insight.QuerySnapshotRepository;
+import io.dbtower.insight.ComparisonService;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.model.DeadlockEvent;
@@ -13,7 +13,7 @@ import io.dbtower.operator.model.SessionInfo;
 
 import java.util.Optional;
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.RegistryService;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,9 +35,9 @@ import static org.mockito.Mockito.*;
  */
 class OpsAlertDetectorTest {
 
-    private final DatabaseInstanceRepository instanceRepository = Mockito.mock(DatabaseInstanceRepository.class);
+    private final RegistryService instanceRepository = Mockito.mock(RegistryService.class);
     private final DbmsOperatorFactory operatorFactory = Mockito.mock(DbmsOperatorFactory.class);
-    private final QuerySnapshotRepository snapshotRepository = Mockito.mock(QuerySnapshotRepository.class);
+    private final ComparisonService comparisonService = Mockito.mock(ComparisonService.class);
     private final BackupFreshnessService backupFreshnessService = Mockito.mock(BackupFreshnessService.class);
     private final WebhookNotifier notifier = Mockito.mock(WebhookNotifier.class);
     private final DbmsOperator operator = Mockito.mock(DbmsOperator.class);
@@ -47,16 +47,21 @@ class OpsAlertDetectorTest {
 
     @BeforeEach
     void setUp() {
+        // 쿨다운은 이제 전송이 성공해야 확정된다 — mock 기본값(false)이면 확정되지 않아
+        // "쿨다운 동안 다시 안 울린다"가 성립하지 않는다. 전달 성공을 기본 전제로 둔다.
+        Mockito.when(notifier.sendEmbed(Mockito.anyString(), Mockito.any(), Mockito.any()))
+                .thenReturn(true);
         // idle-txn 5s, replication-lag 30s, snapshot-stall 10m, cooldown 30m
-        detector = new OpsAlertDetector(instanceRepository, operatorFactory, snapshotRepository,
+        detector = new OpsAlertDetector(instanceRepository, operatorFactory, comparisonService,
                 backupFreshnessService, notifier, 5, 30, 10, 30, 1024);
         instance = new DatabaseInstance(
                 "test-db", DbmsType.POSTGRESQL, "127.0.0.1", 5432, "sample", "postgres", "pw");
         when(instanceRepository.findAll()).thenReturn(List.of(instance));
         when(operatorFactory.create(any())).thenReturn(operator);
         // 기본은 조용한 상태 — 각 테스트가 필요한 신호만 켠다
+        when(operator.health()).thenReturn(io.dbtower.registry.HealthStatus.up("16.1", 3));
         when(operator.activeSessions(anyInt())).thenReturn(List.of());
-        when(operator.replicationState()).thenReturn(new ReplicationState("STANDALONE", 0, "복제 구성 없음"));
+        when(operator.replicationState()).thenReturn(ReplicationState.standalone("복제 구성 없음"));
         // 백업은 기본으로 신선(FRESH) — 백업 신선도 규칙은 조용. 각 테스트가 필요할 때만 STALE/NO_BACKUP으로 켠다
         when(backupFreshnessService.freshnessFor(any(DatabaseInstance.class))).thenReturn(fresh());
         // createdAt이 지금(스냅샷 창 안)이라 스냅샷 정지 판정은 기본 보류 → 오탐 없음
@@ -108,21 +113,78 @@ class OpsAlertDetectorTest {
         verify(notifier, never()).sendEmbed(anyString(), any(), any());
 
         // 임계(30s) 이하 — 조용
-        when(operator.replicationState()).thenReturn(new ReplicationState("REPLICA", 30, "recovery"));
+        when(operator.replicationState()).thenReturn(ReplicationState.measured("REPLICA", 30, "recovery"));
         detector.detect();
         verify(notifier, never()).sendEmbed(anyString(), any(), any());
 
         // 임계 초과 — 알림
-        when(operator.replicationState()).thenReturn(new ReplicationState("REPLICA", 120, "recovery"));
+        when(operator.replicationState()).thenReturn(ReplicationState.measured("REPLICA", 120, "recovery"));
         detector.detect();
         assertTrue(notifiedMessage().contains("복제 지연"));
     }
 
     @Test
-    void 복제_lag_음수는_미지원_신호라_스킵한다() {
-        when(operator.replicationState()).thenReturn(new ReplicationState("REPLICA", -1, "미지원"));
+    void 구조적_미지원은_스킵한다() {
+        // 이 기종·역할에서 지연을 잴 수단이 아예 없는 경우 — 알릴 사건이 아니다.
+        // 화면에는 detail로 사유가 표시되므로 사각지대가 감춰지지는 않는다.
+        when(operator.replicationState()).thenReturn(
+                ReplicationState.unsupported("PRIMARY", "SHOW REPLICAS는 지연을 제공하지 않는다"));
         detector.detect();
         verify(notifier, never()).sendEmbed(anyString(), any(), any());
+    }
+
+    @Test
+    void 복제는_있는데_지연을_못_읽으면_알린다() {
+        // 회귀 방어: 예전에는 이 상황이 lag=-1로 내려와 "미지원"과 구분되지 않고 조용히 스킵됐다.
+        // MySQL에서 Seconds_Behind_Source가 NULL인 것은 복제 스레드가 죽었다는 신호인데,
+        // 가장 알려야 할 사건에서 알림이 침묵했다. 이제 UNAVAILABLE은 그 자체가 경보다.
+        when(operator.replicationState()).thenReturn(
+                ReplicationState.unavailable("REPLICA", "복제 스레드 중단(IO=No, SQL=Yes)"));
+        detector.detect();
+        assertTrue(notifiedMessage().contains("복제 상태를 읽지 못했습니다"));
+    }
+
+    @Test
+    void 인스턴스가_죽으면_알린다() {
+        // 감사에서 드러난 가장 큰 공백 — 웹훅 발사 지점 9곳 어디에도 다운 알림이 없었다.
+        // health()는 접속 실패를 예외가 아니라 down으로 돌려주므로, 다른 감지가 전부 무너지는
+        // 상황에서도 이 판정에는 도달한다.
+        when(operator.health()).thenReturn(io.dbtower.registry.HealthStatus.down("Connection refused"));
+        detector.detect();
+        String msg = notifiedMessage();
+        assertTrue(msg.contains("인스턴스 접속 불가"));
+        assertTrue(msg.contains("Connection refused"));
+    }
+
+    @Test
+    void 다운_감지는_다른_조회가_예외여도_동작한다() {
+        // 대상이 죽으면 activeSessions 같은 조회는 예외를 던진다. 예전에는 그 예외가
+        // 같은 try 안의 감지들을 전부 삼켰다 — 다운 감지는 그 바깥에 있어야 한다.
+        when(operator.health()).thenReturn(io.dbtower.registry.HealthStatus.down("timeout"));
+        when(operator.activeSessions(anyInt()))
+                .thenThrow(new io.dbtower.operator.OperatorException("접속 실패"));
+        detector.detect();
+        assertTrue(notifiedMessage().contains("인스턴스 접속 불가"));
+    }
+
+    @Test
+    void 전송에_실패하면_쿨다운을_확정하지_않고_다음_폴에서_재시도한다() {
+        // 회귀 방어: 예전에는 passCooldown이 판정과 동시에 lastAlerted를 갱신했다. 그래서 웹훅이
+        // 잠깐 죽거나 레이트리밋에 걸린 순간 발생한 경보는 쿨다운(30분) 때문에 재감지조차 되지 않고
+        // 영구히 사라졌다. 알림 이력 테이블도 없어 사후 확인도 불가능했다.
+        when(operator.activeSessions(anyInt())).thenReturn(List.of(idleTxn(101, 8000)));
+        Mockito.when(notifier.sendEmbed(anyString(), any(), any())).thenReturn(false);
+
+        detector.detect();
+        detector.detect();
+        // 두 번 다 시도해야 한다 — 실패한 전송은 쿨다운을 소비하지 않는다
+        verify(notifier, times(2)).sendEmbed(anyString(), any(), any());
+
+        // 전송이 복구되면 그때 확정된다 — 그 뒤 폴은 쿨다운에 걸려 조용해야 한다
+        Mockito.when(notifier.sendEmbed(anyString(), any(), any())).thenReturn(true);
+        detector.detect();   // 성공 → 여기서 쿨다운 확정
+        detector.detect();   // 쿨다운 중 → 발사 없음
+        verify(notifier, times(3)).sendEmbed(anyString(), any(), any());
     }
 
     @Test
@@ -301,12 +363,15 @@ class OpsAlertDetectorTest {
         DatabaseInstance app = instanceOn(1, "pg-app", "10.0.0.5:5432");
         DatabaseInstance billing = instanceOn(2, "pg-billing", "10.0.0.5:5432");
         when(instanceRepository.findAll()).thenReturn(List.of(app, billing));
-        when(operator.replicationState()).thenReturn(new ReplicationState("REPLICA", 120, "recovery"));
+        when(operator.replicationState()).thenReturn(ReplicationState.measured("REPLICA", 120, "recovery"));
 
         detector.detect();
 
-        // 경보 1건 + 대상 탐침(operator 생성)도 그룹당 1회 — 중복 부하까지 준다
-        verify(operatorFactory, times(1)).create(any());
+        // 서버 전역 신호(복제·세션·데드락)는 그룹당 1회만 탐침한다 — 아래 경보가 1건인 것이 그 증거.
+        // Operator 생성 자체는 인스턴스당 1회다(다운 감지는 DB별로 봐야 하므로) — 풀을 감싸는
+        // 얇은 객체라 생성 비용이 아니라 "대상에 던지는 조회 수"가 중복 부하의 척도다.
+        verify(operatorFactory, times(2)).create(any());
+        verify(operator, times(1)).activeSessions(anyInt());
         String message = notifiedMessage();
         assertTrue(message.contains("복제 지연"));
         // 공유 서버 경보는 누구에게 해당하는지 명시한다 — 대표 이름만 보고 남의 팀 문제로 오인하지 않게
@@ -318,7 +383,7 @@ class OpsAlertDetectorTest {
         DatabaseInstance a = instanceOn(1, "pg-a", "10.0.0.5:5432");
         DatabaseInstance b = instanceOn(2, "pg-b", "10.0.0.6:5432");
         when(instanceRepository.findAll()).thenReturn(List.of(a, b));
-        when(operator.replicationState()).thenReturn(new ReplicationState("REPLICA", 120, "recovery"));
+        when(operator.replicationState()).thenReturn(ReplicationState.measured("REPLICA", 120, "recovery"));
 
         detector.detect();
 

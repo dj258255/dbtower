@@ -179,10 +179,19 @@ public class AiAnalyzer {
     }
 
     private String loadRules() {
+        // 파일 부재를 조용히 빈 문자열로 넘기면 "반드시 아래 판단 기준 문서에 근거해서만 판정하라"는
+        // 시스템 프롬프트 뒤가 텅 빈 채로 모델에 나간다 — AI가 판단자가 아니라 1차 분석기라는
+        // 이 프로젝트의 원칙이 아무 신호 없이 무력화되는 경로다. 경로가 상대경로라 JAR을 다른
+        // 디렉터리에서 띄우면 실제로 재현된다. 읽기 예외와 똑같이 경고를 남긴다.
+        if (!Files.exists(rulesPath)) {
+            log.warn("판단 기준 문서 없음 path={} — AI 분석이 판단 기준 없이 수행된다(dbtower.ai.rules-path 확인)",
+                    rulesPath.toAbsolutePath());
+            return "";
+        }
         try {
-            return Files.exists(rulesPath) ? Files.readString(rulesPath) : "";
+            return Files.readString(rulesPath);
         } catch (Exception e) {
-            log.warn("판단 기준 문서 로드 실패: {}", e.getMessage());
+            log.warn("판단 기준 문서 로드 실패 path={}: {}", rulesPath.toAbsolutePath(), e.getMessage());
             return "";
         }
     }
