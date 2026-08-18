@@ -17,6 +17,18 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
 
+  # 복원 검증 전용 스크래치 인스턴스 — 관제 대상이 아니다(등록하지 않는다).
+  # 복원 검증이 대상 인스턴스 자신에서 돌면 논리적으로는 격리돼 있어도 디스크·IO를 운영과 공유한다.
+  # 여기로 복원 명령을 돌리고 dbtower.backup.verify-isolated=true를 켜면 그 공유가 사라진다.
+  verify-postgres:
+    image: postgres:16
+    container_name: dbtower-verify-postgres
+    environment:
+      POSTGRES_PASSWORD: dbtower1234
+      POSTGRES_DB: postgres
+    ports:
+      - "15433:5432"
+
   postgres:
     image: postgres:16
     container_name: dbtower-postgres

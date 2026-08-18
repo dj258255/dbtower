@@ -3241,20 +3241,107 @@ DBA 5기종·모니터링·인프라·개발자 관점의 리뷰어 9인이 27,3
 못 떠서 두 번에 나눠 돌렸다. 4기종(MySQL/PostgreSQL/MongoDB/Oracle)을 확인하고,
 Oracle을 내린 뒤 MSSQL을 확인했다. 검증 대상은 기종별 동작이라 동시 기동은 필요하지 않다.
 
-### 123.1 복제 상태 3-값 — `-1` 센티넬 제거
+### 123.1 복제 상태 3-값 — 실제 복제를 걸어서 측정
+
+처음 이 절을 쓸 때는 단일 노드 데모만 찔러 보고 5기종 전부 `NOT_APPLICABLE`이 나온 것을
+"3-값 확인"이라고 적었다. **그건 센티넬이 사라진 것만 본 것이고, 그 자리에 넣은 지연 계산은
+한 번도 실행되지 않았다.** 랩 규율(재 보지 않은 것을 근거로 쓰지 않는다)에 걸리므로
+PostgreSQL 스트리밍 복제와 MySQL 복제를 실제로 구성해 다시 쟀다.
+
+**PostgreSQL — 프라이머리 + 스탠바이 (실측)**
+
+```bash
+# 스탠바이 구성
+docker exec dbtower-postgres psql -U postgres -c \
+  "CREATE ROLE repl WITH REPLICATION LOGIN PASSWORD 'repl1234'"
+docker exec dbtower-postgres bash -c "echo 'host replication all all trust' >> \
+  /var/lib/postgresql/data/pg_hba.conf" && reload
+docker run --rm --network container:dbtower-postgres -v dbtower_standby_data:/standby postgres:16 \
+  pg_basebackup -h 127.0.0.1 -U repl -D /standby -Fp -Xs -R -P
+docker run -d --name dbtower-pg-standby --network dbtower_default -p 15433:5432 \
+  -v dbtower_standby_data:/var/lib/postgresql/data postgres:16 -c hot_standby=on
+```
 
 ```
-GET /api/instances/{id}/replication
-  id=1  (MySQL)      role=STANDALONE  lagSeconds=null  lagSource=NOT_APPLICABLE
-  id=2  (PostgreSQL) role=STANDALONE  lagSeconds=null  lagSource=NOT_APPLICABLE
-  id=8  (Oracle)     role=STANDALONE  lagSeconds=null  lagSource=NOT_APPLICABLE
-  id=3  (SQL Server) role=STANDALONE  lagSeconds=null  lagSource=NOT_APPLICABLE
-        detail="AlwaysOn 가용성 그룹 미구성"
+프라이머리 pg_stat_replication: dbtower_standby state=streaming
+
+# 따라잡은 상태
+GET /api/instances/34/replication  (스탠바이)
+  {"role":"REPLICA","lagSeconds":0.0,"lagSource":"MEASURED",
+   "detail":"recovery 모드 — 재생 완료(수신=재생 LSN)"}
+GET /api/instances/2/replication   (프라이머리)
+  {"role":"PRIMARY","lagSeconds":8.31E-4,"lagSource":"MEASURED",
+   "detail":"replicas=1 — 가장 뒤처진 스탠바이의 replay_lag"}
 ```
 
-단일 노드 데모라 `NOT_APPLICABLE`이 맞다. 요점은 값이 아니라 **구분**이다 —
-예전에는 같은 상황에서 MySQL/PG가 `0`, MSSQL/Oracle/Mongo가 `-1`을 냈고,
-알림 게이트가 `lagSeconds < 0`으로 스킵해 세 기종은 복제 지연 알림이 구조적으로 불가능했다.
+스탠바이의 `0.0`이 **유휴 스탠바이 오탐 가드**가 동작한 결과다. 이 가드가 없으면
+`now() - pg_last_xact_replay_timestamp()`가 유휴 프라이머리에서 무한 증가해
+완전히 따라잡은 스탠바이가 상시 오탐을 낸다.
+
+프라이머리의 값은 예전에 `0` 하드코딩이던 자리다 — 그래서 프라이머리만 등록한 환경에서는
+복제 지연 알림이 구조적으로 불가능했다.
+
+```
+# 재생을 멈추고 80,000행을 써서 실제 지연을 만든다
+docker exec dbtower-pg-standby psql -U postgres -c "select pg_wal_replay_pause()"
+
+스탠바이:  +3s -> 12.85926s    +8s -> 20.896659s    +15s -> 35.93632s   (전부 MEASURED)
+프라이머리: 25.684129s  (replay_lag)
+
+# 임계 30초 초과 -> 경보 발사, 두 역할 모두
+alert_history
+  31 | SENT | 복제 지연 role=PRIMARY lag=105.0s (임계 30s 초과, replicas=1 — 가장 뒤처진 스탠바이의 replay_lag)
+  32 | SENT | 복제 지연 role=REPLICA lag=125.2s (임계 30s 초과, recovery 모드)
+
+# 재생 재개 후
+스탠바이 0.0s / 프라이머리 0.000773s  (둘 다 MEASURED)
+```
+
+**MySQL — 소스 + 레플리카 (실측)**
+
+```bash
+docker run -d --name dbtower-mysql-replica --network dbtower_default -p 13307:3306 \
+  -e MYSQL_ROOT_PASSWORD=... mysql:8.4 --server-id=2 --log-bin=binlog --skip-replica-start
+# 프라이머리 gtid_mode=OFF라 파일/포지션 방식. MySQL 8.4는 mysql_native_password를 뺐으므로
+# repl 계정은 기본 caching_sha2_password + GET_SOURCE_PUBLIC_KEY=1.
+CHANGE REPLICATION SOURCE TO SOURCE_HOST='dbtower-mysql', SOURCE_LOG_FILE='binlog.000214',
+  SOURCE_LOG_POS=1051, GET_SOURCE_PUBLIC_KEY=1;  START REPLICA;
+```
+
+| 상태 | DB 실제값 | DBTower 응답 |
+|---|---|---|
+| 정상 | `IO=Yes, SQL=Yes, Seconds_Behind_Source=0` | `lagSeconds=0.0, MEASURED` |
+| 단절 (`STOP REPLICA IO_THREAD`) | `IO=No, Seconds_Behind_Source=NULL` | `lagSeconds=null, UNAVAILABLE`<br>`"복제 스레드 중단(IO=No, SQL=Yes)"` |
+
+```
+alert_history
+  34 | SENT | 복제 상태를 읽지 못했습니다 role=REPLICA
+             (source=dbtower-mysql:3306 — 복제 스레드 중단(IO=No, SQL=Yes))
+```
+
+두 번째 줄이 이번 MySQL 수정의 전부다. `Seconds_Behind_Source`의 NULL은 "지연 미상"이 아니라
+**복제가 끊겼다**는 신호인데, 예전에는 `-1`로 뭉개져 알림 게이트가 조용히 스킵했다 —
+가장 알려야 할 사건에서 침묵했다.
+
+**MongoDB — 깨진 레플리카셋 (실측, 부분)**
+
+`--replSet rs0`인데 설정이 무효화된 상태(code 93)를 실측했다. 123.2(a) 참고.
+
+```
+{"role":"REPLSET_BROKEN","lagSeconds":null,"lagSource":"UNAVAILABLE", ...}
+alert_history  19 | SENT | 복제 상태를 읽지 못했습니다 role=REPLSET_BROKEN
+```
+
+**측정하지 못한 MEASURED 경로 (정직 표기)**
+
+| 기종 | 구현한 원천 | 왜 못 쟀나 |
+|---|---|---|
+| Oracle | `v$dataguard_stats`의 apply lag | Data Guard 스탠바이 구성이 필요하다 |
+| SQL Server | `redo_queue_size` + `last_redone_time` | AlwaysOn 가용성 그룹(클러스터) 구성이 필요하다 |
+| MongoDB | `members[].optimeDate` 차 | 멤버 2개 이상의 레플리카셋이 필요하다(깨진 경로만 실측) |
+
+이 셋은 **코드는 있으나 실행된 적이 없다.** 단일 노드에서 `NOT_APPLICABLE`이 나오는 것과
+`UNSUPPORTED`로 강등되는 것까지는 확인했지만, 지연 숫자를 낸 적은 없다.
 
 ### 123.2 라이브에서 새로 드러난 결함 2건
 
@@ -3416,8 +3503,52 @@ GET /actuator/health -> {"groups":["liveness","readiness"],"status":"UP"}
 
 ### 123.10 확인하지 못한 것
 
+- **Oracle·SQL Server·MongoDB의 지연 계산(MEASURED)**: 123.1 마지막 표 참고.
+  각각 Data Guard·AlwaysOn·멤버 2개 이상 레플리카셋 구성이 필요하다.
+  코드는 있으나 실행된 적이 없다 — 면접에서 물으면 그대로 답한다.
 - **여유공간 부족 시 복원 거부**: 재현에 대용량 백업이 필요하다.
 - **gh-ost 가드레일 실동작**: 플래그 조립과 프로세스 타임아웃은 단위 테스트로 덮지만,
   `--max-load` 스로틀이 실제로 거는 것은 부하를 만들어야 확인된다.
-- **웹훅 실발사**: `DBTOWER_WEBHOOK_URL`을 비워 돌렸다. 전달 경로는
-  "미설정 로그 + alert_history 적재"까지 확인했고 Discord 실발사는 이번 범위 밖이다.
+- **Discord 실발사**: 아래 123.11에서 로컬 수신기로 HTTP 전달 경로 전체를 확인했다.
+  Discord 서버로 실제 발사하는 것은 워크스페이스가 필요해 범위 밖이다.
+
+### 123.11 웹훅 전달 내구성 — 실패하면 재시도한다
+
+`DBTOWER_WEBHOOK_URL`을 비워 두면 전달 경로를 못 탄다. 로컬 수신기를 세워
+성공(204)과 실패(500)를 전환하며 전 사슬을 확인했다.
+
+```python
+# 가짜 수신기 — mode 파일로 204/500 전환, 받은 페이로드를 기록
+http.server.HTTPServer(("127.0.0.1", 9099), H).serve_forever()
+```
+
+**(1) 정상 전달 — 페이로드가 실제로 HTTP로 나간다**
+
+```
+수신 1건  mode=ok  len=209
+text: [DBTower 운영 경보] instance=local-mysql
+      - 스냅샷 수집 정지 — 최근 10분간 신규 배치 0 (수집기 중단·접속 실패 의심, 회귀 감지 무력화)
+      [dbtower:instance=1]
+```
+
+꼬리의 `[dbtower:instance=1]`이 Slack 반응 진단용 인스턴스 마커다.
+단위 테스트로만 덮던 것이 실제 페이로드에 실려 나가는 것을 여기서 확인했다.
+
+**(2) 전송 실패 — FAILED로 기록되고 쿨다운은 확정되지 않는다**
+
+```
+mode=fail (수신기가 500 반환)
+alert_history:  FAILED | 1    SENT | 6
+app.log:        "쿨다운 미확정" 1건
+```
+
+**(3) 복구 후 같은 신호가 재시도된다**
+
+```
+alert_history (instance_id=7, local-mongo)
+  22 | FAILED | 인스턴스 접속 불가 — 127.0.0....    <- 웹훅 500, 쿨다운 미확정
+  24 | SENT   | 인스턴스 접속 불가 — 127.0.0....    <- 다음 폴에서 같은 신호 재시도, 성공
+```
+
+수정 전이었다면 22번 시점에 쿨다운(기본 30분)이 확정돼 **그 경보는 재감지조차 되지 않고
+기록도 없이 사라졌을 것**이다. 이 세 단계가 "전송 성공 후에만 쿨다운 확정" 변경의 전부다.
