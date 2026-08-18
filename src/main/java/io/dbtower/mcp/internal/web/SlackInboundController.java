@@ -6,6 +6,7 @@ import io.dbtower.mcp.internal.DiagnosisService;
 import io.dbtower.mcp.internal.DiscordTriggerRules;
 import io.dbtower.mcp.internal.SlackSignatureVerifier;
 import io.dbtower.registry.DatabaseInstance;
+import io.dbtower.alert.AlertMessageIndex;
 import io.dbtower.registry.RegistryService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -28,8 +29,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -49,8 +48,6 @@ import java.util.stream.Collectors;
 public class SlackInboundController {
 
     private static final Logger log = LoggerFactory.getLogger(SlackInboundController.class);
-    /** 알림 텍스트 폴백에서 인스턴스를 찾는 패턴 — "인스턴스: name (TYPE)" 줄(웹훅 포맷 계약). */
-    private static final Pattern INSTANCE_LINE = Pattern.compile("인스턴스: (\\S+)");
 
     private final DiagnosisService diagnosisService;
     private final RegistryService registryService;
@@ -136,16 +133,16 @@ public class SlackInboundController {
     private void diagnoseAndReply(String channel, String ts) {
         try {
             String text = fetchMessageText(channel, ts);
-            Matcher m = text == null ? null : INSTANCE_LINE.matcher(text);
-            if (m == null || !m.find()) {
+            Long instanceId = AlertMessageIndex.instanceFromText(text);
+            if (instanceId == null) {
                 postThread(channel, ts, "이 메시지에서 대상 인스턴스를 알 수 없어 진단을 시작하지 못했습니다.");
                 return;
             }
-            String name = m.group(1);
-            DatabaseInstance instance = registryService.findAll().stream()
-                    .filter(i -> i.getName().equals(name)).findFirst().orElse(null);
-            if (instance == null) {
-                postThread(channel, ts, "등록되지 않은 인스턴스입니다: " + name);
+            DatabaseInstance instance;
+            try {
+                instance = registryService.findById(instanceId);
+            } catch (RuntimeException e) {
+                postThread(channel, ts, "등록되지 않은 인스턴스입니다: id=" + instanceId);
                 return;
             }
             postThread(channel, ts, instance.getName() + " 진단을 시작합니다… (잠시만요)");

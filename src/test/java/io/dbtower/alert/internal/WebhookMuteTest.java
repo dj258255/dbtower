@@ -19,12 +19,13 @@ class WebhookMuteTest {
         final List<Long> delivered = new ArrayList<>();
 
         Capturing(AlertMuter muter) {
-            super("https://discord.com/api/webhooks/x", 100, null, muter);
+            super("https://discord.com/api/webhooks/x", 100, null, muter, null);
         }
 
         @Override
-        void deliverEmbed(String textFallback, String suppressedNote, Embed embed, Long instanceId) {
+        boolean deliverEmbed(String textFallback, String suppressedNote, Embed embed, Long instanceId) {
             delivered.add(instanceId);
+            return true;   // 캡처 성공 = 전달 성공
         }
     }
 

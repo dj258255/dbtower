@@ -41,6 +41,20 @@ public interface DbmsOperator {
      */
     long DEEP_DIAGNOSIS_TIMEOUT_MS = 10_000L;
 
+    /**
+     * 목록 조회 limit의 하드 상한 — 진단 조회가 대상 DB와 힙을 통째로 끌어오지 않게.
+     * {@code ?limit=100000000} 하나로 대상에서 1억 행을 뽑아 힙에 담으려는 시도가 인증된 VIEWER에게
+     * 열려 있었다. describeSchema가 {@code SchemaSupport.DEFAULT_MAX_TABLES}로 하드 상한을 거는 것과
+     * 같은 규율을 목록 API 전반에 적용한다. 상한을 넘긴 요청은 거부가 아니라 조용히 상한으로 자른다
+     * (진단 조회라 부분 결과가 오류보다 유용하고, 상위 N개 조회라는 의미상 잘림이 자연스럽다).
+     */
+    int MAX_ROW_LIMIT = 1_000;
+
+    /** limit을 1..{@link #MAX_ROW_LIMIT} 범위로 자른다. 음수·0은 1로 올린다. */
+    static int clampLimit(int limit) {
+        return Math.max(1, Math.min(limit, MAX_ROW_LIMIT));
+    }
+
     /** 연결 확인 + 버전 + 응답시간 */
     HealthStatus health();
 

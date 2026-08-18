@@ -50,7 +50,7 @@ class OracleRestoreVerifyIT {
                 new VaultCredentials("", ""), 120, 4, 5000, 600_000, 1_800_000, 30, 60_000);
         // Oracle 백업도 서버 사이드 API(DBMS_DATAPUMP)라 외부 CLI가 필요 없다 — RMAN 경로만 미설정
         BackupTools tools = new BackupTools(null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, "/tmp");
+                null, null, null, null, null, null, null, "/tmp", false);
         return new OracleOperator(instance, pools, tools, "");
     }
 

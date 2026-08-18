@@ -4,7 +4,7 @@ import io.dbtower.advisor.Advisor;
 import io.dbtower.advisor.AdvisorFinding;
 import io.dbtower.advisor.Severity;
 
-import io.dbtower.insight.QuerySnapshotRepository;
+import io.dbtower.insight.ComparisonService;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
@@ -28,12 +28,12 @@ import java.util.List;
 @Component
 public class SnapshotRetentionAdvisor implements Advisor {
 
-    private final QuerySnapshotRepository snapshotRepository;
+    private final ComparisonService comparisonService;
     private final int retentionDays;
 
-    public SnapshotRetentionAdvisor(QuerySnapshotRepository snapshotRepository,
+    public SnapshotRetentionAdvisor(ComparisonService comparisonService,
                                     @Value("${dbtower.snapshot.retention-days:7}") int retentionDays) {
-        this.snapshotRepository = snapshotRepository;
+        this.comparisonService = comparisonService;
         this.retentionDays = retentionDays;
     }
 
@@ -59,8 +59,8 @@ public class SnapshotRetentionAdvisor implements Advisor {
         }
         // 증거: 이 인스턴스의 스냅샷 배치가 실제로 쌓여 있는가. 매우 오래된 시점부터 현재까지 조회해
         // 배치 존재를 확인한다(sumByBatch는 배치별 집계라 반환 크기가 배치 수로 제한된다).
-        long batches = snapshotRepository.sumByBatch(instance.getId(),
-                LocalDateTime.now().minusYears(100), LocalDateTime.now()).size();
+        long batches = comparisonService.batchCount(instance.getId(),
+                LocalDateTime.now().minusYears(100), LocalDateTime.now());
         if (batches == 0) {
             return List.of(); // 아직 수집된 스냅샷이 없으면 적재 문제가 아니다
         }

@@ -7,7 +7,7 @@ import io.dbtower.insight.BaselineService.AnomalyScan;
 import io.dbtower.insight.BaselineService.MetricAnomaly;
 import io.dbtower.insight.BaselineService.QueryAnomaly;
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.RegistryService;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,7 +29,7 @@ import static org.mockito.Mockito.*;
  */
 class AnomalyDetectorTest {
 
-    private final DatabaseInstanceRepository instanceRepository = Mockito.mock(DatabaseInstanceRepository.class);
+    private final RegistryService instanceRepository = Mockito.mock(RegistryService.class);
     private final BaselineService baselineService = Mockito.mock(BaselineService.class);
     private final WebhookNotifier notifier = Mockito.mock(WebhookNotifier.class);
 
@@ -37,6 +37,10 @@ class AnomalyDetectorTest {
 
     @BeforeEach
     void setUp() {
+        // 쿨다운은 이제 전송이 성공해야 확정된다 — mock 기본값(false)이면 확정되지 않아
+        // "쿨다운 동안 다시 안 울린다"가 성립하지 않는다. 전달 성공을 기본 전제로 둔다.
+        Mockito.when(notifier.sendEmbed(Mockito.anyString(), Mockito.any(), Mockito.any()))
+                .thenReturn(true);
         detector = new AnomalyDetector(instanceRepository, baselineService, notifier, 30);
         DatabaseInstance instance = new DatabaseInstance(
                 "test-db", DbmsType.MYSQL, "127.0.0.1", 3306, "sample", "root", "pw");

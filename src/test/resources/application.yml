@@ -1,6 +1,10 @@
 # 테스트 전용 설정 — 실 DB 없이(CI 포함) 컨텍스트가 뜨도록 인메모리 H2를 쓴다.
 # H2는 PostgreSQL 호환 모드 — 플랫폼 저장소가 PostgreSQL 문법을 전제하기 때문.
 spring:
+  # 프로필을 명시한다 — SecretCipher가 "프로필 미설정"도 fail-closed로 보게 바뀌었기 때문.
+  # 예전에는 prod/docker만 fail-closed라 그 밖의 이름(production·k8s·internal…)은 전부 평문 폴백이었다.
+  profiles:
+    active: test
   datasource:
     url: jdbc:h2:mem:dbtower;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
     username: sa

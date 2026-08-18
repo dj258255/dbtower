@@ -792,7 +792,7 @@ public class MongoOperator implements DbmsOperator {
                 return n;
             });
             return RestoreVerification.verified(
-                    "임시 DB로 아카이브 복원 성공 (mongorestore, nsTo=" + target + ")", collections);
+                    "임시 DB로 아카이브 복원 성공 (mongorestore, nsTo=" + backupTools.verifyLocationNote() + target + ")", collections);
         } finally {
             // 임시 DB 삭제 — 성공/실패 어느 경로든 격리 대상만 정리(원본 무해)
             try {
@@ -953,16 +953,89 @@ public class MongoOperator implements DbmsOperator {
                             .runCommand(new Document("replSetGetStatus", 1));
                     List<Document> members = status.getList("members", Document.class, List.of());
                     int myState = status.getInteger("myState", -1);
+                    // 상태 코드는 1/2만이 아니다 — ROLLBACK(9)·RECOVERING(3)은 알림이 울려야 할 상태인데
+                    // 예전에는 "STATE_9"라는 의미 없는 문자열로 나갔다.
                     String role = switch (myState) {
+                        case 0 -> "STARTUP";
                         case 1 -> "PRIMARY";
                         case 2 -> "SECONDARY";
+                        case 3 -> "RECOVERING";
+                        case 5 -> "STARTUP2";
+                        case 6 -> "UNKNOWN";
+                        case 7 -> "ARBITER";
+                        case 8 -> "DOWN";
+                        case 9 -> "ROLLBACK";
+                        case 10 -> "REMOVED";
                         default -> "STATE_" + myState;
                     };
-                    return new ReplicationState(role, -1,
-                            "replSet=%s members=%d".formatted(status.getString("set"), members.size()));
+                    String base = "replSet=%s members=%d state=%s"
+                            .formatted(status.getString("set"), members.size(), role);
+
+                    // 지연 = 프라이머리 optimeDate - 내 optimeDate. members[]에 이미 다 들어 있는데
+                    // 예전 구현은 개수만 세고 버린 뒤 -1을 실었다 — MongoDB만 복제 알림에서 영구 제외됐다.
+                    Document primary = null;
+                    Document self = null;
+                    int unhealthy = 0;
+                    for (Document m : members) {
+                        if (m.getInteger("state", -1) == 1) {
+                            primary = m;
+                        }
+                        if (Boolean.TRUE.equals(m.getBoolean("self"))) {
+                            self = m;
+                        }
+                        Number health = m.get("health", Number.class);
+                        if (health != null && health.doubleValue() == 0) {
+                            unhealthy++;
+                        }
+                    }
+                    String detail = unhealthy > 0 ? base + " unhealthy_members=" + unhealthy : base;
+                    if (primary == null) {
+                        // 프라이머리가 없다 = 선출 중이거나 과반 상실. 지연을 못 재는 게 아니라 사건이다.
+                        return ReplicationState.unavailable(role, detail + " — 레플리카셋에 프라이머리가 없다(선출 중이거나 과반 상실)");
+                    }
+                    if (self == null) {
+                        return ReplicationState.unavailable(role, detail + " — members[]에서 자기 노드를 찾지 못했다");
+                    }
+                    if (myState == 1) {
+                        // 프라이머리 자신의 지연은 0이지만 그건 자명하다. 세컨더리 중 가장 뒤처진 값을 낸다.
+                        java.util.Date primaryOptime = primary.getDate("optimeDate");
+                        double worst = 0;
+                        boolean any = false;
+                        for (Document m : members) {
+                            int st = m.getInteger("state", -1);
+                            if (st != 2 || m.getDate("optimeDate") == null || primaryOptime == null) {
+                                continue;   // 세컨더리만, optime이 있는 것만
+                            }
+                            any = true;
+                            worst = Math.max(worst,
+                                    (primaryOptime.getTime() - m.getDate("optimeDate").getTime()) / 1000.0);
+                        }
+                        return any
+                                ? ReplicationState.measured(role, Math.max(0, worst),
+                                        detail + " — 가장 뒤처진 세컨더리의 optime 차")
+                                : ReplicationState.unsupported(role, detail
+                                        + " — 세컨더리가 없거나 optime을 못 얻어 지연을 낼 수 없다");
+                    }
+                    java.util.Date primaryOptime = primary.getDate("optimeDate");
+                    java.util.Date selfOptime = self.getDate("optimeDate");
+                    if (primaryOptime == null || selfOptime == null) {
+                        return ReplicationState.unavailable(role, detail + " — optimeDate 미확보");
+                    }
+                    double lagSec = (primaryOptime.getTime() - selfOptime.getTime()) / 1000.0;
+                    return ReplicationState.measured(role, Math.max(0, lagSec), detail + " — 프라이머리 optime 차");
                 } catch (MongoCommandException e) {
-                    if (e.getErrorCode() == 76) { // NoReplicationEnabled
-                        return new ReplicationState("STANDALONE", 0, "레플리카셋 미구성");
+                    // 76 NoReplicationEnabled — --replSet 자체가 없다. 복제를 안 쓰는 구성이므로 알릴 것이 없다.
+                    if (e.getErrorCode() == 76) {
+                        return ReplicationState.standalone("레플리카셋 미구성");
+                    }
+                    // 93 InvalidReplicaSetConfig / 94 NotYetInitialized — --replSet은 켜져 있는데
+                    // 설정이 깨졌거나 rs.initiate()가 안 됐다. 이건 조회 실패가 아니라 <b>사건</b>이다:
+                    // 그 상태의 노드는 프라이머리를 못 뽑아 쓰기를 받지 못한다.
+                    // 예외로 던지면 /replication이 502가 되고 oplog 백업 잡까지 "백업 실패"로 죽는다(실측).
+                    if (e.getErrorCode() == 93 || e.getErrorCode() == 94) {
+                        return ReplicationState.unavailable("REPLSET_BROKEN",
+                                "레플리카셋이 구성돼 있으나 사용 불가 상태다 (code=%d): %s"
+                                        .formatted(e.getErrorCode(), e.getErrorMessage()));
                     }
                     throw e;
                 }

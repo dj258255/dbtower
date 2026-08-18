@@ -209,9 +209,10 @@ SaaS 는 이 제품에 안 맞는다 — 대상 DB 자격증명 수탁, 사설�
 
 ## 심화 아크 3 — 테이블 상세 정보 레퍼런스 패리티 (착수 명세)
 
-> **구현 완료** (VERIFICATION 66절). tableDetail 5기종(MySQL·Oracle=NATIVE DDL, PostgreSQL·MSSQL=RECONSTRUCTED, MongoDB=컬렉션 JSON), 인덱스 카디널리티·타입, 크기 통계, 주입 방어. POST /api/instances/{id}/table-detail + 상세 패널 아코디언. 데모 MySQL·PG 라이브. 아래 명세는 기록.
+> **구현 완료** (VERIFICATION 66절). tableDetail 5기종(MySQL·Oracle=NATIVE DDL, PostgreSQL·MSSQL=RECONSTRUCTED, MongoDB=컬렉션 JSON), 인덱스 카디널리티·타입, 크기 통계, 주입 방어. POST /api/instances/{id}/table-detail + 상세 패널 아코디언. 데모 MySQL·PG 라이브.
 >
-> **구현 담당: Opus. 착수 명세(미착수).** 레퍼런스의 "테이블 상세 정보" 화면(스키마 정보=CREATE TABLE 전문,
+> **아래는 착수 당시의 명세를 기록으로 남긴 것이다** — 완료 상태와 모순되게 "미착수"로 읽히던 표기를 걷어냈다.
+> 레퍼런스의 "테이블 상세 정보" 화면(스키마 정보=CREATE TABLE 전문,
 > 기본 통계=엔진·행수·데이터/인덱스 크기·평균 행 길이·생성 시각, 인덱스 정보=컬럼·타입·카디널리티)을
 > 5기종에서 재현한다. 심화 아크 2(문의 테이블 구조, 65절)의 "린 요약"을 풀 상세로 승격하는 다음 계단.
 > 레퍼런스 대비 현재 갭: 데이터/인덱스 크기·평균 행 길이 표시(원천은 tableStats에 있음), 인덱스

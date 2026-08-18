@@ -4,7 +4,7 @@ import io.dbtower.insight.internal.SnapshotWriter;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.RegistryService;
 import net.javacrumbs.shedlock.core.LockConfiguration;
 import net.javacrumbs.shedlock.core.LockProvider;
 import net.javacrumbs.shedlock.core.SimpleLock;
@@ -29,7 +29,7 @@ import static org.mockito.Mockito.*;
  */
 class SnapshotSchedulerShardingTest {
 
-    private final DatabaseInstanceRepository repository = Mockito.mock(DatabaseInstanceRepository.class);
+    private final RegistryService repository = Mockito.mock(RegistryService.class);
     private final SnapshotWriter writer = Mockito.mock(SnapshotWriter.class);
     private final DbmsOperatorFactory operatorFactory = Mockito.mock(DbmsOperatorFactory.class);
     private final LockProvider lockProvider = Mockito.mock(LockProvider.class);

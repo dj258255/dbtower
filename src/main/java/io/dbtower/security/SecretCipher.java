@@ -54,13 +54,17 @@ public class SecretCipher {
     /** 스프링 주입 경로 — 암호화 키와 활성 프로필(spring.profiles.active)을 함께 받아 배포 프로필 fail-closed를 판정한다. */
     @Autowired
     public SecretCipher(@Value("${dbtower.security.encryption-key:}") String encodedKey,
-                        @Value("${spring.profiles.active:}") String activeProfiles) {
+                        @Value("${spring.profiles.active:}") String activeProfiles,
+                        @Value("${dbtower.security.allow-plaintext:false}") boolean allowPlaintext) {
         if (encodedKey == null || encodedKey.isBlank()) {
-            // 배포 프로필(prod·docker)에서는 조용한 평문 폴백을 막는다 — 키 없이 뜨면 대상 DB 비밀번호가 전량 평문이 된다
-            if (isFailClosedProfile(activeProfiles)) {
+            // 키가 없으면 기본이 거부다 — 키 없이 뜨면 대상 DB 비밀번호가 전량 평문이 된다.
+            // 평문으로 띄우려면 개발용 프로필이거나 allow-plaintext를 명시적으로 켜야 한다(의도의 기록).
+            if (isFailClosedProfile(activeProfiles) && !allowPlaintext) {
                 throw new IllegalStateException(
-                        "배포 프로필(" + activeProfiles + ")에서 DBTOWER_ENCRYPTION_KEY가 없습니다 — 인스턴스 비밀번호 평문 저장을 막기 위해 "
-                                + "기동을 거부합니다. base64 인코딩 32바이트 키를 설정하세요 (예: openssl rand -base64 32)");
+                        "프로필(" + (activeProfiles == null || activeProfiles.isBlank() ? "(미설정)" : activeProfiles)
+                                + ")에서 DBTOWER_ENCRYPTION_KEY가 없습니다 — 인스턴스 비밀번호 평문 저장을 막기 위해 "
+                                + "기동을 거부합니다. base64 인코딩 32바이트 키를 설정하세요 (예: openssl rand -base64 32). "
+                                + "평문 저장을 의도했다면 dbtower.security.allow-plaintext=true를 명시하세요");
             }
             this.key = null;
             log.warn("DBTOWER_ENCRYPTION_KEY 미설정 — 인스턴스 비밀번호가 평문으로 저장됩니다. "
@@ -85,23 +89,31 @@ public class SecretCipher {
 
     /** 테스트·부트스트랩 편의 — 프로필을 지정하지 않으면 dev/기본으로 취급한다(하위호환). */
     public SecretCipher(String encodedKey) {
-        this(encodedKey, "");
+        this(encodedKey, "test", true);
     }
 
     /**
-     * spring.profiles.active(콤마 구분)에 배포 프로필(prod·docker)이 포함되는지 — 대소문자 무시.
-     * 미설정(blank)·dev·test는 false(평문 폴백 유지) — 로컬 개발·테스트 컨텍스트 부팅 편의.
-     * blank까지 fail-closed로 잡으면 키를 안 주는 다수의 @SpringBootTest 컨텍스트가 못 뜬다.
+     * 평문 폴백이 허용되는 프로필 — <b>이 목록에 없으면 전부 fail-closed다(미설정 포함).</b>
+     *
+     * <p>예전에는 반대였다: {@code prod}·{@code docker}만 fail-closed고 나머지는 평문 폴백.
+     * 그런데 이 저장소에는 앱 자체의 Kubernetes 매니페스트가 없어 <b>배포자가 프로필 이름을 직접 정한다</b> —
+     * {@code production}·{@code prd}·{@code k8s}·{@code internal} 중 아무거나 쓰는 순간 게이트를 통과하고
+     * 대상 DB 자격증명 전량이 평문으로 저장됐다. 신호는 WARN 한 줄뿐이고 앱은 정상 동작한다.
+     * 자격증명 보관을 존재 이유로 하는 플랫폼에서 기본값이 fail-open이면 안 된다.
+     *
+     * <p>여집합으로 뒤집으면 새 배포 이름을 만들어도 자동으로 안전한 쪽에 선다. 로컬에서 키 없이
+     * 띄우고 싶으면 프로필을 dev/local/test로 두거나 allow-plaintext를 명시적으로 켠다.
      */
-    private static final java.util.Set<String> FAIL_CLOSED_PROFILES = java.util.Set.of("prod", "docker");
+    private static final java.util.Set<String> PLAINTEXT_ALLOWED_PROFILES =
+            java.util.Set.of("dev", "local", "test");
 
     private static boolean isFailClosedProfile(String activeProfiles) {
         if (activeProfiles == null || activeProfiles.isBlank()) {
-            return false;
+            return true;   // 미설정 = 배포 의도를 알 수 없음 = 안전한 쪽
         }
         for (String p : activeProfiles.split(",")) {
-            if (FAIL_CLOSED_PROFILES.contains(p.trim().toLowerCase())) {
-                return true;
+            if (!p.isBlank() && !PLAINTEXT_ALLOWED_PROFILES.contains(p.trim().toLowerCase())) {
+                return true;   // 하나라도 개발용이 아니면 fail-closed
             }
         }
         return false;

@@ -34,6 +34,17 @@ public class ComparisonService {
                                 List<QueryDiff> queries) {
     }
 
+    /**
+     * 구간 안에 수집된 스냅샷 배치 수 — "수집이 실제로 돌고 있는가"를 묻는 다른 모듈용 공개 창구.
+     *
+     * alert의 수집 정지 감지와 advisor의 보존 점검이 이걸 알아야 하는데, 없어서 insight의
+     * 리포지토리를 직접 주입받고 있었다(모듈 경계 우회). 배치별 집계라 반환 크기가 배치 수로
+     * 제한되므로 존재 확인 용도로 가볍다.
+     */
+    public int batchCount(Long instanceId, LocalDateTime from, LocalDateTime to) {
+        return snapshotRepository.sumByBatch(instanceId, from, to).size();
+    }
+
     public CompareResult compare(Long instanceId,
                                  LocalDateTime baseFrom, LocalDateTime baseTo,
                                  LocalDateTime targetFrom, LocalDateTime targetTo) {

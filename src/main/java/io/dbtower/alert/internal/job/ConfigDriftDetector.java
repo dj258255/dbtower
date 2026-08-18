@@ -7,7 +7,7 @@ import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.alert.internal.persistence.ConfigDriftDao;
 import io.dbtower.alert.internal.persistence.ConfigDriftDao.ParamChangeRow;
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.RegistryService;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,19 +35,19 @@ public class ConfigDriftDetector {
     /** 카드 한 장에 실을 변경 상한 — 나머지는 "+N건 더"로(필드 1024자 한도 방어). */
     private static final int CARD_CHANGE_LIMIT = 15;
 
-    private final DatabaseInstanceRepository instanceRepository;
+    private final RegistryService registryService;
     private final ConfigDriftService driftService;
     private final ConfigDriftDao dao;
     private final WebhookNotifier notifier;
     private final int retentionDays;
     private final String baseUrl;
 
-    public ConfigDriftDetector(DatabaseInstanceRepository instanceRepository,
+    public ConfigDriftDetector(RegistryService registryService,
                                ConfigDriftService driftService, ConfigDriftDao dao,
                                WebhookNotifier notifier,
                                @Value("${dbtower.config-drift.retention-days:365}") int retentionDays,
                                @Value("${dbtower.base-url:}") String baseUrl) {
-        this.instanceRepository = instanceRepository;
+        this.registryService = registryService;
         this.driftService = driftService;
         this.dao = dao;
         this.notifier = notifier;
@@ -60,7 +60,7 @@ public class ConfigDriftDetector {
     public void collect() {
         LocalDateTime capturedAt = LocalDateTime.now();
         int changed = 0;
-        for (DatabaseInstance instance : instanceRepository.findAll()) {
+        for (DatabaseInstance instance : registryService.findAll()) {
             if (!instance.isCollectionEnabled()) {
                 continue;
             }

@@ -3,7 +3,7 @@ package io.dbtower.advisor;
 import io.dbtower.advisor.internal.job.AdvisorSweepJob;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.RegistryService;
 import io.dbtower.registry.DbmsType;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -26,7 +26,7 @@ import static org.mockito.Mockito.*;
  */
 class AdvisorSweepDedupTest {
 
-    private final DatabaseInstanceRepository repository = Mockito.mock(DatabaseInstanceRepository.class);
+    private final RegistryService repository = Mockito.mock(RegistryService.class);
     private final AdvisorService advisorService = Mockito.mock(AdvisorService.class);
 
     /** 호스트 스코프 Advisor 스텁 — 디스크 예측과 같은 성격 */

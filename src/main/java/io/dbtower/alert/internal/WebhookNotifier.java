@@ -1,6 +1,8 @@
 package io.dbtower.alert.internal;
 
 import io.dbtower.alert.AlertMessageIndex;
+import io.dbtower.alert.internal.persistence.AlertHistoryRepository;
+import io.dbtower.alert.internal.domain.AlertHistoryEntry;
 import io.dbtower.alert.AlertMuter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,16 +46,26 @@ public class WebhookNotifier {
 
     /** Discord 알림 메시지 id ↔ 인스턴스 매핑 인덱스(Gateway 봇 이모지 트리거용). 테스트에선 null 가능. */
     private final AlertMessageIndex messageIndex;
+
+    /**
+     * 알림 이력 — 발사된 모든 감지 알림을 결과와 함께 남긴다.
+     * 예전에는 웹훅으로만 나가고 영속 기록이 없어, 레이트리밋이나 전송 실패로 사라진 알림을
+     * 사후에 확인할 방법이 없었다(IncidentReportService가 이 한계를 주석으로 인정하고 있었다).
+     * 기록 실패가 알림 발송을 막으면 안 되므로 예외는 삼키고 로그만 남긴다(messageIndex와 같은 원칙).
+     */
+    private final AlertHistoryRepository historyRepository;
     /** 인스턴스별 알림 일시 중지("알람 스킵") — 강제 지점은 여기 한 곳. 테스트에선 null 가능. */
     private final AlertMuter muter;
 
     public WebhookNotifier(@Value("${DBTOWER_WEBHOOK_URL:}") String webhookUrl,
                            @Value("${dbtower.alert.rate-per-minute:12}") int ratePerMinute,
-                           AlertMessageIndex messageIndex, AlertMuter muter) {
+                           AlertMessageIndex messageIndex, AlertMuter muter,
+                           AlertHistoryRepository historyRepository) {
         this.webhookUrl = webhookUrl;
         this.ratePerMinute = Math.max(1, ratePerMinute);
         this.messageIndex = messageIndex;
         this.muter = muter;
+        this.historyRepository = historyRepository;
     }
 
     /**
@@ -77,8 +89,8 @@ public class WebhookNotifier {
      * 보낸다 — 웹훅도 이기종이라 "잘 꾸며주는 쪽"과 "확실히 도착하는 쪽"을 URL이 결정한다.
      * 레이트리밋은 텍스트 경로와 같은 윈도우를 쓴다(embed라고 도배가 허용되는 건 아니므로).
      */
-    public void sendEmbed(String fallbackText, Embed embed) {
-        sendEmbed(fallbackText, (Long) null, embed);
+    public boolean sendEmbed(String fallbackText, Embed embed) {
+        return sendEmbed(fallbackText, (Long) null, embed);
     }
 
     /**
@@ -86,25 +98,61 @@ public class WebhookNotifier {
      * 특권 인텐트 없이 대상 인스턴스를 조회하게 — AlertMessageIndex 참고). null이면 매핑 안 함(문의 등).
      * (fallback, instanceId, embed) 인자 순서 — 호출부 가독성(맥락 → 페이로드).
      */
-    public void sendEmbed(String fallbackText, Long instanceId, Embed embed) {
-        sendEmbedAt(fallbackText, embed, instanceId, System.currentTimeMillis());
+    public boolean sendEmbed(String fallbackText, Long instanceId, Embed embed) {
+        return sendEmbedAt(fallbackText, embed, instanceId, System.currentTimeMillis());
     }
 
-    void sendEmbedAt(String fallbackText, Embed embed, Long instanceId, long now) {
+    boolean sendEmbedAt(String fallbackText, Embed embed, Long instanceId, long now) {
         // 알람 스킵(음소거 반응) — 중지된 인스턴스의 알림은 발사하지 않는다. 조용한 유실이 아니라
         // 사람이 방금 명시적으로 끈 상태이고, 만료되면 자동 재개된다(레이트리밋 억제와 달리 요약도 안 남긴다).
         if (muter != null && muter.isMuted(instanceId)) {
             log.info("알림 중지 중(알람 스킵) — instance={} 발사 생략", instanceId);
-            return;
+            return true;   // 사람이 명시적으로 끈 것 — 해제 직후 폭주하지 않게 소비된 것으로 본다
         }
         String decided = decide(fallbackText, now);
         if (decided == null) {
-            return;
+            // 레이트리밋 초과 — 본문은 버려지고 요약만 남는다. 소비되지 않았다고 알려
+            // 호출부가 쿨다운을 확정하지 않게 한다(창이 비면 다음 폴에서 다시 감지된다).
+            return false;
         }
         // decide가 억제 요약을 덧붙였다면 그 꼬리를 분리해 embed에는 별도 알림줄로 싣는다
         String note = decided.length() > fallbackText.length()
                 ? decided.substring(fallbackText.length()).strip() : "";
-        deliverEmbed(decided, note, embed, instanceId);
+        boolean delivered = deliverEmbed(decided, note, embed, instanceId);
+        record(fallbackText, embed, instanceId, delivered);
+        return delivered;
+    }
+
+    /** 색으로 심각도를 판정한다 — 알림 종류마다 색이 이미 배정돼 있어 별도 인자가 필요 없다. */
+    private static String severityOf(int color) {
+        if (color == AlertEmbeds.RED) {
+            return "RED";
+        }
+        if (color == AlertEmbeds.AMBER) {
+            return "AMBER";
+        }
+        if (color == AlertEmbeds.PURPLE) {
+            return "PURPLE";
+        }
+        return "INFO";
+    }
+
+    /** 이력 한 줄 — 기록 실패는 알림 발송을 막지 않는다. */
+    private void record(String fallbackText, Embed embed, Long instanceId, boolean delivered) {
+        if (historyRepository == null) {
+            return;
+        }
+        try {
+            historyRepository.save(new AlertHistoryEntry(
+                    instanceId,
+                    embed == null || embed.title() == null ? "alert" : clip(embed.title(), 40),
+                    embed == null ? "INFO" : severityOf(embed.color()),
+                    fallbackText,
+                    delivered ? AlertHistoryEntry.Status.SENT : AlertHistoryEntry.Status.FAILED,
+                    java.time.LocalDateTime.now()));
+        } catch (RuntimeException e) {
+            log.warn("알림 이력 기록 실패 — 알림 발송은 계속한다: {}", e.getMessage());
+        }
     }
 
     /** embed 한 장 — 제목·색·필드 목록. 필드 value가 비면 페이로드에서 제외된다. */
@@ -152,15 +200,19 @@ public class WebhookNotifier {
      * embed 실제 전송(package-private — 테스트에서 오버라이드해 관측).
      * Discord가 아니면(슬랙 등) embed 문법이 없으므로 textFallback(억제 요약 포함)을 그대로 보낸다.
      */
-    void deliverEmbed(String textFallback, String suppressedNote, Embed embed, Long instanceId) {
+    boolean deliverEmbed(String textFallback, String suppressedNote, Embed embed, Long instanceId) {
         if (webhookUrl == null || webhookUrl.isBlank()) {
             log.info("[알림(webhook 미설정)] {}", textFallback);
-            return;
+            return true;   // 보낼 채널이 없다 — 재시도해도 달라지지 않으므로 소비된 것으로 본다
         }
         boolean discord = webhookUrl.contains("discord.com");
+        // Slack 등 텍스트 채널에는 기계 판독용 인스턴스 마커를 붙인다 — 이모지 반응 진단이 본문을
+        // 되파싱해야 하는데(Slack 웹훅 응답에 메시지 ts가 없다) 알림 종류마다 첫 줄 형식이 달라
+        // 대상을 못 찾고 있었다. 계약을 생산자 9곳이 아니라 발송 직전 한 곳에 둔다.
         String payload = discord
                 ? discordEmbedPayload(embed, suppressedNote)
-                : "{\"text\": %s}".formatted(jsonString(textFallback));
+                : "{\"text\": %s}".formatted(
+                        jsonString(AlertMessageIndex.withInstanceMarker(textFallback, instanceId)));
         // instanceId가 있고 Discord면 ?wait=true로 메시지 id를 받아 인덱스에 기록(Gateway 봇 이모지 트리거).
         // 그 외엔 종전대로 fire-and-forget.
         if (discord && instanceId != null && messageIndex != null) {
@@ -168,9 +220,9 @@ public class WebhookNotifier {
             if (id != null) {
                 messageIndex.record(id, instanceId);
             }
-        } else {
-            postJson(payload);
+            return id != null;
         }
+        return postJson(payload);
     }
 
     /** ?wait=true로 전송해 응답에서 메시지 id를 파싱한다(매핑 기록용). 실패는 null. */
@@ -241,7 +293,7 @@ public class WebhookNotifier {
         postJson(payload);
     }
 
-    private void postJson(String payload) {
+    private boolean postJson(String payload) {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(webhookUrl))
@@ -252,10 +304,14 @@ public class WebhookNotifier {
             HttpResponse<String> res = client.send(request, HttpResponse.BodyHandlers.ofString());
             if (res.statusCode() >= 300) {
                 log.warn("웹훅 발송 실패 status={} body={}", res.statusCode(), res.body());
+                return false;
             }
+            return true;
         } catch (Exception e) {
-            // 알림 실패가 감지 파이프라인을 멈추면 안 된다
+            // 알림 실패가 감지 파이프라인을 멈추면 안 된다 — 다만 실패했다는 사실은 호출부에 돌려준다.
+            // 예전에는 여기서 로그만 남기고 끝나, 이미 확정된 쿨다운 때문에 그 경보가 영구히 사라졌다.
             log.warn("웹훅 발송 실패: {}", e.getMessage());
+            return false;
         }
     }
 

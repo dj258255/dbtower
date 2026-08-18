@@ -5,7 +5,7 @@ import io.dbtower.insight.internal.SnapshotWriter;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.model.QueryStat;
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.RegistryService;
 import io.dbtower.registry.InstanceDeletedEvent;
 import jakarta.annotation.PreDestroy;
 import net.javacrumbs.shedlock.core.LockConfiguration;
@@ -61,7 +61,7 @@ public class SnapshotScheduler {
     // 상한을 둬도 그 효과는 유지된다. order를 workers로 모듈러해 한 워커 슬롯 주기(step) 안으로 접고 캡을 씌운다.
     private static final long JITTER_CAP_MS = 2000;
 
-    private final DatabaseInstanceRepository instanceRepository;
+    private final RegistryService registryService;
     private final SnapshotWriter snapshotWriter;
     private final DbmsOperatorFactory operatorFactory;
     private final LockProvider lockProvider;
@@ -69,13 +69,13 @@ public class SnapshotScheduler {
     private final int workers;
     private final int shards;
 
-    public SnapshotScheduler(DatabaseInstanceRepository instanceRepository,
+    public SnapshotScheduler(RegistryService registryService,
                              SnapshotWriter snapshotWriter,
                              DbmsOperatorFactory operatorFactory,
                              LockProvider lockProvider,
                              @Value("${dbtower.snapshot.workers:4}") int workers,
                              @Value("${dbtower.snapshot.shards:1}") int shards) {
-        this.instanceRepository = instanceRepository;
+        this.registryService = registryService;
         this.snapshotWriter = snapshotWriter;
         this.operatorFactory = operatorFactory;
         this.lockProvider = lockProvider;
@@ -148,7 +148,7 @@ public class SnapshotScheduler {
     private void collectShard(int shard) {
         List<Future<?>> futures = new ArrayList<>();
         int order = 0, assigned = 0;
-        for (DatabaseInstance instance : instanceRepository.findAll()) {
+        for (DatabaseInstance instance : registryService.findAll()) {
             if (shards > 1 && instance.getId() % shards != shard) {
                 continue; // 다른 샤드 담당 — 그 샤드의 락 보유자가 수집한다
             }

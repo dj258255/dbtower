@@ -6,9 +6,12 @@
 
 ```bash
 ./gradlew compileJava          # 컴파일
+./scripts/check-conventions.sh # 규약 검사 (모듈 경계·Lombok·이모지·기종 분기 기준선)
 ./gradlew test                 # 테스트
 docker compose up -d           # 대상 DB 5종 + 모니터링 스택
-DBTOWER_WEBHOOK_URL="" ./gradlew bootRun   # 앱 기동 (http://localhost:8080)
+# 앱 기동 — 암호화 키는 필수다(프로필 미설정은 fail-closed. SecretCipher 주석 참고).
+# 키 없이 로컬에서 띄우려면 SPRING_PROFILES_ACTIVE=dev 를 준다.
+DBTOWER_ENCRYPTION_KEY=$(openssl rand -base64 32) DBTOWER_WEBHOOK_URL="" ./gradlew bootRun
 ```
 
 - 성능 개선은 반드시 before/after 실측 수치와 함께. 측정 없는 개선 주장 금지
@@ -18,7 +21,8 @@ DBTOWER_WEBHOOK_URL="" ./gradlew bootRun   # 앱 기동 (http://localhost:8080)
 ## 저장소 구조
 
 ```text
-src/main/java/io/dbtower/    Spring Modulith 모듈 15개 (경계는 ModularityTests가 빌드에서 강제)
+src/main/java/io/dbtower/    Spring Modulith 모듈 15개 (순환·internal 침범은 ModularityTests가,
+                             레이어 규칙은 scripts/check-conventions.sh가 빌드에서 강제)
 ├── operator/    DbmsOperator 인터페이스 + 5기종 구현(MySQL/PostgreSQL/MSSQL/Oracle/MongoDB), 커넥션 풀/클라이언트 캐시
 ├── registry/    인스턴스 등록·헬스체크
 ├── insight/     스냅샷 수집, 시점 비교, 활동 그래프, 파라미터/스키마 diff
@@ -47,8 +51,16 @@ scripts/         dbtower-mcp.sh (MCP stdio 실행기)
 
 ## 아키텍처 원칙
 
-- 플랫폼 코드는 `DbmsOperator` 인터페이스에만 의존한다. 기종 분기는 `DbmsOperatorFactory` 한 곳에만 존재
-- 새 DBMS 지원 = Operator 구현체 1개 추가로 끝나야 한다
+- 플랫폼 코드는 `DbmsOperator` 인터페이스에만 의존한다. 같은 능력의 기종별 **구현 선택**은
+  `DbmsOperatorFactory` 한 곳에만 둔다 — 다른 곳에서 `DbmsType`으로 구현을 갈라내지 않는다
+- 능력 자체가 없는 기종을 걸러내는 선언(`Advisor.supports(DbmsType)` 등)은 위 금지 대상이 아니다.
+  다만 늘어나면 유지비가 붙으므로 기준선을 `scripts/check-conventions.sh`가 지킨다 —
+  새 분기를 추가하기 전에 `DbmsOperator`에 능력으로 흡수할 수 있는지 먼저 검토한다
+- 새 DBMS 지원의 **핵심**은 Operator 구현체 1개다. 다만 실제로는 그 밖에도 손댈 곳이 있다 —
+  `DbmsType` enum, 팩토리 case, 기종별 백업 명령 설정(`BackupTools`·`application.yml`),
+  JDBC 드라이버 의존성, 프론트의 아이콘·색상. "1개로 끝난다"가 아니라
+  "1개가 본체이고 나머지는 등록 절차"로 이해할 것 (컴파일러가 잡아주는 곳은 팩토리·`DeepAnalyzer`·
+  `RuleBasedAnalyzer`의 exhaustive switch 셋뿐이므로, 새 기종 추가 시 위 목록을 직접 훑어야 한다)
 - 플랫폼 자체 저장소(PostgreSQL, dbtower DB)와 관리 대상 DB는 분리 — 대상 장애가 플랫폼을 죽이면 안 된다
 - 관리 플랫폼은 대상 DB에 임의 DML을 실행하지 않는다 (explain은 SELECT만 허용)
 - MCP·웹훅 등 채널 계층에 비즈니스 로직을 두지 않는다 — 전부 REST/서비스 코어에 위임

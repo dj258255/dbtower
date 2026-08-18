@@ -537,11 +537,32 @@ public class OracleOperator extends AbstractJdbcOperator {
                 LOG.info("Oracle ARCHIVE LOG CURRENT 생략(경계 없이 기존 아카이브 수집): {}", e.getMessage());
             }
             // 정석(현업 스크립트): 최신 하나가 아니라 미수집 아카이브 전부를 보충 수집한다(멱등) —
-            // 주기 사이에 로그 스위치가 여러 번 일어나면 체인에 구멍이 나기 때문. 첫 실행 폭주 방지 상한 50.
+            // 주기 사이에 로그 스위치가 여러 번 일어나면 체인에 구멍이 나기 때문.
+            //
+            // 상한을 SQL의 ROWNUM으로 먼저 걸면 안 된다: 예전 구현은 completion_time ASC 상위 50건을
+            // 뽑은 뒤 자바에서 alreadyCollected를 걸렀다. 아카이브가 50건을 넘는 순간 이 쿼리는 영원히
+            // 같은 최고참 50건만 돌려주고, 그게 다 수집되면 "전부 이미 수집됨"이라는 정상처럼 읽히는
+            // 메시지로 끝났다 — 실제로는 그 뒤 수천 건이 미수집이고, control_file_record_keep_time이
+            // 지나면 그 구간은 복구 불가로 확정된다. 그래서 후보를 넓게 받아 미수집분을 고른 뒤 상한을 건다.
+            //
+            // 필터: status='A'(사용 가능 — 'D'는 삭제됨, 'X'는 만료), deleted='NO', standby_dest='NO'
+            // (스탠바이 목적지 제외). 다중 아카이브 목적지는 같은 로그가 dest_id마다 행으로 나오므로
+            // (thread#, sequence#)당 하나만 고른다 — 안 그러면 같은 파일을 목적지 수만큼 중복 수집한다.
             List<String> archives = new ArrayList<>();
-            try (ResultSet rs = st.executeQuery(
-                    "SELECT name FROM (SELECT name FROM v$archived_log WHERE name IS NOT NULL "
-                            + "ORDER BY completion_time ASC) WHERE ROWNUM <= 50")) {
+            try (ResultSet rs = st.executeQuery("""
+                    SELECT name FROM (
+                        SELECT name FROM (
+                            SELECT name, completion_time,
+                                   ROW_NUMBER() OVER (PARTITION BY thread#, sequence# ORDER BY dest_id) AS dest_rank
+                            FROM v$archived_log
+                            WHERE name IS NOT NULL
+                              AND status = 'A'
+                              AND deleted = 'NO'
+                              AND standby_dest = 'NO'
+                        ) WHERE dest_rank = 1
+                        ORDER BY completion_time ASC
+                    ) WHERE ROWNUM <= %d
+                    """.formatted(ARCHIVE_CANDIDATE_SCAN))) {
                 while (rs.next()) {
                     archives.add(rs.getString(1));
                 }
@@ -550,15 +571,26 @@ public class OracleOperator extends AbstractJdbcOperator {
                 throw new OperatorException(
                         "아카이브된 로그가 아직 없습니다 — 로그 스위치(서버 활동 또는 CDB에서 ARCHIVE LOG CURRENT) 후 생성됩니다");
             }
+            // 미수집분만 오래된 순으로 추린 뒤 한 회차 상한을 건다(첫 실행 폭주 방지).
+            List<String> pending = new ArrayList<>();
+            for (String candidate : archives) {
+                String baseName = safeFileName(candidate.substring(candidate.lastIndexOf('/') + 1));
+                if (!alreadyCollected(baseName)) {
+                    pending.add(candidate);
+                    if (pending.size() >= ARCHIVE_BATCH) {
+                        break;
+                    }
+                }
+            }
+            if (pending.isEmpty()) {
+                throw new OperatorException("수집할 새 아카이브 로그가 없습니다(전부 이미 수집됨)");
+            }
             long totalBytes = 0;
             String lastLocation = null;
             int collected = 0;
-            for (String archived : archives) {
+            for (String archived : pending) {
                 // 수집 명령은 접두부 템플릿 + 서버 관점 절대경로 인자(다른 기종과 같은 모델)
                 String baseName = safeFileName(archived.substring(archived.lastIndexOf('/') + 1));
-                if (alreadyCollected(baseName)) {
-                    continue;
-                }
                 Path out = Path.of(backupTools.backupDir(),
                         "oracle-archivelog-%s-%s-%s".formatted(
                                 safeFileName(instance.getName()), backupTimestamp(), baseName));
@@ -568,9 +600,6 @@ public class OracleOperator extends AbstractJdbcOperator {
                 totalBytes += Math.max(0, one.bytes());
                 lastLocation = one.location();
                 collected++;
-            }
-            if (collected == 0) {
-                throw new OperatorException("수집할 새 아카이브 로그가 없습니다(전부 이미 수집됨)");
             }
             return new BackupResult(lastLocation, totalBytes);
         } catch (SQLException e) {
@@ -644,6 +673,15 @@ public class OracleOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * 아카이브 후보를 훑는 범위. 미수집분을 찾으려면 이미 수집된 것들을 지나쳐야 하므로
+     * 한 회차 수집 상한(ARCHIVE_BATCH)보다 충분히 넓어야 한다. 이름만 읽는 조회라 가볍다.
+     */
+    private static final int ARCHIVE_CANDIDATE_SCAN = 5000;
+
+    /** 한 회차에 실제로 복사할 최대 개수 — 첫 실행에서 수천 건을 한 번에 복사하지 않게. */
+    private static final int ARCHIVE_BATCH = 50;
+
     /** 복원 검증에만 필요한 시스템 권한 — 관제(조회)에는 없어도 되는 것들이다. */
     private static final List<String> IMPORT_PRIVILEGES = List.of("CREATE USER", "ALTER USER", "DROP USER");
 
@@ -681,7 +719,7 @@ public class OracleOperator extends AbstractJdbcOperator {
                 created = true;
                 importRemapped(conn, dumpFile, sourceSchema, targetSchema);
                 return RestoreVerification.verified(
-                        "임시 스키마로 실제 임포트 성공 — DBMS_DATAPUMP REMAP_SCHEMA (target=" + targetSchema + ")",
+                        "임시 스키마로 실제 임포트 성공 — DBMS_DATAPUMP REMAP_SCHEMA (target=" + backupTools.verifyLocationNote() + targetSchema + ")",
                         countTables(conn, targetSchema));
             } finally {
                 if (created) {
@@ -982,14 +1020,31 @@ public class OracleOperator extends AbstractJdbcOperator {
         String sql = "SELECT database_role, open_mode, protection_mode FROM v$database";
         try {
             return jdbc().query(sql, rs -> {
-                if (rs.next()) {
-                    return new ReplicationState(
-                            rs.getString("database_role"),
-                            -1,
-                            "open_mode=%s protection=%s".formatted(
-                                    rs.getString("open_mode"), rs.getString("protection_mode")));
+                if (!rs.next()) {
+                    return ReplicationState.unavailable("UNKNOWN", "v$database 조회 결과 없음");
                 }
-                return new ReplicationState("UNKNOWN", -1, "v$database 조회 결과 없음");
+                String role = rs.getString("database_role");
+                String detail = "open_mode=%s protection=%s".formatted(
+                        rs.getString("open_mode"), rs.getString("protection_mode"));
+                if ("PRIMARY".equalsIgnoreCase(role)) {
+                    return ReplicationState.standalone(
+                            "database_role=PRIMARY " + detail + " — Data Guard 스탠바이가 있으면 그쪽을 등록해야 지연이 보인다");
+                }
+                // 스탠바이의 적용 지연은 v$dataguard_stats('apply lag')가 원천이다. 이 뷰는 Data Guard가
+                // 구성된 스탠바이에서만 행이 있고, 값 형식이 '+00 00:00:03'(INTERVAL DAY TO SECOND)이라
+                // 초로 환산한다. 예전에는 -1을 실어서 Oracle은 복제 지연 알림이 구조적으로 불가능했다.
+                Double applyLagSec = jdbc().query("""
+                        SELECT EXTRACT(DAY FROM TO_DSINTERVAL(value)) * 86400
+                             + EXTRACT(HOUR FROM TO_DSINTERVAL(value)) * 3600
+                             + EXTRACT(MINUTE FROM TO_DSINTERVAL(value)) * 60
+                             + EXTRACT(SECOND FROM TO_DSINTERVAL(value)) AS lag_sec
+                        FROM v$dataguard_stats
+                        WHERE name = 'apply lag' AND value IS NOT NULL AND value != ''
+                        """, r2 -> r2.next() ? r2.getDouble("lag_sec") : null);
+                return applyLagSec == null
+                        ? ReplicationState.unavailable(role, detail
+                                + " — v$dataguard_stats의 apply lag 미확보(Data Guard 미구성이거나 아직 통계 없음)")
+                        : ReplicationState.measured(role, applyLagSec, detail + " — apply lag");
             });
         } catch (DataAccessException e) {
             throw new OperatorException("Oracle 복제 상태 조회 실패: " + e.getMessage(), e);

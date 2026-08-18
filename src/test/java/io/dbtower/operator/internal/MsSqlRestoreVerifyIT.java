@@ -49,7 +49,7 @@ class MsSqlRestoreVerifyIT {
                 new VaultCredentials("", ""), 30, 4, 5000, 600_000, 1_800_000, 30, 60_000);
         // MSSQL 백업은 서버 사이드 T-SQL이라 외부 클라이언트 명령이 하나도 필요 없다 — 전부 null
         BackupTools tools = new BackupTools(null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, "/tmp");
+                null, null, null, null, null, null, null, "/tmp", false);
         return new MsSqlOperator(instance, pools, tools);
     }
 

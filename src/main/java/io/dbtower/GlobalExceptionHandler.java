@@ -21,7 +21,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Map<String, String> badRequest(IllegalArgumentException e) {
-        return Map.of("error", e.getMessage());
+        return Map.of("error", message(e));
     }
 
     /**
@@ -31,7 +31,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InstanceNotFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public Map<String, String> instanceNotFound(InstanceNotFoundException e) {
-        return Map.of("error", e.getMessage());
+        return Map.of("error", message(e));
     }
 
     /**
@@ -54,6 +54,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(UnsupportedOperationException.class)
     @ResponseStatus(HttpStatus.NOT_IMPLEMENTED)
     public Map<String, String> notImplemented(UnsupportedOperationException e) {
-        return Map.of("error", e.getMessage());
+        return Map.of("error", message(e));
+    }
+
+    /**
+     * {@code Map.of}는 null 값에 NPE를 던진다 — 메시지 없는 예외
+     * ({@code new IllegalArgumentException()})가 올라오면 의도한 400/404/501 대신 핸들러 자신이
+     * 터져 500이 나간다. Spring·Jackson·JDBC 드라이버가 던지는 예외는 통제 밖이라 방어가 필요하다.
+     */
+    private static String message(Exception e) {
+        String m = e.getMessage();
+        return m == null || m.isBlank() ? e.getClass().getSimpleName() : m;
     }
 }

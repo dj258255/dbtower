@@ -3,6 +3,8 @@ package io.dbtower.onlineddl.internal;
 import io.dbtower.registry.DatabaseInstance;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -157,20 +159,43 @@ final class OnlineDdlCommands {
     /**
      * gh-ost 실행 — stdout/stderr를 한데 모아 캡처한다(gh-ost는 진행 로그를 stderr로 낸다).
      * timeoutSeconds를 넘기면 프로세스를 파괴하고 실패로 본다(고스트 테이블만 남을 수 있어 정리 안내를 detail에 싣는다).
+     *
+     * <p><b>출력을 별도 스레드에서 빨아내는 이유</b>: 예전 구현은 {@code readAllBytes()}를 먼저 부르고
+     * 그 뒤에 {@code waitFor(timeout)}을 불렀다. readAllBytes는 EOF(=프로세스 종료)까지 블록하므로
+     * waitFor에는 <b>이미 끝난 프로세스</b>에 대해서만 도달했다 — 타임아웃과 destroyForcibly가
+     * 도달 불가능한 죽은 코드였고, gh-ost가 멈추면 호출 스레드(동기 REST면 톰캣 워커)가 무한 대기했다.
+     * 같은 저장소의 {@code RestoreSupport.exec}는 처음부터 스레드를 분리하는 정석을 쓰고 있었다.
+     *
+     * <p>파이프 버퍼가 차면 자식이 쓰기에서 멈추므로, 드레인은 타임아웃 여부와 무관하게 계속 돌려야 한다.
+     * 그래서 데몬 스레드로 띄우고 결과만 join으로 잠깐 기다린다.
      */
     static ExecResult exec(List<String> command, long timeoutSeconds) {
         Process process = null;
         try {
             process = new ProcessBuilder(command).redirectErrorStream(true).start();
             process.getOutputStream().close();
-            byte[] out = process.getInputStream().readAllBytes();
+
+            ByteArrayOutputStream captured = new ByteArrayOutputStream();
+            Process running = process;
+            Thread drain = new Thread(() -> {
+                try (InputStream in = running.getInputStream()) {
+                    in.transferTo(captured);
+                } catch (IOException ignored) {
+                    // 프로세스를 강제 종료하면 스트림이 끊긴다 — 그때까지 모은 출력만 쓴다
+                }
+            }, "gh-ost-output");
+            drain.setDaemon(true);
+            drain.start();
+
             boolean done = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
             if (!done) {
                 process.destroyForcibly();
-                return new ExecResult(-1, new String(out, StandardCharsets.UTF_8)
+                drain.join(DRAIN_JOIN_MILLIS);
+                return new ExecResult(-1, captured.toString(StandardCharsets.UTF_8)
                         + "\n(시간 초과로 중단 — 고스트 테이블 잔여물 확인 필요)");
             }
-            return new ExecResult(process.exitValue(), new String(out, StandardCharsets.UTF_8));
+            drain.join(DRAIN_JOIN_MILLIS);   // 종료 후 남은 버퍼를 마저 받는다
+            return new ExecResult(process.exitValue(), captured.toString(StandardCharsets.UTF_8));
         } catch (IOException e) {
             return new ExecResult(-1, "gh-ost 실행 실패: " + e.getMessage());
         } catch (InterruptedException e) {
@@ -181,6 +206,9 @@ final class OnlineDdlCommands {
             return new ExecResult(-1, "gh-ost 실행이 중단되었습니다");
         }
     }
+
+    /** 프로세스 종료 후 남은 출력을 받는 짧은 대기 — 무한 대기로 되돌아가지 않게 상한을 둔다. */
+    private static final long DRAIN_JOIN_MILLIS = 2_000;
 
     /** gh-ost 출력에서 고스트 테이블 이름(`_x_gho`)을 뽑는다 — 없으면 null. */
     static String parseGhostTable(String output) {

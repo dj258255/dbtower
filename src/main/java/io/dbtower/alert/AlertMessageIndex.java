@@ -30,6 +30,40 @@ public class AlertMessageIndex {
 
     private static final Logger log = LoggerFactory.getLogger(AlertMessageIndex.class);
 
+    /**
+     * Slack 텍스트 알림 꼬리에 붙는 기계 판독용 인스턴스 마커 (Discord 메시지 id 매핑의 Slack 대응).
+     *
+     * Slack 인커밍 웹훅 응답에는 메시지 ts가 없어 위 (2) 방식(발사 시점 id 매핑)을 쓸 수 없다.
+     * 그래서 이모지 반응 진단이 본문 텍스트를 되파싱해야 하는데, 알림 9종의 첫 줄 형식이 제각각이라
+     * "인스턴스: name" 패턴 하나로는 2종만 맞고 <b>회귀·이상·운영 경보 전부에서 대상을 못 찾았다</b>
+     * (실제로 사용자가 반응을 다는 알림이 정확히 그 셋이다).
+     *
+     * 생산자 9곳의 문안을 통일하는 대신, sendEmbed가 이미 받고 있는 instanceId를 발송 직전에 한 번
+     * 붙인다 — 계약이 한 곳에 모이고 새 알림 종류가 생겨도 자동으로 지켜진다. 이름이 아니라 id라
+     * 채널 쪽에서 인스턴스 목록을 선형 탐색할 필요도 없다.
+     */
+    private static final String SLACK_MARKER_PREFIX = "[dbtower:instance=";
+
+    private static final java.util.regex.Pattern SLACK_MARKER =
+            java.util.regex.Pattern.compile("\\[dbtower:instance=(\\d+)]");
+
+    /** 텍스트 알림 꼬리에 인스턴스 마커를 붙인다. instanceId가 없으면(함대 전체 리포트 등) 원문 그대로. */
+    public static String withInstanceMarker(String text, Long instanceId) {
+        if (instanceId == null) {
+            return text;
+        }
+        return text + "\n" + SLACK_MARKER_PREFIX + instanceId + "]";
+    }
+
+    /** 텍스트 알림에서 인스턴스 id를 읽는다. 마커가 없으면 null(구버전 알림·함대 리포트). */
+    public static Long instanceFromText(String text) {
+        if (text == null) {
+            return null;
+        }
+        java.util.regex.Matcher m = SLACK_MARKER.matcher(text);
+        return m.find() ? Long.valueOf(m.group(1)) : null;
+    }
+
     /** 보존 일수 — 이보다 오래된 알림에 반응이 달리는 일은 사실상 없다. */
     private static final int RETENTION_DAYS = 30;
     /** 보존 정리를 record N회마다 한 번만 — 알림 볼륨이 낮아 이 정도로 충분하다. */

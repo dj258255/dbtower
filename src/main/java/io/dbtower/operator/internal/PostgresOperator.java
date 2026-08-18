@@ -244,7 +244,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
                     "-tAc", "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'"),
                     env, null);
             return RestoreVerification.verified(
-                    "임시 DB로 덤프 복원 성공 (psql, target=" + target + ")",
+                    "임시 DB로 덤프 복원 성공 (psql, target=" + backupTools.verifyLocationNote() + target + ")",
                     RestoreSupport.parseCount(count));
         } finally {
             if (created) {
@@ -580,7 +580,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
                 JOIN pg_inherits inh   ON inh.inhparent = parent.oid
                 JOIN pg_class child    ON child.oid = inh.inhrelid
                 JOIN pg_namespace ns   ON ns.oid = parent.relnamespace
-                WHERE ns.nspname NOT IN ('pg_catalog', 'information_schema')
+                WHERE ns.nspname = current_schema()
                 ORDER BY parent.relname, child.relname
                 LIMIT ?
                 """;
@@ -734,7 +734,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
                     JOIN pg_namespace n ON n.oid = c.relnamespace
                     WHERE c.relname = ?
                       AND c.relkind IN ('r', 'p')
-                      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                      AND n.nspname = current_schema()
                     LIMIT 1
                     """;
             BasicStats stats = jdbc().query(statsSql, rs -> {
@@ -774,7 +774,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
                           AND st.attname = (SELECT a2.attname FROM pg_attribute a2
                                             WHERE a2.attrelid = c.oid AND a2.attnum = ix.indkey[0])
                     WHERE c.relname = ?
-                      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                      AND n.nspname = current_schema()
                     ORDER BY i.relname, k.ord
                     """;
             List<IndexRow> indexRows = jdbc().query(indexSql,
@@ -795,7 +795,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
                            is_nullable, column_default
                     FROM information_schema.columns
                     WHERE table_name = ?
-                      AND table_schema NOT IN ('pg_catalog', 'information_schema')
+                      AND table_schema = current_schema()
                     ORDER BY ordinal_position
                     """,
                     (rs, i) -> new TableDetailSupport.ColumnDef(
@@ -816,7 +816,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
                     JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
                     WHERE c.relname = ?
                       AND con.contype = 'p'
-                      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                      AND n.nspname = current_schema()
                     ORDER BY k.ord
                     """,
                     (rs, i) -> rs.getString("attname"),
@@ -830,7 +830,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
                     JOIN pg_namespace n ON n.oid = c.relnamespace
                     WHERE c.relname = ?
                       AND con.contype IN ('f', 'c')
-                      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                      AND n.nspname = current_schema()
                     ORDER BY con.contype DESC, con.conname
                     """,
                     (rs, i) -> rs.getString("clause"),
@@ -842,7 +842,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
                     SELECT indexdef
                     FROM pg_indexes
                     WHERE tablename = ?
-                      AND schemaname NOT IN ('pg_catalog', 'information_schema')
+                      AND schemaname = current_schema()
                     ORDER BY indexname
                     """,
                     (rs, i) -> rs.getString("indexdef"),
@@ -855,19 +855,22 @@ public class PostgresOperator extends AbstractJdbcOperator {
                     JOIN pg_class c ON c.oid = t.tgrelid
                     JOIN pg_namespace n ON n.oid = c.relnamespace
                     WHERE c.relname = ? AND NOT t.tgisinternal
-                      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                      AND n.nspname = current_schema()
                     """, Integer.class, tableName);
             int triggers = triggerCount != null ? triggerCount : 0;
             List<Boolean> partRows = jdbc().query("""
                     SELECT (c.relkind = 'p') AS p FROM pg_class c
                     JOIN pg_namespace n ON n.oid = c.relnamespace
-                    WHERE c.relname = ? AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                    WHERE c.relname = ? AND n.nspname = current_schema()
                     LIMIT 1
                     """, (rs, i) -> rs.getBoolean("p"), tableName);
             boolean partitioned = !partRows.isEmpty() && Boolean.TRUE.equals(partRows.get(0));
 
             StringBuilder note = new StringBuilder(
-                    "PostgreSQL은 테이블별 스토리지 엔진·생성 시각 개념이 없어 engine/createdAt은 미제공. "
+                    "조회 범위는 접속 세션의 기본 스키마(current_schema())다 — 예전에는 시스템 스키마만 빼고 "
+                    + "전 사용자 스키마를 훑어, 같은 이름의 테이블이 두 스키마에 있으면 컬럼·인덱스가 뒤섞인 "
+                    + "DDL이 만들어졌다. 다른 스키마를 보려면 그 스키마를 기본으로 하는 계정으로 등록한다. "
+                    + "PostgreSQL은 테이블별 스토리지 엔진·생성 시각 개념이 없어 engine/createdAt은 미제공. "
                     + "카디널리티는 선두 컬럼 n_distinct 추정. "
                     + "DDL은 단일 CREATE 명령이 없어 PostgreSQL 자체 정의 함수(pg_get_constraintdef·pg_get_indexdef)로 "
                     + "컬럼·PK·FK·CHECK·인덱스까지 재구성.");
@@ -1383,7 +1386,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
         String columnsSql = """
                 SELECT table_name, column_name, data_type, is_nullable, ordinal_position
                 FROM information_schema.columns
-                WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+                WHERE table_schema = current_schema()
                 ORDER BY table_name, ordinal_position
                 """;
         String indexesSql = """
@@ -1395,7 +1398,7 @@ public class PostgresOperator extends AbstractJdbcOperator {
                 JOIN pg_namespace n ON n.oid = t.relnamespace
                 JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
                 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
-                WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+                WHERE n.nspname = current_schema()
                   AND t.relkind IN ('r', 'p')
                 ORDER BY t.relname, i.relname, k.ord
                 """;
@@ -1437,23 +1440,55 @@ public class PostgresOperator extends AbstractJdbcOperator {
     public ReplicationState replicationState() {
         // 두 조회는 세션 지역 상태를 공유하지 않아 각각 실행해도 결과가 같다
         try {
-            ReplicationState asReplica = jdbc().query(
-                    "SELECT pg_is_in_recovery() AS in_recovery, " +
-                    "COALESCE(EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp())), 0) AS lag_sec",
+            // 스탠바이: 재생 시각 기준 지연. 단, 소스가 유휴하면 재생할 것이 없어 now()-replay_timestamp가
+            // 무한히 증가한다(완전히 따라잡은 스탠바이가 새벽마다 "지연 3600s"로 오탐). 수신 LSN과 재생
+            // LSN이 같으면 따라잡은 것이므로 0으로 본다 — PostgreSQL 문서가 권하는 표준 가드다.
+            ReplicationState asReplica = jdbc().query("""
+                    SELECT pg_is_in_recovery() AS in_recovery,
+                           pg_last_wal_receive_lsn() = pg_last_wal_replay_lsn() AS caught_up,
+                           EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp())) AS lag_sec
+                    """,
                     rs -> {
                         rs.next();
-                        return rs.getBoolean("in_recovery")
-                                ? new ReplicationState("REPLICA", rs.getDouble("lag_sec"), "recovery 모드")
-                                : null;
+                        if (!rs.getBoolean("in_recovery")) {
+                            return null;
+                        }
+                        if (rs.getBoolean("caught_up")) {
+                            return ReplicationState.measured("REPLICA", 0, "recovery 모드 — 재생 완료(수신=재생 LSN)");
+                        }
+                        Object lag = rs.getObject("lag_sec");
+                        return lag == null
+                                ? ReplicationState.unavailable("REPLICA",
+                                        "recovery 모드 — 재생 시각 미확보(기동 후 아직 트랜잭션을 재생하지 않음)")
+                                : ReplicationState.measured("REPLICA", rs.getDouble("lag_sec"), "recovery 모드");
                     });
             if (asReplica != null) {
                 return asReplica;
             }
-            Integer replicas = jdbc().queryForObject(
-                    "SELECT COUNT(*) AS replicas FROM pg_stat_replication", Integer.class);
-            return replicas != null && replicas > 0
-                    ? new ReplicationState("PRIMARY", 0, "replicas=" + replicas)
-                    : new ReplicationState("STANDALONE", 0, "복제 구성 없음");
+            // 프라이머리: 예전에는 레플리카 수만 세고 지연에 0을 실어서, 프라이머리만 등록한 환경에서는
+            // 복제 지연 알림이 구조적으로 절대 울리지 않았다. pg_stat_replication의 replay_lag가
+            // 프라이머리에서 지연을 보는 정석이라 그걸 읽는다(가장 뒤처진 스탠바이 기준).
+            return jdbc().query("""
+                    SELECT COUNT(*) AS replicas,
+                           MAX(EXTRACT(EPOCH FROM replay_lag)) AS worst_replay_lag,
+                           COUNT(replay_lag) AS lag_known
+                    FROM pg_stat_replication
+                    """,
+                    rs -> {
+                        rs.next();
+                        int replicas = rs.getInt("replicas");
+                        if (replicas == 0) {
+                            return ReplicationState.standalone("복제 구성 없음");
+                        }
+                        // replay_lag는 스탠바이가 완전히 따라잡았거나 아직 피드백이 없으면 NULL이다.
+                        // 연결된 스탠바이가 있는데 전부 NULL이면 "지연 0"이 아니라 "따라잡음"으로 본다.
+                        if (rs.getInt("lag_known") == 0) {
+                            return ReplicationState.measured("PRIMARY", 0,
+                                    "replicas=" + replicas + " — 전 스탠바이 재생 완료(replay_lag 없음)");
+                        }
+                        return ReplicationState.measured("PRIMARY", rs.getDouble("worst_replay_lag"),
+                                "replicas=" + replicas + " — 가장 뒤처진 스탠바이의 replay_lag");
+                    });
         } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 복제 상태 조회 실패: " + e.getMessage(), e);
         }

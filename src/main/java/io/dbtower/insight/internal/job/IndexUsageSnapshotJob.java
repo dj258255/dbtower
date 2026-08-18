@@ -3,7 +3,7 @@ package io.dbtower.insight.internal.job;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.model.IndexUsage;
 import io.dbtower.registry.DatabaseInstance;
-import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.RegistryService;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,15 +36,15 @@ public class IndexUsageSnapshotJob {
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """;
 
-    private final DatabaseInstanceRepository instanceRepository;
+    private final RegistryService registryService;
     private final DbmsOperatorFactory operatorFactory;
     private final JdbcTemplate jdbc;
     private final int retentionDays;
 
-    public IndexUsageSnapshotJob(DatabaseInstanceRepository instanceRepository,
+    public IndexUsageSnapshotJob(RegistryService registryService,
                                  DbmsOperatorFactory operatorFactory, JdbcTemplate jdbc,
                                  @Value("${dbtower.index-usage.retention-days:7}") int retentionDays) {
-        this.instanceRepository = instanceRepository;
+        this.registryService = registryService;
         this.operatorFactory = operatorFactory;
         this.jdbc = jdbc;
         this.retentionDays = retentionDays;
@@ -55,7 +55,7 @@ public class IndexUsageSnapshotJob {
     public void collect() {
         LocalDateTime capturedAt = LocalDateTime.now();
         int instances = 0, rows = 0;
-        for (DatabaseInstance instance : instanceRepository.findAll()) {
+        for (DatabaseInstance instance : registryService.findAll()) {
             if (!instance.isCollectionEnabled()) {
                 continue;
             }

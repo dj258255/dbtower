@@ -1738,12 +1738,25 @@ function setupCopyButtons() {
   });
 }
 
+// 지연 값과 "왜 값이 없는가"를 구분해 표기한다 — 예전 응답은 -1을 실어서 미지원과 복제 단절이
+// 화면에서 같아 보였다(백엔드 ReplicationState.LagSource 참고).
+const LAG_SOURCE_LABEL = {
+  MEASURED: null,                                   // 값이 있으므로 배지 없음
+  NOT_APPLICABLE: { cls: "muted", label: "복제 미구성" },
+  UNSUPPORTED: { cls: "src-unsupported", label: "지연 측정 미지원" },
+  UNAVAILABLE: { cls: "verify-FAILED", label: "지연 확인 불가" },
+};
+
 async function loadReplication() {
+  const box = $("#replication-box");
   try {
     const r = await api(`/api/instances/${state.instance.id}/replication`);
-    $("#replication-box").textContent =
-      `role: ${r.role}\nlagSeconds: ${r.lagSeconds}\n${r.detail ?? ""}`;
-  } catch (e) { $("#replication-box").textContent = `조회 실패: ${e.message}`; }
+    const badge = LAG_SOURCE_LABEL[r.lagSource];
+    const lag = r.lagSource === "MEASURED"
+      ? `${fmtNum(r.lagSeconds, 1)}s`
+      : `<span class="verify-badge ${badge ? esc(badge.cls) : "muted"}">${esc(badge ? badge.label : r.lagSource)}</span>`;
+    box.innerHTML = `role: ${esc(r.role)}<br>지연: ${lag}<br>${esc(r.detail ?? "")}`;
+  } catch (e) { box.textContent = `조회 실패: ${e.message}`; }
   loadReplicationSlots();
 }
 

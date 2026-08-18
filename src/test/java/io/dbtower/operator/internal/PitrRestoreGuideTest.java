@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class PitrRestoreGuideTest {
 
-    private final BackupTools tools = new BackupTools("d", "d", "d", "r", "r", "r", "b", "o", "w", "a", "pb", "rm", "xb", "xba", "xbv", "/tmp");
+    private final BackupTools tools = new BackupTools("d", "d", "d", "r", "r", "r", "b", "o", "w", "a", "pb", "rm", "xb", "xba", "xbv", "/tmp", false);
 
     @Test
     void MySQL_안내는_FULL_적재_후_binlog를_stop_datetime까지_재생한다() {
