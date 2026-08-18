@@ -3591,11 +3591,11 @@ GET /actuator/health -> {"groups":["liveness","readiness"],"status":"UP"}
 
 - **Oracle의 지연 계산(MEASURED)**: Oracle 공식 Docker 가이드가 "Data Guard is not supported"를
   명시한다 — 에디션이 아니라 컨테이너 실행 형태의 제약이라, VM/물리 장비가 있어야 잴 수 있다.
-- **여유공간 부족 시 복원 거부**: 재현에 대용량 백업이 필요하다.
-- **gh-ost 가드레일 실동작**: 플래그 조립과 프로세스 타임아웃은 단위 테스트로 덮지만,
-  `--max-load` 스로틀이 실제로 거는 것은 부하를 만들어야 확인된다.
+  (123.1 마지막 절 참고 — 막는 것이 에디션·실행 형태 두 겹이다)
 - **Discord 실발사**: 아래 123.11에서 로컬 수신기로 HTTP 전달 경로 전체를 확인했다.
   Discord 서버로 실제 발사하는 것은 워크스페이스가 필요해 범위 밖이다.
+
+나머지 두 항목(gh-ost 가드레일, 여유공간 부족 거부)은 123.12·123.13에서 실측했다.
 
 ### 123.11 웹훅 전달 내구성 — 실패하면 재시도한다
 
@@ -3637,3 +3637,86 @@ alert_history (instance_id=7, local-mongo)
 
 수정 전이었다면 22번 시점에 쿨다운(기본 30분)이 확정돼 **그 경보는 재감지조차 되지 않고
 기록도 없이 사라졌을 것**이다. 이 세 단계가 "전송 성공 후에만 쿨다운 확정" 변경의 전부다.
+
+### 123.12 gh-ost — 스로틀과 프로세스 타임아웃
+
+`--max-load`를 극단으로 낮춰 무한 스로틀시키면 두 성질을 한 번에 볼 수 있다.
+스로틀이 실제로 거는지(플래그가 전달되는지)와, 타임아웃이 실제로 끊는지다.
+후자는 **수정 전에는 도달 불가능한 코드**였다 — `readAllBytes()`가 EOF까지 블록해
+`waitFor(timeout)`에는 이미 끝난 프로세스만 도달했다.
+
+```bash
+DBTOWER_ONLINEDDL_TIMEOUTSECONDS=15
+DBTOWER_ONLINEDDL_GHOSTFLAGS="--allow-on-master --assume-rbr \
+  --max-load=Threads_running=1 --critical-load=Threads_running=500 --chunk-size=100 --azure"
+
+# 295,490행 테이블에 ADD COLUMN, execute=true
+POST /api/instances/1/online-ddl {"table":"ghost_demo","alter":"ADD COLUMN note varchar(64) NULL","execute":true}
+```
+
+```
+경과 15초 (= 타임아웃 설정값)
+{"status":"FAILED","mode":"execute","ghostTable":null,
+ "detail": "...
+   Copy: 0/295490 0.0%; Applied: 0; Backlog: 130/1000; Time: 13s(total), 13s(copy);
+     Lag: 0.01s, State: throttled, max-load Threads_running=3 >= 1; ETA: N/A
+   Copy: 0/295490 0.0%; ... State: throttled, max-load Threads_running=3 >= 1; ETA: N/A
+   (시간 초과로 중단 — 고스트 테이블 잔여물 확인 필요)"}
+```
+
+gh-ost가 스로틀 사유를 명시한다 — `max-load Threads_running=3 >= 1`. 그 결과 15초 동안
+**한 행도 복사하지 않았다**(`Copy: 0/295490 0.0%`). 그리고 프로세스는 15초에 끊겼다.
+
+실행 후 고스트 테이블이 남아 있는 것도 확인했다.
+
+```sql
+select table_name from information_schema.tables
+ where table_schema='sample' and table_name like '_ghost_demo%';
+  _ghost_demo_ghc
+  _ghost_demo_gho
+```
+
+이건 결함이 아니라 **의도한 동작**이다. `--initially-drop-ghost-table`을 일부러 뺐기 때문에
+남은 잔여물은 사람이 확인하고 지운다 — 그 플래그가 켜져 있으면 진행 중인 다른 마이그레이션의
+고스트 테이블까지 묻지 않고 지운다.
+
+### 123.13 복원 검증 — 여유공간 부족 시 거부
+
+실제로 공간이 부족한 상황을 만들어 두 방향을 다 확인했다.
+데이터 경로를 크기 제한 tmpfs로 띄우고, 백업을 뜬 뒤 남은 공간을 채웠다.
+
+```bash
+docker run -d --name mssql-cap --tmpfs /var/opt/mssql/data:size=1400m ... mssql/server:2022-latest
+CREATE DATABASE capdb ... SIZE=200MB  LOG ... SIZE=50MB
+BACKUP DATABASE capdb TO DISK='...capdb.bak' WITH INIT, COPY_ONLY, CHECKSUM
+dd if=/dev/zero of=/var/opt/mssql/data/filler bs=1M count=850
+```
+
+**거부 (여유 161MB, 필요 250MB x 1.2 = 300MB)**
+
+```
+POST /api/instances/42/backup/verify?location=/var/opt/mssql/data/capdb.bak
+{"status":"FAILED",
+ "detail":"복원 검증을 중단했습니다 — 대상 인스턴스의 데이터 볼륨 여유가 부족합니다
+           (필요 약 300MB, 여유 161MB). 이 복원은 운영 데이터 파일과 같은 볼륨을 쓰므로,
+           강행하면 복원 실패에서 끝나지 않고 운영 DB의 파일 증가까지 막혀 서비스가 멈출 수 있습니다.",
+ "restoredObjectCount":null}
+```
+
+**시도하지 않았다는 증거** — 임시 DB가 만들어지지 않았고 볼륨도 그대로다.
+
+```
+SELECT COUNT(*) FROM sys.databases WHERE name LIKE 'dbtower_verify%'  -> 0
+df /var/opt/mssql/data  -> 1.3G used / 162M avail  (거부 전후 동일)
+```
+
+**통과 (filler 제거 후 여유 1012MB)**
+
+```
+rm /var/opt/mssql/data/filler
+{"status":"VERIFIED","detail":"임시 DB로 전체 복원 성공 — RESTORE DATABASE + 사용자 테이블 조회
+  (target=dbtower_verify_20260818154245868). 주의: 이 복원은 대상 인스턴스 자신에서 수행됐다 ..."}
+```
+
+같은 백업·같은 인스턴스에서 여유 공간만 바꿔 거부/통과가 갈렸다 —
+가드가 항상 거부하는 게 아니라 실제 조건 판정임을 보인다.
