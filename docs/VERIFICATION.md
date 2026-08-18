@@ -3341,9 +3341,27 @@ SECONDARY {"lagSeconds":0.0,"lagSource":"MEASURED",
 ```
 
 두 계산 경로(프라이머리가 세컨더리를 스캔 / 세컨더리가 자기와 프라이머리를 비교)가 모두 실행됐다.
-다만 **0이 아닌 값은 만들지 못했다** — 동일 호스트 복제가 서브초라 40,000건 대량 삽입 직후에
-연속 샘플링해도 0.0이었고, 세컨더리를 `fsyncLock`으로 잠그는 방법은 2멤버 구성에서
-majority write concern이 걸려 프라이머리 쓰기 자체가 블록됐다.
+
+실제 지연은 세컨더리를 `fsyncLock`으로 잠그고 프라이머리에 **`writeConcern:{w:1}`로** 써서 만든다.
+write concern을 기본값으로 두면 2멤버 구성에서 majority(=2)가 필요해 프라이머리 쓰기 자체가
+블록된다 — 첫 시도가 여기서 막혔다. `w:1`이면 프라이머리만 ack하므로 잠긴 세컨더리가 뒤처진다.
+
+```
+db.fsyncLock()                                   # 세컨더리
+insertMany(20,000건, {writeConcern:{w:1}})       # 프라이머리
+
+  +8s   PRIMARY 1.0s     SECONDARY 1.0s
+  +24s  PRIMARY 20.0s    SECONDARY 20.0s
+  +32s  PRIMARY 30.0s    SECONDARY 30.0s
+  +52s                   SECONDARY 70.0s
+  +92s                   SECONDARY 110.0s        (전부 MEASURED)
+
+alert_history
+  62 | 복제 지연 role=PRIMARY   lag=100.0s (임계 30s 초과, replSet=rslab members=2 — 가장 뒤처진 세컨더리)
+  63 | 복제 지연 role=SECONDARY lag=100.0s (임계 30s 초과, replSet=rslab members=2)
+
+db.fsyncUnlock() 후 -> 둘 다 0.0s MEASURED
+```
 
 데모 컨테이너의 깨진 레플리카셋(code 93 `InvalidReplicaSetConfig`)은 별도로 실측했다 — 123.2(a).
 
@@ -3386,13 +3404,30 @@ CLUSTER_TYPE=NONE AG의 세컨더리에서 로컬 행만 돌려줘 2노드 AG인
 
 | 기종 | 구현한 원천 | 왜 못 쟀나 |
 |---|---|---|
-| Oracle | `v$dataguard_stats`의 apply lag | **구조적으로 불가.** Data Guard는 Enterprise Edition 전용이고 데모는 Free 에디션이다 |
+| Oracle | `v$dataguard_stats`의 apply lag | **컨테이너에서 구조적으로 불가** — 아래 참고 |
 
-Oracle만 남았고, 이건 환경을 바꿔도 안 된다 — EE 라이선스가 있어야 한다.
-`v$dataguard_stats` 조회 자체는 무료 뷰라 권한 문제는 없고, Data Guard가 없으면 행이 없어
-`UNAVAILABLE`로 내려간다(그 경로는 확인했다).
+Oracle만 남았다. 막는 것이 **두 겹**이고, 둘 다 넘어야 한다.
 
-MongoDB는 계산 경로가 실행됐지만 0이 아닌 값을 못 만들었다 — 위 단서 참고.
+**(1) 에디션** — Data Guard는 Enterprise Edition 기능이다. 데모의 Oracle Free에는 없다.
+
+**(2) 실행 형태** — 에디션을 올려도 컨테이너에서는 여전히 안 된다.
+Oracle 자신의 EE Docker 설치 가이드가 명시한다
+([Oracle Database EE Installation Guide for Docker Containers](https://docs.oracle.com/en/database/oracle/oracle-database/21/deeck/index.html)):
+
+> This docker image release supports only a single database instance.
+> **Oracle Data Guard is not supported.**
+
+즉 EE 이미지를 받아 와도 컨테이너에서는 Data Guard가 지원 대상이 아니다.
+재려면 VM이나 물리 장비, 또는 Data Guard를 지원하는 관리형 환경(OCI DB System 등)이 필요하고,
+그건 이 데모 스택의 범위 밖이다.
+
+참고로 Physical Standby 실험 자체에 **Broker나 RAC는 필요 없다** — Primary + Standby 두 DB와
+redo 전송만 있으면 된다(Broker는 관리 계층, RAC는 별개 기술). 그래서 이 항목이 막힌 이유는
+"구성이 무거워서"가 아니라 위 두 겹 때문이다.
+
+`v$dataguard_stats` 조회 자체는 팩 무관 무료 뷰라 권한 문제는 없다. Data Guard가 없으면
+행이 없어 `UNAVAILABLE`로 내려가는데, 그 경로는 확인했다 — 즉 **없는 것을 없다고 답하는 것까지는
+동작하고, 있을 때 숫자를 내는 부분만 미검증이다.**
 
 ### 123.2 라이브에서 새로 드러난 결함 2건
 
@@ -3554,9 +3589,8 @@ GET /actuator/health -> {"groups":["liveness","readiness"],"status":"UP"}
 
 ### 123.10 확인하지 못한 것
 
-- **Oracle의 지연 계산(MEASURED)**: Data Guard가 Enterprise Edition 전용이라 Free 에디션 데모에서는
-  구조적으로 불가하다. 환경을 바꿔도 EE 라이선스 없이는 안 된다. 코드는 있으나 실행된 적이 없다.
-- **MongoDB의 0이 아닌 지연**: 계산 경로는 실행했으나(MEASURED, 0.0) 동일 호스트라 값을 못 만들었다.
+- **Oracle의 지연 계산(MEASURED)**: Oracle 공식 Docker 가이드가 "Data Guard is not supported"를
+  명시한다 — 에디션이 아니라 컨테이너 실행 형태의 제약이라, VM/물리 장비가 있어야 잴 수 있다.
 - **여유공간 부족 시 복원 거부**: 재현에 대용량 백업이 필요하다.
 - **gh-ost 가드레일 실동작**: 플래그 조립과 프로세스 타임아웃은 단위 테스트로 덮지만,
   `--max-load` 스로틀이 실제로 거는 것은 부하를 만들어야 확인된다.
