@@ -15,6 +15,11 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
+      # AGENTS.md가 선언한 규약을 빌드가 강제한다 — 다관점 리뷰에서 "규약은 지켜지고 있지만
+      # 강제 장치가 없는 경계에서만 무너졌다"는 것이 드러나 추가했다(모듈 경계·Lombok·이모지·
+      # 기종 분기 기준선·읽기 전용 게이트). 테스트보다 먼저 돌려 빠르게 실패시킨다.
+      - name: Convention checks
+        run: ./scripts/check-conventions.sh
       - name: Test
         run: ./gradlew test
       - name: Upload test report
