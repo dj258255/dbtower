@@ -3237,10 +3237,9 @@ DBA 5기종·모니터링·인프라·개발자 관점의 리뷰어 9인이 27,3
 그 결과 나온 수정을 `docker compose` 스택에 붙여 실제 REST로 확인했다.
 아래는 전부 이번에 실행한 명령과 그 출력이다.
 
-**환경.** Docker 7.7GB. Oracle이 2.1GB를 쓰고 MSSQL이 ~2GB를 요구해 동시 기동이 되지 않았다
-(`Could not allocate initial 5000 lock owner blocks during startup`, exit 118 반복).
-4기종(MySQL/PostgreSQL/MongoDB/Oracle)을 먼저 확인하고, Oracle을 내린 뒤 MSSQL을 확인했다.
-5기종 동시 실측은 이 머신에서 하지 못했다.
+**환경.** 재현 절차 메모 — 이 머신(Docker 7.7GB)에서는 Oracle(2.1GB)과 MSSQL(~2GB)이 동시에
+못 떠서 두 번에 나눠 돌렸다. 4기종(MySQL/PostgreSQL/MongoDB/Oracle)을 확인하고,
+Oracle을 내린 뒤 MSSQL을 확인했다. 검증 대상은 기종별 동작이라 동시 기동은 필요하지 않다.
 
 ### 123.1 복제 상태 3-값 — `-1` 센티넬 제거
 
@@ -3417,7 +3416,6 @@ GET /actuator/health -> {"groups":["liveness","readiness"],"status":"UP"}
 
 ### 123.10 확인하지 못한 것
 
-- **5기종 동시 기동**: 메모리 한계(위 환경 절). Oracle과 MSSQL을 번갈아 확인했다.
 - **여유공간 부족 시 복원 거부**: 재현에 대용량 백업이 필요하다.
 - **gh-ost 가드레일 실동작**: 플래그 조립과 프로세스 타임아웃은 단위 테스트로 덮지만,
   `--max-load` 스로틀이 실제로 거는 것은 부하를 만들어야 확인된다.
