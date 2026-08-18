@@ -3323,25 +3323,76 @@ alert_history
 **복제가 끊겼다**는 신호인데, 예전에는 `-1`로 뭉개져 알림 게이트가 조용히 스킵했다 —
 가장 알려야 할 사건에서 침묵했다.
 
-**MongoDB — 깨진 레플리카셋 (실측, 부분)**
+**MongoDB — 2멤버 레플리카셋 (실측)**
 
-`--replSet rs0`인데 설정이 무효화된 상태(code 93)를 실측했다. 123.2(a) 참고.
+```bash
+docker run -d --name dbtower-mongolab1 --network dbtower_default -p 17021:27017 mongo:7 --replSet rslab --bind_ip_all
+docker run -d --name dbtower-mongolab2 --network dbtower_default -p 17022:27017 mongo:7 --replSet rslab --bind_ip_all
+rs.initiate({_id:"rslab", members:[
+  {_id:0, host:"dbtower-mongolab1:27017", priority:2},
+  {_id:1, host:"dbtower-mongolab2:27017", priority:1}]})
+```
 
 ```
-{"role":"REPLSET_BROKEN","lagSeconds":null,"lagSource":"UNAVAILABLE", ...}
-alert_history  19 | SENT | 복제 상태를 읽지 못했습니다 role=REPLSET_BROKEN
+PRIMARY   {"lagSeconds":0.0,"lagSource":"MEASURED",
+           "detail":"replSet=rslab members=2 state=PRIMARY — 가장 뒤처진 세컨더리의 optime 차"}
+SECONDARY {"lagSeconds":0.0,"lagSource":"MEASURED",
+           "detail":"replSet=rslab members=2 state=SECONDARY — 프라이머리 optime 차"}
 ```
+
+두 계산 경로(프라이머리가 세컨더리를 스캔 / 세컨더리가 자기와 프라이머리를 비교)가 모두 실행됐다.
+다만 **0이 아닌 값은 만들지 못했다** — 동일 호스트 복제가 서브초라 40,000건 대량 삽입 직후에
+연속 샘플링해도 0.0이었고, 세컨더리를 `fsyncLock`으로 잠그는 방법은 2멤버 구성에서
+majority write concern이 걸려 프라이머리 쓰기 자체가 블록됐다.
+
+데모 컨테이너의 깨진 레플리카셋(code 93 `InvalidReplicaSetConfig`)은 별도로 실측했다 — 123.2(a).
+
+**SQL Server — AlwaysOn 읽기 확장 AG (실측)**
+
+`CLUSTER_TYPE = NONE`은 Pacemaker 없이 Linux 컨테이너에서 구성된다
+([MS Learn](https://learn.microsoft.com/en-us/sql/linux/business-continuity/availability-groups/configure-read-scale)).
+고가용성은 제공하지 않지만 `sys.dm_hadr_database_replica_states`를 채우는 데는 충분하다.
+
+```bash
+mssql-conf set hadr.hadrenabled 1   # 양쪽, 재시작
+# node1에서 마스터 키 + 인증서 생성 -> .cer/.pvk를 node2로 복사(소유자 mssql) -> node2에서 등록
+CREATE ENDPOINT [Hadr_endpoint] AS TCP (LISTENER_PORT = 5022)
+  FOR DATABASE_MIRRORING (ROLE = ALL, AUTHENTICATION = CERTIFICATE dbm_certificate,
+                          ENCRYPTION = REQUIRED ALGORITHM AES);
+CREATE AVAILABILITY GROUP [ag1] WITH (CLUSTER_TYPE = NONE) FOR REPLICA ON ... SEEDING_MODE = AUTOMATIC;
+ALTER AVAILABILITY GROUP [ag1] JOIN WITH (CLUSTER_TYPE = NONE);   -- node2
+```
+
+```
+# 세컨더리 (agdb)
+{"role":"REPLICA","lagSeconds":0.0,"lagSource":"MEASURED",
+ "detail":"AlwaysOn replicas=2 state=SYNCHRONIZING redo_queue=0KB send_queue=60KB"}
+
+# HADR SUSPEND 후 프라이머리에 40,000행(각 4KB) 쓰고 RESUME
+샘플1  lag=102.0s  redo_queue=3160KB   <- 실제 redo 백로그
+샘플2  lag=0.0s    redo_queue=0KB      <- 재생 완료
+샘플3  lag=0.0s    redo_queue=0KB
+
+# AG 프라이머리 (agdb)
+{"role":"PRIMARY","lagSeconds":null,"lagSource":"UNSUPPORTED",
+ "detail":"... 프라이머리 로컬 행에는 재생 지연이 없다(세컨더리 복제본을 등록해야 지연이 보인다)"}
+```
+
+이 실측에서 **복제본 수 표기 오류를 하나 더 잡았다.** `sys.dm_hadr_availability_replica_states`는
+CLUSTER_TYPE=NONE AG의 세컨더리에서 로컬 행만 돌려줘 2노드 AG인데 `replicas=1`로 나왔다.
+구성 메타데이터(`sys.availability_replicas`)로 바꿔 `replicas=2`가 되는 것을 확인했다.
 
 **측정하지 못한 MEASURED 경로 (정직 표기)**
 
 | 기종 | 구현한 원천 | 왜 못 쟀나 |
 |---|---|---|
-| Oracle | `v$dataguard_stats`의 apply lag | Data Guard 스탠바이 구성이 필요하다 |
-| SQL Server | `redo_queue_size` + `last_redone_time` | AlwaysOn 가용성 그룹(클러스터) 구성이 필요하다 |
-| MongoDB | `members[].optimeDate` 차 | 멤버 2개 이상의 레플리카셋이 필요하다(깨진 경로만 실측) |
+| Oracle | `v$dataguard_stats`의 apply lag | **구조적으로 불가.** Data Guard는 Enterprise Edition 전용이고 데모는 Free 에디션이다 |
 
-이 셋은 **코드는 있으나 실행된 적이 없다.** 단일 노드에서 `NOT_APPLICABLE`이 나오는 것과
-`UNSUPPORTED`로 강등되는 것까지는 확인했지만, 지연 숫자를 낸 적은 없다.
+Oracle만 남았고, 이건 환경을 바꿔도 안 된다 — EE 라이선스가 있어야 한다.
+`v$dataguard_stats` 조회 자체는 무료 뷰라 권한 문제는 없고, Data Guard가 없으면 행이 없어
+`UNAVAILABLE`로 내려간다(그 경로는 확인했다).
+
+MongoDB는 계산 경로가 실행됐지만 0이 아닌 값을 못 만들었다 — 위 단서 참고.
 
 ### 123.2 라이브에서 새로 드러난 결함 2건
 
@@ -3503,9 +3554,9 @@ GET /actuator/health -> {"groups":["liveness","readiness"],"status":"UP"}
 
 ### 123.10 확인하지 못한 것
 
-- **Oracle·SQL Server·MongoDB의 지연 계산(MEASURED)**: 123.1 마지막 표 참고.
-  각각 Data Guard·AlwaysOn·멤버 2개 이상 레플리카셋 구성이 필요하다.
-  코드는 있으나 실행된 적이 없다 — 면접에서 물으면 그대로 답한다.
+- **Oracle의 지연 계산(MEASURED)**: Data Guard가 Enterprise Edition 전용이라 Free 에디션 데모에서는
+  구조적으로 불가하다. 환경을 바꿔도 EE 라이선스 없이는 안 된다. 코드는 있으나 실행된 적이 없다.
+- **MongoDB의 0이 아닌 지연**: 계산 경로는 실행했으나(MEASURED, 0.0) 동일 호스트라 값을 못 만들었다.
 - **여유공간 부족 시 복원 거부**: 재현에 대용량 백업이 필요하다.
 - **gh-ost 가드레일 실동작**: 플래그 조립과 프로세스 타임아웃은 단위 테스트로 덮지만,
   `--max-load` 스로틀이 실제로 거는 것은 부하를 만들어야 확인된다.

@@ -646,7 +646,11 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                        drs.redo_queue_size,
                        drs.log_send_queue_size,
                        DATEDIFF(SECOND, drs.last_redone_time, SYSUTCDATETIME()) AS redo_age_sec,
-                       (SELECT COUNT(*) FROM sys.dm_hadr_availability_replica_states) AS replica_count
+                       -- 복제본 수는 상태 DMV가 아니라 구성 메타데이터에서 센다.
+                       -- CLUSTER_TYPE=NONE AG의 세컨더리에서는 dm_hadr_availability_replica_states가
+                       -- 로컬 행만 보여줘 2노드 AG인데 replicas=1로 나왔다(실측). 구성은 모든 복제본이 안다.
+                       (SELECT COUNT(*) FROM sys.availability_replicas ar
+                         WHERE ar.group_id = drs.group_id) AS replica_count
                 FROM sys.dm_hadr_database_replica_states drs
                 WHERE drs.database_id = DB_ID()
                   AND drs.is_local = 1
