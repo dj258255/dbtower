@@ -66,8 +66,17 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
             // 접속 실패는 JDBC의 SQLException이 아니라 Spring의 DataAccessException으로 올라온다.
             String version = jdbc().queryForObject(versionSql(), String.class);
             return HealthStatus.up(version != null ? version : "unknown", System.currentTimeMillis() - start);
-        } catch (DataAccessException e) {
-            return HealthStatus.down(e.getMessage());
+        } catch (RuntimeException e) {
+            // DataAccessException만 잡으면 안 된다(실측): 대상이 죽어 있으면 첫 커넥션 시도에서
+            // HikariPool$PoolInitializationException이 나는데 이건 순수 RuntimeException이라
+            // 게이트를 빠져나가 컨트롤러까지 올라갔다. 그 결과 /health가 down 상태가 아니라
+            // 302(로그인 리다이렉트)를 냈고, 더 나쁘게는 다운 감지가 health()를 부르는 자리에서
+            // 예외로 터져 "다운 알림"이 다시 침묵했다.
+            //
+            // health()의 계약은 "떠 있나 아닌가"다 — 어떤 이유로 실패하든 답은 down이다.
+            // 사유는 메시지에 실어 보내므로 원인이 감춰지지도 않는다.
+            String cause = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            return HealthStatus.down(cause);
         }
     }
 

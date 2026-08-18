@@ -3230,3 +3230,196 @@ dbtower_ai_tokens_total{backend="cli",call_site="diagnose",type="output"}       
 테스트가 덮는다. 또한 CLI 경로 수치는 Claude Code 자체 프롬프트가 앞에 붙은 복합체라 절대값이 아니라
 같은 하네스 안의 짝비교로만 유효하다(120절과 같은 단서). 두 진단의 도구 연쇄가 동일했는지는 기록하지
 않았으므로, 위 79.3%는 재현 1회분의 관측이지 확정된 절감률이 아니다.
+
+## 123. 다관점 감사 대응 — 라이브 실측 (2026-08-18)
+
+DBA 5기종·모니터링·인프라·개발자 관점의 리뷰어 9인이 27,334줄을 독립 감사했고,
+그 결과 나온 수정을 `docker compose` 스택에 붙여 실제 REST로 확인했다.
+아래는 전부 이번에 실행한 명령과 그 출력이다.
+
+**환경.** Docker 7.7GB. Oracle이 2.1GB를 쓰고 MSSQL이 ~2GB를 요구해 동시 기동이 되지 않았다
+(`Could not allocate initial 5000 lock owner blocks during startup`, exit 118 반복).
+4기종(MySQL/PostgreSQL/MongoDB/Oracle)을 먼저 확인하고, Oracle을 내린 뒤 MSSQL을 확인했다.
+5기종 동시 실측은 이 머신에서 하지 못했다.
+
+### 123.1 복제 상태 3-값 — `-1` 센티넬 제거
+
+```
+GET /api/instances/{id}/replication
+  id=1  (MySQL)      role=STANDALONE  lagSeconds=null  lagSource=NOT_APPLICABLE
+  id=2  (PostgreSQL) role=STANDALONE  lagSeconds=null  lagSource=NOT_APPLICABLE
+  id=8  (Oracle)     role=STANDALONE  lagSeconds=null  lagSource=NOT_APPLICABLE
+  id=3  (SQL Server) role=STANDALONE  lagSeconds=null  lagSource=NOT_APPLICABLE
+        detail="AlwaysOn 가용성 그룹 미구성"
+```
+
+단일 노드 데모라 `NOT_APPLICABLE`이 맞다. 요점은 값이 아니라 **구분**이다 —
+예전에는 같은 상황에서 MySQL/PG가 `0`, MSSQL/Oracle/Mongo가 `-1`을 냈고,
+알림 게이트가 `lagSeconds < 0`으로 스킵해 세 기종은 복제 지연 알림이 구조적으로 불가능했다.
+
+### 123.2 라이브에서 새로 드러난 결함 2건
+
+검증 중에 감사가 못 잡은 결함이 두 개 나왔다. 둘 다 이번에 고쳤다.
+
+**(a) MongoDB 에러 93을 예외로 던져 조회 전체가 502**
+
+데모 컨테이너는 `--replSet rs0`인데 컨테이너 재생성으로 설정이 무효화돼 있었다.
+코드가 76(NoReplicationEnabled)만 standalone으로 처리하고 93은 그대로 던졌다.
+
+```
+BEFORE  GET /api/instances/7/replication  -> HTTP 502
+        OperatorException: MongoDB 복제 상태 조회 실패: ... error 93 (InvalidReplicaSetConfig)
+        (같은 예외가 oplog 백업 잡도 "백업 실패"로 죽였다 — app.log 실측)
+
+AFTER   HTTP 200
+        {"role":"REPLSET_BROKEN","lagSeconds":null,"lagSource":"UNAVAILABLE",
+         "detail":"레플리카셋이 구성돼 있으나 사용 불가 상태다 (code=93): ..."}
+```
+
+93/94는 "조회 실패"가 아니라 **사건**이다 — 그 상태의 노드는 프라이머리를 못 뽑아 쓰기를 받지 못한다.
+
+**(b) 죽은 대상의 헬스가 down이 아니라 302 로그인 리다이렉트**
+
+`HikariPool$PoolInitializationException`은 `DataAccessException`이 아니라 순수 `RuntimeException`이라
+`AbstractJdbcOperator.health()`의 catch를 빠져나가 컨트롤러까지 올라갔다.
+
+```
+BEFORE  GET /api/instances/3/health  (MSSQL 컨테이너 중지 상태)
+        HTTP/1.1 302
+        Location: http://localhost:8080/login.html;jsessionid=...
+
+AFTER   HTTP 200
+        {"up":false,"version":null,"pingMillis":-1,
+         "message":"Failed to initialize pool: 호스트 127.0.0.1, 포트 11433에 대한 TCP/IP 연결에 실패..."}
+```
+
+이게 더 나빴던 이유: 이번에 새로 넣은 **다운 감지가 `health()`를 부르는 자리에서 예외로 터져,
+다운 알림이 다시 침묵**했다. 고친 뒤 실제로 발사되는 것을 아래에서 확인했다.
+
+### 123.3 인스턴스 다운 알림 — 없던 경로
+
+MSSQL 컨테이너가 죽어 있는 상태에서 운영 감지 폴러가 돌았다.
+
+```
+app.log
+  OpsAlertDetector : 운영 경보 instance=local-mssql findings=3
+  WebhookNotifier  : [알림(webhook 미설정)] [DBTower 운영 경보] instance=local-mssql
+  - 인스턴스 접속 불가 — 127.0.0.1:11433/master (Failed to initialize pool: ...)
+  - 스냅샷 수집 정지 — 최근 10분간 신규 배치 0
+```
+
+두 번째 줄이 특히 중요하다. `detectSnapshotStall`은 예전에 operator try **안**에 있어서,
+대상이 죽으면 `activeSessions` 예외에 막혀 도달조차 못 했다 —
+이 규칙이 존재하는 바로 그 상황에서 침묵했다. try 밖으로 옮긴 뒤 죽은 대상에서 실제로 나왔다.
+
+### 123.4 알림 이력 (V31)
+
+```sql
+select id, instance_id, kind, severity, status, left(summary,60) from alert_history order by id desc limit 6;
+
+11|32|DBTower 운영 경보 — mssql-pitr  |RED  |SENT|[DBTower 운영 경보] instance=mssql-pitr\n- 인스턴스 접속 불가
+10| 7|DBTower 운영 경보 — local-mongo |RED  |SENT|[DBTower 운영 경보] instance=local-mongo\n- 복제 상태를 읽지 못했습니다
+ 9| 3|DBTower 운영 경보 — local-mssql |RED  |SENT|[DBTower 운영 경보] instance=local-mssql\n- 인스턴스 접속 불가
+ 8| 8|DBTower 회귀 감지 — local-oracle|AMBER|SENT|[DBTower 회귀 감지] instance=local-oracle (최근 5분 vs 직전 15분)
+ 7| 1|DBTower 회귀 감지 — local-mysql |AMBER|SENT|[DBTower 회귀 감지] instance=local-mysql
+ 6|32|DBTower 운영 경보 — mssql-pitr  |RED  |SENT|[DBTower 운영 경보] instance=mssql-pitr\n- 스냅샷 수집 정지
+```
+
+10번 행이 123.2(a)에서 고친 Mongo `UNAVAILABLE`이 경보로 나간 기록이다 —
+예전에는 이 상황이 `-1`로 내려와 조용히 스킵됐다.
+
+### 123.5 PostgreSQL 스키마 한정 — 컬럼 혼합 제거
+
+`public.demo_customer`(3컬럼) 옆에 `staging.demo_customer`(4컬럼)를 만들고 같은 조건으로 세었다.
+
+```sql
+-- BEFORE 조건 (시스템 스키마만 제외)
+SELECT count(*) FROM information_schema.columns
+WHERE table_name='demo_customer' AND table_schema NOT IN ('pg_catalog','information_schema');
+ 7
+
+-- AFTER 조건 (접속 세션 기본 스키마로 한정)
+SELECT count(*) FROM information_schema.columns
+WHERE table_name='demo_customer' AND table_schema = current_schema();
+ 3
+```
+
+```
+POST /api/instances/2/table-detail {"table":"demo_customer"}
+  DDL 컬럼 수: 3
+  ghost_ 컬럼 포함: False
+  note: "조회 범위는 접속 세션의 기본 스키마(current_schema())다 — ..."
+```
+
+수정 전이었다면 두 테이블의 컬럼이 합쳐진 7컬럼 `CREATE TABLE`이 재구성됐을 것이다.
+검증 후 `staging` 스키마는 제거했다.
+
+### 123.6 읽기 전용 게이트 — 양방향 파손 해소
+
+```
+POST /api/instances/2/explain
+  SELECT count(*) FROM demo_customer                                 200
+  WITH t AS (SELECT 1 AS n) SELECT * FROM t                          200   (전에는 거부)
+  SELECT 1 /* ; */                                                   200   (전에는 거부)
+  SELECT 1 /* ' */; DROP TABLE demo_customer                         400   (전에는 통과)
+  WITH d AS (DELETE FROM demo_customer RETURNING *) SELECT * FROM d   400
+```
+
+### 123.7 SQL Server COPY_ONLY — 백업 카탈로그가 증거
+
+`msdb.dbo.backupset`에 수정 전후가 같은 표에 남아 있다.
+
+```sql
+SELECT TOP 4 backup_start_date, is_copy_only, has_backup_checksums, type
+FROM msdb.dbo.backupset ORDER BY backup_set_id DESC;
+
+2026-08-18 06:09:38 | copy_only=1 | checksum=1 | type=D   <- 수정 후
+2026-08-15 20:52:45 | copy_only=0 | checksum=0 | type=L   <- 수정 전
+2026-08-15 20:52:45 | copy_only=0 | checksum=0 | type=D   <- 수정 전
+2026-08-15 20:52:44 | copy_only=0 | checksum=0 | type=D   <- 수정 전
+```
+
+`COPY_ONLY` 없는 `BACKUP DATABASE`는 사이트의 차등 베이스를 리셋하고,
+`BACKUP LOG`는 로그 체인의 그 구간을 이 파일로 가져간다. 이미 잘린 로그는 되돌릴 수 없다.
+
+### 123.8 복원 검증 — 여유공간 사전 검사 + 실행 위치 표기
+
+```
+볼륨: 1,031,017MB total / 728,808MB free  (sys.dm_os_volume_stats)
+
+POST /api/instances/3/backup/verify
+{"status":"VERIFIED",
+ "detail":"임시 DB로 전체 복원 성공 — RESTORE DATABASE + 사용자 테이블 조회
+           (target=dbtower_verify_20260818061118120). 주의: 이 복원은 대상 인스턴스 자신에서
+           수행됐다 — 논리적으로는 격리돼 있지만(임시 이름·원본 미변경·정리 보장) 디스크와 IO는
+           운영과 공유한다. 별도 검증 인스턴스로 복원 명령을 지정하고
+           dbtower.backup.verify-isolated=true를 켜면 이 경고는 사라진다.",
+ "restoredObjectCount":0}
+```
+
+여유가 충분해(728GB) 사전 검사를 통과하고 복원이 진행됐다.
+**부족한 경우의 거부 경로는 이 환경에서 재현하지 못했다** — 700GB짜리 백업이 필요하다.
+그 분기는 단위 테스트가 아니라 코드 판정(`FILELISTONLY`의 Size 합 × 1.2 vs `availableBytes`)으로만 있다.
+`restoredObjectCount=0`은 `master` DB에 사용자 테이블이 없어서 맞는 값이다.
+
+### 123.9 암호화 fail-closed
+
+프로필 미설정으로 키 없이 띄우면 기동을 거부한다(단위 테스트 `SecretCipherProfileTest`).
+라이브 기동은 `DBTOWER_ENCRYPTION_KEY`를 준 경로로만 확인했다 —
+정상 설정에서 fail-closed가 방해하지 않는다는 것까지가 이번 실측 범위다.
+
+```
+Started DbtowerApplication in 5.025 seconds
+GET /actuator/health -> {"groups":["liveness","readiness"],"status":"UP"}
+```
+
+`AGENTS.md`의 기동 명령에 키를 추가했다 — 프로필 미설정으로는 더 이상 뜨지 않기 때문이다.
+
+### 123.10 확인하지 못한 것
+
+- **5기종 동시 기동**: 메모리 한계(위 환경 절). Oracle과 MSSQL을 번갈아 확인했다.
+- **여유공간 부족 시 복원 거부**: 재현에 대용량 백업이 필요하다.
+- **gh-ost 가드레일 실동작**: 플래그 조립과 프로세스 타임아웃은 단위 테스트로 덮지만,
+  `--max-load` 스로틀이 실제로 거는 것은 부하를 만들어야 확인된다.
+- **웹훅 실발사**: `DBTOWER_WEBHOOK_URL`을 비워 돌렸다. 전달 경로는
+  "미설정 로그 + alert_history 적재"까지 확인했고 Discord 실발사는 이번 범위 밖이다.

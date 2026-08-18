@@ -1024,8 +1024,18 @@ public class MongoOperator implements DbmsOperator {
                     double lagSec = (primaryOptime.getTime() - selfOptime.getTime()) / 1000.0;
                     return ReplicationState.measured(role, Math.max(0, lagSec), detail + " — 프라이머리 optime 차");
                 } catch (MongoCommandException e) {
-                    if (e.getErrorCode() == 76) { // NoReplicationEnabled
+                    // 76 NoReplicationEnabled — --replSet 자체가 없다. 복제를 안 쓰는 구성이므로 알릴 것이 없다.
+                    if (e.getErrorCode() == 76) {
                         return ReplicationState.standalone("레플리카셋 미구성");
+                    }
+                    // 93 InvalidReplicaSetConfig / 94 NotYetInitialized — --replSet은 켜져 있는데
+                    // 설정이 깨졌거나 rs.initiate()가 안 됐다. 이건 조회 실패가 아니라 <b>사건</b>이다:
+                    // 그 상태의 노드는 프라이머리를 못 뽑아 쓰기를 받지 못한다.
+                    // 예외로 던지면 /replication이 502가 되고 oplog 백업 잡까지 "백업 실패"로 죽는다(실측).
+                    if (e.getErrorCode() == 93 || e.getErrorCode() == 94) {
+                        return ReplicationState.unavailable("REPLSET_BROKEN",
+                                "레플리카셋이 구성돼 있으나 사용 불가 상태다 (code=%d): %s"
+                                        .formatted(e.getErrorCode(), e.getErrorMessage()));
                     }
                     throw e;
                 }
