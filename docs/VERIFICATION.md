@@ -3425,9 +3425,25 @@ Oracle 자신의 EE Docker 설치 가이드가 명시한다
 redo 전송만 있으면 된다(Broker는 관리 계층, RAC는 별개 기술). 그래서 이 항목이 막힌 이유는
 "구성이 무거워서"가 아니라 위 두 겹 때문이다.
 
-`v$dataguard_stats` 조회 자체는 팩 무관 무료 뷰라 권한 문제는 없다. Data Guard가 없으면
-행이 없어 `UNAVAILABLE`로 내려가는데, 그 경로는 확인했다 — 즉 **없는 것을 없다고 답하는 것까지는
-동작하고, 있을 때 숫자를 내는 부분만 미검증이다.**
+`v$dataguard_stats` 조회 자체는 팩 무관 무료 뷰라 권한 문제는 없다. 데모 Oracle에서 실제로 확인했다:
+
+```
+select count(*) from v$dataguard_stats;   ->  dg_rows=0
+select database_role, open_mode from v$database;  ->  role=PRIMARY open=READ WRITE
+
+GET /api/instances/8/replication
+{"role":"STANDALONE","lagSeconds":null,"lagSource":"NOT_APPLICABLE",
+ "detail":"database_role=PRIMARY open_mode=READ WRITE protection=MAXIMUM PERFORMANCE
+           — Data Guard 스탠바이가 있으면 그쪽을 등록해야 지연이 보인다"}
+```
+
+**정정** — 앞서 "Data Guard가 없으면 `UNAVAILABLE`로 내려가는데 그 경로는 확인했다"고 적었는데
+그건 틀렸다. 코드는 role이 PRIMARY면 `v$dataguard_stats`를 아예 조회하지 않고 `NOT_APPLICABLE`로
+답한다. `UNAVAILABLE`은 **스탠바이인데 apply lag를 못 얻는 경우**에만 나오고, 그 상황은
+Data Guard 구성이 있어야 만들 수 있으므로 여전히 미검증이다.
+
+정리하면 Oracle에서 확인된 것은 `NOT_APPLICABLE`(복제 미구성) 하나뿐이고,
+`MEASURED`와 `UNAVAILABLE` 두 경로는 코드만 있다.
 
 ### 123.2 라이브에서 새로 드러난 결함 2건
 
@@ -3592,10 +3608,18 @@ GET /actuator/health -> {"groups":["liveness","readiness"],"status":"UP"}
 - **Oracle의 지연 계산(MEASURED)**: Oracle 공식 Docker 가이드가 "Data Guard is not supported"를
   명시한다 — 에디션이 아니라 컨테이너 실행 형태의 제약이라, VM/물리 장비가 있어야 잴 수 있다.
   (123.1 마지막 절 참고 — 막는 것이 에디션·실행 형태 두 겹이다)
-- **Discord 실발사**: 아래 123.11에서 로컬 수신기로 HTTP 전달 경로 전체를 확인했다.
-  Discord 서버로 실제 발사하는 것은 워크스페이스가 필요해 범위 밖이다.
+- **Oracle의 `UNAVAILABLE` 경로**: 스탠바이인데 apply lag를 못 얻는 경우다.
+  이것도 Data Guard 구성이 있어야 만들 수 있다. 데모 Oracle은 PRIMARY라 `NOT_APPLICABLE`로 답한다
+  — 즉 Oracle에서 확인된 것은 세 경로 중 하나뿐이다.
 
-나머지 두 항목(gh-ost 가드레일, 여유공간 부족 거부)은 123.12·123.13에서 실측했다.
+나머지 항목(gh-ost 가드레일, 여유공간 부족 거부, Discord 전달 경로)은
+123.12·123.13·123.14에서 실측했다.
+
+**정정** — 처음에 "Discord 실발사"를 미검증으로 올렸는데 그건 틀렸다.
+Discord 실발사는 이 프로젝트가 이미 검증했다(88·93·95절 — Gateway 봇 e2e, 슬래시 커맨드 실등록).
+`alert_message_index`에 2026-07-17 ~ 08-18의 실제 Discord 스노플레이크 id가 433건 남아 있다.
+이 세션에서 확인이 필요했던 것은 **이번에 바꾼 부분**(전달 결과 boolean 전파, 이력 기록)이고,
+그건 123.14에서 로컬 수신기로 확인했다.
 
 ### 123.11 웹훅 전달 내구성 — 실패하면 재시도한다
 
@@ -3720,3 +3744,35 @@ rm /var/opt/mssql/data/filler
 
 같은 백업·같은 인스턴스에서 여유 공간만 바꿔 거부/통과가 갈렸다 —
 가드가 항상 거부하는 게 아니라 실제 조건 판정임을 보인다.
+
+### 123.14 Discord 전달 경로 — 이번에 바꾼 부분
+
+Discord 실발사 자체는 88·93·95절에서 이미 검증됐다(Gateway 봇 e2e, 슬래시 커맨드 실등록,
+`alert_message_index`에 실제 스노플레이크 id 433건). 여기서 확인할 것은 **이번에 바꾼 부분**이다 —
+`deliverEmbed`가 전달 결과를 boolean으로 돌려주게 됐고, 그 결과가 이력에 기록된다.
+
+Discord 분기는 `webhookUrl.contains("discord.com")`으로 갈리므로, URL 경로에 그 문자열을 넣으면
+계정 없이도 실제 Discord 분기를 태울 수 있다. 수신기는 `?wait=true` 응답 형식(메시지 id)을 흉내낸다.
+
+```
+DBTOWER_WEBHOOK_URL=http://127.0.0.1:9098/api/webhooks/discord.com/x
+수신기 응답: {"id":"1400000000000000001","type":0}
+```
+
+```
+받은 요청
+  path: /api/webhooks/discord.com/x?wait=true          <- wait=true 부착됨
+  body 최상위 키: ['embeds', 'allowed_mentions']        <- 텍스트 채널의 {"text":...}가 아님
+  embed.title : DBTower 운영 경보 — local-mysql
+  embed.color : 14041167 (0xD6404F = AlertEmbeds.RED)
+  allowed_mentions: {"parse": []}                       <- 멘션 잠금
+  fields: [인스턴스] inline=true / [감지 내용] inline=false
+
+메시지 id 매핑 (alert_message_index)
+  1400000000000000001 -> instance_id=32
+alert_history
+  7 rows, SENT=7
+```
+
+응답에서 파싱한 id가 `AlertMessageIndex.record`로 저장되는 것까지 확인했다 —
+이게 이모지 반응 진단이 특권 인텐트 없이 대상 인스턴스를 찾는 근간이다.
