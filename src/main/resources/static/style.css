@@ -792,3 +792,23 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 .incident-result .incident-list li { padding: 2px 0; }
 .incident-result code { background: #f1f3f5; padding: 1px 5px; border-radius: 3px; }
 .incident-table { margin: 8px 0; font-size: 13px; }
+
+/* 대상별 운영 종합 카드 (DBRE) — 선택 즉시 정체+상태를 한눈에 */
+.overview-card { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; margin-bottom: 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; border-left: 3px solid var(--primary); }
+.overview-card[hidden] { display: none; }
+.ov-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ov-id { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ov-type { font-size: 11px; font-weight: 800; letter-spacing: .04em; color: var(--dark);
+  background: #eef0f5; padding: 2px 7px; border-radius: 6px; }
+.ov-name { font-size: 16px; }
+.ov-meta { font-size: 12px; }
+.ov-health { display: flex; align-items: center; gap: 8px; }
+.ov-status { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 6px; }
+.ov-up { color: #1a7a4f; background: #e4f4ec; }
+.ov-down { color: #fff; background: var(--up); }
+.ov-grade { font-size: 12px; font-weight: 800; color: #fff; padding: 2px 9px; border-radius: 10px; }
+.ov-signals { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 12.5px;
+  border-top: 1px solid var(--line); padding-top: 8px; }
+.ov-sig-k { font-weight: 700; color: var(--muted); margin-right: 4px; }
+.ov-rpo { color: var(--base); font-weight: 600; }

@@ -488,7 +488,7 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
-  await Promise.all([loadActivity(), loadMetrics(), loadBackupInfo(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks(), loadReviews()]);
+  await Promise.all([loadOverview(), loadActivity(), loadMetrics(), loadBackupInfo(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks(), loadReviews()]);
 }
 
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
@@ -1746,6 +1746,52 @@ const LAG_SOURCE_LABEL = {
   UNSUPPORTED: { cls: "src-unsupported", label: "지연 측정 미지원" },
   UNAVAILABLE: { cls: "verify-FAILED", label: "지연 확인 불가" },
 };
+
+const BK_STATUS_LABEL = { FRESH: "신선", STALE: "오래됨", NO_BACKUP: "백업 없음" };
+
+// 대상별 운영 종합 (DBRE) — 정체(이름·기종·환경·클러스터)와 상태(헬스·복제·백업·RPO 노출)를
+// 한 대상 단위에 모아 선택 즉시 최상단에 보여준다. 조각 하나가 못 읽혀도 나머지는 그대로 표기한다.
+async function loadOverview() {
+  const box = $("#overview-card");
+  if (!box) return;
+  box.hidden = false;
+  try {
+    const o = await api(`/api/instances/${state.instance.id}/overview`);
+    const rep = o.replication || {};
+    const badge = LAG_SOURCE_LABEL[rep.lagSource];
+    const repLag = rep.lagSource === "MEASURED"
+      ? `${fmtNum(rep.lagSeconds, 1)}s`
+      : `<span class="verify-badge ${badge ? esc(badge.cls) : "muted"}">${esc(badge ? badge.label : rep.lagSource || "-")}</span>`;
+    const rpo = rep.rpoExposure
+      ? ` <span class="ov-rpo">RPO 노출 ${esc(rep.rpoExposure)}</span>` : "";
+    const bk = o.backup;
+    const bkStr = bk
+      ? `${esc(BK_STATUS_LABEL[bk.status] ?? bk.status)}` +
+        `${bk.elapsedHours != null ? ` · ${fmtNum(bk.elapsedHours, 1)}h 전` : ""}` +
+        `${bk.verifyStatus ? ` · 검증 ${esc(bk.verifyStatus)}` : ""}`
+      : "이력 없음";
+    const meta = [o.environment, o.cluster ? `클러스터 ${o.cluster}` : "", o.teamLabel ? `팀 ${o.teamLabel}` : ""]
+      .filter(Boolean).map(esc).join(" · ");
+    box.innerHTML = `
+      <div class="ov-head">
+        <div class="ov-id">
+          <span class="ov-type">${esc(o.type)}</span>
+          <b class="ov-name">${esc(o.name)}</b>
+          ${meta ? `<span class="ov-meta muted">${meta}</span>` : ""}
+        </div>
+        <div class="ov-health">
+          <span class="ov-status ${o.down ? "ov-down" : "ov-up"}">${o.down ? "DOWN" : "UP"}</span>
+          <span class="ov-grade grade-${esc(o.grade)}">${esc(o.grade)} · ${esc(String(o.healthScore))}</span>
+        </div>
+      </div>
+      <div class="ov-signals">
+        <span class="ov-sig"><span class="ov-sig-k">복제</span> ${esc(rep.role ?? "-")} · 지연 ${repLag}${rpo}</span>
+        <span class="ov-sig"><span class="ov-sig-k">백업</span> ${bkStr}</span>
+      </div>`;
+  } catch (e) {
+    box.innerHTML = `<span class="muted">운영 종합 조회 실패: ${esc(e.message)}</span>`;
+  }
+}
 
 async function loadReplication() {
   const box = $("#replication-box");

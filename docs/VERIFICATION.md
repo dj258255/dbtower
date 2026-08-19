@@ -4028,3 +4028,7 @@ GET /api/instances/47/overview  (mysql-replica)
 정체·건강·복제(+RPO 노출)·백업이 한 호출에 모였다. 화면은 여전히 나누되(대상관리/상태/장애/백업)
 정보 모델은 대상 단위로 합치는 DBRE 방향이다. 단위 테스트 3건(`OverviewServiceTest`) —
 조립·부분실패 시 사유 표기·RPO는 실측일 때만.
+
+**프론트 연결** — 정적 SPA에 종합 카드를 붙였다. 인스턴스를 고르면 `selectInstance`가 `loadOverview()`로
+`/overview`를 불러 result-panel 최상단에 카드를 그린다(정체+헬스 등급+복제/RPO+백업 한 줄). 동적 값은
+전부 `esc()` 경유(프레임워크·빌드체인 없음, 저장소 규약 유지). app.js `node --check` 통과.

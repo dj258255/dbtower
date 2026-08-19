@@ -116,6 +116,8 @@
 
     <!-- 결과 탭 -->
     <section class="panel" id="result-panel" hidden>
+      <!-- 대상별 운영 종합 (DBRE) — 이 DB가 무엇인지 + 지금 어떤지를 한눈에. GET /api/instances/{id}/overview -->
+      <div id="overview-card" class="overview-card" hidden></div>
       <div class="tabs">
         <button class="tab active" data-tab="top">Top Query</button>
         <button class="tab" data-tab="slow">Slow Query</button>
