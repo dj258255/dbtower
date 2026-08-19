@@ -3993,3 +3993,38 @@ PostgreSQL 동기 정직 표기(123.18)와 같은 규율을 MySQL 반동기(semi
 가운데가 핵심 — 반동기를 켰지만 실제로는 async로 커밋되고 있던 자리(유실 0 약속이 깨진)를
 DBTower가 `UNAVAILABLE`로 드러내 복제 알림 게이트에 태운다. PG(동기)와 MySQL(반동기) 모두
 "설정 vs 지금 실제"를 구분하게 됐다(MSSQL은 123.1에서 이미).
+
+### 123.20 대상별 운영 종합(overview) — 관측을 DB 대상 단위에 귀속
+
+DBRE 관점에서 "이 DB가 무엇인지"(정체)와 "지금 어떤 상태인지"(건강·복제·백업)를 흩어진 모듈이 아니라
+하나의 대상 단위에서 보게 한다. DBTower의 관측 엔드포인트는 이미 전부 `/api/instances/{id}/*`
+형태라(정보 모델이 이미 대상 단위) 남은 것은 연결 조직 — 흩어진 조각을 한 객체로 모으는 것이었다.
+
+`GET /api/instances/{id}/overview` 신설. score 모듈에 뒀다(이미 advisor·backup·insight·registry·slo를
+참조하는 집계 허브라 복제(operator)만 더하면 순환 없이 종합이 된다 — ModularityTests 통과 확인).
+읽기 전용 집계다 — 조치(승격·설정 변경)를 여기서 실행하지 않는다(DBTower의 관제 plane 경계).
+
+조립: 정체(registry) + 헬스 스코어(score) + 복제 역할·지연(operator.replicationState) + 백업 신선도
+(backup). 복제/백업 조각이 대상 장애로 실패해도 나머지는 채워 돌려주고 실패 사실을 사유로 남긴다
+(부분 실패를 사각지대로 감추지 않음).
+
+**RPO 노출** — 앞서 "RPO metric"으로 남겨둔 항목을 여기에 흡수했다. 별도 metric이 아니라 복제 지연의
+파생이다: 실측(MEASURED) 지연이 곧 "지금 failover하면 잃을 데이터"다. 실측이 아니면(못 재면) 노출도
+알 수 없으므로 null(위장 금지).
+
+**라이브 검증** — mysql-source(primary)+mysql-replica를 등록하고 종합 조회:
+
+```
+GET /api/instances/47/overview  (mysql-replica)
+{
+  "name":"mysql-replica", "type":"MYSQL", "cluster":"mysql-cluster",
+  "healthScore":77, "grade":"C", "down":false,
+  "replication":{ "role":"REPLICA", "lagSeconds":0.0, "lagSource":"MEASURED",
+                  "rpoExposure":"0s (따라잡음 — 유실 창 없음)" },
+  "backup":{ "status":"NO_BACKUP", "thresholdHours":24 }
+}
+```
+
+정체·건강·복제(+RPO 노출)·백업이 한 호출에 모였다. 화면은 여전히 나누되(대상관리/상태/장애/백업)
+정보 모델은 대상 단위로 합치는 DBRE 방향이다. 단위 테스트 3건(`OverviewServiceTest`) —
+조립·부분실패 시 사유 표기·RPO는 실측일 때만.
