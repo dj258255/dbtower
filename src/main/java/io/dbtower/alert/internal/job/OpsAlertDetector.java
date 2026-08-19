@@ -182,7 +182,7 @@ public class OpsAlertDetector {
                     ReplicationState repl = operator.replicationState();
                     findings.addAll(detectReplicationLag(instance, repl, now));
                     findings.addAll(detectRoleChange(instance, repl, now));
-                    collectClusterPrimary(instance, repl, primariesByCluster);
+                    collectClusterWritable(instance, repl, primariesByCluster);
                     findings.addAll(detectReplicationSlots(instance, operator, now));
                     findings.addAll(detectDeadlocks(instance, operator, now));
                     // 서버를 공유하는 다른 인스턴스가 있으면 경보가 그들에게도 해당함을 명시한다
@@ -516,61 +516,74 @@ public class OpsAlertDetector {
     // 몫이다. 여기서는 두 가지를 관측만 한다: (1) 역할이 뒤집혔다(=failover가 일어났다), (2) 한 클러스터에
     // PRIMARY가 둘이다(=split-brain 의심). 둘 다 대상 DB에 아무것도 쓰지 않고 replicationState의 역할만 읽는다.
 
-    /** 기종마다 제각각인 역할 문자열을 HA 관점의 굵은 분류로 환원한다(대소문자·부분일치 허용). */
-    private enum HaRole { PRIMARY, STANDBY, OTHER }
+    /**
+     * 역할을 HA 관점의 굵은 분류로 환원한다 — 핵심은 <b>쓰기 가능(WRITABLE) vs 대기(STANDBY)</b>다.
+     *
+     * <p>왜 PRIMARY가 아니라 WRITABLE인가(라이브 검증에서 드러난 것): PG는 <b>연결된 복제본이 없는
+     * primary를 STANDALONE으로 보고</b>한다. 스탠바이를 승격하면 그 순간 다운스트림이 없어 role이
+     * STANDALONE이 되고, 원래 primary도 복제본을 잃으면 STANDALONE이 된다. 그래서 "PRIMARY 개수"로
+     * split-brain을 세면 <b>실제 split-brain(양쪽 다 쓰기 가능)을 놓친다</b>. 승격/강등과 split-brain의
+     * 본질은 "역할명이 PRIMARY인가"가 아니라 "쓰기를 받는가(=in-recovery가 아닌가)"다.
+     * PRIMARY·STANDALONE은 WRITABLE, REPLICA/SECONDARY/STANDBY는 STANDBY, 그 외는 UNKNOWN.
+     */
+    private enum HaRole { WRITABLE, STANDBY, UNKNOWN }
 
     private static HaRole classify(String role) {
         if (role == null) {
-            return HaRole.OTHER;
+            return HaRole.UNKNOWN;
         }
         String r = role.toUpperCase();
-        // Oracle 'PHYSICAL STANDBY'·Mongo 'SECONDARY'·MySQL/PG/MSSQL 'REPLICA'는 STANDBY로,
-        // 'PRIMARY'는 PRIMARY로. STANDALONE·미상은 OTHER(역할 미확정)라 failover 판정에서 뺀다.
         if (r.contains("STANDBY") || r.contains("REPLICA") || r.contains("SECONDARY")) {
             return HaRole.STANDBY;
         }
-        if (r.contains("PRIMARY")) {
-            return HaRole.PRIMARY;
+        if (r.contains("PRIMARY") || r.contains("STANDALONE") || r.contains("MASTER") || r.contains("SOURCE")) {
+            return HaRole.WRITABLE;
         }
-        return HaRole.OTHER;
+        return HaRole.UNKNOWN;
     }
 
     /**
-     * 역할 변경(failover 신호) — 직전 폴의 역할과 지금 역할이 PRIMARY↔STANDBY로 뒤집히면 알린다.
-     * 첫 관측(기준선 없음)과 OTHER(STANDALONE/미상)로의 전이는 조용히 넘어간다.
+     * 역할 변경(failover 신호) — 직전 폴과 지금이 STANDBY↔WRITABLE로 뒤집히면 알린다(승격/강등).
+     * 첫 관측(기준선 없음), UNKNOWN(역할 미상), 그리고 WRITABLE↔WRITABLE(예: primary가 복제본을
+     * 잃어 STANDALONE이 됨 — 쓰기 상태는 그대로라 failover가 아니다)은 조용히 넘어간다.
      */
     private List<String> detectRoleChange(DatabaseInstance instance, ReplicationState state, LocalDateTime now) {
         if (state == null || instance.getId() == null) {
             return List.of();
         }
         HaRole cur = classify(state.role());
-        if (cur == HaRole.OTHER) {
-            // 역할 미확정 — 기준선을 건드리지 않는다(복제 미구성/조회 실패는 failover가 아니다).
+        if (cur == HaRole.UNKNOWN) {
+            // 역할 미상 — 기준선을 건드리지 않는다(조회 실패를 역할 변경으로 오인하지 않는다).
             return List.of();
         }
         HaRole prev = lastRole.put(instance.getId(), cur);
         if (prev == null || prev == cur) {
-            return List.of();   // 첫 관측이거나 변화 없음
+            return List.of();   // 첫 관측이거나 쓰기/대기 상태 변화 없음
         }
+        String direction = cur == HaRole.WRITABLE ? "승격(STANDBY -> 쓰기 가능)" : "강등(쓰기 가능 -> STANDBY)";
         if (!passCooldown("role-change", instance, now)) {
             return List.of();
         }
-        return List.of("복제 역할 변경 감지(failover 신호): %s -> %s (role=%s) — 계획된 스위치오버가 아니면 확인이 필요합니다"
-                .formatted(prev, cur, state.role()));
+        return List.of("복제 역할 변경 감지(failover 신호): %s (role=%s) — 계획된 스위치오버가 아니면 확인이 필요합니다"
+                .formatted(direction, state.role()));
     }
 
-    /** 이번 폴에서 관측된 PRIMARY를 cluster 라벨로 모은다(split-brain 상관용). 라벨이 없으면 상관 불가라 건너뛴다. */
-    private void collectClusterPrimary(DatabaseInstance instance, ReplicationState state,
-                                       Map<String, List<Long>> primariesByCluster) {
-        if (state == null || instance.getId() == null || classify(state.role()) != HaRole.PRIMARY) {
+    /**
+     * 이번 폴에서 관측된 <b>쓰기 가능(WRITABLE)</b> 노드를 cluster 라벨로 모은다(split-brain 상관용).
+     * PRIMARY만 세지 않는 이유는 classify 주석 참고 — 복제본을 잃은 primary는 STANDALONE으로 보고되지만
+     * 여전히 쓰기를 받으므로, 정상 클러스터라면 쓰기 가능 노드는 정확히 하나여야 한다. 둘 이상이면 split-brain.
+     * 라벨이 없으면 형제 노드를 알 수 없어 상관 불가라 건너뛴다.
+     */
+    private void collectClusterWritable(DatabaseInstance instance, ReplicationState state,
+                                        Map<String, List<Long>> writablesByCluster) {
+        if (state == null || instance.getId() == null || classify(state.role()) != HaRole.WRITABLE) {
             return;
         }
         String cluster = instance.getClusterLabel();
         if (cluster == null || cluster.isBlank()) {
-            // 클러스터 선언이 있어야 "형제 노드"를 알 수 있다 — 없으면 split-brain을 판정할 근거가 없다.
             return;
         }
-        primariesByCluster.computeIfAbsent(cluster, k -> new ArrayList<>()).add(instance.getId());
+        writablesByCluster.computeIfAbsent(cluster, k -> new ArrayList<>()).add(instance.getId());
     }
 
     /**
@@ -594,7 +607,7 @@ public class OpsAlertDetector {
             List<String> names = primaryIds.stream().map(id -> byId.get(id).getName()).toList();
             DatabaseInstance rep = byId.get(primaryIds.get(0));
             List<String> findings = List.of(
-                    "split-brain 의심 — 클러스터 '%s'에 PRIMARY가 %d개입니다: %s. 하나만 주여야 합니다 — 펜싱·정족수를 확인하세요"
+                    "split-brain 의심 — 클러스터 '%s'에 쓰기 가능 노드가 %d개입니다: %s. 하나만 주여야 합니다 — 펜싱·정족수를 확인하세요"
                             .formatted(cluster, primaryIds.size(), String.join(", ", names)));
             if (notifySplitBrain(rep, findings)) {
                 lastAlerted.put(cdKey, now);   // 전송 성공 후에만 쿨다운 확정

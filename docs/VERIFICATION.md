@@ -3883,33 +3883,53 @@ DBTower는 failover를 **실행**하지 않는다. 정족수·펜싱을 가진 �
 감지 대상에 의존하면 안 된다" 원칙). DBTower가 할 일은 failover를 **관측·기록**하는 것이고, 그걸
 `OpsAlertDetector`에 얹었다. 대상 DB에 아무것도 쓰지 않고 기존 `replicationState()`의 역할만 읽는다.
 
-**두 가지 관측**
-- **역할 변경(failover 신호)**: 인스턴스 역할을 폴 사이에 추적해 PRIMARY↔STANDBY로 뒤집히면 알린다.
-  기종별 역할 문자열('PHYSICAL STANDBY'·'SECONDARY'·'REPLICA')을 STANDBY로, 'PRIMARY'를 PRIMARY로
-  환원(`classify`). 첫 관측은 기준선만 잡고 조용(데드락 첫관측 규율과 동일 — 등록 직후 전부를 역할
-  변경으로 오인하지 않는다). STANDALONE/미상(OTHER)으로의 전이는 failover가 아니라 무시.
-- **split-brain**: `cluster` 라벨로 인스턴스를 묶어 같은 클러스터에 PRIMARY가 둘 이상이면 알린다.
+**두 가지 관측** — 핵심은 역할을 **쓰기 가능(WRITABLE) vs 대기(STANDBY)**로 본다는 것이다.
+- **역할 변경(failover 신호)**: 폴 사이에 STANDBY↔WRITABLE로 뒤집히면 알린다(승격/강등). 첫 관측은
+  기준선만 잡고 조용(데드락 첫관측 규율과 동일). WRITABLE↔WRITABLE(예: primary가 복제본을 잃어
+  STANDALONE이 됨 — 쓰기 상태 그대로라 failover 아님)과 미상(UNKNOWN)은 무시.
+- **split-brain**: `cluster` 라벨로 묶어 같은 클러스터에 **쓰기 가능 노드가 둘 이상**이면 알린다.
   복제 토폴로지에서 가장 위험한 상태(양쪽이 각자 쓰기를 받아 데이터가 갈라짐). 라벨이 없으면
-  형제 노드를 알 수 없어 상관 자체가 불가라 건너뛴다(그동안 표시용뿐이던 `cluster` 라벨을 상관에 씀).
+  형제 노드를 알 수 없어 상관 불가라 건너뛴다(그동안 표시용뿐이던 `cluster` 라벨을 상관에 씀).
+
+**왜 PRIMARY가 아니라 WRITABLE인가 — 라이브가 잡은 설계 결함**
+
+처음엔 역할을 PRIMARY/STANDBY로 나눠 "PRIMARY 개수"로 split-brain을 셌다. 단위 테스트는
+`"PRIMARY"`/`"REPLICA"` 문자열로 전부 통과했다. 그런데 **실제 PG 앞에 세우니 안 먹혔다** — PG는
+연결된 복제본이 없는 primary를 **STANDALONE으로 보고**한다. 스탠바이를 승격하면 다운스트림이 없어
+role=STANDALONE이 되고, 원래 primary도 복제본을 잃으면 STANDALONE이 된다. 그래서 승격 직후
+양쪽이 다 STANDALONE이라 "PRIMARY 개수=0"으로 **실제 split-brain을 통째로 놓쳤다**. 승격/split-brain의
+본질은 "역할명이 PRIMARY인가"가 아니라 "쓰기를 받는가(=in-recovery가 아닌가)"다. PRIMARY·STANDALONE을
+WRITABLE로 묶어 다시 짰다. **안 재봤으면 안 드러날 결함이었다**(단위 테스트는 초록불이었다).
+
+**라이브 검증** — PG 스트리밍 복제(primary + standby)를 실제로 세워 등록하고, 진짜 페일오버를 일으켰다.
+
+```
+구성:  pgprim(15440, cluster=pg-cluster) <-스트리밍- pgstby(15441, cluster=pg-cluster)
+       DBTower에 pg-primary(id 44)·pg-standby(id 45)로 등록, ops-alert 폴 15s
+
+베이스라인:  44 role=PRIMARY   45 role=REPLICA   -> HA 경보 없음(정상: 쓰기 가능 1개)
+
+페일오버:    docker exec pgstby psql -c "SELECT pg_promote()"
+승격 후:     44 role=STANDALONE(복제본 잃음)   45 role=STANDALONE(승격됨)
+
+다음 폴에서 DBTower가 발사(로컬 수신기로 포착):
+  운영 경보 — pg-standby:
+    복제 역할 변경 감지(failover 신호): 승격(STANDBY -> 쓰기 가능) (role=STANDALONE)
+  HA 경보 — split-brain:
+    클러스터 'pg-cluster'에 쓰기 가능 노드가 2개입니다: pg-primary, pg-standby
+```
+
+44(WRITABLE->WRITABLE, 복제본만 잃음)는 정확히 조용했고 45(STANDBY->WRITABLE, 승격)만 역할 변경으로
+잡혔다. 둘 다 STANDALONE인데도 split-brain을 잡았다 — PRIMARY 개수였다면 0으로 놓쳤을 자리다.
 
 **설계 결정**
 - 복제 상태를 폴당 한 번만 읽어 지연·역할변경·split-brain 수집이 공유(대상에 중복 조회 안 함).
-- 쿨다운은 기존 패턴 재사용 — 역할변경은 인스턴스 단위, split-brain은 클러스터 단위.
-  둘 다 **전송이 성공해야 확정**(웹훅 실패 시 다음 폴에서 재시도, 경보 유실 없음).
-- 경보는 기존 `WebhookNotifier.sendEmbed` 경로라 `alert_history`에 SENT/FAILED로 남는다.
+- 쿨다운은 역할변경=인스턴스 단위, split-brain=클러스터 단위. 둘 다 **전송 성공 후 확정**
+  (웹훅 실패 시 다음 폴 재시도). 경보는 `WebhookNotifier.sendEmbed` 경로라 `alert_history`에 남는다.
 
-**검증(단위 테스트)** — `OpsAlertDetectorTest`, 27건 통과(신규 4건):
-```
-역할이_뒤집히면_failover_신호로_알리고_첫관측은_조용하다
-  detect(PRIMARY)      -> 조용 (기준선)
-  detect(PHYSICAL STANDBY) -> "복제 역할 변경 감지(failover 신호): PRIMARY -> STANDBY"
-역할이_그대로면_조용하다        detect(PRIMARY) x2 -> 발사 0
-한_클러스터에_PRIMARY가_둘이면_split_brain을_알린다
-  payments-a(PRIMARY) + payments-b(PRIMARY), 같은 cluster -> "split-brain 의심 ... payments-a, payments-b"
-한_클러스터에_PRIMARY가_하나면_split_brain이_아니다
-  payments-a(PRIMARY) + payments-b(REPLICA) -> 발사 0
-```
+**검증(단위 테스트)** — `OpsAlertDetectorTest` 29건 통과(신규 6건). 라이브가 잡은 결함을 못박은 둘:
+`복제본없이_승격돼_STANDALONE이_되어도_역할변경으로_잡는다`,
+`복제본잃은_primary와_승격된_standby가_둘다_STANDALONE이면_split_brain을_잡는다`.
 
-**정직 경계** — 이건 감지기 로직을 단위 테스트로 고정한 것이다. 실제 failover/split-brain 사건을
-라이브로 관측한 기록은 아니다(그러려면 실제 페일오버를 일으켜야 한다). DBTower는 그 사건을
-**관측·기록**할 뿐 **실행**하지 않는다는 경계는 코드와 이 절이 함께 지킨다.
+**경계** — DBTower는 이 사건을 **관측·기록**할 뿐 **실행(승격·펜싱·전환)하지 않는다**. 실행은 정족수·
+펜싱을 가진 클러스터 매니저 몫이다. 이 경계는 코드와 이 절이 함께 지킨다.

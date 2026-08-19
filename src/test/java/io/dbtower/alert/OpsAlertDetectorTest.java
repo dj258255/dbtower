@@ -207,6 +207,34 @@ class OpsAlertDetectorTest {
         verify(notifier, never()).sendEmbed(anyString(), any(), any());
     }
 
+    @Test
+    void 복제본없이_승격돼_STANDALONE이_되어도_역할변경으로_잡는다() {
+        // 라이브 검증에서 드러난 것: PG는 다운스트림 없는 primary를 STANDALONE으로 보고한다.
+        // 스탠바이를 승격하면 그 순간 role=STANDALONE이 되는데, 쓰기 가능이 됐으니 그것이 failover다.
+        // 'PRIMARY' 문자열만 보면 이 승격을 놓친다 — WRITABLE(쓰기 가능)로 봐야 잡힌다.
+        useInstanceWithId();
+        when(operator.replicationState()).thenReturn(ReplicationState.measured("REPLICA", 0, "recovery"));
+        detector.detect();   // 베이스라인: 스탠바이
+        verify(notifier, never()).sendEmbed(anyString(), any(), any());
+
+        when(operator.replicationState()).thenReturn(ReplicationState.standalone("복제 구성 없음"));
+        detector.detect();   // 승격 → STANDALONE(쓰기 가능) = 승격 신호
+        assertTrue(notifiedMessage().contains("역할 변경"));
+    }
+
+    @Test
+    void 복제본잃은_primary와_승격된_standby가_둘다_STANDALONE이면_split_brain을_잡는다() {
+        // 승격 직후의 실제 상태 — 원래 primary는 복제본을 잃어 STANDALONE, 승격된 노드도 STANDALONE.
+        // 'PRIMARY 개수'로 세면 0이라 split-brain을 놓친다. 쓰기 가능 노드 개수로 세야 2가 되어 잡힌다.
+        DatabaseInstance a = clusterNode(1L, "pg-a", "hostA:5432", "pgc");
+        DatabaseInstance b = clusterNode(2L, "pg-b", "hostB:5432", "pgc");
+        when(instanceRepository.findAll()).thenReturn(List.of(a, b));
+        when(operator.replicationState()).thenReturn(ReplicationState.standalone("복제 구성 없음"));
+
+        detector.detect();
+        assertTrue(notifiedMessage().contains("split-brain"));
+    }
+
     private DatabaseInstance clusterNode(long id, String name, String serverKey, String cluster) {
         DatabaseInstance n = Mockito.mock(DatabaseInstance.class);
         when(n.getId()).thenReturn(id);
