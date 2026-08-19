@@ -4032,3 +4032,36 @@ GET /api/instances/47/overview  (mysql-replica)
 **프론트 연결** — 정적 SPA에 종합 카드를 붙였다. 인스턴스를 고르면 `selectInstance`가 `loadOverview()`로
 `/overview`를 불러 result-panel 최상단에 카드를 그린다(정체+헬스 등급+복제/RPO+백업 한 줄). 동적 값은
 전부 `esc()` 경유(프레임워크·빌드체인 없음, 저장소 규약 유지). app.js `node --check` 통과.
+
+### 123.21 Oracle 동기 보호수준 정직 표기 — protection_mode vs protection_level
+
+SQL(123.1)·PG(123.18)·MySQL(123.19)에 이은 마지막 SQL 계열 — Oracle의 "설정 vs 지금"이다.
+Oracle은 `v$database`에 **protection_mode(설정된 보호수준)**와 **protection_level(지금 실제 수준)**을
+따로 둔다. MAXIMUM AVAILABILITY/PROTECTION은 동기(무손실) 설정인데, sync 스탠바이가 끊기면
+Oracle은 protection_level을 낮춰(RESYNCHRONIZATION/MAXIMUM PERFORMANCE) **조용히 async로 저하**한다.
+운영자는 protection_mode만 보고 무손실이라 믿지만 실제 커밋은 async — 전형적 침묵이다.
+
+`OracleOperator.replicationState()`의 primary 경로에서 둘을 함께 읽어, protection_mode가 동기인데
+protection_level이 그에 못 미치면 `UNAVAILABLE`로 강등한다.
+
+**라이브 검증** — OCI VM에 Data Guard를 다시 세우고(Primary BOSTON + 물리 Standby LONDON,
+redo transport를 **LGWR SYNC AFFIRM**으로, MAX AVAILABILITY 설정) 두 상태를 오갔다:
+
+```
+[동기 정상]  standby 접속·동기
+  서버:    protection_mode=MAXIMUM AVAILABILITY  protection_level=MAXIMUM AVAILABILITY
+  DBTower: NOT_APPLICABLE  "protection=MAXIMUM AVAILABILITY — ..."(정상)
+
+[내구성 저하]  sync standby(LONDON) shutdown + 프라이머리 커밋 → protection_level 강등
+  서버:    protection_mode=MAXIMUM AVAILABILITY  protection_level=RESYNCHRONIZATION
+  DBTower: UNAVAILABLE  "protection=MAXIMUM AVAILABILITY protection_level=RESYNCHRONIZATION
+                        — 설정은 동기(MAXIMUM AVAILABILITY)인데 현재 수준 미달(sync 스탠바이 미접속 — 내구성 저하)"
+
+[회복]  standby 재기동·resync
+  서버:    protection_level=MAXIMUM AVAILABILITY
+  DBTower: NOT_APPLICABLE (정상 복귀)
+```
+
+이로써 **동기 내구성 정직 표기가 SQL 계열 4기종(SQL Server·PostgreSQL·MySQL·Oracle) 전부** 완성됐다.
+MongoDB는 동기 "설정" 개념 대신 write concern(w:majority)이라, 과반 상실이 곧 위험이고 이미
+`UNAVAILABLE`("과반 상실")로 잡힌다(123.1 데모 스택 실측) — 별도 플래그가 필요 없는 다른 모델이다.

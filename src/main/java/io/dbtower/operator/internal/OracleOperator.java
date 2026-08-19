@@ -1017,16 +1017,31 @@ public class OracleOperator extends AbstractJdbcOperator {
     /** 복제 상태 — Data Guard 기준의 데이터베이스 역할. 미구성 단독 인스턴스도 PRIMARY로 표시된다 */
     @Override
     public ReplicationState replicationState() {
-        String sql = "SELECT database_role, open_mode, protection_mode FROM v$database";
+        // protection_mode(설정된 보호 수준)와 protection_level(지금 실제 수준)을 함께 본다 —
+        // 둘이 다르면 설정보다 낮은 수준으로 저하 운영 중이라는 뜻이다(동기 정직 표기의 Oracle판).
+        String sql = "SELECT database_role, open_mode, protection_mode, protection_level FROM v$database";
         try {
             return jdbc().query(sql, rs -> {
                 if (!rs.next()) {
                     return ReplicationState.unavailable("UNKNOWN", "v$database 조회 결과 없음");
                 }
                 String role = rs.getString("database_role");
-                String detail = "open_mode=%s protection=%s".formatted(
-                        rs.getString("open_mode"), rs.getString("protection_mode"));
+                String protMode = rs.getString("protection_mode");
+                String protLevel = rs.getString("protection_level");
+                String detail = "open_mode=%s protection=%s".formatted(rs.getString("open_mode"), protMode);
                 if ("PRIMARY".equalsIgnoreCase(role)) {
+                    // 동기 내구성 정직 표기 — MAXIMUM AVAILABILITY/PROTECTION은 동기(무손실) 설정인데,
+                    // sync 스탠바이가 끊기면 Oracle은 protection_level을 낮춰 조용히 async로 저하한다
+                    // (MAX AVAILABILITY는 MAXIMUM PERFORMANCE/RESYNCHRONIZATION으로). protection_mode와
+                    // protection_level이 갈리면 "설정은 동기인데 지금 async"다 — SQL/PG/MySQL과 같은 규율.
+                    boolean syncConfigured = protMode != null
+                            && (protMode.toUpperCase().contains("AVAILABILITY")
+                                || protMode.toUpperCase().contains("PROTECTION"));
+                    if (syncConfigured && protLevel != null && !protLevel.equalsIgnoreCase(protMode)) {
+                        return ReplicationState.unavailable(role, detail + " protection_level=" + protLevel
+                                + " — 설정은 동기(" + protMode + ")인데 현재 수준 미달"
+                                + "(sync 스탠바이 미접속 — 내구성 저하)");
+                    }
                     return ReplicationState.standalone(
                             "database_role=PRIMARY " + detail + " — Data Guard 스탠바이가 있으면 그쪽을 등록해야 지연이 보인다");
                 }
