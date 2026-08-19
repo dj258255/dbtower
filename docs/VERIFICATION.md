@@ -3933,3 +3933,34 @@ WRITABLE로 묶어 다시 짰다. **안 재봤으면 안 드러날 결함이었�
 
 **경계** — DBTower는 이 사건을 **관측·기록**할 뿐 **실행(승격·펜싱·전환)하지 않는다**. 실행은 정족수·
 펜싱을 가진 클러스터 매니저 몫이다. 이 경계는 코드와 이 절이 함께 지킨다.
+
+### 123.18 PostgreSQL 동기 복제 정직 표기 — "동기 설정 vs 지금 동기인가"
+
+MSSQL은 이미 AlwaysOn 동기화 상태가 비정상이면 `UNAVAILABLE`로 강등한다(123.1, `NOT SYNCHRONIZED`).
+같은 규율을 PostgreSQL로 확장했다. `synchronous_standby_names`가 설정됐는데 실제로 동기(sync/quorum)
+상태인 스탠바이가 0이면, "동기 설정"과 "지금 동기인가"가 어긋난 것이다 — 커밋이 사실상 async로
+확정되고 있어 내구성이 설정보다 낮다. 운영자는 동기라 믿는데 아닌, 전형적인 침묵 상태다.
+A29/R01의 교훈("동기 설정과 지금 동기는 다르다")을 관제 신호로 만든 것.
+
+`PostgresOperator.replicationState()`의 primary 경로에 `pg_stat_replication`의 sync_state 집계와
+`synchronous_standby_names` 설정을 더했다. 설정됐는데 sync 스탠바이 0이면 `UNAVAILABLE`로 강등한다.
+
+**라이브 검증** — pgprim(primary) + pgstby(standby, walreceiver)를 세우고 세 상태를 오가며 실측:
+
+```
+[동기 설정 + 실제 동기]  synchronous_standby_names='*'
+  서버:    walreceiver sync=sync
+  DBTower: MEASURED  "replicas=1 sync=1/1 — 전 스탠바이 재생 완료"
+
+[동기 설정인데 매칭 스탠바이 없음]  synchronous_standby_names='ghost'   <- 내구성 저하
+  서버:    walreceiver sync=async
+  DBTower: UNAVAILABLE  "synchronous_standby_names='ghost' 인데 동기 상태 스탠바이 0
+                        — 설정은 동기인데 지금 async로 커밋(내구성 저하)"
+
+[async]  synchronous_standby_names=''
+  서버:    walreceiver sync=async
+  DBTower: MEASURED  "replicas=1 (async 복제) — 전 스탠바이 재생 완료"
+```
+
+가운데가 핵심이다 — 설정만 보면 동기라 안심하지만 실제로는 async로 커밋되던 자리를,
+DBTower가 `UNAVAILABLE`(=복제는 있는데 정상 아님)로 드러내 기존 복제 알림 게이트에 태운다.

@@ -1471,7 +1471,9 @@ public class PostgresOperator extends AbstractJdbcOperator {
             return jdbc().query("""
                     SELECT COUNT(*) AS replicas,
                            MAX(EXTRACT(EPOCH FROM replay_lag)) AS worst_replay_lag,
-                           COUNT(replay_lag) AS lag_known
+                           COUNT(replay_lag) AS lag_known,
+                           COUNT(*) FILTER (WHERE sync_state IN ('sync', 'quorum')) AS sync_replicas,
+                           (SELECT current_setting('synchronous_standby_names')) AS sync_names
                     FROM pg_stat_replication
                     """,
                     rs -> {
@@ -1480,14 +1482,28 @@ public class PostgresOperator extends AbstractJdbcOperator {
                         if (replicas == 0) {
                             return ReplicationState.standalone("복제 구성 없음");
                         }
+                        // 동기 복제 정직 표기 — synchronous_standby_names가 설정됐는데 실제로 동기(sync/quorum)
+                        // 상태인 스탠바이가 0이면, "동기 설정"과 "지금 동기인가"가 어긋난 것이다. 커밋이 사실상
+                        // async로 확정되고 있어 내구성이 설정보다 낮다. MSSQL의 NOT SYNCHRONIZED 강등과 같은
+                        // 규율(A29/R01: "동기 설정 vs 지금 동기인가는 다르다"). 이 상태는 조용히 넘길 신호가 아니다.
+                        String syncNames = rs.getString("sync_names");
+                        boolean syncConfigured = syncNames != null && !syncNames.isBlank();
+                        int syncReplicas = rs.getInt("sync_replicas");
+                        if (syncConfigured && syncReplicas == 0) {
+                            return ReplicationState.unavailable("PRIMARY", "replicas=" + replicas
+                                    + " synchronous_standby_names='" + syncNames
+                                    + "' 인데 동기 상태 스탠바이 0 — 설정은 동기인데 지금 async로 커밋(내구성 저하)");
+                        }
+                        String syncInfo = syncConfigured
+                                ? " sync=" + syncReplicas + "/" + replicas : " (async 복제)";
                         // replay_lag는 스탠바이가 완전히 따라잡았거나 아직 피드백이 없으면 NULL이다.
                         // 연결된 스탠바이가 있는데 전부 NULL이면 "지연 0"이 아니라 "따라잡음"으로 본다.
                         if (rs.getInt("lag_known") == 0) {
                             return ReplicationState.measured("PRIMARY", 0,
-                                    "replicas=" + replicas + " — 전 스탠바이 재생 완료(replay_lag 없음)");
+                                    "replicas=" + replicas + syncInfo + " — 전 스탠바이 재생 완료(replay_lag 없음)");
                         }
                         return ReplicationState.measured("PRIMARY", rs.getDouble("worst_replay_lag"),
-                                "replicas=" + replicas + " — 가장 뒤처진 스탠바이의 replay_lag");
+                                "replicas=" + replicas + syncInfo + " — 가장 뒤처진 스탠바이의 replay_lag");
                     });
         } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 복제 상태 조회 실패: " + e.getMessage(), e);
