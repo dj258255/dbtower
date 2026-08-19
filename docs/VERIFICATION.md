@@ -3964,3 +3964,32 @@ A29/R01의 교훈("동기 설정과 지금 동기는 다르다")을 관제 신�
 
 가운데가 핵심이다 — 설정만 보면 동기라 안심하지만 실제로는 async로 커밋되던 자리를,
 DBTower가 `UNAVAILABLE`(=복제는 있는데 정상 아님)로 드러내 기존 복제 알림 게이트에 태운다.
+
+### 123.19 MySQL 반동기 복제 정직 표기 — "반동기 설정인데 지금 async"
+
+PostgreSQL 동기 정직 표기(123.18)와 같은 규율을 MySQL 반동기(semisync)로 확장했다. MySQL 반동기는
+소스가 커밋 ack를 기다리다 `rpl_semi_sync_source_timeout`을 넘기면 **async로 폴백**하고
+`Rpl_semi_sync_source_status`가 OFF가 된다. 이때 반동기의 "유실 0" 약속이 깨진 상태인데(R01: 폴백
+창에서 유실이 되살아난다), 설정(`rpl_semi_sync_source_enabled=ON`)만 보면 여전히 반동기라 안심한다.
+
+`MySqlOperator.replicationState()`의 primary 경로에서 `rpl_semi_sync_source_enabled`와
+`Rpl_semi_sync_source_status`를 읽어, 설정은 ON인데 상태가 OFF면 `UNAVAILABLE`로 강등한다.
+플러그인 미설치면 상태 행이 없어 null → 반동기 미사용으로 본다("없음"과 "OFF"를 구분).
+
+**라이브 검증** — mysqlprim(source) + mysqlrep(replica)에 반동기를 세우고(timeout 3s) 세 상태 실측:
+
+```
+[반동기 ON]  replica 정상, Rpl_semi_sync_source_status=ON
+  DBTower: UNSUPPORTED  "replicas=1 반동기=ON — SHOW REPLICAS는 지연을 제공하지 않는다"
+
+[반동기 깨짐]  replica 중단 + source에 쓰기 -> 3s 타임아웃 -> async 폴백, status=OFF   <- 내구성 저하
+  DBTower: UNAVAILABLE  "replicas=1 — 반동기 설정(rpl_semi_sync_source_enabled=ON)인데
+                        Rpl_semi_sync_source_status=OFF (타임아웃으로 async 폴백 — 내구성 저하)"
+
+[회복]  replica 반동기 재활성 + IO 스레드 재시작 + 쓰기 -> status=ON
+  DBTower: UNSUPPORTED  "replicas=1 반동기=ON — ..."
+```
+
+가운데가 핵심 — 반동기를 켰지만 실제로는 async로 커밋되고 있던 자리(유실 0 약속이 깨진)를
+DBTower가 `UNAVAILABLE`로 드러내 복제 알림 게이트에 태운다. PG(동기)와 MySQL(반동기) 모두
+"설정 vs 지금 실제"를 구분하게 됐다(MSSQL은 123.1에서 이미).

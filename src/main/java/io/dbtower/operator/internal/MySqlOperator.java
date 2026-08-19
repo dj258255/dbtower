@@ -987,20 +987,46 @@ public class MySqlOperator extends AbstractJdbcOperator {
             if (asReplica != null) {
                 return asReplica;
             }
+            // 반동기(semisync) 정직 표기 — 소스에 반동기가 켜져 있는데 상태가 OFF면 타임아웃으로 async
+            // 폴백한 것이다("설정은 반동기인데 지금 async" = 내구성 저하). 반동기의 유실 0 약속이 깨진
+            // 상태이므로 조용히 넘길 신호가 아니다(R01: 폴백 창에서 유실이 되살아난다). 플러그인 미설치면
+            // 상태/변수 행이 없어 null → 반동기 미사용으로 본다. MySQL 8.0.26+는 source, 그 이전은 master.
+            String semiEnabled = mysqlShowValue("SHOW GLOBAL VARIABLES LIKE 'rpl_semi_sync_source_enabled'");
+            String semiStatus = mysqlShowValue("SHOW GLOBAL STATUS LIKE 'Rpl_semi_sync_source_status'");
             return jdbc().query("SHOW REPLICAS", rs -> {
                 int replicas = 0;
                 while (rs.next()) {
                     replicas++;
                 }
+                if (replicas == 0) {
+                    return ReplicationState.standalone("복제 구성 없음");
+                }
+                boolean semiOn = "ON".equalsIgnoreCase(semiEnabled);
+                if (semiOn && "OFF".equalsIgnoreCase(semiStatus)) {
+                    return ReplicationState.unavailable("PRIMARY", "replicas=" + replicas
+                            + " — 반동기 설정(rpl_semi_sync_source_enabled=ON)인데 Rpl_semi_sync_source_status=OFF"
+                            + " (타임아웃으로 async 폴백 — 내구성 저하)");
+                }
                 // SHOW REPLICAS는 연결된 레플리카 목록만 주고 지연을 주지 않는다. 예전에는 0을 실어서
                 // "지연 없음"으로 읽혔는데, 프라이머리만 등록한 환경에서는 임계를 영원히 못 넘었다.
-                return replicas > 0
-                        ? ReplicationState.unsupported("PRIMARY", "replicas=" + replicas
-                                + " — SHOW REPLICAS는 지연을 제공하지 않는다(레플리카 쪽을 등록해야 지연이 보인다)")
-                        : ReplicationState.standalone("복제 구성 없음");
+                String semiInfo = semiOn ? " 반동기=ON" : " (async 복제)";
+                return ReplicationState.unsupported("PRIMARY", "replicas=" + replicas + semiInfo
+                        + " — SHOW REPLICAS는 지연을 제공하지 않는다(레플리카 쪽을 등록해야 지연이 보인다)");
             });
         } catch (DataAccessException e) {
             throw new OperatorException("MySQL 복제 상태 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * SHOW ... LIKE '이름'의 Value 컬럼을 읽는다(반동기 상태/변수용). 행이 없으면(플러그인 미설치 등)
+     * null을 돌려준다 — "없음"과 "OFF"를 구분하기 위해서다. sql은 코드 내 고정 리터럴이라 주입 위험이 없다.
+     */
+    private String mysqlShowValue(String sql) {
+        try {
+            return jdbc().query(sql, rs -> rs.next() ? rs.getString("Value") : null);
+        } catch (DataAccessException e) {
+            return null;
         }
     }
 
