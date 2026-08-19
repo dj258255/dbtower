@@ -3875,3 +3875,41 @@ MongoDB     62|SENT 복제 지연 role=PRIMARY   lag=100.0s
 **실측이 없었으면 드러나지 않았을 결함이 기종마다 하나씩 나왔다** — PG 프라이머리 `0` 고정,
 MySQL `NULL` 뭉갬, MSSQL 복제본 수 오표기, Oracle 빈문자열=NULL. 넷 다 코드는 정상으로 보였고
 단위 테스트(H2/목)는 초록불이었다. "복제를 걸어 지연을 잰 것이 없다"는 이제 5기종 전부에 무효다.
+
+### 123.17 HA 관측 — 역할 변경(failover) 감지 + split-brain 감지
+
+DBTower는 failover를 **실행**하지 않는다. 정족수·펜싱을 가진 클러스터 매니저(WSFC/Pacemaker/Patroni)
+몫이다. 감지기와 실행기가 같은 단일 지점이면 그게 죽을 때 둘 다 잃기 때문이다(이 저장소의 "감지기가
+감지 대상에 의존하면 안 된다" 원칙). DBTower가 할 일은 failover를 **관측·기록**하는 것이고, 그걸
+`OpsAlertDetector`에 얹었다. 대상 DB에 아무것도 쓰지 않고 기존 `replicationState()`의 역할만 읽는다.
+
+**두 가지 관측**
+- **역할 변경(failover 신호)**: 인스턴스 역할을 폴 사이에 추적해 PRIMARY↔STANDBY로 뒤집히면 알린다.
+  기종별 역할 문자열('PHYSICAL STANDBY'·'SECONDARY'·'REPLICA')을 STANDBY로, 'PRIMARY'를 PRIMARY로
+  환원(`classify`). 첫 관측은 기준선만 잡고 조용(데드락 첫관측 규율과 동일 — 등록 직후 전부를 역할
+  변경으로 오인하지 않는다). STANDALONE/미상(OTHER)으로의 전이는 failover가 아니라 무시.
+- **split-brain**: `cluster` 라벨로 인스턴스를 묶어 같은 클러스터에 PRIMARY가 둘 이상이면 알린다.
+  복제 토폴로지에서 가장 위험한 상태(양쪽이 각자 쓰기를 받아 데이터가 갈라짐). 라벨이 없으면
+  형제 노드를 알 수 없어 상관 자체가 불가라 건너뛴다(그동안 표시용뿐이던 `cluster` 라벨을 상관에 씀).
+
+**설계 결정**
+- 복제 상태를 폴당 한 번만 읽어 지연·역할변경·split-brain 수집이 공유(대상에 중복 조회 안 함).
+- 쿨다운은 기존 패턴 재사용 — 역할변경은 인스턴스 단위, split-brain은 클러스터 단위.
+  둘 다 **전송이 성공해야 확정**(웹훅 실패 시 다음 폴에서 재시도, 경보 유실 없음).
+- 경보는 기존 `WebhookNotifier.sendEmbed` 경로라 `alert_history`에 SENT/FAILED로 남는다.
+
+**검증(단위 테스트)** — `OpsAlertDetectorTest`, 27건 통과(신규 4건):
+```
+역할이_뒤집히면_failover_신호로_알리고_첫관측은_조용하다
+  detect(PRIMARY)      -> 조용 (기준선)
+  detect(PHYSICAL STANDBY) -> "복제 역할 변경 감지(failover 신호): PRIMARY -> STANDBY"
+역할이_그대로면_조용하다        detect(PRIMARY) x2 -> 발사 0
+한_클러스터에_PRIMARY가_둘이면_split_brain을_알린다
+  payments-a(PRIMARY) + payments-b(PRIMARY), 같은 cluster -> "split-brain 의심 ... payments-a, payments-b"
+한_클러스터에_PRIMARY가_하나면_split_brain이_아니다
+  payments-a(PRIMARY) + payments-b(REPLICA) -> 발사 0
+```
+
+**정직 경계** — 이건 감지기 로직을 단위 테스트로 고정한 것이다. 실제 failover/split-brain 사건을
+라이브로 관측한 기록은 아니다(그러려면 실제 페일오버를 일으켜야 한다). DBTower는 그 사건을
+**관측·기록**할 뿐 **실행**하지 않는다는 경계는 코드와 이 절이 함께 지킨다.

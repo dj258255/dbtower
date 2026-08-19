@@ -144,6 +144,80 @@ class OpsAlertDetectorTest {
         assertTrue(notifiedMessage().contains("복제 상태를 읽지 못했습니다"));
     }
 
+    // ---------- HA 관측: 역할 변경(failover) + split-brain ----------
+
+    @Test
+    void 역할이_뒤집히면_failover_신호로_알리고_첫관측은_조용하다() {
+        useInstanceWithId();
+        // 첫 관측 PRIMARY: 기준선만 잡고 조용(등록 직후 전부를 역할 변경으로 오인하지 않는다)
+        when(operator.replicationState()).thenReturn(ReplicationState.measured("PRIMARY", 0, "healthy"));
+        detector.detect();
+        verify(notifier, never()).sendEmbed(anyString(), any(), any());
+
+        // 다음 폴에서 STANDBY로 뒤집힘 = failover가 일어난 신호(기종 문자열 'PHYSICAL STANDBY'도 STANDBY로 본다)
+        when(operator.replicationState()).thenReturn(ReplicationState.measured("PHYSICAL STANDBY", 0, "recovery"));
+        detector.detect();
+        String message = notifiedMessage();
+        assertTrue(message.contains("역할 변경"));
+        assertTrue(message.contains("failover"));
+    }
+
+    @Test
+    void 역할이_그대로면_조용하다() {
+        useInstanceWithId();
+        when(operator.replicationState()).thenReturn(ReplicationState.measured("PRIMARY", 0, "healthy"));
+        detector.detect();
+        detector.detect(); // 같은 역할 반복 — 역할 변경 아님
+        verify(notifier, never()).sendEmbed(anyString(), any(), any());
+    }
+
+    @Test
+    void 한_클러스터에_PRIMARY가_둘이면_split_brain을_알린다() {
+        // 같은 cluster 라벨, 서로 다른 host(각자 서버 대표), 둘 다 PRIMARY = split-brain
+        DatabaseInstance a = clusterNode(1L, "payments-a", "hostA:5432", "payments");
+        DatabaseInstance b = clusterNode(2L, "payments-b", "hostB:5432", "payments");
+        when(instanceRepository.findAll()).thenReturn(List.of(a, b));
+        when(operator.replicationState()).thenReturn(ReplicationState.measured("PRIMARY", 0, "healthy"));
+
+        detector.detect();
+        String message = notifiedMessage();
+        assertTrue(message.contains("split-brain"));
+        assertTrue(message.contains("payments-a"));
+        assertTrue(message.contains("payments-b"));
+    }
+
+    @Test
+    void 한_클러스터에_PRIMARY가_하나면_split_brain이_아니다() {
+        DatabaseInstance a = clusterNode(1L, "payments-a", "hostA:5432", "payments");
+        DatabaseInstance b = clusterNode(2L, "payments-b", "hostB:5432", "payments");
+        when(instanceRepository.findAll()).thenReturn(List.of(a, b));
+        // a는 PRIMARY, b는 STANDBY(정상 토폴로지). operatorFactory는 인스턴스별로 다른 operator를 준다.
+        DbmsOperator opA = Mockito.mock(DbmsOperator.class);
+        DbmsOperator opB = Mockito.mock(DbmsOperator.class);
+        when(opA.health()).thenReturn(io.dbtower.registry.HealthStatus.up("16.1", 3));
+        when(opB.health()).thenReturn(io.dbtower.registry.HealthStatus.up("16.1", 3));
+        when(opA.activeSessions(anyInt())).thenReturn(List.of());
+        when(opB.activeSessions(anyInt())).thenReturn(List.of());
+        when(opA.replicationState()).thenReturn(ReplicationState.measured("PRIMARY", 0, "healthy"));
+        when(opB.replicationState()).thenReturn(ReplicationState.measured("REPLICA", 0, "recovery"));
+        when(operatorFactory.create(a)).thenReturn(opA);
+        when(operatorFactory.create(b)).thenReturn(opB);
+
+        detector.detect();
+        verify(notifier, never()).sendEmbed(anyString(), any(), any());
+    }
+
+    private DatabaseInstance clusterNode(long id, String name, String serverKey, String cluster) {
+        DatabaseInstance n = Mockito.mock(DatabaseInstance.class);
+        when(n.getId()).thenReturn(id);
+        when(n.getName()).thenReturn(name);
+        when(n.getCreatedAt()).thenReturn(java.time.LocalDateTime.now());
+        when(n.isCollectionEnabled()).thenReturn(true);
+        when(n.serverKey()).thenReturn(serverKey);
+        when(n.getClusterLabel()).thenReturn(cluster);
+        return n;
+    }
+
     @Test
     void 인스턴스가_죽으면_알린다() {
         // 감사에서 드러난 가장 큰 공백 — 웹훅 발사 지점 9곳 어디에도 다운 알림이 없었다.
