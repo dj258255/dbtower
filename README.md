@@ -40,6 +40,10 @@ DBA는 같은 질문에 반복해서 답하게 됩니다. 정형화된 운영 �
 | 회귀 자동 감지 | 신규 쿼리·QPS 급증·레이턴시 회귀·rows/call 폭증을 폴러가 잡아 Discord/Slack 웹훅 — Discord는 리치 embed(맥락·AI 분석·진단 딥링크 구조화), Slack·미설정은 텍스트 폴백 |
 | 플랜 변경 감지 | "쿼리는 그대로인데 느려짐 = 옵티마이저가 플랜을 갈아탐"을 5기종에서 확인 — 회귀 쿼리만 계획 shape 비교(PG GENERIC_PLAN·MySQL 샘플·MSSQL Query Store·Oracle plan_hash_value·Mongo profile) |
 | 복제 슬롯 감시 | 비활성 슬롯이 WAL을 무한 보존해 디스크를 채우는 사각을 잡는다(PG) — pg_stat_replication이 못 보는 lost/unreserved/보존량 |
+| 복제 지연 실측 | 5기종 전부 실제 복제를 걸어 apply/replay 지연을 잰다(MEASURED) — MySQL·PG·Mongo·MSSQL AlwaysOn·Oracle Data Guard. "못 잰다"와 "지금 못 읽었다"를 같은 값으로 뭉개지 않는다(3-값) |
+| HA 관측 | failover를 실행하지 않고 관측한다 — 역할이 뒤집히면(승격/강등) failover 신호로, 같은 클러스터에 쓰기 가능 노드가 둘이면 split-brain으로 경보. 실행(펜싱·정족수)은 클러스터 매니저 몫 |
+| 동기 내구성 정직 표기 | "설정은 동기인데 지금 실제로는 async"를 SQL 4기종에서 드러낸다 — PG synchronous_standby_names·MySQL 반동기 폴백·MSSQL NOT SYNCHRONIZED·Oracle protection_level 저하. 운영자가 무손실이라 믿는 침묵을 잡는다 |
+| 대상별 운영 종합 | 정체(기종·환경·클러스터)+헬스 스코어+복제(RPO 노출)+백업을 한 대상에 모아 선택 즉시 카드로 — DBRE의 "관측을 DB 대상 단위에 귀속" |
 | 백업 정책 | 추상 정책을 기종별 실행 방식으로 번역 — (인스턴스, 타입)별 병행 스케줄(FULL 앵커 6시간 + LOG 체인 15분이 정석), 신선도는 앵커 기준(LOG 성공이 FULL 실패를 못 가림) + S3 호환 원격 보관(3-2-1 오프사이트) |
 | 통합 모니터링 | CPU·Connections 그래프 내장(Prometheus exporter 직접 조회, 미수집 사유 정직 표기) + Grafana 연동 + 복제 상태 통합 뷰 |
 | 웹 콘솔 | QPS·CPU 그래프 드래그로 구간 선택 -> 증감 표 -> 클릭 한 번에 EXPLAIN + AI 분석 |

@@ -27,7 +27,7 @@ src/main/java/io/dbtower/    Spring Modulith 모듈 15개 (순환·internal 침�
 ├── registry/    인스턴스 등록·헬스체크
 ├── insight/     스냅샷 수집, 시점 비교, 활동 그래프, 파라미터/스키마 diff
 ├── analysis/    실행계획 규칙 기반 분석 + AI 1차 분석 + 심층 진단
-├── alert/       회귀·이상·운영 감지, 웹훅, 플랜 변경 감지, DB팀 문의
+├── alert/       회귀·이상·운영 감지(복제 지연·역할변경(failover)·split-brain 관측 포함), 웹훅, 플랜 변경 감지, DB팀 문의
 ├── backup/      백업 정책·실행·복원 검증·원격 보관·신선도
 ├── advisor/     운영 모범규칙 자동 점검 (일일 스윕)
 ├── audit/       상태변경·로그인·월권 감사 기록
@@ -35,7 +35,7 @@ src/main/java/io/dbtower/    Spring Modulith 모듈 15개 (순환·internal 침�
 ├── mcp/         MCP 서버 (프로토콜 코어 + stdio/HTTP 전송) + 자연어 진단
 ├── onlineddl/   gh-ost 온라인 스키마 변경 (MySQL)
 ├── review/      스키마 변경 리뷰 게이트 (판정·승인·기록, 실행은 안 함)
-├── score/       통합 헬스 스코어
+├── score/       통합 헬스 스코어 + 대상별 운영 종합(overview: 정체·건강·복제·백업을 한 대상에)
 ├── security/    인증·인가, 비밀번호 암호화, API 토큰
 └── slo/         SLO/에러 버짓
 src/main/resources/static/   웹 콘솔 (의존성 0 정적 SPA)

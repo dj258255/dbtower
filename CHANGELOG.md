@@ -8,6 +8,32 @@
 
 ## [Unreleased]
 
+HA 관측을 관제 plane의 경계 안에서 완성한 릴리즈 준비분. DBTower는 failover를 **실행하지 않고
+관측·기록**한다(실행은 정족수·펜싱을 가진 클러스터 매니저 몫). 그리고 "설정된 동기 vs 지금 실제
+동기"의 침묵을 SQL 4기종 전부에서 드러내고, 흩어진 관측을 대상 단위로 모으는 overview를 붙였다.
+모두 라이브로 재현·검증(docs/VERIFICATION.md 123.16~123.21), 대상 DB에 쓰기 0. 테스트 557건.
+
+### Added
+- **HA 관측 — 역할 변경(failover)·split-brain 감지**(OpsAlertDetector): 인스턴스 역할을 폴 사이에
+  추적해 STANDBY↔쓰기가능(WRITABLE)으로 뒤집히면 failover 신호로, 같은 cluster 라벨에 쓰기 가능
+  노드가 둘 이상이면 split-brain으로 알린다. 대상에 쓰기 없이 `replicationState()`의 역할만 읽는다.
+  실제 PG 페일오버로 라이브 검증하다 설계 결함(PG는 복제본 없는 primary를 STANDALONE으로 보고 →
+  PRIMARY 개수로 세면 split-brain을 놓침)을 잡아 쓰기가능 모델로 수정(123.17).
+- **대상별 운영 종합(overview) — `GET /api/instances/{id}/overview`**: 정체(이름·기종·환경·클러스터)
+  + 헬스 스코어 + 복제(역할·지연·**RPO 노출**) + 백업 신선도를 한 객체로 모은다(DBRE의 "관측을 대상
+  단위에 귀속"). score 모듈에 뒀다(이미 집계 허브라 순환 없이 operator만 추가). 읽기 전용 집계 —
+  조치는 실행하지 않는다. 프론트 SPA 최상단에 종합 카드로 연결(123.20).
+- **동기 내구성 정직 표기 — "설정된 동기 vs 지금 실제"를 SQL 4기종에서**: PostgreSQL
+  `synchronous_standby_names` 설정인데 sync 스탠바이 0(123.18), MySQL 반동기가 타임아웃으로 async
+  폴백(`Rpl_semi_sync_source_status=OFF`, 123.19), Oracle `protection_mode != protection_level`
+  (MAX AVAILABILITY인데 RESYNCHRONIZATION 저하, 123.21)을 각각 `UNAVAILABLE`로 강등. MSSQL은
+  이미 NOT SYNCHRONIZED 강등(123.1). MongoDB는 write concern 모델이라 과반 상실이 이미 잡힘.
+
+### Fixed
+- **Oracle 복제 지연 MEASURED가 구조적으로 불가능했던 결함**: apply lag 쿼리의 `value != ''`가
+  Oracle에선 `value != NULL`(빈 문자열=NULL) → 항상 UNKNOWN → 정상값이어도 0행 → 늘 UNAVAILABLE.
+  `value IS NOT NULL` 하나로 충분. 실제 Data Guard 앞에 세워야만 드러난 침묵(123.15).
+
 ## [1.2.0] - 2026-07-19
 
 DBTower를 실제 운영 도구로 밀어붙인 릴리즈. 현업 DBA의 병목이 남는 다섯 지점(설정 드리프트·스키마 변경 리뷰 게이트·인덱스 사용 통계·인시던트·월간 리포트)을 기능으로 끊고, 웹 콘솔을 좌측 사이드바+모니터링 서브내비 구조로 전면 개편했으며, lakehouse 장기 분석계와 양방향 루프를 닫았다. 모듈 15개, MCP 도구 16종, 테스트 515건 CI, VERIFICATION 117개 절.
