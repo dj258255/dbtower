@@ -987,25 +987,34 @@ public class MySqlOperator extends AbstractJdbcOperator {
             if (asReplica != null) {
                 return asReplica;
             }
-            // 반동기(semisync) 정직 표기 — 소스에 반동기가 켜져 있는데 상태가 OFF면 타임아웃으로 async
-            // 폴백한 것이다("설정은 반동기인데 지금 async" = 내구성 저하). 반동기의 유실 0 약속이 깨진
-            // 상태이므로 조용히 넘길 신호가 아니다(R01: 폴백 창에서 유실이 되살아난다). 플러그인 미설치면
-            // 상태/변수 행이 없어 null → 반동기 미사용으로 본다. MySQL 8.0.26+는 source, 그 이전은 master.
-            String semiEnabled = mysqlShowValue("SHOW GLOBAL VARIABLES LIKE 'rpl_semi_sync_source_enabled'");
-            String semiStatus = mysqlShowValue("SHOW GLOBAL STATUS LIKE 'Rpl_semi_sync_source_status'");
+            // 반동기(semisync) 정직 표기 — 소스에 반동기가 켜져 있는데 상태가 ON이 아니면 타임아웃으로
+            // async 폴백한 것이다("설정은 반동기인데 지금 async" = 내구성 저하). 반동기의 유실 0 약속이
+            // 깨진 상태라 조용히 넘길 신호가 아니다(R01: 폴백 창에서 유실이 되살아난다).
+            // 변수 이름: MySQL 8.0.26+는 source_*, 그 이전(8.0.25 이하·5.7)은 master_* — 둘 다 조회해
+            // 먼저 잡히는 값을 쓴다(안 그러면 구버전에서 반동기 저하가 통째로 안 잡힌다). 둘 다 없으면
+            // 플러그인 미설치 → 반동기 미사용.
+            boolean semiOn = "ON".equalsIgnoreCase(firstNonBlank(
+                    mysqlShowValue("SHOW GLOBAL VARIABLES LIKE 'rpl_semi_sync_source_enabled'"),
+                    mysqlShowValue("SHOW GLOBAL VARIABLES LIKE 'rpl_semi_sync_master_enabled'")));
+            String semiStatus = firstNonBlank(
+                    mysqlShowValue("SHOW GLOBAL STATUS LIKE 'Rpl_semi_sync_source_status'"),
+                    mysqlShowValue("SHOW GLOBAL STATUS LIKE 'Rpl_semi_sync_master_status'"));
             return jdbc().query("SHOW REPLICAS", rs -> {
                 int replicas = 0;
                 while (rs.next()) {
                     replicas++;
                 }
+                // 반동기 판정을 replicas==0보다 먼저 한다 — 반동기 프라이머리가 레플리카를 전부 잃은 순간이
+                // 바로 내구성 상실(커밋이 async 폴백/블로킹)의 순간이라, "복제 구성 없음"으로 뭉개면 그때
+                // 침묵한다. 상태를 못 읽어도(null) 설정이 ON이면 저하 의심으로 올린다(조용히 넘기지 않는다).
+                if (semiOn && !"ON".equalsIgnoreCase(semiStatus)) {
+                    return ReplicationState.unavailable("PRIMARY", "replicas=" + replicas
+                            + " — 반동기 설정(ON)인데 Rpl_semi_sync_source_status="
+                            + (semiStatus == null ? "미확보" : semiStatus)
+                            + (replicas == 0 ? " + 연결된 레플리카 0 (내구성 상실)" : " (타임아웃으로 async 폴백 — 내구성 저하)"));
+                }
                 if (replicas == 0) {
                     return ReplicationState.standalone("복제 구성 없음");
-                }
-                boolean semiOn = "ON".equalsIgnoreCase(semiEnabled);
-                if (semiOn && "OFF".equalsIgnoreCase(semiStatus)) {
-                    return ReplicationState.unavailable("PRIMARY", "replicas=" + replicas
-                            + " — 반동기 설정(rpl_semi_sync_source_enabled=ON)인데 Rpl_semi_sync_source_status=OFF"
-                            + " (타임아웃으로 async 폴백 — 내구성 저하)");
                 }
                 // SHOW REPLICAS는 연결된 레플리카 목록만 주고 지연을 주지 않는다. 예전에는 0을 실어서
                 // "지연 없음"으로 읽혔는데, 프라이머리만 등록한 환경에서는 임계를 영원히 못 넘었다.

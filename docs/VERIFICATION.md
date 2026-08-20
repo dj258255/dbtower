@@ -4065,3 +4065,39 @@ redo transport를 **LGWR SYNC AFFIRM**으로, MAX AVAILABILITY 설정) 두 상�
 이로써 **동기 내구성 정직 표기가 SQL 계열 4기종(SQL Server·PostgreSQL·MySQL·Oracle) 전부** 완성됐다.
 MongoDB는 동기 "설정" 개념 대신 write concern(w:majority)이라, 과반 상실이 곧 위험이고 이미
 `UNAVAILABLE`("과반 상실")로 잡힌다(123.1 데모 스택 실측) — 별도 플래그가 필요 없는 다른 모델이다.
+
+### 123.22 HA 아크 다관점 리뷰 — 라이브 검증이 못 잡은 침묵을 리뷰가 잡았다
+
+HA 관측 아크(123.17~123.21) 신규 코드 +638줄에 4관점 리뷰 에이전트를 돌렸다(침묵실패 헌터·5기종
+DBA 정확성·일반 코드리뷰·타입 설계). 라이브로 "검증했다"던 코드에서, **테스트해보지 않은 경로**의
+실제 결함이 나왔다 — 라이브 검증은 해피패스만 봤고, 리뷰가 실패 경로를 짚었다. 독립한 두 에이전트가
+같은 최상위 결함(#1)을 지목했다.
+
+**고친 것 (리뷰가 짚은 실제 결함)**
+- **#1 (HIGH, 두 에이전트 확인) — 역할변경 baseline이 전송 전 전진 → 웹훅 일시 실패 시 failover 경보
+  영구 소실.** `detectRoleChange`가 판정과 동시에 `lastRole`을 갱신해, 전송 실패로 finding이 버려져도
+  기준선은 이미 전진 → 다음 폴에서 `prev==cur`로 재감지 안 됨(역할은 failover 후 머무르는 one-shot
+  신호라 재트리거도 없다). split-brain은 baseline이 없어 안전했는데 role-change만 이 함정. `pendingRole`
+  도입 — 전송 성공(`commitCooldown`) 후에만 기준선 전진. 회귀 테스트 추가(전송 실패→다음 폴 재시도).
+- **#2 (HIGH) — MySQL 반동기 primary가 레플리카를 전부 잃으면 `replicas==0` 조기 반환으로 "복제 구성
+  없음"으로 침묵.** 반동기 primary가 레플리카 0인 순간이 바로 내구성 상실인데 가장 양성으로 뭉갰다.
+  반동기 판정을 `replicas==0`보다 앞으로 이동.
+- **#3 (HIGH) — MySQL 반동기가 `source_*` 변수만 봐서 8.0.25 이하·5.7에서 감지 불가**(그 버전은
+  `master_*` 이름). `firstNonBlank(source, master)` 둘 다 조회.
+- **#4 (HIGH) — overview 백업 조회 실패가 null→"이력 없음"으로 위장.** catch가 정상 "이력 없음"과 같은
+  null 반환 → 백업 서브시스템 장애가 UI에서 "아직 백업 안 함"처럼 보였다. `status="UNAVAILABLE"`로
+  표면화(replicationSummary의 규율과 일치). 회귀 테스트 추가.
+- **#5 (HIGH, DBA) — PG 동기 검사가 `sync==0`(전면 붕괴)만 잡고 정족수 미달은 놓침.** `ANY 2 (...)`에
+  1개만 붙어도 정상으로 읽혔다. `synchronous_standby_names`의 `ANY k`/`FIRST k`를 파싱해 `sync < k`면 저하.
+- **#6 (타입설계) — `rpoExposure`가 한국어 문안·반올림을 백엔드 DTO에 구움(lagSeconds 중복).** MCP 등
+  비-웹 소비자는 숫자를 못 되찾는다. 모델에서 제거 — 프론트가 `lagSeconds`+MEASURED로 파생.
+
+**문서화한 한계 (수정 대신 정직 표기)**
+- split-brain은 **단일 프라이머리 토폴로지 전제** — MySQL Group Replication 멀티프라이머리·Galera 등
+  의도적 멀티라이터는 같은 cluster 라벨로 묶으면 오탐(코드 주석·경보 문안에 명시). GR 단일 프라이머리는
+  클래식 채널이 없어 STANDALONE으로 보여 세컨더리까지 쓰기 가능으로 오분류될 수 있다(GR 가시성은 범위 밖).
+- MySQL 멀티소스 복제는 첫 채널만 평가(선존 한계, 이번 아크 밖).
+- 계획 스위치오버 순간의 양쪽 WRITABLE 오탐 — 시점 관측의 본질, 쿨다운으로 완화.
+
+**깨끗하다고 확인된 것**: `classify`(5기종 실제 역할 문자열 정확)·Oracle protection 비교·apply-lag
+빈문자열=NULL 회피·404 전파·프론트 XSS(전부 esc)·null 가드·run-scope 맵 누수 없음.

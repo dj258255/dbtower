@@ -67,7 +67,8 @@ class OverviewServiceTest {
         assertThat(o.grade()).isEqualTo("B");
         assertThat(o.replication().role()).isEqualTo("REPLICA");
         assertThat(o.replication().lagSource()).isEqualTo("MEASURED");
-        assertThat(o.replication().rpoExposure()).contains("3s");
+        // RPO 노출은 실측 지연 그 자체 — 프론트가 파생하므로 모델은 lagSeconds를 그대로 전달한다
+        assertThat(o.replication().lagSeconds()).isEqualTo(3.0);
         assertThat(o.backup().status()).isEqualTo("FRESH");
         assertThat(o.backup().elapsedHours()).isEqualTo(3.5);
     }
@@ -88,13 +89,28 @@ class OverviewServiceTest {
     }
 
     @Test
-    void RPO_노출은_실측일_때만_실린다() {
+    void 복제_미구성은_NOT_APPLICABLE로_그대로_전달된다() {
         when(operator.replicationState()).thenReturn(
                 ReplicationState.standalone("복제 구성 없음"));
 
         InstanceOverview o = svc.overviewFor(1L);
 
         assertThat(o.replication().lagSource()).isEqualTo("NOT_APPLICABLE");
-        assertThat(o.replication().rpoExposure()).isNull();
+        assertThat(o.replication().lagSeconds()).isNull();
+    }
+
+    @Test
+    void 백업_조회_실패는_이력없음_아니라_UNAVAILABLE로_표면화된다() {
+        // 회귀 방어: 예전에는 catch가 null을 반환해 프론트가 "이력 없음"(아직 백업 전)으로 렌더했다 —
+        // 백업 서브시스템 장애가 "아직 백업 안 함"처럼 보이던 침묵. "못 읽음 ≠ 없음"으로 구분한다.
+        when(backup.freshnessFor(any(DatabaseInstance.class)))
+                .thenThrow(new RuntimeException("meta DB timeout"));
+
+        InstanceOverview o = svc.overviewFor(1L);
+
+        assertThat(o.backup()).isNotNull();
+        assertThat(o.backup().status()).isEqualTo("UNAVAILABLE");
+        // 나머지 조각은 정상
+        assertThat(o.healthScore()).isEqualTo(82);
     }
 }

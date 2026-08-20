@@ -95,6 +95,16 @@ public class OpsAlertDetector {
      */
     private final Map<Long, HaRole> lastRole = new ConcurrentHashMap<>();
 
+    /**
+     * 이번 인스턴스 패스에서 감지한 역할 변경의 새 역할(instanceId → cur) — pendingCooldown과 같은 규율.
+     * <b>전송이 성공해야 기준선(lastRole)을 전진시킨다.</b> 예전엔 detectRoleChange가 판정과 동시에
+     * lastRole을 갱신해, 웹훅이 잠깐 죽은 순간의 failover 경보가 재감지조차 되지 않고 영구 소실됐다
+     * (역할은 failover 후 안정적으로 머무르므로 다음 사건에 재트리거되지도 않는 one-shot 신호다).
+     * split-brain은 기준선이 없어 안전했고 role-change만 이 함정이 있었다. detect()가 단일 흐름이라
+     * 평범한 맵으로 충분하다(evict는 이 맵을 건드리지 않는다 — 패스마다 확정/폐기된다).
+     */
+    private final Map<Long, HaRole> pendingRole = new java.util.HashMap<>();
+
     public OpsAlertDetector(RegistryService registryService,
                             DbmsOperatorFactory operatorFactory,
                             ComparisonService comparisonService,
@@ -215,12 +225,14 @@ public class OpsAlertDetector {
             }
             if (findings.isEmpty()) {
                 pendingCooldown.clear();
+                pendingRole.clear();
             } else if (notify(instance, findings)) {
                 commitCooldown(now);
             } else {
-                // 전송 실패·레이트리밋 — 쿨다운을 확정하지 않는다. 다음 폴에서 같은 신호를 다시 감지해
-                // 재시도한다(예전에는 여기서 경보가 영구히 사라졌다).
+                // 전송 실패·레이트리밋 — 쿨다운도 역할 기준선도 확정하지 않는다. 다음 폴에서 같은 신호를
+                // 다시 감지해 재시도한다(예전에는 여기서 경보가 영구히 사라졌다 — role-change 포함).
                 pendingCooldown.clear();
+                pendingRole.clear();
                 log.warn("운영 경보 전송 실패 instance={} — 쿨다운 미확정, 다음 주기에 재시도한다",
                         instance.getName());
             }
@@ -479,6 +491,9 @@ public class OpsAlertDetector {
     private void commitCooldown(LocalDateTime now) {
         pendingCooldown.forEach(k -> lastAlerted.put(k, now));
         pendingCooldown.clear();
+        // 전송이 성공했으니 이제 역할 기준선을 전진시킨다(그 전엔 실패 시 재감지 가능하게 미뤄뒀다).
+        pendingRole.forEach(lastRole::put);
+        pendingRole.clear();
     }
 
     /**
@@ -556,14 +571,21 @@ public class OpsAlertDetector {
             // 역할 미상 — 기준선을 건드리지 않는다(조회 실패를 역할 변경으로 오인하지 않는다).
             return List.of();
         }
-        HaRole prev = lastRole.put(instance.getId(), cur);
-        if (prev == null || prev == cur) {
-            return List.of();   // 첫 관측이거나 쓰기/대기 상태 변화 없음
+        Long id = instance.getId();
+        HaRole prev = lastRole.get(id);   // 읽기만 — 기준선 전진은 아래에서 조건부로
+        if (prev == null) {
+            lastRole.put(id, cur);        // 첫 관측: 기준선만 잡는다(알림 없음 → 전송 무관)
+            return List.of();
+        }
+        if (prev == cur) {
+            return List.of();             // 쓰기/대기 상태 변화 없음
         }
         String direction = cur == HaRole.WRITABLE ? "승격(STANDBY -> 쓰기 가능)" : "강등(쓰기 가능 -> STANDBY)";
         if (!passCooldown("role-change", instance, now)) {
             return List.of();
         }
+        // 기준선 전진은 전송 성공(commitCooldown)으로 미룬다 — 웹훅 실패 시 failover 경보 소실 방지.
+        pendingRole.put(id, cur);
         return List.of("복제 역할 변경 감지(failover 신호): %s (role=%s) — 계획된 스위치오버가 아니면 확인이 필요합니다"
                 .formatted(direction, state.role()));
     }
@@ -587,9 +609,16 @@ public class OpsAlertDetector {
     }
 
     /**
-     * split-brain 판정 — 한 클러스터(cluster 라벨)에 PRIMARY가 둘 이상이면 알린다. 복제 토폴로지에서
+     * split-brain 판정 — 한 클러스터(cluster 라벨)에 쓰기 가능 노드가 둘 이상이면 알린다. 복제 토폴로지에서
      * 가장 위험한 상태다(양쪽이 각자 쓰기를 받아 데이터가 갈라진다). DBTower는 이걸 막지 못하고(펜싱은
      * 클러스터 매니저 몫) 감지·기록만 한다. 쿨다운은 클러스터 단위이고, 전송이 성공해야 확정한다.
+     *
+     * <p><b>전제: 단일 프라이머리 토폴로지</b>(PG 스트리밍·MySQL 클래식·MSSQL AlwaysOn·Oracle DG·Mongo
+     * 복제셋 — 쓰기 가능 노드가 정확히 하나). <b>의도적 멀티라이터</b>(MySQL Group Replication 멀티
+     * 프라이머리·Galera/XtraDB Cluster·active-active)는 같은 cluster 라벨로 묶으면 오탐한다 — 그런
+     * 클러스터에는 라벨을 붙이지 않거나(상관 대상에서 제외) 별도 정책이 필요하다. 또한 GR 단일
+     * 프라이머리는 클래식 채널이 없어 operator가 STANDALONE으로 봐 세컨더리까지 쓰기 가능으로 오분류될
+     * 수 있다(GR 가시성은 replication_group_members 별도 지원이 필요 — 현재 범위 밖).
      */
     private void detectSplitBrain(Map<String, List<Long>> primariesByCluster,
                                   Map<Long, DatabaseInstance> byId, LocalDateTime now) {
@@ -607,7 +636,7 @@ public class OpsAlertDetector {
             List<String> names = primaryIds.stream().map(id -> byId.get(id).getName()).toList();
             DatabaseInstance rep = byId.get(primaryIds.get(0));
             List<String> findings = List.of(
-                    "split-brain 의심 — 클러스터 '%s'에 쓰기 가능 노드가 %d개입니다: %s. 하나만 주여야 합니다 — 펜싱·정족수를 확인하세요"
+                    "split-brain 의심 — 클러스터 '%s'에 쓰기 가능 노드가 %d개입니다: %s. 단일 프라이머리 클러스터라면 쓰기 노드는 하나여야 합니다 — 펜싱·정족수를 확인하세요"
                             .formatted(cluster, primaryIds.size(), String.join(", ", names)));
             if (notifySplitBrain(rep, findings)) {
                 lastAlerted.put(cdKey, now);   // 전송 성공 후에만 쿨다운 확정

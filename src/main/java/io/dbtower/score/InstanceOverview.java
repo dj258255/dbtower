@@ -25,10 +25,11 @@ public record InstanceOverview(
         Backup backup) {
 
     /**
-     * 복제 요약 — 역할·지연·출처에 더해 <b>RPO 노출</b>(지금 failover하면 잃을 데이터)을 파생한다.
-     * 지연이 실측(MEASURED)일 때만 RPO가 의미가 있고, 그 외에는 null이다(위장 금지).
+     * 복제 요약 — 역할·지연 초·출처·부연. <b>RPO 노출</b>("지금 failover하면 잃을 데이터")은 별도 필드로
+     * 두지 않는다 — 그것은 실측 지연(MEASURED lagSeconds) 자체이므로, 표현(반올림·문안·로케일)은 소비자
+     * (프론트)가 한다. 백엔드가 한국어 문안을 구우면 MCP 등 비-웹 소비자는 숫자를 못 되찾는다.
      */
-    public record Replication(String role, Double lagSeconds, String lagSource, String detail, String rpoExposure) {}
+    public record Replication(String role, Double lagSeconds, String lagSource, String detail) {}
 
     /** 백업 요약 — 신선도 상태·마지막 백업 경과·복원 검증 상태. */
     public record Backup(String status, Double elapsedHours, String verifyStatus, int thresholdHours) {}

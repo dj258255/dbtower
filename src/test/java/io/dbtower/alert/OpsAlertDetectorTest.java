@@ -172,6 +172,29 @@ class OpsAlertDetectorTest {
     }
 
     @Test
+    void 역할변경_전송_실패시_기준선을_전진시키지_않아_다음_폴에서_재시도한다() {
+        // 회귀 방어(리뷰 finding): 예전에는 detectRoleChange가 판정과 동시에 lastRole을 전진시켜,
+        // 웹훅이 잠깐 죽은 순간의 failover 경보가 재감지조차 안 되고 영구 소실됐다(one-shot 신호).
+        // 이제 기준선은 전송 성공(commitCooldown) 후에만 전진한다 — split-brain과 같은 규율.
+        useInstanceWithId();
+        when(operator.replicationState()).thenReturn(ReplicationState.measured("REPLICA", 0, "recovery"));
+        detector.detect();  // 베이스라인 STANDBY
+
+        // 승격 발생 — 그런데 전송 실패
+        when(operator.replicationState()).thenReturn(ReplicationState.measured("PRIMARY", 0, "healthy"));
+        when(notifier.sendEmbed(anyString(), any(), any())).thenReturn(false);
+        detector.detect();  // 감지 + 전송 실패 → 기준선 전진 안 함
+
+        // 전송 복구 → 다음 폴에서 재감지되어야 한다(baseline이 전진했다면 여기서 침묵했을 것)
+        when(notifier.sendEmbed(anyString(), any(), any())).thenReturn(true);
+        detector.detect();  // 재감지 + 전송 성공
+
+        ArgumentCaptor<String> cap = ArgumentCaptor.forClass(String.class);
+        verify(notifier, times(2)).sendEmbed(cap.capture(), any(), any());
+        assertTrue(cap.getAllValues().stream().allMatch(m -> m.contains("역할 변경")));
+    }
+
+    @Test
     void 한_클러스터에_PRIMARY가_둘이면_split_brain을_알린다() {
         // 같은 cluster 라벨, 서로 다른 host(각자 서버 대표), 둘 다 PRIMARY = split-brain
         DatabaseInstance a = clusterNode(1L, "payments-a", "hostA:5432", "payments");

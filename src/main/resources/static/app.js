@@ -1747,7 +1747,7 @@ const LAG_SOURCE_LABEL = {
   UNAVAILABLE: { cls: "verify-FAILED", label: "지연 확인 불가" },
 };
 
-const BK_STATUS_LABEL = { FRESH: "신선", STALE: "오래됨", NO_BACKUP: "백업 없음" };
+const BK_STATUS_LABEL = { FRESH: "신선", STALE: "오래됨", NO_BACKUP: "백업 없음", UNAVAILABLE: "확인 불가" };
 
 // 대상별 운영 종합 (DBRE) — 정체(이름·기종·환경·클러스터)와 상태(헬스·복제·백업·RPO 노출)를
 // 한 대상 단위에 모아 선택 즉시 최상단에 보여준다. 조각 하나가 못 읽혀도 나머지는 그대로 표기한다.
@@ -1762,8 +1762,10 @@ async function loadOverview() {
     const repLag = rep.lagSource === "MEASURED"
       ? `${fmtNum(rep.lagSeconds, 1)}s`
       : `<span class="verify-badge ${badge ? esc(badge.cls) : "muted"}">${esc(badge ? badge.label : rep.lagSource || "-")}</span>`;
-    const rpo = rep.rpoExposure
-      ? ` <span class="ov-rpo">RPO 노출 ${esc(rep.rpoExposure)}</span>` : "";
+    // RPO 노출("지금 failover하면 잃을 데이터")은 실측 지연 그 자체 — 표현은 여기서(백엔드가 문안을 굽지 않음)
+    const rpo = (rep.lagSource === "MEASURED" && rep.lagSeconds != null)
+      ? ` <span class="ov-rpo">RPO 노출 ${rep.lagSeconds <= 0 ? "0s (따라잡음)" : "약 " + esc(fmtNum(rep.lagSeconds, 0)) + "s"}</span>`
+      : "";
     const bk = o.backup;
     const bkStr = bk
       ? `${esc(BK_STATUS_LABEL[bk.status] ?? bk.status)}` +

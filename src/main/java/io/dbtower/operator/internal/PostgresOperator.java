@@ -1489,13 +1489,19 @@ public class PostgresOperator extends AbstractJdbcOperator {
                         String syncNames = rs.getString("sync_names");
                         boolean syncConfigured = syncNames != null && !syncNames.isBlank();
                         int syncReplicas = rs.getInt("sync_replicas");
-                        if (syncConfigured && syncReplicas == 0) {
+                        // 필요 정족수 — 'ANY k (...)'·'FIRST k (...)'면 k, 그 외(단일·레거시 목록)는 1.
+                        // sync/quorum 상태 스탠바이가 이 수에 못 미치면 커밋이 async로 폴백(0일 때)하거나
+                        // 블로킹(부분 미달)한다 — 둘 다 "설정은 동기인데 지금 그만큼 동기가 아니다"라 저하로 본다.
+                        // 예전엔 ==0(전면 붕괴)만 잡아 'ANY 2'에 1개만 붙은 정족수 미달을 놓쳤다.
+                        int requiredSync = syncConfigured ? parseRequiredSync(syncNames) : 0;
+                        if (syncConfigured && syncReplicas < requiredSync) {
                             return ReplicationState.unavailable("PRIMARY", "replicas=" + replicas
-                                    + " synchronous_standby_names='" + syncNames
-                                    + "' 인데 동기 상태 스탠바이 0 — 설정은 동기인데 지금 async로 커밋(내구성 저하)");
+                                    + " synchronous_standby_names='" + syncNames + "' — 동기 스탠바이 "
+                                    + syncReplicas + "/" + requiredSync + " (필요 정족수 미달 — "
+                                    + (syncReplicas == 0 ? "async로 커밋" : "커밋 블로킹/내구성 저하") + ")");
                         }
                         String syncInfo = syncConfigured
-                                ? " sync=" + syncReplicas + "/" + replicas : " (async 복제)";
+                                ? " sync=" + syncReplicas + "/" + requiredSync : " (async 복제)";
                         // replay_lag는 스탠바이가 완전히 따라잡았거나 아직 피드백이 없으면 NULL이다.
                         // 연결된 스탠바이가 있는데 전부 NULL이면 "지연 0"이 아니라 "따라잡음"으로 본다.
                         if (rs.getInt("lag_known") == 0) {
@@ -1508,6 +1514,18 @@ public class PostgresOperator extends AbstractJdbcOperator {
         } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 복제 상태 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    private static final java.util.regex.Pattern SYNC_QUORUM =
+            java.util.regex.Pattern.compile("^(?:ANY|FIRST)\\s+(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /**
+     * synchronous_standby_names에서 필요한 동기 스탠바이 수를 뽑는다. 'ANY k (...)'·'FIRST k (...)'면 k,
+     * 그 외(단일 이름·레거시 목록 's1, s2')는 PostgreSQL 기본 정책상 1(FIRST 1과 동치)이다.
+     */
+    private static int parseRequiredSync(String syncNames) {
+        java.util.regex.Matcher m = SYNC_QUORUM.matcher(syncNames.trim());
+        return m.find() ? Integer.parseInt(m.group(1)) : 1;
     }
 
     /**

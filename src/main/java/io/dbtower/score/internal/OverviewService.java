@@ -55,40 +55,28 @@ public class OverviewService {
                 return null;
             }
             return new InstanceOverview.Replication(
-                    s.role(), s.lagSeconds(), s.lagSource().name(), s.detail(), rpoExposure(s));
+                    s.role(), s.lagSeconds(), s.lagSource().name(), s.detail());
         } catch (Exception e) {
             // 대상 접속 실패 등 — 조각 하나가 죽어도 종합은 돌려주되, 못 읽었다는 사실을 남긴다.
             log.warn("overview 복제 조회 실패 instance={} cause={}", i.getName(), e.getMessage());
             return new InstanceOverview.Replication(null, null,
-                    ReplicationState.LagSource.UNAVAILABLE.name(), "복제 상태 조회 실패: " + e.getMessage(), null);
+                    ReplicationState.LagSource.UNAVAILABLE.name(), "복제 상태 조회 실패: " + e.getMessage());
         }
-    }
-
-    /**
-     * RPO 노출 = 지금 failover하면 잃을 데이터. 복제 지연이 실측(MEASURED)일 때만 의미가 있다 —
-     * 그 외(NOT_APPLICABLE/UNSUPPORTED/UNAVAILABLE)에서는 지연 자체를 모르므로 노출도 알 수 없다(null).
-     */
-    private String rpoExposure(ReplicationState s) {
-        if (s.lagSource() != ReplicationState.LagSource.MEASURED || s.lagSeconds() == null) {
-            return null;
-        }
-        double lag = s.lagSeconds();
-        return lag <= 0
-                ? "0s (따라잡음 — 유실 창 없음)"
-                : "약 %.0fs 분량 (마지막으로 복제된 지점 이후)".formatted(lag);
     }
 
     private InstanceOverview.Backup backupSummary(DatabaseInstance i) {
         try {
             BackupFreshness b = backupFreshness.freshnessFor(i);
             if (b == null) {
-                return null;
+                return null;   // 정상적 "이력 없음"(freshnessFor가 NO_BACKUP 상태로 주므로 보통 여기 안 옴)
             }
             return new InstanceOverview.Backup(
                     b.status().name(), b.elapsedHours(), b.verifyStatus(), b.thresholdHours());
         } catch (Exception e) {
+            // "지금 못 읽었다"를 null(="이력 없음")로 뭉개지 않는다 — 백업 서브시스템 장애가 UI에서
+            // "아직 백업 안 함"처럼 보이면 안 된다(replicationSummary의 UNAVAILABLE 규율과 일치).
             log.warn("overview 백업 신선도 조회 실패 instance={} cause={}", i.getName(), e.getMessage());
-            return null;
+            return new InstanceOverview.Backup("UNAVAILABLE", null, null, 0);
         }
     }
 }
