@@ -63,55 +63,22 @@ public class OpsAlertDetector {
     private final int idleTxnSeconds;
     private final int replicationLagSeconds;
     private final int snapshotStallMinutes;
-    private final int cooldownMinutes;
     private final long slotRetainedBytes;
 
-    /** key = instanceId:종류(:식별자), value = 마지막 알림 시각 */
-    private final Map<String, LocalDateTime> lastAlerted = new ConcurrentHashMap<>();
-
     /**
-     * 이번 인스턴스 패스에서 쿨다운을 통과한 키 — <b>전송이 실제로 성공해야 확정한다.</b>
-     *
-     * <p>예전에는 passCooldown이 판정과 동시에 lastAlerted를 갱신했다. 그래서 웹훅이 잠깐 죽거나
-     * 레이트리밋에 걸린 순간에 발생한 경보는, 쿨다운(기본 30분) 때문에 <b>재감지조차 되지 않고
-     * 영구히 사라졌다</b>. 알림 이력 테이블도 없어 사후에 "그때 알림이 왔었나"를 확인할 방법도 없었다.
-     *
-     * <p>detect()는 ShedLock + fixedDelay로 한 시점에 한 번만 도는 단일 흐름이라 평범한 필드로 충분하다.
+     * 경보 쿨다운 — 판정과 동시에 확정하지 않고 전송 성공 후에만 확정하는 규율(웹훅 실패 시 경보 영구
+     * 소실 방지). 인스턴스 단위 감지(detect*)와 HaObserver의 split-brain이 이 게이트를 공유한다.
      */
-    private final List<String> pendingCooldown = new ArrayList<>();
+    private final CooldownGate cooldown;
+
+    /** HA 관측(역할 변경 failover + split-brain) — 대상에 쓰기 없이 역할만 읽는다. cooldown을 공유한다. */
+    private final HaObserver ha;
 
     /** PG 데드락 누적 카운터의 직전 값(instanceId → count) — 폴 사이 델타로 "새 데드락"을 센다. */
     private final Map<Long, Long> lastDeadlockCount = new ConcurrentHashMap<>();
 
     /** MSSQL/MySQL 최근 데드락의 직전 식별 문자열(instanceId → sig) — 같은 사건 반복 알림을 막는다. */
     private final Map<Long, String> lastDeadlockSig = new ConcurrentHashMap<>();
-
-    /**
-     * 인스턴스별 직전 복제 역할(instanceId → PRIMARY/STANDBY) — 폴 사이에 역할이 뒤집히면
-     * failover가 일어났다는 신호다. DBTower는 failover를 <b>실행</b>하지 않고 <b>관측</b>만 한다
-     * (실행은 정족수·펜싱을 가진 클러스터 매니저 몫). 첫 관측은 기준선만 잡고 조용히 넘어간다 —
-     * 그렇지 않으면 등록 직후 전부를 "역할 변경"으로 오인한다(데드락 첫관측 규율과 동일).
-     * STANDALONE/미상(OTHER)은 기준선을 건드리지 않는다 — 복제 미구성/조회 실패는 failover가 아니다.
-     */
-    private final Map<Long, HaRole> lastRole = new ConcurrentHashMap<>();
-
-    /**
-     * 이번 인스턴스 패스에서 감지한 역할 변경의 새 역할(instanceId → cur) — pendingCooldown과 같은 규율.
-     * <b>전송이 성공해야 기준선(lastRole)을 전진시킨다.</b> 예전엔 detectRoleChange가 판정과 동시에
-     * lastRole을 갱신해, 웹훅이 잠깐 죽은 순간의 failover 경보가 재감지조차 되지 않고 영구 소실됐다
-     * (역할은 failover 후 안정적으로 머무르므로 다음 사건에 재트리거되지도 않는 one-shot 신호다).
-     * split-brain은 기준선이 없어 안전했고 role-change만 이 함정이 있었다. detect()가 단일 흐름이라
-     * 평범한 맵으로 충분하다(evict는 이 맵을 건드리지 않는다 — 패스마다 확정/폐기된다).
-     */
-    private final Map<Long, HaRole> pendingRole = new java.util.HashMap<>();
-
-    /**
-     * 직전 폴에서 "쓰기 가능 노드 ≥2"로 관측된 클러스터 — split-brain 히스테리시스용. 계획 스위치오버
-     * 순간엔 옛/새 프라이머리가 잠깐 둘 다 쓰기 가능일 수 있어, 한 폴만 보고 알리면 오탐이 된다.
-     * 2회 연속 관측될 때만 알린다(진짜 split-brain은 지속되므로 한 폴 늦게 잡힐 뿐이다). detect() 단일
-     * 흐름에서만 접근하고 매 폴 재구성되므로 평범한 Set으로 충분하다.
-     */
-    private final java.util.Set<String> splitBrainSeen = new java.util.HashSet<>();
 
     public OpsAlertDetector(RegistryService registryService,
                             DbmsOperatorFactory operatorFactory,
@@ -131,8 +98,9 @@ public class OpsAlertDetector {
         this.idleTxnSeconds = idleTxnSeconds;
         this.replicationLagSeconds = replicationLagSeconds;
         this.snapshotStallMinutes = snapshotStallMinutes;
-        this.cooldownMinutes = cooldownMinutes;
         this.slotRetainedBytes = slotRetainedMb * 1024 * 1024;
+        this.cooldown = new CooldownGate(cooldownMinutes);
+        this.ha = new HaObserver(notifier, cooldown);
     }
 
     // HA 분산 락(Phase A5): RegressionDetector와 같은 이유로 한 시점에 한 노드만 운영 감지를 돌린다.
@@ -199,8 +167,8 @@ public class OpsAlertDetector {
                     // (대상에 같은 조회를 중복으로 던지지 않는다 — 서버 대표 탐침 원칙과 같은 취지).
                     ReplicationState repl = operator.replicationState();
                     findings.addAll(detectReplicationLag(instance, repl, now));
-                    findings.addAll(detectRoleChange(instance, repl, now));
-                    collectClusterWritable(instance, repl, primariesByCluster);
+                    findings.addAll(ha.roleChange(instance, repl, now));
+                    ha.collectWritable(instance, repl, primariesByCluster);
                     findings.addAll(detectReplicationSlots(instance, operator, now));
                     findings.addAll(detectDeadlocks(instance, operator, now));
                     // 서버를 공유하는 다른 인스턴스가 있으면 경보가 그들에게도 해당함을 명시한다
@@ -232,21 +200,22 @@ public class OpsAlertDetector {
                 log.warn("백업 신선도 감지 실패 instance={} cause={}", instance.getName(), e.getMessage());
             }
             if (findings.isEmpty()) {
-                pendingCooldown.clear();
-                pendingRole.clear();
+                cooldown.clearPending();
+                ha.clearPendingRole();
             } else if (notify(instance, findings)) {
-                commitCooldown(now);
+                cooldown.commit(now);
+                ha.commitPendingRole();
             } else {
                 // 전송 실패·레이트리밋 — 쿨다운도 역할 기준선도 확정하지 않는다. 다음 폴에서 같은 신호를
                 // 다시 감지해 재시도한다(예전에는 여기서 경보가 영구히 사라졌다 — role-change 포함).
-                pendingCooldown.clear();
-                pendingRole.clear();
+                cooldown.clearPending();
+                ha.clearPendingRole();
                 log.warn("운영 경보 전송 실패 instance={} — 쿨다운 미확정, 다음 주기에 재시도한다",
                         instance.getName());
             }
         }
         // 인스턴스 순회가 끝난 뒤, 클러스터 단위 신호(split-brain)를 한 번에 판정한다.
-        detectSplitBrain(primariesByCluster, byId, now);
+        ha.splitBrain(primariesByCluster, byId, now);
     }
 
     /**
@@ -484,24 +453,9 @@ public class OpsAlertDetector {
     }
 
     /** RegressionDetector와 동일한 쿨다운 — 같은 신호는 cooldownMinutes 안에 한 번만 알린다 */
+    /** 인스턴스 단위 쿨다운 — key는 instanceId:종류. 확정은 detect()가 전송 성공 후 cooldown.commit으로. */
     private boolean passCooldown(String kind, DatabaseInstance instance, LocalDateTime now) {
-        String key = instance.getId() + ":" + kind;
-        LocalDateTime last = lastAlerted.get(key);
-        if (last != null && last.plusMinutes(cooldownMinutes).isAfter(now)) {
-            return false;
-        }
-        // 아직 확정하지 않는다 — 전송이 성공한 뒤 commitCooldown이 기록한다
-        pendingCooldown.add(key);
-        return true;
-    }
-
-    /** 전송 성공 — 이번 패스에서 통과한 키들의 쿨다운을 그때 확정한다. */
-    private void commitCooldown(LocalDateTime now) {
-        pendingCooldown.forEach(k -> lastAlerted.put(k, now));
-        pendingCooldown.clear();
-        // 전송이 성공했으니 이제 역할 기준선을 전진시킨다(그 전엔 실패 시 재감지 가능하게 미뤄뒀다).
-        pendingRole.forEach(lastRole::put);
-        pendingRole.clear();
+        return cooldown.pass(instance.getId() + ":" + kind, now);
     }
 
     /**
@@ -516,11 +470,10 @@ public class OpsAlertDetector {
     }
 
     void evict(long instanceId) {
-        String prefix = instanceId + ":";
-        lastAlerted.keySet().removeIf(k -> k.startsWith(prefix));
+        cooldown.evictPrefix(instanceId);
         lastDeadlockCount.remove(instanceId);
         lastDeadlockSig.remove(instanceId);
-        lastRole.remove(instanceId);
+        ha.evict(instanceId);
     }
 
     private boolean notify(DatabaseInstance instance, List<String> findings) {
@@ -534,142 +487,4 @@ public class OpsAlertDetector {
                 null, null, findings, null, null));
     }
 
-    // ---------- HA 관측: 역할 변경(failover) + split-brain ----------
-    // DBTower는 failover를 실행하지 않는다 — 정족수·펜싱을 가진 클러스터 매니저(WSFC/Pacemaker/Patroni)
-    // 몫이다. 여기서는 두 가지를 관측만 한다: (1) 역할이 뒤집혔다(=failover가 일어났다), (2) 한 클러스터에
-    // PRIMARY가 둘이다(=split-brain 의심). 둘 다 대상 DB에 아무것도 쓰지 않고 replicationState의 역할만 읽는다.
-
-    /**
-     * 역할을 HA 관점의 굵은 분류로 환원한다 — 핵심은 <b>쓰기 가능(WRITABLE) vs 대기(STANDBY)</b>다.
-     *
-     * <p>왜 PRIMARY가 아니라 WRITABLE인가(라이브 검증에서 드러난 것): PG는 <b>연결된 복제본이 없는
-     * primary를 STANDALONE으로 보고</b>한다. 스탠바이를 승격하면 그 순간 다운스트림이 없어 role이
-     * STANDALONE이 되고, 원래 primary도 복제본을 잃으면 STANDALONE이 된다. 그래서 "PRIMARY 개수"로
-     * split-brain을 세면 <b>실제 split-brain(양쪽 다 쓰기 가능)을 놓친다</b>. 승격/강등과 split-brain의
-     * 본질은 "역할명이 PRIMARY인가"가 아니라 "쓰기를 받는가(=in-recovery가 아닌가)"다.
-     * PRIMARY·STANDALONE은 WRITABLE, REPLICA/SECONDARY/STANDBY는 STANDBY, 그 외는 UNKNOWN.
-     */
-    private enum HaRole { WRITABLE, STANDBY, UNKNOWN }
-
-    private static HaRole classify(String role) {
-        if (role == null) {
-            return HaRole.UNKNOWN;
-        }
-        String r = role.toUpperCase();
-        if (r.contains("STANDBY") || r.contains("REPLICA") || r.contains("SECONDARY")) {
-            return HaRole.STANDBY;
-        }
-        if (r.contains("PRIMARY") || r.contains("STANDALONE") || r.contains("MASTER") || r.contains("SOURCE")) {
-            return HaRole.WRITABLE;
-        }
-        return HaRole.UNKNOWN;
-    }
-
-    /**
-     * 역할 변경(failover 신호) — 직전 폴과 지금이 STANDBY↔WRITABLE로 뒤집히면 알린다(승격/강등).
-     * 첫 관측(기준선 없음), UNKNOWN(역할 미상), 그리고 WRITABLE↔WRITABLE(예: primary가 복제본을
-     * 잃어 STANDALONE이 됨 — 쓰기 상태는 그대로라 failover가 아니다)은 조용히 넘어간다.
-     */
-    private List<String> detectRoleChange(DatabaseInstance instance, ReplicationState state, LocalDateTime now) {
-        if (state == null || instance.getId() == null) {
-            return List.of();
-        }
-        HaRole cur = classify(state.role());
-        if (cur == HaRole.UNKNOWN) {
-            // 역할 미상 — 기준선을 건드리지 않는다(조회 실패를 역할 변경으로 오인하지 않는다).
-            return List.of();
-        }
-        Long id = instance.getId();
-        HaRole prev = lastRole.get(id);   // 읽기만 — 기준선 전진은 아래에서 조건부로
-        if (prev == null) {
-            lastRole.put(id, cur);        // 첫 관측: 기준선만 잡는다(알림 없음 → 전송 무관)
-            return List.of();
-        }
-        if (prev == cur) {
-            return List.of();             // 쓰기/대기 상태 변화 없음
-        }
-        String direction = cur == HaRole.WRITABLE ? "승격(STANDBY -> 쓰기 가능)" : "강등(쓰기 가능 -> STANDBY)";
-        if (!passCooldown("role-change", instance, now)) {
-            return List.of();
-        }
-        // 기준선 전진은 전송 성공(commitCooldown)으로 미룬다 — 웹훅 실패 시 failover 경보 소실 방지.
-        pendingRole.put(id, cur);
-        return List.of("복제 역할 변경 감지(failover 신호): %s (role=%s) — 계획된 스위치오버가 아니면 확인이 필요합니다"
-                .formatted(direction, state.role()));
-    }
-
-    /**
-     * 이번 폴에서 관측된 <b>쓰기 가능(WRITABLE)</b> 노드를 cluster 라벨로 모은다(split-brain 상관용).
-     * PRIMARY만 세지 않는 이유는 classify 주석 참고 — 복제본을 잃은 primary는 STANDALONE으로 보고되지만
-     * 여전히 쓰기를 받으므로, 정상 클러스터라면 쓰기 가능 노드는 정확히 하나여야 한다. 둘 이상이면 split-brain.
-     * 라벨이 없으면 형제 노드를 알 수 없어 상관 불가라 건너뛴다.
-     */
-    private void collectClusterWritable(DatabaseInstance instance, ReplicationState state,
-                                        Map<String, List<Long>> writablesByCluster) {
-        if (state == null || instance.getId() == null || classify(state.role()) != HaRole.WRITABLE) {
-            return;
-        }
-        String cluster = instance.getClusterLabel();
-        if (cluster == null || cluster.isBlank()) {
-            return;
-        }
-        writablesByCluster.computeIfAbsent(cluster, k -> new ArrayList<>()).add(instance.getId());
-    }
-
-    /**
-     * split-brain 판정 — 한 클러스터(cluster 라벨)에 쓰기 가능 노드가 둘 이상이면 알린다. 복제 토폴로지에서
-     * 가장 위험한 상태다(양쪽이 각자 쓰기를 받아 데이터가 갈라진다). DBTower는 이걸 막지 못하고(펜싱은
-     * 클러스터 매니저 몫) 감지·기록만 한다. 쿨다운은 클러스터 단위이고, 전송이 성공해야 확정한다.
-     *
-     * <p><b>전제: 단일 프라이머리 토폴로지</b>(PG 스트리밍·MySQL 클래식·MSSQL AlwaysOn·Oracle DG·Mongo
-     * 복제셋 — 쓰기 가능 노드가 정확히 하나). <b>의도적 멀티라이터</b>(MySQL Group Replication 멀티
-     * 프라이머리·Galera/XtraDB Cluster·active-active)는 같은 cluster 라벨로 묶으면 오탐한다 — 그런
-     * 클러스터에는 라벨을 붙이지 않거나(상관 대상에서 제외) 별도 정책이 필요하다. 또한 GR 단일
-     * 프라이머리는 클래식 채널이 없어 operator가 STANDALONE으로 봐 세컨더리까지 쓰기 가능으로 오분류될
-     * 수 있다(GR 가시성은 replication_group_members 별도 지원이 필요 — 현재 범위 밖).
-     */
-    private void detectSplitBrain(Map<String, List<Long>> primariesByCluster,
-                                  Map<Long, DatabaseInstance> byId, LocalDateTime now) {
-        Set<String> nowSeen = new HashSet<>();
-        for (var entry : primariesByCluster.entrySet()) {
-            List<Long> primaryIds = entry.getValue();
-            if (primaryIds.size() < 2) {
-                continue;
-            }
-            String cluster = entry.getKey();
-            nowSeen.add(cluster);
-            // 히스테리시스 — 첫 관측이면 한 폴 더 기다린다(계획 스위치오버의 순간적 이중 쓰기 필터).
-            if (!splitBrainSeen.contains(cluster)) {
-                continue;
-            }
-            String cdKey = "split-brain:" + cluster;
-            LocalDateTime last = lastAlerted.get(cdKey);
-            if (last != null && last.plusMinutes(cooldownMinutes).isAfter(now)) {
-                continue;
-            }
-            List<String> names = primaryIds.stream().map(id -> byId.get(id).getName()).toList();
-            DatabaseInstance rep = byId.get(primaryIds.get(0));
-            List<String> findings = List.of(
-                    "split-brain 의심 — 클러스터 '%s'에 쓰기 가능 노드가 %d개입니다: %s. 단일 프라이머리 클러스터라면 쓰기 노드는 하나여야 합니다 — 펜싱·정족수를 확인하세요"
-                            .formatted(cluster, primaryIds.size(), String.join(", ", names)));
-            if (notifySplitBrain(rep, findings)) {
-                lastAlerted.put(cdKey, now);   // 전송 성공 후에만 쿨다운 확정
-            } else {
-                log.warn("split-brain 경보 전송 실패 cluster={} — 쿨다운 미확정, 다음 주기 재시도", cluster);
-            }
-        }
-        // 다음 폴의 히스테리시스 기준 — 이번에 ≥2로 본 클러스터로 교체(사라진 건 자연히 초기화된다).
-        splitBrainSeen.clear();
-        splitBrainSeen.addAll(nowSeen);
-    }
-
-    private boolean notifySplitBrain(DatabaseInstance rep, List<String> findings) {
-        StringBuilder message = new StringBuilder();
-        message.append("[DBTower HA 경보] split-brain 의심\n");
-        findings.forEach(f -> message.append("- ").append(f).append("\n"));
-        log.warn("HA 경보 split-brain rep={} findings={}", rep.getName(), findings.size());
-        return notifier.sendEmbed(message.toString(), rep.getId(), AlertEmbeds.forDetection(
-                "HA 경보 — split-brain", AlertEmbeds.RED, rep,
-                null, null, findings, null, null));
-    }
 }
