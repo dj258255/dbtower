@@ -958,31 +958,54 @@ public class MySqlOperator extends AbstractJdbcOperator {
     public ReplicationState replicationState() {
         // 두 SHOW 문은 세션 지역 상태를 공유하지 않아 각각 실행해도 결과가 같다
         try {
+            // Group Replication을 먼저 본다 — GR 멤버는 클래식 채널(SHOW REPLICA STATUS)이 없어서,
+            // GR을 못 보면 세컨더리까지 STANDALONE(=쓰기 가능)으로 오분류돼 split-brain 오탐이 난다.
+            // GR 멤버면 MEMBER_ROLE(PRIMARY/SECONDARY)로 역할을 정직하게 준다.
+            ReplicationState gr = groupReplicationState();
+            if (gr != null) {
+                return gr;
+            }
             ReplicationState asReplica = jdbc().query("SHOW REPLICA STATUS", rs -> {
-                if (!rs.next()) {
-                    return null;
+                // 멀티소스 복제는 채널마다 한 행이다 — 예전엔 rs.next() 한 번으로 첫 채널만 봐서, 채널 2가
+                // 죽어도 채널 1이 건강하면 안 보였다. 전 채널을 순회해 하나라도 스레드 중단이면 즉시
+                // unavailable(가장 알려야 할 사건), 아니면 채널 중 최악(최대) 지연을 대표값으로 낸다.
+                boolean any = false;
+                boolean lagUnknown = false;
+                double maxLag = -1;
+                String worstSource = null;
+                while (rs.next()) {
+                    any = true;
+                    String channel = rs.getString("Channel_Name");   // 단일 소스면 빈 문자열
+                    String source = "source=" + rs.getString("Source_Host") + ":" + rs.getInt("Source_Port")
+                            + (channel != null && !channel.isBlank() ? " ch=" + channel : "");
+                    // 스레드 상태를 먼저 본다. Seconds_Behind_Source의 NULL은 "지연 미상"이 아니라 복제
+                    // 스레드가 죽었다는 신호인데, 예전엔 -1로 뭉개 알림 게이트가 조용히 스킵했다.
+                    String ioRunning = rs.getString("Replica_IO_Running");
+                    String sqlRunning = rs.getString("Replica_SQL_Running");
+                    if (!"Yes".equalsIgnoreCase(ioRunning) || !"Yes".equalsIgnoreCase(sqlRunning)) {
+                        String lastError = firstNonBlank(rs.getString("Last_Error"),
+                                rs.getString("Last_IO_Error"), rs.getString("Last_SQL_Error"));
+                        return ReplicationState.unavailable("REPLICA", String.format(
+                                "%s — 복제 스레드 중단(IO=%s, SQL=%s)%s", source, ioRunning, sqlRunning,
+                                lastError == null ? "" : ": " + lastError));
+                    }
+                    Object behind = rs.getObject("Seconds_Behind_Source");
+                    if (behind == null) {
+                        lagUnknown = true;       // 스레드는 살았는데 값이 빔(전환 중 등) — 못 읽은 것
+                        worstSource = source;
+                    } else {
+                        double lag = rs.getDouble("Seconds_Behind_Source");
+                        if (lag > maxLag) { maxLag = lag; worstSource = source; }
+                    }
                 }
-                String source = "source=" + rs.getString("Source_Host") + ":" + rs.getInt("Source_Port");
-                // 스레드 상태를 먼저 본다 — 여기가 예전 구현의 결정적 공백이었다.
-                // Seconds_Behind_Source가 NULL인 것은 "지연 미상"이 아니라 복제 스레드가 죽었다는 신호인데,
-                // 그걸 -1로 뭉개서 알림 게이트가 조용히 스킵했다(가장 알려야 할 사건에서 침묵).
-                String ioRunning = rs.getString("Replica_IO_Running");
-                String sqlRunning = rs.getString("Replica_SQL_Running");
-                boolean healthy = "Yes".equalsIgnoreCase(ioRunning) && "Yes".equalsIgnoreCase(sqlRunning);
-                if (!healthy) {
-                    String lastError = firstNonBlank(
-                            rs.getString("Last_Error"), rs.getString("Last_IO_Error"), rs.getString("Last_SQL_Error"));
-                    return ReplicationState.unavailable("REPLICA", String.format(
-                            "%s — 복제 스레드 중단(IO=%s, SQL=%s)%s", source, ioRunning, sqlRunning,
-                            lastError == null ? "" : ": " + lastError));
+                if (!any) {
+                    return null;                 // 레플리카 아님 — 아래 프라이머리 경로로
                 }
-                Object behind = rs.getObject("Seconds_Behind_Source");
-                if (behind == null) {
-                    // 스레드는 살아 있는데 값이 비는 경우(전환 중 등) — 못 읽은 것이지 지연 0이 아니다
+                if (maxLag < 0 && lagUnknown) {  // 지연을 아는 채널이 하나도 없다
                     return ReplicationState.unavailable("REPLICA",
-                            source + " — Seconds_Behind_Source 미확보(복제 전환 중이거나 소스 접속 대기)");
+                            worstSource + " — Seconds_Behind_Source 미확보(복제 전환 중이거나 소스 접속 대기)");
                 }
-                return ReplicationState.measured("REPLICA", rs.getDouble("Seconds_Behind_Source"), source);
+                return ReplicationState.measured("REPLICA", maxLag < 0 ? 0 : maxLag, worstSource);
             });
             if (asReplica != null) {
                 return asReplica;
@@ -1035,6 +1058,42 @@ public class MySqlOperator extends AbstractJdbcOperator {
         try {
             return jdbc().query(sql, rs -> rs.next() ? rs.getString("Value") : null);
         } catch (DataAccessException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Group Replication 멤버 상태 — GR을 쓰면 클래식 복제 채널이 없어 SHOW REPLICA STATUS가 비어,
+     * 세컨더리까지 STANDALONE(=쓰기 가능)으로 오분류돼 split-brain 오탐이 난다. MEMBER_ROLE로 역할을
+     * 정직하게 준다(SECONDARY는 STANDBY로 분류돼 오탐이 사라진다). GR 미사용이거나 플러그인 미설치
+     * (테이블 없음)면 null → 클래식 경로로 넘어간다. GR 지연 자체는 이번 범위 밖(역할 정직 표기까지).
+     */
+    private ReplicationState groupReplicationState() {
+        try {
+            return jdbc().query("""
+                    SELECT MEMBER_ROLE, MEMBER_STATE,
+                           (SELECT COUNT(*) FROM performance_schema.replication_group_members) AS members
+                    FROM performance_schema.replication_group_members
+                    WHERE MEMBER_ID = @@server_uuid
+                    """, rs -> {
+                if (!rs.next()) {
+                    return null;   // 테이블은 있으나 이 서버가 그룹 멤버가 아님 → GR 미사용
+                }
+                String role = rs.getString("MEMBER_ROLE");        // PRIMARY / SECONDARY (8.0.2+에서 채워짐)
+                String memberState = rs.getString("MEMBER_STATE"); // ONLINE / RECOVERING / UNREACHABLE / ERROR / OFFLINE
+                String detail = "Group Replication members=" + rs.getInt("members")
+                        + " state=" + memberState + " role=" + role;
+                if (role == null || role.isBlank()) {
+                    return ReplicationState.unavailable("UNKNOWN", detail + " — MEMBER_ROLE 미확보(구버전)");
+                }
+                if (!"ONLINE".equalsIgnoreCase(memberState)) {
+                    return ReplicationState.unavailable(role, detail + " — 멤버가 ONLINE이 아니다(그룹 참여 이상)");
+                }
+                return ReplicationState.unsupported(role, detail
+                        + " — GR 지연은 SHOW로 안 나온다(역할만 표기; SECONDARY는 쓰기 불가로 정직 분류)");
+            });
+        } catch (DataAccessException e) {
+            // replication_group_members 테이블 없음(GR 플러그인 미설치) 등 → GR 미사용으로 본다.
             return null;
         }
     }

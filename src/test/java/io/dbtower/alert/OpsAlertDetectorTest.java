@@ -202,7 +202,9 @@ class OpsAlertDetectorTest {
         when(instanceRepository.findAll()).thenReturn(List.of(a, b));
         when(operator.replicationState()).thenReturn(ReplicationState.measured("PRIMARY", 0, "healthy"));
 
-        detector.detect();
+        detector.detect();   // 첫 관측 — 히스테리시스로 조용(계획 스위치오버 순간 오탐 방지)
+        verify(notifier, never()).sendEmbed(anyString(), any(), any());
+        detector.detect();   // 2회 연속 → 발사
         String message = notifiedMessage();
         assertTrue(message.contains("split-brain"));
         assertTrue(message.contains("payments-a"));
@@ -254,7 +256,8 @@ class OpsAlertDetectorTest {
         when(instanceRepository.findAll()).thenReturn(List.of(a, b));
         when(operator.replicationState()).thenReturn(ReplicationState.standalone("복제 구성 없음"));
 
-        detector.detect();
+        detector.detect();   // 첫 관측(히스테리시스 대기)
+        detector.detect();   // 2회 연속 → 발사
         assertTrue(notifiedMessage().contains("split-brain"));
     }
 

@@ -4101,3 +4101,33 @@ DBA 정확성·일반 코드리뷰·타입 설계). 라이브로 "검증했다"�
 
 **깨끗하다고 확인된 것**: `classify`(5기종 실제 역할 문자열 정확)·Oracle protection 비교·apply-lag
 빈문자열=NULL 회피·404 전파·프론트 XSS(전부 esc)·null 가드·run-scope 맵 누수 없음.
+
+### 123.23 리뷰가 남긴 한계 3건 닫기 — GR 인식·멀티소스·split-brain 히스테리시스
+
+123.22에서 "한계로 문서화"했던 것 중 진짜 gap 셋을 실제로 닫았다(추출 리팩터는 리뷰가 문제로 안 짚어 제외).
+
+**GR(Group Replication) 인식 — split-brain 오탐 제거 (라이브 검증)**
+GR 멤버는 클래식 채널이 없어 `SHOW REPLICAS`가 비고, operator가 STANDALONE(=쓰기 가능)으로 오분류해
+단일 프라이머리 GR인데도 세컨더리까지 쓰기 가능으로 세어 split-brain 오탐이 났다. `MySqlOperator`가
+`performance_schema.replication_group_members`를 먼저 읽어 `MEMBER_ROLE`(PRIMARY/SECONDARY)로 역할을
+정직하게 주게 했다(GR 미사용/플러그인 미설치면 null → 클래식 경로).
+
+3노드 GR 단일 프라이머리를 실제로 세워(grnode1~3, mysql:8.4, group_replication) 검증:
+```
+서버:    grnode1 ONLINE PRIMARY / grnode2 ONLINE SECONDARY / grnode3 ONLINE SECONDARY
+DBTower: id49 role=PRIMARY   "Group Replication members=3 state=ONLINE role=PRIMARY"
+         id50 role=SECONDARY "... role=SECONDARY — SECONDARY는 쓰기 불가로 정직 분류"
+         id51 role=SECONDARY
+→ 같은 cluster 라벨(gr-cluster)에 쓰기 가능 노드 1개(PRIMARY만) → split-brain 경보 0
+```
+수정 전이라면 3개 다 STANDALONE → 쓰기 가능 3개 → 오탐이었다. (의도적 GR 멀티프라이머리는 모두
+PRIMARY라 여전히 알린다 — 그건 실제로 다중 라이터라 표기가 맞고, 원치 않으면 라벨을 빼면 된다.)
+
+**MySQL 멀티소스 복제 — 전 채널 평가**
+`SHOW REPLICA STATUS`는 채널마다 한 행인데 예전엔 첫 행만 봤다(채널 2가 죽어도 채널 1이 건강하면
+안 보임). 전 채널을 순회해 하나라도 스레드 중단이면 즉시 `UNAVAILABLE`, 아니면 채널 중 최대 지연을
+대표값으로 낸다(단일 소스는 동작 불변). `Channel_Name`으로 채널을 표기.
+
+**split-brain 히스테리시스 — 스위치오버 순간 오탐 완화**
+계획 스위치오버 순간엔 옛/새 프라이머리가 잠깐 둘 다 쓰기 가능일 수 있다. 2회 연속 관측될 때만
+알린다(진짜 split-brain은 지속되므로 한 폴 늦게 잡힐 뿐). 단위 테스트로 "첫 폴 조용, 2회 연속 발사" 고정.

@@ -105,6 +105,14 @@ public class OpsAlertDetector {
      */
     private final Map<Long, HaRole> pendingRole = new java.util.HashMap<>();
 
+    /**
+     * 직전 폴에서 "쓰기 가능 노드 ≥2"로 관측된 클러스터 — split-brain 히스테리시스용. 계획 스위치오버
+     * 순간엔 옛/새 프라이머리가 잠깐 둘 다 쓰기 가능일 수 있어, 한 폴만 보고 알리면 오탐이 된다.
+     * 2회 연속 관측될 때만 알린다(진짜 split-brain은 지속되므로 한 폴 늦게 잡힐 뿐이다). detect() 단일
+     * 흐름에서만 접근하고 매 폴 재구성되므로 평범한 Set으로 충분하다.
+     */
+    private final java.util.Set<String> splitBrainSeen = new java.util.HashSet<>();
+
     public OpsAlertDetector(RegistryService registryService,
                             DbmsOperatorFactory operatorFactory,
                             ComparisonService comparisonService,
@@ -622,12 +630,18 @@ public class OpsAlertDetector {
      */
     private void detectSplitBrain(Map<String, List<Long>> primariesByCluster,
                                   Map<Long, DatabaseInstance> byId, LocalDateTime now) {
+        Set<String> nowSeen = new HashSet<>();
         for (var entry : primariesByCluster.entrySet()) {
             List<Long> primaryIds = entry.getValue();
             if (primaryIds.size() < 2) {
                 continue;
             }
             String cluster = entry.getKey();
+            nowSeen.add(cluster);
+            // 히스테리시스 — 첫 관측이면 한 폴 더 기다린다(계획 스위치오버의 순간적 이중 쓰기 필터).
+            if (!splitBrainSeen.contains(cluster)) {
+                continue;
+            }
             String cdKey = "split-brain:" + cluster;
             LocalDateTime last = lastAlerted.get(cdKey);
             if (last != null && last.plusMinutes(cooldownMinutes).isAfter(now)) {
@@ -644,6 +658,9 @@ public class OpsAlertDetector {
                 log.warn("split-brain 경보 전송 실패 cluster={} — 쿨다운 미확정, 다음 주기 재시도", cluster);
             }
         }
+        // 다음 폴의 히스테리시스 기준 — 이번에 ≥2로 본 클러스터로 교체(사라진 건 자연히 초기화된다).
+        splitBrainSeen.clear();
+        splitBrainSeen.addAll(nowSeen);
     }
 
     private boolean notifySplitBrain(DatabaseInstance rep, List<String> findings) {
