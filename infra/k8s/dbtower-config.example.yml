@@ -6,4 +6,5 @@ metadata:
   name: dbtower-config-secret
 stringData:
   DBTOWER_URL: "http://host.docker.internal:8080"   # 클러스터에서 호스트의 DBTower를 가리키는 예
-  DBTOWER_TOKEN: "CHANGE_ME"                          # ADMIN Bearer 토큰
+  DBTOWER_TOKEN: "CHANGE_ME"                          # Bearer API 토큰 — 앱의 DBTOWER_API_TOKEN과 동일해야 한다
+                                                      # (앱에 미설정이면 Bearer 인증이 꺼져 있어 등록이 401)

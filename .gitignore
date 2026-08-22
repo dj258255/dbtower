@@ -44,8 +44,10 @@ infra/terraform/.terraform/
 infra/terraform/*.tfstate*
 infra/k8s/*-secret.yml
 
-# 셀프호스트 시크릿 — 절대 커밋 금지
+# 셀프호스트 시크릿 — 절대 커밋 금지 (.env 및 편집기·sed가 남기는 백업 변형까지)
 .env
+.env.*
+!.env.example
 
 # 로컬 데이터 디렉터리(옛 H2 등) — 저장소에 넣지 않는다
 data/

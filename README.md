@@ -298,9 +298,11 @@ open http://localhost:8080   # admin / .env의 DBTOWER_ADMIN_PASSWORD (비웠다
                              #   docker compose -f docker-compose.app.yml logs dbtower | grep 비밀번호)
 ```
 
-이미지는 [GHCR](https://github.com/dj258255/dbtower/pkgs/container/dbtower)에서 pull하거나
-(`ghcr.io/dj258255/dbtower:latest`), 위 compose가 `--build`로 로컬 빌드합니다. 릴리스는 `vX.Y.Z`
-태그를 push하면 `release.yml` 워크플로가 이미지를 게시합니다. 버전별 변경은 [CHANGELOG.md](CHANGELOG.md) 참고.
+이미지는 [GHCR](https://github.com/dj258255/dbtower/pkgs/container/dbtower)에서
+pull합니다(`ghcr.io/dj258255/dbtower:latest`). `up -d`는 게시된 이미지를 받고, 소스에서 바로
+빌드하려면 `docker compose -f docker-compose.app.yml up -d --build`를 씁니다(항상 현재 소스 기준 —
+게시 이미지가 최신이 아닐 때 확실). 릴리스는 `vX.Y.Z` 태그를 push하면 `release.yml` 워크플로가
+이미지를 게시합니다. 버전별 변경은 [CHANGELOG.md](CHANGELOG.md) 참고.
 
 > 5기종 데모 대상까지 한 번에 띄워 둘러보려면: `docker compose up -d`(대상 5종+모니터링)를 함께 쓰고
 > 앱은 아래 "개발 모드"로 실행합니다.
@@ -317,8 +319,14 @@ open http://localhost:8080               # 웹 콘솔 -> admin / devpass 로그�
 
 인스턴스 등록 (API — 웹 콘솔은 조회·진단 전용):
 
+등록·삭제 같은 상태 변경은 ADMIN 권한이 필요합니다. 사람은 세션 로그인(쿠키), 기계·자동화는
+`.env`의 `DBTOWER_API_TOKEN`을 `Authorization: Bearer`로 보냅니다(미설정 시 Bearer 인증이 꺼져
+있어 401 — IaC 자동 등록을 쓰려면 반드시 설정). 토큰 생성: `openssl rand -base64 32`.
+
 ```bash
-curl -X POST localhost:8080/api/instances -H 'Content-Type: application/json' -d '{
+curl -X POST localhost:8080/api/instances \
+  -H "Authorization: Bearer $DBTOWER_API_TOKEN" \
+  -H 'Content-Type: application/json' -d '{
   "name": "local-mysql", "type": "MYSQL",
   "host": "127.0.0.1", "port": 13306, "dbName": "sample",
   "username": "root", "password": "dbtower1234"

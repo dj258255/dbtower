@@ -4152,3 +4152,47 @@ OpsAlertDetector는 폴 루프 + 운영 감지 + delegate만 남아 675 → 490�
 
 참고로 리뷰어 4인 중 누구도 이 크기를 결함으로 짚지 않았다(둘은 구조를 칭찬) — 이건 버그 수정이 아니라
 가독성/분리 개선이다. 리뷰 근거가 없어 처음엔 보류했으나, 소유자 판단으로 진행했고 테스트가 안전망이 됐다.
+
+### 123.25 셀프호스트 온보딩 실검 — 남이 자기 앱 DB를 붙이는 경로를 실제로 밟아봤다
+
+"다른 사람이 자기 인프라에 붙여도 잘 되나 / 내가 빠뜨린 건 없나"를 문서가 아니라 실행으로 점검했다.
+게시 이미지를 pull → `docker-compose.app.yml`로 앱+메타DB 기동 → throwaway "내 앱 DB"(postgres:16)를
+같은 네트워크에 띄우고 → register-job.yml과 <b>동일한 방식</b>(Bearer PUT)으로 자동 등록까지 밟았다.
+
+**발견 1 (실제 gap, 수정함) — API 토큰 온보딩 누락.** k8s `register-job.yml`은
+`Authorization: Bearer $DBTOWER_TOKEN`로 멱등 등록(PUT /api/instances)하는데, 앱을 띄우는
+`docker-compose.app.yml`이 `DBTOWER_API_TOKEN`을 세팅하지 않았고 `.env.example`·README 등록 예시에도
+없었다. 즉 문서대로 IaC 자동 등록을 하면 Bearer 인증이 꺼진 채라 401. 실측:
+
+```
+PUT /api/instances (토큰 없음)      -> 302 (세션 로그인 리다이렉트)
+PUT /api/instances (틀린 Bearer)    -> 401
+PUT /api/instances (올바른 Bearer)  -> 200 {"id":1,...}   # 토큰 세팅 후
+```
+
+수정: `.env.example`에 `DBTOWER_API_TOKEN`(+`DBTOWER_VIEWER_PASSWORD`) 추가, compose가 앱에 전달,
+k8s `dbtower-config.example.yml`에 "앱의 DBTOWER_API_TOKEN과 동일해야 함" 명시, README 등록 예시에
+Bearer 헤더 추가. 재검증: 토큰 세팅 후 자동 등록 200, 멱등 재등록도 같은 id(중복 없음),
+DBTower가 대상 PG에 실접속(GET {id}/health -> 200, `PostgreSQL 16.14`, ping 9ms),
+overview 종합까지 정직하게 나옴:
+
+```
+GET /api/instances/1/overview -> 200
+  replication: role=STANDALONE, lagSource=NOT_APPLICABLE, "복제 구성 없음"   # 단일 PG를 OK로 위장 안 함
+  backup:      status=NO_BACKUP, thresholdHours=24                          # "이력 없음"을 UNAVAILABLE로 뭉개지 않음
+```
+
+**발견 2 (실제 gap) — 게시된 `:latest`가 낡음.** `docker inspect ghcr.io/dj258255/dbtower:latest`의
+`Created`가 2026-07-19인데 overview 도입은 2026-08-20(205d00f), HA 관측 아크는 그 이후다. 그래서 구
+이미지에선 `/api/instances/{id}/overview`가 404였다(미매핑 → `/error` 디스패치 → OncePerRequestFilter인
+ApiTokenFilter가 에러 디스패치엔 재실행 안 됨 → 그 요청 미인증 → `/error`는 `/api/` 아님 →
+401이 아니라 로그인 리다이렉트 302). "같은 토큰인데 health는 200, overview는 302"의 답은 인증이 아니라
+<b>게시 산출물의 낡음</b>이었다. 문서 소스로 로컬 재빌드(`up -d --build`)한 이미지에선 동일 토큰·경로가
+200 — 코드는 정상, 배포 이미지만 낡았다. README의 "`up -d`가 `--build`로 로컬 빌드한다"는 문장도
+부정확(이미지가 있으면 `up -d`는 pull)이라 바로잡고, 항상 현재 소스로 띄우려면 `--build`를 쓰라고 명시.
+
+**부수 관찰(저위험, 미수정)** — 매핑 없는/에러 난 `/api/` 경로가 401/404 JSON이 아니라 302 로그인
+리다이렉트로 덮인다(위 에러 디스패치 메커니즘). 문서화된 등록 happy-path·인증 실패 path는 각각 200/401로
+깨끗하므로 IaC 흐름엔 영향 없다. curl `-sf`가 302엔 실패하지 않는 점만 유의(오타 경로 시 조용히 통과 가능).
+
+검증에 쓴 scaffolding(throwaway `myapp-db`, 로컬 `.env`)은 이 절 기록 후 정리한다.
