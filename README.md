@@ -287,6 +287,9 @@ Grafana/PMM처럼 자기 인프라에 직접 띄워 자기 DB를 붙이는 모�
 띄우고, 관리 "대상" DB는 웹 UI에서 등록합니다. 이미지에 mysqldump/pg_dump/mongodump가 번들되어
 있어(배터리 포함) 백업까지 추가 설치 없이 동작합니다. TLS는 리버스 프록시(Caddy/nginx)가 종단하는
 구성을 권장합니다 — 그때 `DBTOWER_COOKIE_SECURE=true`로 쿠키에 Secure 플래그를 켜세요.
+프록시는 `X-Forwarded-Proto: https`를 전달해야 합니다(앱은 `forward-headers-strategy: framework`로
+이를 읽어 세션 쿠키 Secure·리다이렉트 scheme을 맞춥니다). 프록시 뒤 공개 URL이 있으면
+`DBTOWER_BASE_URL`(예: `https://dbtower.example.com`)도 주세요 — MCP OAuth 메타데이터의 절대 URL 기준입니다.
 
 ```bash
 cp .env.example .env                     # DBTOWER_DB_PASSWORD 등을 채운다

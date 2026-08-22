@@ -4196,3 +4196,38 @@ ApiTokenFilter가 에러 디스패치엔 재실행 안 됨 → 그 요청 미인
 깨끗하므로 IaC 흐름엔 영향 없다. curl `-sf`가 302엔 실패하지 않는 점만 유의(오타 경로 시 조용히 통과 가능).
 
 검증에 쓴 scaffolding(throwaway `myapp-db`, 로컬 `.env`)은 이 절 기록 후 정리한다.
+
+### 123.26 compose가 안 넘기던 knob들 — 문서가 시키는 하드닝이 조용히 죽던 것
+
+"더 없나"를 이어, 앱이 지원하는 DBTOWER_* env와 `docker-compose.app.yml`이 컨테이너로 <b>실제
+전달</b>하는 env를 대조했다(compose는 env_file 없이 `environment:`에 나열한 것만 넘긴다 — `.env`는
+compose 파일의 `${VAR}` 치환에만 쓰이지 컨테이너 env로 자동 주입되지 않는다). 차집합에서 진짜 갭:
+
+- **`DBTOWER_COOKIE_SECURE`** — README가 "TLS 프록시면 true로 켜라"고 시키는데 compose가 안 넘겨
+  컨테이너가 이 env를 못 받았다 → `application-docker.yml`의 `${DBTOWER_COOKIE_SECURE:false}`가
+  항상 false로 귀결. 즉 <b>문서대로 한 하드닝이 조용히 무효</b>였다(보안 관련 침묵 갭).
+- **`DBTOWER_BASE_URL`** — 프록시 뒤 공개 URL. 미전달 시 OAuth resource_metadata가 localhost로 굳는다.
+
+수정: compose가 둘을 앱에 전달 + `.env.example`에 추가 + README에 프록시가 `X-Forwarded-Proto`를
+보내야 함을 명시. 실측(COOKIE_SECURE=true, BASE_URL=https://dbtower.example.com로 기동):
+
+```
+컨테이너 printenv           DBTOWER_COOKIE_SECURE=true / DBTOWER_BASE_URL=https://dbtower.example.com
+Set-Cookie XSRF-TOKEN       ...; Secure                     # CSRF 쿠키는 dbtower.security.cookie-secure로 무조건 강제
+Set-Cookie SESSION (평문)    ...; HttpOnly; SameSite=Lax     # Secure 없음 — Spring Session은 request.isSecure()로 판단
+Set-Cookie SESSION (XFP=https) ...; Secure; HttpOnly         # 프록시 헤더 오면 Secure 붙음 → 메커니즘 정상
+/.well-known/oauth-protected-resource -> {"resource":"https://dbtower.example.com/mcp", ...}   # BASE_URL 반영
+```
+
+세션 쿠키 Secure는 플래그가 아니라 프록시의 `X-Forwarded-Proto: https`(+ forward-headers-strategy:
+framework)로 결정된다는 걸 실측으로 확인 — README에 그 운영 조건을 넣었다.
+
+**이 과정에서 내가 낸 버그를 실측이 잡았다.** 백업 운영 knob을 추가하며 typed(boolean/int) env를
+`${VAR:-}`(빈 문자열)로 넘겼더니 앱이 `Invalid boolean value []`로 기동 실패했다 —
+`${DBTOWER_VERIFY_ISOLATED:false}`(boolean)·`${DBTOWER_BACKUP_RETENTION_DAYS:14}`(int)의 기본값이
+빈 문자열에 덮여 타입 변환이 깨진 것. compose가 빈값을 강제하면 Spring의 `:default`가 무력화된다.
+수정: typed 손잡이는 앱 기본값을 compose fallback으로(`:-false`/`:-14`, `:-`는 .env가 비어도 fallback
+사용). 재기동 성공(~9s)으로 확인. String인 암호화 키만 빈 값 허용. 그냥 커밋했으면 모든 셀프호스터의
+첫 기동을 깨뜨렸을 변경이라, "실제로 띄워 본다"의 값어치가 그대로 드러났다.
+
+검증 scaffolding(임시 스택·verify.env)은 이 절 기록 후 정리한다.

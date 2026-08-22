@@ -28,6 +28,12 @@ services:
       # 기계·자동화용 Bearer API 토큰(선택). IaC 자동 등록(k8s register-job 등)을 쓰려면 필수 —
       # register 쪽 DBTOWER_TOKEN과 같아야 한다. 비우면 Bearer 인증 비활성(사람 세션 로그인만).
       DBTOWER_API_TOKEN: ${DBTOWER_API_TOKEN:-}
+      # 리버스 프록시(Caddy/nginx)로 HTTPS 종단 시 true — 세션·CSRF 쿠키에 Secure 플래그.
+      # 프록시 뒤 배포의 [권장] 하드닝. compose가 이 env를 넘겨야 앱이 실제로 켠다(안 넘기면 무효).
+      DBTOWER_COOKIE_SECURE: ${DBTOWER_COOKIE_SECURE:-false}
+      # 외부 접근 주소(프록시 뒤면 그 공개 URL, 예: https://dbtower.example.com). MCP OAuth의
+      # resource_metadata·리다이렉트 절대 URL 기준. 미설정 시 http://localhost:포트로 가정.
+      DBTOWER_BASE_URL: ${DBTOWER_BASE_URL:-}
       # 등록 대상 DB 비밀번호를 저장 시 암호화(AES-256-GCM). base64 32바이트. [필수] — 미설정 시
       # docker 프로필이 fail-closed로 기동 거부(평문 저장 방지, CWE-312). 생성: openssl rand -base64 32
       DBTOWER_ENCRYPTION_KEY: ${DBTOWER_ENCRYPTION_KEY:?암호화 키가 필요합니다 — .env에 DBTOWER_ENCRYPTION_KEY 설정 (openssl rand -base64 32)}
@@ -42,6 +48,16 @@ services:
       DBTOWER_BACKUP_REMOTE_BUCKET: ${DBTOWER_BACKUP_REMOTE_BUCKET:-dbtower-backups}
       DBTOWER_S3_ACCESS_KEY: ${DBTOWER_S3_ACCESS_KEY:-}
       DBTOWER_S3_SECRET_KEY: ${DBTOWER_S3_SECRET_KEY:-}
+      # 백업 운영 knob(선택) — 보존일수/산출물 암호화 키(주면 백업 파일을 이 키로 암호화)/복원검증 격리.
+      # typed(int/boolean)는 빈 문자열을 넘기면 기동이 깨지므로 앱 기본값을 fallback으로 둔다
+      # (:- 는 .env가 비어 있어도 fallback을 쓴다). 문자열인 암호화 키만 빈 값 허용.
+      DBTOWER_BACKUP_RETENTION_DAYS: ${DBTOWER_BACKUP_RETENTION_DAYS:-14}
+      DBTOWER_BACKUP_ENCRYPTION_KEY: ${DBTOWER_BACKUP_ENCRYPTION_KEY:-}
+      DBTOWER_VERIFY_ISOLATED: ${DBTOWER_VERIFY_ISOLATED:-false}
+      # 그 밖의 통합(선택)은 이 compose에 기본 나열하지 않았다 — 필요 시 여기 environment에 추가한다:
+      #   ChatOps(Discord/Slack): DBTOWER_DISCORD_*, DBTOWER_SLACK_*  (docs/DESIGN.md)
+      #   외부 시크릿(Vault): DBTOWER_VAULT_URL/DBTOWER_VAULT_TOKEN
+      #   디스크 예측 소스(외부 Prometheus/CloudWatch): DBTOWER_PROMETHEUS_URL 등
       JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75}
     ports:
       - "${DBTOWER_PORT:-8080}:8080"
