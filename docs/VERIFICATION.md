@@ -4231,3 +4231,110 @@ framework)로 결정된다는 걸 실측으로 확인 — README에 그 운영 �
 첫 기동을 깨뜨렸을 변경이라, "실제로 띄워 본다"의 값어치가 그대로 드러났다.
 
 검증 scaffolding(임시 스택·verify.env)은 이 절 기록 후 정리한다.
+
+---
+
+## 124. 활성 세션 샘플링(ASH) — 1초 해상도로 올리고, 내 가설을 반증하다 (2026-08-29)
+
+### 무엇이 비어 있었나
+
+`SessionInfo(pid·user·state·waitEvent·blockedByPid·query·elapsedMs)`와
+`DbmsOperator.activeSessions()`는 5기종 전부 구현돼 있는데 **어디에도 영속되지 않았다.**
+사용처를 전부 뒤지면 셋뿐이다.
+
+| 사용처 | 쓰는 방식 |
+|---|---|
+| `InsightController` | 웹 화면에 "지금"만 표시 |
+| `OpsAlertDetector` | 장기 유휴 세션 감지에 스캔 |
+| `OverProvisionAnalyzer` | 세션 **개수**만 사용 |
+
+영속되는 건 `wait_event_snapshot`뿐이고 스키마는
+`(instance_id, captured_at, event_name, category, wait_count, total_ms)` TOP 50이다.
+`PostgresOperator.waitEvents()`가 **원천 쿼리 단계에서 `GROUP BY`로 이미 집계**하므로 세션도
+쿼리도 블로커도 남지 않는다.
+
+즉 `SessionInfo` 주석에 내가 직접 쓴 문장 — **"blockedByPid가 채워진 행이 곧 블로킹 트리의
+잎, DBA가 장애 시 가장 먼저 보는 값"** — 이 화면을 새로고침하면 사라지고 있었다.
+
+### V32 — 무엇을 추가했나
+
+```
+V32__ash_sample.sql
+  ash_sample       세션 행 (sampled_at/ingested_at 분리, sample_seq, blocked_by_pid, 지문)
+  ash_sample_tick  틱 메타 (observed/retained/dropped, collect_ms, status)
+
+insight/AshSample.java · AshSampleTick.java
+insight/internal/AshSampleWriter.java   JDBC batchUpdate + ON CONFLICT DO NOTHING
+insight/internal/QueryFingerprint.java  원문 대신 정규화 SHA-256 앞 32헥스
+insight/internal/job/AshSamplerJob.java 1초 샘플러 (ShedLock, in-flight 가드, 상한 절단)
+insight/internal/job/AshSampleRetentionJob.java  7일 보존, ctid 배치 DELETE
+```
+
+**기존 경로는 0줄도 건드리지 않았다.** `DbmsOperator` 인터페이스 무변경,
+`WaitEventSnapshotJob`·`SnapshotScheduler` 무수정, 신규 테이블 추가만. 대사 상대가 필요하므로
+5분 집계는 구조적으로도 지울 수 없다.
+
+### A9 원칙과의 정면 충돌, 그리고 실측
+
+`WaitEventSnapshotJob` 주석이 5분 주기를 고른 근거는 **"조회 자체가 부하가 되면 안 된다"**였다.
+해상도를 300배 올리는 이 잡은 그 원칙과 정면으로 부딪친다. 그래서 말이 아니라 수치로 답했다.
+
+```
+환경: PostgreSQL 16, max_connections=100. 격리 메타 DB(dbtower_ash)로 계측
+      (기존 메타 DB는 무변경 — 인스턴스 10개 그대로)
+
+시나리오                       인스턴스  기대틱  실제틱  결측률  SKIP ERR  드롭률  collect p95
+평시                                 1      81     81  0.0000    0   0  0.0000       2.85ms
+락 폭풍(피해자 50, 45초)             1      45     45  0.0000    0   0  0.0000       2.48ms
+인스턴스 축                         21   64~71   동일  0.0000    0   0  0.0000  1.78~5.56ms
+60대 + 폭풍 + 커넥션 고갈           60   40/대  40/대  0.0000    0   0  0.0000   최대 18.34ms
+
+중복(멱등키 위반) 0건 · 늦은 도착 0건 · 총 77,104 샘플 / 7,371 틱 / 23MB
+```
+
+`collect_ms`가 평시 2.85ms, 락 폭풍 중 2.48ms(오히려 더 빠름), 60인스턴스 동시 폭풍에서도
+최대 18.34ms. **A9 원칙은 지켜졌다.**
+
+### 내 가설이 틀렸다
+
+붙이기 전 논거는 이랬다.
+
+> 락 폭풍이 나는 순간이 곧 관측이 가장 필요한 순간이면서 동시에 메타 DB도 같이 느려지는
+> 순간이다. 관측 경로가 운영 경로와 자원을 공유하면, 정확히 필요한 순간에 샘플을 잃는다.
+
+**정반대였다.** 60인스턴스 + 락 폭풍 35세션으로 `max_connections=100`을 넘겨 **락 폭풍의
+피해자 세션들이 `FATAL: sorry, too many clients already`로 접속에 실패하는 동안**, 샘플러는
+2,400틱을 전부 `OK`로 마쳤다. ERROR 0, SKIPPED 0, 결측 0.
+
+이유는 명확하다. **샘플러의 커넥션은 이미 풀에 잡혀 있었고, 그 순간 거부된 것은 새
+커넥션이었다.** 굶어 죽을 것이라 예상한 쪽이 따뜻한 풀을 쥔 생존자였다.
+
+그래서 로그 버퍼를 넣지 않았다. 수치가 정당화하지 않은 구조는 넣지 않는다.
+
+### 실제 락 컨보이
+
+```
+피해자 pid | 가해자 pid | 샘플 수 | 지속   | 대기 이벤트
+       508 |        501 |   2,400 | 39.6초 | transactionid
+       506 |        508 |   2,399 | 39.6초 | tuple
+       507 |        508 |   2,399 | 39.6초 | tuple
+       509 |        508 |   2,398 | 39.6초 | tuple
+       504 |        508 |   2,398 | 39.6초 | tuple
+
+총 64,568개 막힌 샘플 · 피해자 76 · 가해자 4
+```
+
+**2단계 체인이다.** `501 → 508 → {504, 506, 507, 509}`. 기존 5분 집계로는 "그 5분에 lock
+대기가 있었다"까지만 남고, 누가 누구를 막았고 체인이 몇 단이었는지는 복원되지 않는다.
+
+### 회귀
+
+```
+./gradlew test    BUILD SUCCESSFUL (3분 32초) — V32 포함, 회귀 없음
+Flyway V32        실 PG 적용 성공
+샘플러 실기동     runId 단위 77,104 샘플 수집
+```
+
+장기 이력과 판정(블로킹 체인·대사·파이프라인 건강도)은 lakehouse 몫이다 —
+`dbtower-lakehouse` VERIFICATION §22, CONTRACT §1-2, RUNBOOK §8.
+

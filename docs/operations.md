@@ -135,3 +135,65 @@ DBTOWER_METABASE_EMAIL=... / DBTOWER_METABASE_PASSWORD=...
 
 volume 판정(임계 원천 ②): MSSQL=dm_os_volume_stats(총량/여유, 실측 1007GB/774GB),
 Oracle=dba_data_files(할당/autoextend 상한, 실측 1189MB/96TB), MySQL·PG·Mongo=NULL(불가 정직).
+
+---
+
+## 6. ASH 샘플러 운영 (V32) — 켤 때 알아야 할 것
+
+### 기본은 꺼져 있다
+
+`dbtower.ash.enabled=false`가 기본이라 켜지 않으면 빈 자체가 뜨지 않는다. **롤백은 이 한 줄이다.**
+
+```yaml
+dbtower:
+  ash:
+    enabled: false            # 기본 꺼둠
+    interval-ms: 1000         # 샘플 주기. 락은 초 단위로 생겼다 사라진다
+    max-sessions-per-tick: 500
+    workers: 4
+    retention-days: 7         # query_snapshot·wait_event_snapshot과 대칭
+    retention-sweep-ms: 3600000
+```
+
+### 켜기 전 확인할 셋
+
+1. **대상은 현재 PostgreSQL만이다.** `DbmsType.POSTGRESQL`이 아니면 건너뛴다
+2. **`max_connections`가 먼저 벽이다.** 인스턴스마다 커넥션 풀이 생기므로, 관리 대상이 많으면
+   샘플러가 아니라 대상 DB의 커넥션 한도가 먼저 찬다. 실측에서 60인스턴스 + 부하 35세션으로
+   기본값 100을 넘겼다
+3. **부피가 다른 스냅샷보다 훨씬 빨리 는다.** 실측에서 77,104 샘플에 23MB였다. 보존 7일과
+   스윕 주기를 반드시 확인하라
+
+### 백프레셔 정책: 쌓지 않고 떨어뜨린다
+
+직전 틱이 아직 안 끝났으면 이번 틱을 **버리고** `SKIPPED_INFLIGHT`로 기록한다. 큐에 쌓으면
+관측이 대상을 더 느리게 만들고, 정확히 락 폭풍 순간에 커넥션을 먹는다. Oracle ASH도 AWS RDS
+Performance Insights도 부하가 높으면 샘플을 떨어뜨리는 쪽을 골랐다.
+
+세션이 `max-sessions-per-tick`을 넘으면 `elapsed_ms` 내림차순으로 자른다(오래 걸린 세션이 진단
+가치가 높다 — Datadog이 느리거나 잦은 쿼리로 편향 샘플링하는 것과 같은 선택). 잘라낸 수는
+`dropped_sessions`에 남긴다. **떨어뜨린 사실을 숨기지 않는다.**
+
+### 0을 읽는 법
+
+`ash_sample`에 행이 없다고 "활성 세션이 없었다"가 아니다. **반드시 `ash_sample_tick`을 같이
+보라.** 틱이 있고 `observed_sessions=0`이면 진짜 0건이고, 틱 자체가 없으면 샘플러가 안 돈 것이다.
+
+결번 판정은 `(sampler_run_id, instance_id)` 안에서만 유효하다. 샘플러 JVM이 재기동하면
+`sample_seq`가 1부터 다시 시작하므로, run을 넘어 이으면 없는 결측이 생긴다.
+
+### 보존 스윕이 대량 DELETE를 피하는 이유
+
+`ctid` 서브쿼리로 5만 행씩 끊어 지운다. 한 트랜잭션이 테이블 전체를 잠그면 관측 정리가 관측
+대상을 흔드는 자기모순이 된다.
+
+### 알려진 한계 (정직 표기)
+
+- **샘플 간격보다 짧은 대기는 놓친다.** 외부 폴링 샘플링의 원리적 한계다. pgsentinel 같은
+  인프로세스 확장이 정석이지만 `shared_preload_libraries` 등록과 재시작을 강제해야 해서
+  밖에서 붙는 도구로는 채택할 수 없었다(Datadog·SolarWinds DPA와 같은 선택)
+- `wait_category`는 이벤트 이름으로 **근사**한다. 정확한 분류는 `SessionInfo`에 카테고리를
+  추가해야 하고, 그건 5기종 공통 모델 변경이라 이 아크의 범위를 넘는다
+
+실측 근거는 `docs/VERIFICATION.md` §124, 계측 절차는 `dbtower-lakehouse/docs/RUNBOOK.md` §8.
+

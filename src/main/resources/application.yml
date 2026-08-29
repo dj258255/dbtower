@@ -78,6 +78,23 @@ dbtower:
     pool-size: 4         # @Scheduled 폴러 공용 스레드 풀 — 느린 폴러가 뒤 전부를 막는 head-of-line blocking 방지
   alert:
     rate-per-minute: 12  # 웹훅 알림 분당 상한 — 초과분은 버리지 않고 다음 허용 알림에 "N건 더" 합산
+  # 활성 세션 샘플링(ASH) — 기본 비활성. 켜지 않으면 기존 동작이 100% 그대로다.
+  #
+  # 왜: SessionInfo·activeSessions()는 5기종 다 있는데 영속되지 않아, 장애가 끝나면
+  # "누가 누구를 막았나"를 복원할 수 없다. wait_event_snapshot(5분 집계)은 세션·블로커가
+  # GROUP BY에서 사라진 뒤라 원리적으로 답하지 못한다.
+  # 선례: Oracle ASH(1초)·AWS RDS Performance Insights(1초)·SolarWinds DPA(1초)·pgsentinel.
+  #
+  # 주의: 이 잡은 WaitEventSnapshotJob의 A9 원칙("조회 자체가 부하가 되면 안 된다")과
+  # 정면으로 부딪친다. 켜기 전에 collect_ms와 결측률을 락 폭풍 주입 상태에서 재라.
+  ash:
+    enabled: false            # 기본 꺼둔다 — 롤백은 이 한 줄
+    interval-ms: 1000         # 샘플 주기. 락은 초 단위로 생겼다 사라지므로 1초여야 의미가 있다
+    max-sessions-per-tick: 500 # 상한 초과 시 elapsed 내림차순으로 자르고 dropped로 기록한다
+    workers: 4                # 인스턴스 병렬 샘플링 워커
+    retention-days: 7         # query_snapshot·wait_event_snapshot과 대칭. 장기는 lakehouse 몫
+    retention-sweep-ms: 3600000
+
   snapshot:
     workers: 4           # 한 틱 안에서 인스턴스별 수집을 병렬 실행하는 워커 수(ShedLock 노드 배타는 유지)
     interval-ms: 60000   # 쿼리 통계 수집 주기
