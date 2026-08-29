@@ -4338,3 +4338,40 @@ Flyway V32        실 PG 적용 성공
 장기 이력과 판정(블로킹 체인·대사·파이프라인 건강도)은 lakehouse 몫이다 —
 `dbtower-lakehouse` VERIFICATION §22, CONTRACT §1-2, RUNBOOK §8.
 
+---
+
+## 125. ASH 샘플러 자기 리뷰 — 확립된 패턴을 두 곳에서 어겼다 (2026-08-30)
+
+124절을 쓰고 하루 뒤에 다시 읽었다. 두 곳에서 이 저장소의 확립된 패턴을 이유 없이 어기고
+있었다.
+
+### 락을 워커 완료 전에 놓았다
+
+`SnapshotScheduler.collectShard()`는 워커 future를 전부 기다린 뒤 unlock한다. 주석에 이유가
+있다. "이 샤드의 모든 워커가 끝날 때까지 대기 — 락 창 안에서 완료를 보장(다음 노드 끼어들기
+방지)". `AshSamplerJob.sample()`은 `pool.submit()`만 하고 `finally`에서 곧장 unlock했다.
+
+단일 노드에서는 `lockAtLeastFor`(900ms)가 가려주고 있었다. 노드가 여럿이면 앞 틱의 워커가
+도는 중에 다른 노드가 같은 초를 재수집할 수 있다. `awaitAll()`을 넣었다.
+
+### sample_seq를 워커 스레드에서 증가시켰다
+
+이쪽이 더 위험했다. seq는 결번으로 결측을 판정하는 축이다. 워커에서 증가시키면 제출 순서와
+실행 순서가 어긋날 때 `(sampled_at, sample_seq)` 짝이 뒤집히고, 그러면 하류의
+`expected_ticks = max(seq) - min(seq) + 1` 계산이 흔들린다. **없는 결측이 생기거나 있는
+결측이 가려진다.**
+
+124절에서 잰 결측률 0.0000이 이 결함으로 오염됐는지 확인했다. 아니었다. 인스턴스별 in-flight
+가드가 있어 같은 인스턴스의 `sampleOne`이 동시에 돌지 않았고, 단일 노드 4워커에서 실제 역전은
+관측되지 않았다. 그래도 조건이 바뀌면 깨지는 코드다. seq를 락을 쥔 스케줄 스레드(단일)에서
+정해 워커에 넘기도록 옮겼다.
+
+### 회귀
+
+```
+./gradlew test   BUILD SUCCESSFUL — V32·ASH 포함, 회귀 없음
+```
+
+lakehouse 쪽에서도 같은 계열의 규약 위반 둘을 찾아 고쳤다(모델 이름과 기종 축 조인).
+그쪽 기록은 `dbtower-lakehouse/docs/VERIFICATION.md` 25절.
+

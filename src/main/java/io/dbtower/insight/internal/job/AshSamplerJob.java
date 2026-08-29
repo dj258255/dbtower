@@ -30,8 +30,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -124,6 +126,7 @@ public class AshSamplerJob {
         if (lock.isEmpty()) {
             return; // 다른 노드가 이 틱을 담당한다
         }
+        List<Future<?>> futures = new ArrayList<>();
         try {
             // 틱 하나의 sampled_at은 인스턴스마다 다르지 않고 하나여야 한다 — 그래야 인스턴스
             // 간 같은 시점을 나란히 놓고 볼 수 있고, 유니크 키도 안정적이다.
@@ -135,17 +138,39 @@ public class AshSamplerJob {
                 if (pool.isShutdown()) {
                     break;
                 }
-                pool.submit(() -> sampleOne(instance, tickAt));
+                // seq는 여기(락을 쥔 스케줄 스레드, 단일)에서 정해 넘긴다. 워커에서 증가시키면
+                // 제출 순서와 실행 순서가 어긋날 때 (tickAt, seq) 짝이 뒤집힌다. seq는 결번으로
+                // 결측을 판정하는 축이라, 뒤집히면 없는 결측이 생기거나 있는 결측이 가려진다.
+                long seq = seqByInstance.computeIfAbsent(instance.getId(), k -> new AtomicLong())
+                        .incrementAndGet();
+                futures.add(pool.submit(() -> sampleOne(instance, tickAt, seq)));
             }
+            // 워커가 전부 끝난 뒤에 락을 놓는다(SnapshotScheduler와 같은 이유) — 락 창 안에서
+            // 완료를 보장해야 다른 노드의 다음 틱이 같은 초를 재수집하지 못한다.
+            awaitAll(futures);
         } finally {
             lock.get().unlock();
         }
     }
 
-    private void sampleOne(DatabaseInstance instance, LocalDateTime tickAt) {
+    /** 워커 완료 대기. 개별 워커 예외는 sampleOne이 이미 격리·기록하므로 여기선 경고만 남긴다. */
+    private void awaitAll(List<Future<?>> futures) {
+        for (Future<?> f : futures) {
+            try {
+                f.get();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            } catch (ExecutionException e) {
+                log.warn("ASH 워커 실행 예외 cause={}",
+                        e.getCause() == null ? e.getMessage() : e.getCause().getMessage());
+            }
+        }
+    }
+
+    private void sampleOne(DatabaseInstance instance, LocalDateTime tickAt, long seq) {
         long id = instance.getId();
         AtomicBoolean busy = inFlight.computeIfAbsent(id, k -> new AtomicBoolean(false));
-        long seq = seqByInstance.computeIfAbsent(id, k -> new AtomicLong()).incrementAndGet();
 
         if (!busy.compareAndSet(false, true)) {
             // 직전 틱이 아직 안 끝났다. 쌓지 않고 버리되, 버렸다는 사실은 남긴다 —
