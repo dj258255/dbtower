@@ -305,6 +305,7 @@ db.getSiblingDB('admin').createUser({
 | MySQL | `GRANT SELECT ON sample.*` | `GRANT SELECT, INSERT, UPDATE, DELETE, ALTER, INDEX ON sample.*` |
 | PostgreSQL | `CONNECT` + `USAGE ON SCHEMA public` + `SELECT ON ALL TABLES` | 위 + `INSERT, UPDATE, DELETE` + `USAGE ON ALL SEQUENCES` + 소유 역할 멤버십 `GRANT sample_owner`(DDL용, 소유 역할에 `CREATE ON SCHEMA public` — 15+에서 인덱스 생성이 스키마 CREATE를 따로 본다) |
 | Oracle | `CREATE SESSION` + 테이블별 `READ`(SELECT와 달리 `FOR UPDATE` 락을 못 건다) | `CREATE SESSION` + 테이블별 `SELECT, INSERT, UPDATE, DELETE`(DDL 없음) |
+| SQL Server 계열(Azure SQL Edge 실측) | DB 사용자 매핑 + `SELECT ON SCHEMA::dbo` | 위 + `INSERT, UPDATE, DELETE ON SCHEMA::dbo` + `SHOWPLAN` + 테이블별 `ALTER`(인덱스·열 추가) |
 | MongoDB | `read@sample` (admin db에 생성) | `readWrite@sample`(변경 티켓 실행은 아직 미지원) |
 
 권한 변경 권한은 어느 계정에도 주지 않는다. 변경 계정의 DDL은 인덱스·열 추가 수준까지만 준다(MySQL `ALTER, INDEX`,
@@ -318,7 +319,18 @@ PostgreSQL은 테이블 소유자만 DDL을 하므로 로그인 불가 소유 �
 - INSERT를 되돌리려면 생성된 키를 돌려받아야 한다. PostgreSQL `SERIAL`은 시퀀스 `USAGE`가 필요하고, MySQL은 키 값을
   직접 넣는 INSERT에서 키를 돌려주지 않아 그 경우 되돌리기가 닫힌다(실행 기록에 이유가 남는다).
 - 검증 조회의 실행계획·응답시간은 변경과 같은 트랜잭션 안에서 변경 계정으로 잰다(MySQL·PostgreSQL `EXPLAIN`은 SELECT 권한,
-  Oracle `EXPLAIN PLAN`은 세션의 PLAN_TABLE).
+  Oracle `EXPLAIN PLAN`은 세션의 PLAN_TABLE, SQL Server `SET SHOWPLAN_TEXT`는 DB 수준 `SHOWPLAN` 권한).
+- SQL Server 계열(VERIFICATION 131절, arm64 Azure SQL Edge로 실측 — 실제 SQL Server 2022가 아니다):
+  - 조회 계정은 읽기 전용 겹이 없다. 드라이버가 `setReadOnly`를 무시하고 서버에 읽기 전용 트랜잭션이 없어, 쓰기 권한 계정으로 보낸 INSERT가
+    거부되지 않고 끝의 롤백으로만 사라졌다. 조회 계정에서 쓰기 권한을 빼는 것이 이 기종의 조회 경계 전부다
+    (`dbtower_reader`의 UPDATE: `The UPDATE permission was denied on the object 'customers'`).
+  - 변경 계정의 DDL은 테이블 단위 `ALTER`만 준다. 인덱스·열 추가는 되고, `DROP TABLE`은 스키마 `ALTER`나 테이블 `CONTROL`이 필요해
+    `Cannot drop the table 'orders', because it does not exist or you do not have permission`, `CREATE TABLE`은
+    `CREATE TABLE permission denied in database 'sample'`로 거부됐다.
+  - 삭제한 행을 같은 키로 되돌려 넣을 때 IDENTITY 열이면 `SET IDENTITY_INSERT`가 필요하고, 이는 그 테이블의 `ALTER` 권한을 요구한다.
+    ALTER가 없는 테이블의 DELETE 되돌리기는 대상 DB가 거부한다(되돌리기 트랜잭션 전체가 롤백된다).
+  - SQL Server 2022의 `VIEW SERVER PERFORMANCE STATE`는 SQL Edge(15.0 엔진)에 없어 모니터에는 이전 형태인 `VIEW SERVER STATE`를,
+    스키마 트리·테이블 상세용으로 `VIEW DEFINITION ON SCHEMA::dbo`를 줬다(모니터는 행 SELECT가 거부된다).
 
 ### 민감 컬럼은 계정 권한으로 뺀다 (본 방어선)
 

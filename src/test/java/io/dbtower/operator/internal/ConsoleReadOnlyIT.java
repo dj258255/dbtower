@@ -118,6 +118,29 @@ class ConsoleReadOnlyIT {
         assertEquals(0, count(op.jdbcUrl(), postgres, "console_ro_probe"));
     }
 
+    /**
+     * SQL Server 계열은 서버 쪽 읽기 전용 트랜잭션이 없고 드라이버도 setReadOnly를 무시한다 — 이 겹은 없고, 남는 방어는 끝의 롤백과
+     * 조회 계정 권한뿐이라는 것을 그대로 증명한다(Azure SQL Edge, docker-compose.arm64.yml + docker/workbench-mssql.sql).
+     */
+    @Test
+    @EnabledIfEnvironmentVariable(named = "DBTOWER_MSSQL_IT", matches = "1")
+    void SQLServer계열은_읽기_전용_겹이_없어_끝의_롤백과_조회_계정_권한이_경계다() throws Exception {
+        MsSqlOperator op = new MsSqlOperator(instance(9104, DbmsType.MSSQL, 11433, "sample"), pools, null);
+        ConsoleCredential sa = new ConsoleCredential("sa", "Dbtower1234!");
+        exec(op.jdbcUrl(), sa, "IF OBJECT_ID('dbo.console_ro_probe') IS NULL CREATE TABLE dbo.console_ro_probe (id INT)",
+                "DELETE FROM dbo.console_ro_probe");
+
+        assertDoesNotThrow(() -> op.executeReadOnly(sa, "INSERT INTO dbo.console_ro_probe VALUES (1)", 10, 5),
+                "쓰기 권한 계정의 INSERT를 읽기 전용으로 거부하지 못한다(드라이버가 힌트를 무시)");
+        assertEquals(0, count(op.jdbcUrl(), sa, "dbo.console_ro_probe"), "끝의 롤백으로 남지는 않는다");
+
+        ConsoleCredential reader = new ConsoleCredential("dbtower_reader", "dbtower1234");
+        OperatorException denied = assertThrows(OperatorException.class,
+                () -> op.executeReadOnly(reader, "UPDATE dbo.customers SET grade = grade WHERE id = 1", 10, 5));
+        System.out.println("[MSSQL reader UPDATE] " + denied.getMessage());
+        assertTrue(denied.getMessage().contains("permission was denied"), denied.getMessage());
+    }
+
     @Test
     @EnabledIfEnvironmentVariable(named = GATE, matches = "1")
     void Oracle_읽기_전용_트랜잭션은_쓰기_권한이_있어도_INSERT를_거부한다() throws Exception {

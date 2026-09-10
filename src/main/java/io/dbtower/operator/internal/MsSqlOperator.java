@@ -13,12 +13,8 @@ import io.dbtower.operator.model.LatencyPercentile;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
-import io.dbtower.operator.model.ChangeOutcome;
-import io.dbtower.operator.model.ChangePlan;
 import io.dbtower.operator.model.QueryStat;
 import io.dbtower.operator.model.ReplicationState;
-import io.dbtower.operator.model.RevertPlan;
-import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.operator.RestoreSupport;
 import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.SchemaSnapshot;
@@ -83,17 +79,86 @@ public class MsSqlOperator extends AbstractJdbcOperator {
     }
 
     /**
-     * 변경 티켓 실행은 실측으로 검증한 기종에만 연다. SQL Server는 행 락 문법(UPDLOCK 힌트)과 생성 키 동작이 다른데,
-     * 로컬 환경(Colima, Rosetta 없음)에서 컨테이너가 뜨지 않아 재지 못했다(VERIFICATION 128절).
+     * 변경 트랜잭션의 락 대기 상한. SET LOCK_TIMEOUT은 밀리초 단위 세션 설정이고 기본값(-1)은 무한 대기다.
+     * 변경 계정 풀은 이 경로만 쓰므로 매번 다시 건다(Azure SQL Edge 실측, VERIFICATION 131절).
      */
     @Override
-    public ChangeOutcome executeChange(ConsoleCredential credential, ChangePlan plan) {
-        throw new UnsupportedOperationException("SQL Server 변경 티켓 실행은 실측 검증 전이라 열지 않았습니다");
+    protected void beginChange(Statement st, int timeoutSeconds) throws SQLException {
+        st.execute("SET LOCK_TIMEOUT " + (timeoutSeconds * 1000L));
+    }
+
+    /**
+     * SQL Server에는 FOR UPDATE 절이 없고 테이블 뒤 힌트로 락을 건다. UPDLOCK은 읽은 행의 갱신 락을 트랜잭션 끝까지 잡아
+     * 사본을 뜬 뒤 실제 변경 전에 다른 세션이 같은 행을 바꾸지 못하게 하고, ROWLOCK은 페이지·테이블 락으로 번지는 것을 줄인다.
+     */
+    @Override
+    protected String lockedSelect(String from, String where, int timeoutSeconds) {
+        return "SELECT * FROM " + from + " WITH (UPDLOCK, ROWLOCK)" + (where == null || where.isBlank() ? "" : " " + where);
+    }
+
+    /**
+     * SHOWPLAN_TEXT는 그 문장만으로 된 배치에서 켜지고, 켠 동안의 조회는 실행되지 않고 계획만 돌려준다 — 첫 결과 집합은 문장 원문,
+     * 다음이 계획 행이다. 변경과 같은 커넥션이라 커밋 전 인덱스도 계획에 보인다.
+     */
+    @Override
+    protected String explainInTransaction(Connection c, String sql) throws SQLException {
+        StringBuilder plan = new StringBuilder();
+        try (Statement st = c.createStatement()) {
+            st.execute("SET SHOWPLAN_TEXT ON");
+            try {
+                boolean hasResult = st.execute(sql);
+                boolean statementText = true;
+                while (true) {
+                    if (hasResult) {
+                        try (ResultSet rs = st.getResultSet()) {
+                            while (rs.next()) {
+                                if (!statementText) {
+                                    plan.append(rs.getString(1)).append('\n');
+                                }
+                            }
+                        }
+                        statementText = false;
+                    } else if (st.getUpdateCount() == -1) {
+                        break;
+                    }
+                    hasResult = st.getMoreResults();
+                }
+            } finally {
+                st.execute("SET SHOWPLAN_TEXT OFF");
+            }
+        }
+        return plan.toString();
+    }
+
+    /**
+     * 삭제한 행을 같은 키로 다시 넣을 때 IDENTITY 열은 SET IDENTITY_INSERT ON이 필요하다 — 다른 기종은 명시 값을 그냥 받는데
+     * SQL Server만 거부한다. 세션당 한 테이블만 켤 수 있고 테이블 ALTER 권한이 들어, 넣기 직후 반드시 끈다.
+     */
+    @Override
+    protected void beforeExplicitKeyInsert(Connection c, String table) throws SQLException {
+        if (hasIdentity(c, table)) {
+            try (Statement st = c.createStatement()) {
+                st.execute("SET IDENTITY_INSERT " + table + " ON");
+            }
+        }
     }
 
     @Override
-    public RevertPlan.Outcome revertChange(ConsoleCredential credential, RevertPlan plan) {
-        throw new UnsupportedOperationException("SQL Server 변경 되돌리기는 실측 검증 전이라 열지 않았습니다");
+    protected void afterExplicitKeyInsert(Connection c, String table) throws SQLException {
+        if (hasIdentity(c, table)) {
+            try (Statement st = c.createStatement()) {
+                st.execute("SET IDENTITY_INSERT " + table + " OFF");
+            }
+        }
+    }
+
+    private static boolean hasIdentity(Connection c, String table) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("SELECT OBJECTPROPERTY(OBJECT_ID(?), 'TableHasIdentity')")) {
+            ps.setString(1, table);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getInt(1) == 1;
+            }
+        }
     }
 
     /**

@@ -308,15 +308,37 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
             }
 
             @Override
-            public String lockClause(int timeoutSeconds) {
-                return AbstractJdbcOperator.this.lockClause(timeoutSeconds);
+            public String lockedSelect(String from, String where, int timeoutSeconds) {
+                return AbstractJdbcOperator.this.lockedSelect(from, where, timeoutSeconds);
             }
 
             @Override
             public String explain(Connection c, String sql) throws SQLException {
                 return explainInTransaction(c, sql);
             }
+
+            @Override
+            public void beforeExplicitKeyInsert(Connection c, String table) throws SQLException {
+                AbstractJdbcOperator.this.beforeExplicitKeyInsert(c, table);
+            }
+
+            @Override
+            public void afterExplicitKeyInsert(Connection c, String table) throws SQLException {
+                AbstractJdbcOperator.this.afterExplicitKeyInsert(c, table);
+            }
         });
+    }
+
+    /** 변경 전 사본을 락과 함께 읽는 조회. 기본은 표준 락 절을 끝에 붙인다 — 락이 테이블 뒤 힌트로 오는 기종이 덮어쓴다 */
+    protected String lockedSelect(String from, String where, int timeoutSeconds) {
+        return "SELECT * FROM " + from + (where == null || where.isBlank() ? "" : " " + where) + lockClause(timeoutSeconds);
+    }
+
+    /** 자동 증가 열에 명시 키 값을 넣기 전후. 기본은 아무것도 안 한다 — PostgreSQL·MySQL·Oracle(BY DEFAULT)은 명시 값을 받는다 */
+    protected void beforeExplicitKeyInsert(Connection c, String table) throws SQLException {
+    }
+
+    protected void afterExplicitKeyInsert(Connection c, String table) throws SQLException {
     }
 
     /**

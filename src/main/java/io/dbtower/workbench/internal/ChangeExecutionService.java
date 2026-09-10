@@ -353,8 +353,8 @@ public class ChangeExecutionService {
             kind = Kind.UNCAPTURED;
         }
         boolean captured = kind == Kind.UPDATE || kind == Kind.DELETE || kind == Kind.INSERT;
-        ChangePlan plan = new ChangePlan(kind, sql, captured ? parsed.table() : null, captured ? parsed.captureSql() : null,
-                probe, maxRows, timeoutSeconds, dryRun);
+        ChangePlan plan = new ChangePlan(kind, sql, captured ? parsed.table() : null, captured ? parsed.captureFrom() : null,
+                captured ? parsed.captureTail() : null, probe, maxRows, timeoutSeconds, dryRun);
         return new Prepared(operators.create(instance), credential, plan, sha256(sql));
     }
 

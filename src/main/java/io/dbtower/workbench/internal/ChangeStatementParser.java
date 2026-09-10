@@ -15,9 +15,18 @@ import java.util.Locale;
  */
 final class ChangeStatementParser {
 
-    record Parsed(Kind kind, String table, String captureSql, String reason) {
+    /**
+     * @param captureFrom 사본 조회의 FROM 대상(원문 표기, 별칭 포함) — 락 문법은 기종마다 달라 오퍼레이터가 조립한다
+     * @param captureTail 원문 WHERE(또는 ORDER BY·LIMIT) 이하, 없으면 빈 문자열
+     */
+    record Parsed(Kind kind, String table, String captureFrom, String captureTail, String reason) {
         boolean capturable() {
             return kind != Kind.UNCAPTURED;
+        }
+
+        /** 락 절이 없는 표준 모양 — 읽기 쉬운 검증·표시용 */
+        String captureSql() {
+            return captureFrom == null ? null : "SELECT * FROM " + captureFrom + (captureTail.isEmpty() ? "" : " " + captureTail);
         }
     }
 
@@ -50,7 +59,7 @@ final class ChangeStatementParser {
             case "update" -> update(sql, tokens);
             case "delete" -> delete(sql, tokens);
             case "insert" -> insert(sql, tokens);
-            case "create", "alter", "drop", "rename", "comment" -> new Parsed(Kind.DDL, null, null, null);
+            case "create", "alter", "drop", "rename", "comment" -> new Parsed(Kind.DDL, null, null, null, null);
             case "with" -> uncaptured("CTE와 함께 쓴 변경은 대상 행을 따로 뽑아낼 수 없다");
             case "replace", "merge", "upsert" -> uncaptured("행을 지우고 다시 쓰거나 합치는 문장은 전후 행 대응을 확정할 수 없다");
             default -> uncaptured(head.toUpperCase(Locale.ROOT) + " 문장은 행 사본 캡처 대상이 아니다");
@@ -74,7 +83,7 @@ final class ChangeStatementParser {
             return uncaptured("UPDATE ... FROM 조인은 " + MULTI_TABLE);
         }
         String target = sql.substring(t.get(i).start(), t.get(set).start()).strip();
-        return new Parsed(Kind.UPDATE, tableName(sql, t, i), captureSql(sql, t, target, tail), null);
+        return new Parsed(Kind.UPDATE, tableName(sql, t, i), target, tail(sql, t, tail), null);
     }
 
     private static Parsed delete(String sql, List<Token> t) {
@@ -99,7 +108,7 @@ final class ChangeStatementParser {
         }
         String target = (tail >= 0 ? sql.substring(t.get(i).start(), t.get(tail).start()) : sql.substring(t.get(i).start()))
                 .strip();
-        return new Parsed(Kind.DELETE, tableName(sql, t, i), captureSql(sql, t, target, tail), null);
+        return new Parsed(Kind.DELETE, tableName(sql, t, i), target, tail(sql, t, tail), null);
     }
 
     private static Parsed insert(String sql, List<Token> t) {
@@ -123,19 +132,22 @@ final class ChangeStatementParser {
                 return uncaptured("upsert는 이미 있던 행이 어떻게 바뀌었는지 사본을 잡을 수 없다");
             }
         }
-        return new Parsed(Kind.INSERT, tableName(sql, t, i), null, null);
+        return new Parsed(Kind.INSERT, tableName(sql, t, i), null, null, null);
     }
 
     /**
-     * 원문 WHERE(또는 ORDER BY·LIMIT) 이하를 그대로 이어 붙인다 — 조건을 다시 쓰지 않아야 실제 변경 대상과 같은 행을 본다.
+     * 원문 WHERE(또는 ORDER BY·LIMIT) 이하를 그대로 떼어 둔다 — 조건을 다시 쓰지 않아야 실제 변경 대상과 같은 행을 본다.
      * 끝은 마지막 토큰에서 자른다: 뒤에 붙은 줄 주석(-- ...)이 남으면 오퍼레이터가 덧붙이는 FOR UPDATE를 주석으로 삼킨다.
      */
-    private static String captureSql(String sql, List<Token> t, String target, int tail) {
+    private static String tail(String sql, List<Token> t, int tail) {
+        if (tail < 0) {
+            return "";
+        }
         int last = t.size() - 1;
         while (last > 0 && t.get(last).type() == Type.PUNCT && ";".equals(t.get(last).text())) {
             last--;
         }
-        return "SELECT * FROM " + target + (tail >= 0 ? " " + sql.substring(t.get(tail).start(), t.get(last).end()).strip() : "");
+        return sql.substring(t.get(tail).start(), t.get(last).end()).strip();
     }
 
     /** [스키마.]테이블 표기를 원문 그대로 — 인용 식별자도 보존한다(오퍼레이터가 대소문자 규칙을 적용한다). */
@@ -200,7 +212,7 @@ final class ChangeStatementParser {
     }
 
     private static Parsed uncaptured(String reason) {
-        return new Parsed(Kind.UNCAPTURED, null, null, reason);
+        return new Parsed(Kind.UNCAPTURED, null, null, null, reason);
     }
 
     static String trimTerminator(String sql) {

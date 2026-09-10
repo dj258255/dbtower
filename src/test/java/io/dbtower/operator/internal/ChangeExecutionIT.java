@@ -42,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class ChangeExecutionIT {
 
     private static final String GATE = "DBTOWER_CONSOLE_IT";
+    private static final String MSSQL_GATE = "DBTOWER_MSSQL_IT";
     private static final String TRICKY = "O'Brien \\ \"q\" ; DROP TABLE x; --";
 
     private final ConnectionPools pools = new ConnectionPools(new VaultCredentials("", ""),
@@ -103,8 +104,9 @@ class ChangeExecutionIT {
         return out;
     }
 
-    private static ChangePlan plan(Kind kind, String sql, String table, String capture, int maxRows, boolean dryRun) {
-        return new ChangePlan(kind, sql, table, capture, null, maxRows, 10, dryRun);
+    /** where가 있으면 사본 조회는 table + where, 락 문법은 기종 오퍼레이터가 조립한다 */
+    private static ChangePlan plan(Kind kind, String sql, String table, String where, int maxRows, boolean dryRun) {
+        return new ChangePlan(kind, sql, table, where == null ? null : table, where, null, maxRows, 10, dryRun);
     }
 
     private static boolean ddlCommits(String url, ConsoleCredential cred) throws SQLException {
@@ -121,7 +123,7 @@ class ChangeExecutionIT {
         List<List<String>> original = rows(url, cred, all);
         assertEquals(3, original.size());
         String update = "UPDATE " + table + " SET name = 'changed' WHERE id IN (1, 2)";
-        String capture = "SELECT * FROM " + table + " WHERE id IN (1, 2)";
+        String capture = "WHERE id IN (1, 2)";
         String type = op.instance.getType().name();
 
         ChangeOutcome dry = op.executeChange(cred, plan(Kind.UPDATE, update, table, capture, 100, true));
@@ -156,7 +158,7 @@ class ChangeExecutionIT {
         with(url, cred, seed);
 
         ChangeOutcome deleted = op.executeChange(cred, plan(Kind.DELETE, "DELETE FROM " + table + " WHERE id = 3", table,
-                "SELECT * FROM " + table + " WHERE id = 3", 100, false));
+                "WHERE id = 3", 100, false));
         assertEquals(1, deleted.affectedRows());
         assertEquals(2, rows(url, cred, all).size());
         op.revertChange(cred, new RevertPlan(Kind.DELETE, table, deleted.before(), deleted.after(), 10, false));
@@ -171,7 +173,7 @@ class ChangeExecutionIT {
         assertEquals(original, rows(url, cred, all));
 
         OperatorException mismatch = assertThrows(OperatorException.class, () -> op.executeChange(cred,
-                plan(Kind.UPDATE, update, table, "SELECT * FROM " + table + " WHERE id = 1", 100, false)));
+                plan(Kind.UPDATE, update, table, "WHERE id = 1", 100, false)));
         System.out.println("[" + type + " 사본 어긋남] " + mismatch.getMessage());
         assertTrue(mismatch.getMessage().contains("영향 행 수"), mismatch.getMessage());
         assertEquals(original, rows(url, cred, all), "사본과 실제 대상이 어긋나면 커밋하지 않는다");
@@ -251,7 +253,7 @@ class ChangeExecutionIT {
                         + " WHERE NOT EXISTS (SELECT 1 FROM change_it_big)",
                 "ANALYZE change_it_big");
         ChangeOutcome ddl = op.executeChange(postgres, new ChangePlan(Kind.DDL,
-                "CREATE INDEX change_it_big_status_idx ON change_it_big (status)", null, null,
+                "CREATE INDEX change_it_big_status_idx ON change_it_big (status)", null, null, null,
                 "SELECT id FROM change_it_big WHERE status = 'S7'", 100, 10, true));
         System.out.println("[PG DDL 드라이런 전 계획]\n" + ddl.probeBefore().plan() + "  timings(us)=" + ddl.probeBefore().timingsMicros());
         System.out.println("[PG DDL 드라이런 후 계획]\n" + ddl.probeAfter().plan() + "  timings(us)=" + ddl.probeAfter().timingsMicros());
@@ -301,6 +303,73 @@ class ChangeExecutionIT {
         boolean commits = ddlCommits(op.jdbcUrl(), owner);
         System.out.println("[Oracle dataDefinitionCausesTransactionCommit] " + commits);
         assertTrue(commits, "Oracle DDL은 암묵 커밋이다(드라이런 거부의 근거)");
+    }
+
+    /**
+     * SQL Server 계열 — 로컬(Apple Silicon, Rosetta 없음)에서는 arm64 Azure SQL Edge로 잰다(docker-compose.arm64.yml).
+     * 다른 기종과 게이트를 나눈 이유: 기본 compose의 SQL Server 이미지는 이 환경에서 뜨지 않아 늘 켜 둘 수 없다.
+     * {@code DBTOWER_MSSQL_IT=1 ./gradlew test --tests '*ChangeExecutionIT'}
+     */
+    @Test
+    @EnabledIfEnvironmentVariable(named = MSSQL_GATE, matches = "1")
+    void SQLServer계열_실행_되돌리기_드리프트_불변식과_트랜잭션_안_실행계획() throws Exception {
+        MsSqlOperator op = new MsSqlOperator(instance(9204, DbmsType.MSSQL, 11433, "sample"), pools, null);
+        ConsoleCredential sa = new ConsoleCredential("sa", "Dbtower1234!");
+        exec(op.jdbcUrl(), sa, "IF OBJECT_ID('dbo.change_it') IS NULL CREATE TABLE dbo.change_it (id INT IDENTITY(100, 1) PRIMARY KEY,"
+                + " name NVARCHAR(50) NOT NULL, note NVARCHAR(200), amount DECIMAL(10,2), flag BIT, updated DATETIME2(6), payload VARBINARY(16))");
+        scenario(op, sa, "change_it", c -> {
+            try (Statement st = c.createStatement()) {
+                st.execute("DELETE FROM dbo.change_it");
+                st.execute("SET IDENTITY_INSERT dbo.change_it ON");
+            }
+            try (PreparedStatement ps = c.prepareStatement(
+                    "INSERT INTO dbo.change_it (id, name, note, amount, flag, updated, payload) VALUES (?, ?, ?, ?, ?, ?, ?)")) {
+                msInsert(ps, 1, "Hong", TRICKY, "10.50", true, LocalDateTime.parse("2026-09-10T12:34:56.789012"), new byte[]{0, 1, (byte) 0xff});
+                msInsert(ps, 2, "Kim", null, "0.00", false, LocalDateTime.parse("2026-09-10T00:00:00.000001"), null);
+                msInsert(ps, 3, "Lee", "plain", "-3.25", null, null, new byte[]{7});
+            }
+            try (Statement st = c.createStatement()) {
+                st.execute("SET IDENTITY_INSERT dbo.change_it OFF");
+            }
+        }, "INSERT INTO change_it (name, note, amount) VALUES ('new', 'n', 1.00)");
+
+        String url = op.jdbcUrl();
+        boolean commits = ddlCommits(url, sa);
+        System.out.println("[MSSQL dataDefinitionCausesTransactionCommit] " + commits);
+        assertFalse(commits, "SQL Server 계열 DDL은 트랜잭션 안에 있다");
+        exec(url, sa, "IF OBJECT_ID('dbo.change_it_big') IS NULL CREATE TABLE dbo.change_it_big (id INT IDENTITY PRIMARY KEY, status NVARCHAR(10))",
+                "IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'change_it_big_status_idx') DROP INDEX change_it_big_status_idx ON dbo.change_it_big",
+                "IF NOT EXISTS (SELECT 1 FROM dbo.change_it_big) INSERT INTO dbo.change_it_big (status)"
+                        + " SELECT TOP (20000) CONCAT('S', ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) % 1000)"
+                        + " FROM sys.all_objects a CROSS JOIN sys.all_objects b",
+                "UPDATE STATISTICS dbo.change_it_big");
+        ChangeOutcome ddl = op.executeChange(sa, new ChangePlan(Kind.DDL,
+                "CREATE INDEX change_it_big_status_idx ON dbo.change_it_big (status)", null, null, null,
+                "SELECT id FROM dbo.change_it_big WHERE status = 'S7'", 100, 10, true));
+        System.out.println("[MSSQL DDL 드라이런 전 계획]\n" + ddl.probeBefore().plan() + "  timings(us)=" + ddl.probeBefore().timingsMicros()
+                + " error=" + ddl.probeBefore().error());
+        System.out.println("[MSSQL DDL 드라이런 후 계획]\n" + ddl.probeAfter().plan() + "  timings(us)=" + ddl.probeAfter().timingsMicros()
+                + " error=" + ddl.probeAfter().error());
+        assertFalse(ddl.committed());
+        assertTrue(ddl.probeAfter().plan().contains("change_it_big_status_idx"), "커밋 전 인덱스가 같은 트랜잭션의 계획에 보인다");
+        assertEquals("0", rows(url, sa, "SELECT COUNT(*) FROM sys.indexes WHERE name = 'change_it_big_status_idx'").get(0).get(0),
+                "드라이런 뒤 인덱스는 없다");
+    }
+
+    private static void msInsert(PreparedStatement ps, int id, String name, String note, String amount, Boolean flag,
+                                 LocalDateTime updated, byte[] payload) throws SQLException {
+        ps.setInt(1, id);
+        ps.setString(2, name);
+        ps.setString(3, note);
+        ps.setBigDecimal(4, new BigDecimal(amount));
+        if (flag == null) {
+            ps.setNull(5, Types.BIT);
+        } else {
+            ps.setBoolean(5, flag);
+        }
+        ps.setObject(6, updated);
+        ps.setBytes(7, payload);
+        ps.executeUpdate();
     }
 
     private static void oraInsert(PreparedStatement ps, int id, String name, String note, String amount,

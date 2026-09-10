@@ -244,7 +244,8 @@ class ChangeExecutionServiceTest {
         ArgumentCaptor<ChangePlan> plan = ArgumentCaptor.forClass(ChangePlan.class);
         verify(operator).executeChange(any(), plan.capture());
         assertTrue(plan.getValue().dryRun());
-        assertEquals("SELECT * FROM customers WHERE id = 3", plan.getValue().captureSql());
+        assertEquals("customers", plan.getValue().captureFrom());
+        assertEquals("WHERE id = 3", plan.getValue().captureTail());
         assertEquals("ROLLED_BACK", view.outcome());
         assertTrue(view.rollbackAvailable(), "드라이런에서는 '실행하면 되돌릴 수 있다'는 예고다");
     }

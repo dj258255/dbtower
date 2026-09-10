@@ -41,9 +41,15 @@ final class JdbcChangeRunner {
     interface Dialect {
         void beginChange(Statement st, int timeoutSeconds) throws SQLException;
 
-        String lockClause(int timeoutSeconds);
+        /** 행 락을 건 SELECT * — 락 문법 위치가 기종마다 달라(끝의 FOR UPDATE, 테이블 뒤 힌트) 조립을 맡긴다 */
+        String lockedSelect(String from, String where, int timeoutSeconds);
 
         String explain(Connection c, String sql) throws SQLException;
+
+        /** 삭제한 행을 같은 키 값으로 다시 넣기 직전·직후 — 자동 증가 열에 명시 값을 거부하는 기종이 켜고 끈다 */
+        void beforeExplicitKeyInsert(Connection c, String table) throws SQLException;
+
+        void afterExplicitKeyInsert(Connection c, String table) throws SQLException;
     }
 
     private static final int PROBE_RUNS = 3;
@@ -81,8 +87,8 @@ final class JdbcChangeRunner {
             switch (plan.kind()) {
                 case UPDATE, DELETE -> {
                     List<String> keys = primaryKey(c, plan.table());
-                    before = capture(c, AbstractJdbcOperator.withoutTrailingSemicolon(plan.captureSql())
-                            + dialect.lockClause(timeout), plan.maxRows(), keys, timeout);
+                    before = capture(c, dialect.lockedSelect(plan.captureFrom(),
+                            AbstractJdbcOperator.withoutTrailingSemicolon(plan.captureTail()), timeout), plan.maxRows(), keys, timeout);
                     affected = executeUpdate(c, statement, timeout);
                     if (affected != before.rows().size()) {
                         throw new OperatorException("영향 행 수(" + affected + ")가 변경 전 사본 행 수(" + before.rows().size()
@@ -273,6 +279,7 @@ final class JdbcChangeRunner {
                 + before.columns().stream().map(col -> ident(quote, col.name())).collect(Collectors.joining(", "))
                 + ") VALUES (" + String.join(", ", Collections.nCopies(before.columns().size(), "?")) + ")";
         long restored = 0;
+        dialect.beforeExplicitKeyInsert(c, plan.table());
         try (PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setQueryTimeout(timeout);
             for (List<String> row : before.rows()) {
@@ -281,6 +288,8 @@ final class JdbcChangeRunner {
                 }
                 restored += requireOne(ps.executeUpdate());
             }
+        } finally {
+            dialect.afterExplicitKeyInsert(c, plan.table());
         }
         return restored;
     }
@@ -363,8 +372,8 @@ final class JdbcChangeRunner {
         RowImage keyed = new RowImage(columns, keys, List.of());
         for (int from = 0; from < keyValues.size(); from += KEY_BATCH) {
             List<List<String>> batch = keyValues.subList(from, Math.min(keyValues.size(), from + KEY_BATCH));
-            String sql = "SELECT * FROM " + table + " WHERE " + String.join(" OR ", Collections.nCopies(batch.size(), condition))
-                    + (lock ? dialect.lockClause(timeout) : "");
+            String where = "WHERE " + String.join(" OR ", Collections.nCopies(batch.size(), condition));
+            String sql = lock ? dialect.lockedSelect(table, where, timeout) : "SELECT * FROM " + table + " " + where;
             try (PreparedStatement ps = c.prepareStatement(sql)) {
                 ps.setQueryTimeout(timeout);
                 int idx = 1;
