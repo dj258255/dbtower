@@ -75,6 +75,18 @@ grep -q "canonical(sql)" src/main/java/io/dbtower/operator/internal/AbstractJdbc
     || hits="AbstractJdbcOperator.requireSelect가 canonical(주석·인용 제거) 사본으로 판정하지 않는다"
 report "읽기 전용 게이트의 주석 인식" "$hits"
 
+# 6) 최소 권한 기준선이 기능을 따라오는지 — MySqlOperator가 읽는 권한 대상 테이블은 init 스크립트에 GRANT가 있어야 한다.
+#    07-04 실측 뒤 추가된 기능이 GRANT 없이 들어와 7곳이 숨어 있었다: 둘은 502, 둘은 HTTP 200 본문 안의 ERROR,
+#    셋은 로컬 토폴로지에서 경로를 안 타 보이지 않았다(VERIFICATION 127절). 상태 코드 점검으로는 못 잡는다.
+#    information_schema는 부여 대상이 아니고, global_status는 모든 사용자가 읽을 수 있어(실측: 부여 없이 330행) 제외한다.
+MYSQL_NO_GRANT_NEEDED="performance_schema.global_status"
+hits=""
+for t in $(grep -oE "(performance_schema|sys|mysql)\.[a-z_]+" src/main/java/io/dbtower/operator/internal/MySqlOperator.java | sort -u); do
+    case " $MYSQL_NO_GRANT_NEEDED " in *" $t "*) continue ;; esac
+    grep -q "ON ${t} " docker/mysql-init.sql || hits="${hits}${t}: docker/mysql-init.sql에 GRANT 없음"$'\n'
+done
+report "MySQL 모니터 권한 기준선 (오퍼레이터가 읽는 테이블 = init 스크립트 GRANT)" "$(echo "$hits" | sed '/^$/d')"
+
 echo
 [ "$fail" -eq 0 ] && echo "규약 검사 전부 통과" || echo "규약 검사 실패 — 위 항목을 확인하세요"
 exit $fail

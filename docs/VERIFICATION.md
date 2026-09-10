@@ -4473,4 +4473,86 @@ SELECT command denied to user 'dbtower_monitor'@'172.18.0.1' for table 'innodb_l
 `docs/least-privilege.md`와 `docker/mysql-init.sql` 어디에도 두 테이블 권한이 없다. 문서 실측(2026-07-04)
 뒤에 들어온 기능의 권한이 반영되지 않은 것으로 보인다. (새 볼륨에서 모니터 계정이 자동으로 생기지 않은 것은
 결함이 아니다. `mysql-init.sql` 머리 주석대로 compose 무수정 정책이라 수동 실행이 기본이다.)
+127절에서 5기종으로 넓혀 재실측하고 고쳤다.
+
+## 127. 최소 권한 재실측 — "200 OK"를 통과로 세면 권한 누락을 놓친다 (2026-09-10)
+
+126절의 부수 발견을 계기로, 07-04에 확정한 최소 권한이 그 뒤 추가된 기능(대기 이벤트, 세션 블로킹, advisor,
+finops)을 따라왔는지 5기종 전부 다시 쟀다.
+
+### 방법
+
+1. 기종별 모니터 계정으로 인스턴스를 등록하고 인스턴스 단위 API 25개(GET 22, POST 3)를 전부 호출한다.
+2. HTTP 상태 코드만 믿지 않는다. 앱 로그의 권한 거부 문구를 함께 모으고, 오퍼레이터 코드가 읽는 테이블을
+   모니터 계정으로 **직접 SELECT**해서 누락을 확정한다.
+3. 부여 뒤에는 **하나씩 회수해 깨지는지** 확인해 최소성을 증명한다.
+
+### 결과
+
+| 기종 | API 25개 | 권한 누락 | 비고 |
+|---|---|---|---|
+| MySQL 8.4.11 | 502 두 건(wait-events, sessions) | **7개 테이블 → 0** | 아래 상세 |
+| PostgreSQL 16 | 25/25 | 0 | 앱 로그 권한 거부 0건 |
+| Oracle Free 23 | 25/25 | 0 | 앱 로그 권한 거부 0건 |
+| MongoDB 7 | 24/25 → 25/25 | 0 | explain 1건 실패는 테스트 입력 오류(`sample`의 `system.*` 컬렉션). 일반 컬렉션으로 200 |
+| SQL Server 2022 | 측정 못 함 | - | 로컬 환경 블로커, 아래 |
+
+MySQL 모니터 계정으로 오퍼레이터가 읽는 테이블을 직접 조회한 결과(권한 부여 전):
+
+```
+performance_schema.events_waits_summary_global_by_event_name  ERROR 1142 SELECT command denied
+performance_schema.prepared_statements_instances              ERROR 1142
+performance_schema.replication_group_members                  ERROR 1142
+performance_schema.setup_instruments                          ERROR 1142
+performance_schema.table_io_waits_summary_by_index_usage      ERROR 1142
+sys.innodb_lock_waits                                         ERROR 1142
+sys.schema_unused_indexes                                     ERROR 1142
+(information_schema.*, mysql.slow_log, 다이제스트 2종, global_status는 통과)
+```
+
+sys 뷰는 `SQL SECURITY INVOKER`라 뷰 SELECT만으로는 안 된다. 단계별로 부여하며 잰 결과:
+
+```
+[1] SELECT sys.innodb_lock_waits만           -> ERROR 1356 ... definer/invoker of view lack rights
+[2] + performance_schema.data_lock_waits     -> ERROR 1356
+[3] + performance_schema.data_locks          -> ERROR 1356
+[7] + EXECUTE sys.quote_identifier           -> ERROR 1356
+[8] + EXECUTE sys.format_statement           -> 0 (통과)
+[4] SELECT sys.schema_unused_indexes만       -> ERROR 1356
+[5] + table_io_waits_summary_by_index_usage  -> 9 (통과)
+```
+
+최소성: 위 7개 중 어느 하나를 회수해도 해당 뷰 조회가 다시 실패했다(1143/1356/1142).
+
+### 200 뒤에 숨은 실패
+
+다섯 권한을 회수한 상태와 부여한 상태에서 같은 API를 불러 본문을 비교했다.
+
+```
+revoked  wait-events  HTTP 502                   granted  wait-events  HTTP 200   (setup_instruments만 빠져도 502)
+revoked  finops       HTTP 200  checks[3].status=ERROR "MySQL 인덱스 사용 통계 조회 실패"   -> granted OK
+revoked  advisors     HTTP 200  checks[8].status=ERROR "MySQL 통계 수집 건강 조회 실패"     -> granted OK
+revoked  partitions / replication / deadlocks    본문 동일 (sample에 파티션 없음, 단일 노드라 그룹 복제 경로를 안 탐)
+granted 상태의 WARN 로그: 0건
+```
+
+상태 코드로 세면 누락 7개 중 2개만 보인다. 2개는 200 본문 안의 `ERROR`, 나머지는 이 토폴로지에서 경로를 타지 않아
+코드 기준으로만 필요성을 확인했다. 표에도 "코드 경로 기준"이라고 구분해 적었다([least-privilege.md](least-privilege.md)).
+
+### 재발 방지
+
+권한 문서는 기능이 늘 때 조용히 썩는다. `scripts/check-conventions.sh`에 "MySqlOperator가 읽는
+performance_schema·sys·mysql 테이블은 docker/mysql-init.sql에 GRANT가 있어야 한다"를 추가했다.
+
+### SQL Server: 로컬 환경 블로커 (측정 못 함)
+
+```
+docker ps -a  dbtower-mssql  Exited (1)
+/opt/mssql/bin/sqlservr: Invalid mapping of address 0x4005352000 in reserved address space below 0x400000000000.
+colima status  -> macOS Virtualization.Framework, arch aarch64 (Rosetta 미사용)
+```
+
+amd64 전용 이미지가 Rosetta 없는 에뮬레이션에서 기동 즉시 죽는다. Colima를 `--vz-rosetta`로 재기동하면 풀릴 가능성이
+높지만, 사용자 머신의 Docker VM 전체를 재시작하는 조작이라 하지 않았다. SQL Server는 07-04 실측(`VIEW SERVER
+PERFORMANCE STATE` 단 하나)을 유지하고, 그 뒤 추가된 기능의 권한은 미검증으로 남긴다.
 

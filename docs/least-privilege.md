@@ -18,7 +18,7 @@ DBTower가 대상 DB에 접속할 때 root/postgres/sa/SYSTEM 같은 관리자 �
 
 | 기종 | 최소 권한 집합 |
 |---|---|
-| MySQL | `SELECT ON sample.*` + `SELECT ON performance_schema.events_statements_summary_by_digest` + `SELECT ON mysql.slow_log` + `REPLICATION CLIENT, REPLICATION SLAVE ON *.*` |
+| MySQL | `SELECT ON sample.*` + performance_schema 테이블 단위 `SELECT`(다이제스트·대기·락·인덱스 사용) + `sys` INVOKER 뷰 2개(원천 테이블 `SELECT`와 `sys` 함수 `EXECUTE` 포함) + `SELECT ON mysql.slow_log` + `REPLICATION CLIENT, REPLICATION SLAVE, PROCESS ON *.*` (전문은 아래, 2026-09-10 재실측) |
 | PostgreSQL | `LOGIN` 롤 + `pg_read_all_stats` (+ EXPLAIN 대상 테이블 `SELECT`) |
 | SQL Server | `VIEW SERVER PERFORMANCE STATE` 단 하나 |
 | Oracle | `CREATE SESSION` + `SELECT_CATALOG_ROLE` + 대상 테이블 `READ` |
@@ -51,6 +51,12 @@ DBTower가 대상 DB에 접속할 때 root/postgres/sa/SYSTEM 같은 관리자 �
 | explain | `SELECT ON sample.*` (EXPLAIN은 대상 테이블 SELECT 권한 요구) | (스키마 SELECT 부여 후 통과 확인) |
 | replication | `REPLICATION CLIENT` (SHOW REPLICA STATUS) + `REPLICATION SLAVE` (SHOW REPLICAS 폴백) | 아래 에러 2건 |
 | 최근 데드락 (D-2) | `PROCESS` (SHOW ENGINE INNODB STATUS) | `Access denied; you need (at least one of) the PROCESS privilege(s)` |
+| wait-events, 심층 진단 대기 차분 (2026-09-10 재실측) | `SELECT ON performance_schema.events_waits_summary_global_by_event_name` + `SELECT ON performance_schema.setup_instruments` | 502 `SELECT command denied ... for table 'events_waits_summary_global_by_event_name'`. setup_instruments 하나만 빠져도 502 |
+| sessions 블로킹 관계 blockedByPid (재실측) | `SELECT ON sys.innodb_lock_waits` + `SELECT ON performance_schema.data_locks`·`data_lock_waits` + `EXECUTE ON FUNCTION sys.format_statement`·`sys.quote_identifier` | 502 `SELECT command denied ... for table 'innodb_lock_waits'`. 뷰만 부여하면 `ERROR 1356 View 'sys.innodb_lock_waits' references invalid table(s) ... or definer/invoker of view lack rights` |
+| 통계 수집 건강 advisor (재실측) | `SELECT ON performance_schema.prepared_statements_instances` | **HTTP 200**, 본문 점검 항목만 `status: ERROR` (`MySQL 통계 수집 건강 조회 실패`) |
+| finops 인덱스 사용량 (재실측) | `SELECT ON performance_schema.table_io_waits_summary_by_index_usage` | **HTTP 200**, 본문 점검 항목만 `status: ERROR` (`MySQL 인덱스 사용 통계 조회 실패`) |
+| 파티션 보조: 미사용 인덱스 (재실측) | `SELECT ON sys.schema_unused_indexes` (+ 위 table_io 테이블, INVOKER 뷰) | 코드 경로 기준으로 필요. sample에 파티션 테이블이 없어 API 차이는 관측하지 못했다 |
+| 복제: 그룹 복제 토폴로지 (재실측) | `SELECT ON performance_schema.replication_group_members` | 코드 경로 기준으로 필요. 단일 노드라 API 차이는 관측하지 못했다 |
 
 ### 계정 생성 전문
 
@@ -62,6 +68,18 @@ GRANT SELECT ON performance_schema.events_statements_histogram_by_digest TO 'dbt
 GRANT SELECT ON mysql.slow_log TO 'dbtower_monitor'@'%';
 GRANT REPLICATION CLIENT, REPLICATION SLAVE ON *.* TO 'dbtower_monitor'@'%';
 GRANT PROCESS ON *.* TO 'dbtower_monitor'@'%'; -- 최근 데드락(SHOW ENGINE INNODB STATUS)
+-- 2026-09-10 재실측으로 추가 (VERIFICATION 127절)
+GRANT SELECT ON performance_schema.events_waits_summary_global_by_event_name TO 'dbtower_monitor'@'%';
+GRANT SELECT ON performance_schema.setup_instruments TO 'dbtower_monitor'@'%';
+GRANT SELECT ON performance_schema.prepared_statements_instances TO 'dbtower_monitor'@'%';
+GRANT SELECT ON performance_schema.replication_group_members TO 'dbtower_monitor'@'%';
+GRANT SELECT ON performance_schema.table_io_waits_summary_by_index_usage TO 'dbtower_monitor'@'%';
+GRANT SELECT ON sys.schema_unused_indexes TO 'dbtower_monitor'@'%';
+GRANT SELECT ON sys.innodb_lock_waits TO 'dbtower_monitor'@'%';
+GRANT SELECT ON performance_schema.data_locks TO 'dbtower_monitor'@'%';
+GRANT SELECT ON performance_schema.data_lock_waits TO 'dbtower_monitor'@'%';
+GRANT EXECUTE ON FUNCTION sys.format_statement TO 'dbtower_monitor'@'%';
+GRANT EXECUTE ON FUNCTION sys.quote_identifier TO 'dbtower_monitor'@'%';
 ```
 
 ### 실측 에러 원문 (권한 추가 전)
