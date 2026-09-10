@@ -334,11 +334,41 @@ class ChangeExecutionServiceTest {
         executed.attachSchemaDiff(JSON.writeValueAsString(diff));
         when(executions.findByReviewIdOrderByStartedAtDesc(7L)).thenReturn(List.of(executed));
         when(operator.dropIndexStatement("customers", "idx_memo")).thenReturn("DROP INDEX idx_memo ON customers");
+        when(operator.dropColumnStatement("customers", "memo")).thenReturn("ALTER TABLE customers DROP COLUMN memo");
 
         ChangeExecutionService.InverseProposal inverse = service.executions(7L).get(0).inverse();
 
         assertEquals(List.of("DROP INDEX idx_memo ON customers", "ALTER TABLE customers DROP COLUMN memo"), inverse.statements());
         assertNotNull(inverse.note(), "지워진 열(legacy)은 정의·데이터가 사본에 없어 자동 역변경을 만들지 않았다고 알린다");
+    }
+
+    @Test
+    void MongoDB_티켓은_명령에서_컬렉션을_잡고_SQL_검증_조회는_거부한다() {
+        String command = "{\"update\": \"customers\", \"updates\": [{\"q\": {\"_id\": 3}, \"u\": {\"$set\": {\"grade\": \"VIP\"}}}]}";
+        ticket("PENDING", command, "SELECT 1");
+        assertEquals(422, assertThrows(WorkbenchRejection.class, () -> service.dryRun(7L, false)).status(),
+                "MongoDB 티켓의 검증 조회는 MongoDB 읽기 명령이어야 한다");
+
+        ticket("PENDING", command, "{\"find\": \"customers\", \"filter\": {\"grade\": \"VIP\"}}");
+        when(operator.executeChange(any(), any())).thenReturn(updated(false));
+        service.dryRun(7L, false);
+
+        ArgumentCaptor<ChangePlan> plan = ArgumentCaptor.forClass(ChangePlan.class);
+        verify(operator).executeChange(any(), plan.capture());
+        assertEquals(Kind.UPDATE, plan.getValue().kind());
+        assertEquals("customers", plan.getValue().table());
+    }
+
+    @Test
+    void 문서_사본의_원본_열은_마스킹을_거치지_않은_값이라_화면_비교에서_빠진다() {
+        List<ImageColumn> columns = List.of(new ImageColumn("_id", Types.OTHER, "bson"), new ImageColumn("email", Types.OTHER, "bson"),
+                new ImageColumn(RowImage.RAW_DOCUMENT_COLUMN, Types.OTHER, "bson"));
+        RowImage image = new RowImage(columns, List.of("_id"), List.of(List.of("3", "lee@example.com", "{\"_id\": 3, \"email\": \"lee@example.com\"}")));
+
+        RowImage visible = ChangeExecutionService.visible(image);
+
+        assertEquals(List.of("_id", "email"), visible.columns().stream().map(ImageColumn::name).toList());
+        assertEquals(List.of("3", "lee@example.com"), visible.rows().get(0));
     }
 
     @Test

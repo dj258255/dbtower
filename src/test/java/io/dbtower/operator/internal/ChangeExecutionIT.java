@@ -1,6 +1,16 @@
 package io.dbtower.operator.internal;
 
+import com.mongodb.MongoClientSettings;
+import com.mongodb.MongoCredential;
+import com.mongodb.ServerAddress;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
 import io.dbtower.operator.ConnectionPools;
+import org.bson.Document;
+import org.bson.json.JsonMode;
+import org.bson.json.JsonWriterSettings;
+import org.bson.types.Decimal128;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.VaultCredentials;
 import io.dbtower.operator.model.ChangeOutcome;
@@ -23,10 +33,13 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -354,6 +367,118 @@ class ChangeExecutionIT {
         assertTrue(ddl.probeAfter().plan().contains("change_it_big_status_idx"), "커밋 전 인덱스가 같은 트랜잭션의 계획에 보인다");
         assertEquals("0", rows(url, sa, "SELECT COUNT(*) FROM sys.indexes WHERE name = 'change_it_big_status_idx'").get(0).get(0),
                 "드라이런 뒤 인덱스는 없다");
+    }
+
+    /**
+     * MongoDB — 단일 노드 복제셋 트랜잭션 안에서 문서 사본을 잡는다. 행 락 대신 쓰기 충돌 감지이고, explain과 기존 컬렉션 인덱스 생성이
+     * 트랜잭션 안에서 거부되는 기종 제약을 그대로 단언한다. 비교 기준은 대상 DB가 준 canonical Extended JSON이라
+     * Decimal128·Date·배열·중첩 문서의 타입까지 복원됐는지 본다.
+     */
+    @Test
+    @EnabledIfEnvironmentVariable(named = GATE, matches = "1")
+    void MongoDB_트랜잭션_안_실행_되돌리기_드리프트와_트랜잭션_밖_실행계획() {
+        MongoClientCache cache = new MongoClientCache(pools);
+        MongoOperator op = new MongoOperator(instance(9205, DbmsType.MONGODB, 17017, "sample"), cache, null, null);
+        ConsoleCredential root = new ConsoleCredential("root", "dbtower1234");
+        JsonWriterSettings canonical = JsonWriterSettings.builder().outputMode(JsonMode.EXTENDED).build();
+        try (MongoClient admin = MongoClients.create(MongoClientSettings.builder()
+                .applyToClusterSettings(b -> b.hosts(List.of(new ServerAddress("127.0.0.1", 17017))))
+                .credential(MongoCredential.createCredential("root", "admin", "dbtower1234".toCharArray())).build())) {
+            MongoCollection<Document> coll = admin.getDatabase("sample").getCollection("change_it");
+            Runnable seed = () -> {
+                coll.deleteMany(new Document());
+                coll.insertMany(List.of(
+                        new Document("_id", 1).append("name", "Hong").append("note", TRICKY)
+                                .append("amount", new Decimal128(new BigDecimal("10.50")))
+                                .append("at", Date.from(Instant.parse("2026-09-10T12:34:56.789Z")))
+                                .append("tags", List.of("a", "b")).append("profile", new Document("tier", 1)),
+                        new Document("_id", 2).append("name", "Kim").append("amount", 0).append("grade", "GOLD"),
+                        new Document("_id", 3).append("name", "Lee").append("amount", 3.25).append("grade", "GOLD")));
+            };
+            Supplier<List<String>> snapshot = () -> coll.find().sort(new Document("_id", 1)).into(new ArrayList<>())
+                    .stream().map(d -> d.toJson(canonical)).toList();
+            seed.run();
+            List<String> original = snapshot.get();
+            String updateMany = "{\"update\": \"change_it\", \"updates\": [{\"q\": {\"_id\": {\"$in\": [1, 2]}},"
+                    + " \"u\": {\"$set\": {\"name\": \"changed\"}}, \"multi\": true}]}";
+
+            ChangeOutcome dry = op.executeChange(root, plan(Kind.UPDATE, updateMany, "change_it", "", 100, true));
+            System.out.println("[MONGODB 드라이런] committed=" + dry.committed() + " affected=" + dry.affectedRows()
+                    + " keys=" + dry.before().keyColumns() + " unavailable=" + dry.rollbackUnavailable());
+            assertFalse(dry.committed());
+            assertEquals(2, dry.affectedRows());
+            assertEquals(original, snapshot.get(), "드라이런은 트랜잭션을 버려 흔적을 남기지 않는다");
+
+            ChangeOutcome done = op.executeChange(root, plan(Kind.UPDATE, updateMany, "change_it", "", 100, false));
+            assertTrue(done.committed());
+            assertNotEquals(original, snapshot.get());
+            RevertPlan.Outcome revertDry = op.revertChange(root, new RevertPlan(Kind.UPDATE, "change_it", done.before(), done.after(), 10, true));
+            assertEquals(2, revertDry.restoredRows());
+            assertNotEquals(original, snapshot.get(), "되돌리기 드라이런도 흔적을 남기지 않는다");
+            RevertPlan.Outcome reverted = op.revertChange(root, new RevertPlan(Kind.UPDATE, "change_it", done.before(), done.after(), 10, false));
+            System.out.println("[MONGODB UPDATE 되돌리기] committed=" + reverted.committed() + " restored=" + reverted.restoredRows());
+            assertEquals(original, snapshot.get(), "Decimal128·Date·배열·중첩 문서와 주입 모양 문자열까지 원래 문서로 복원한다");
+
+            ChangeOutcome again = op.executeChange(root, plan(Kind.UPDATE, updateMany, "change_it", "", 100, false));
+            coll.updateOne(new Document("_id", 1), new Document("$set", new Document("name", "someone")));
+            RevertPlan.Outcome conflict = op.revertChange(root, new RevertPlan(Kind.UPDATE, "change_it", again.before(), again.after(), 10, false));
+            System.out.println("[MONGODB 드리프트] committed=" + conflict.committed() + " conflicts=" + conflict.conflicts());
+            assertFalse(conflict.committed());
+            assertEquals(1, conflict.conflicts().size());
+            assertEquals(List.of("name"), conflict.conflicts().get(0).changedColumns());
+            assertEquals("changed", coll.find(new Document("_id", 2)).first().getString("name"), "충돌이 하나라도 있으면 다른 문서도 되돌리지 않는다");
+            seed.run();
+
+            ChangeOutcome deleted = op.executeChange(root, plan(Kind.DELETE,
+                    "{\"delete\": \"change_it\", \"deletes\": [{\"q\": {\"_id\": 3}, \"limit\": 1}]}", "change_it", "", 100, false));
+            assertEquals(1, deleted.affectedRows());
+            op.revertChange(root, new RevertPlan(Kind.DELETE, "change_it", deleted.before(), deleted.after(), 10, false));
+            assertEquals(original, snapshot.get(), "삭제한 문서를 같은 값으로 다시 넣는다");
+
+            ChangeOutcome inserted = op.executeChange(root, plan(Kind.INSERT,
+                    "{\"insert\": \"change_it\", \"documents\": [{\"_id\": 4, \"name\": \"new\"}]}", "change_it", null, 100, false));
+            assertNull(inserted.rollbackUnavailable());
+            assertEquals(4, snapshot.get().size());
+            op.revertChange(root, new RevertPlan(Kind.INSERT, "change_it", inserted.before(), inserted.after(), 10, false));
+            assertEquals(original, snapshot.get());
+
+            ChangeOutcome noId = op.executeChange(root, plan(Kind.INSERT,
+                    "{\"insert\": \"change_it\", \"documents\": [{\"name\": \"no-id\"}]}", "change_it", null, 100, false));
+            System.out.println("[MONGODB _id 없는 INSERT] unavailable=" + noId.rollbackUnavailable());
+            assertNotNull(noId.rollbackUnavailable(), "서버가 붙인 _id를 돌려받지 못하면 되돌리기를 닫는다");
+            coll.deleteMany(new Document("name", "no-id"));
+
+            OperatorException ambiguous = assertThrows(OperatorException.class, () -> op.executeChange(root, plan(Kind.UPDATE,
+                    "{\"update\": \"change_it\", \"updates\": [{\"q\": {\"grade\": \"GOLD\"}, \"u\": {\"$set\": {\"grade\": \"VIP\"}}}]}",
+                    "change_it", "", 100, false)));
+            System.out.println("[MONGODB 한 문서 명령의 모호한 조건] " + ambiguous.getMessage());
+            assertTrue(ambiguous.getMessage().contains("확정할 수 없다"), ambiguous.getMessage());
+            assertEquals(original, snapshot.get());
+
+            MongoCollection<Document> big = admin.getDatabase("sample").getCollection("change_it_big");
+            if (big.countDocuments() == 0) {
+                List<Document> docs = new ArrayList<>();
+                for (int n = 1; n <= 20_000; n++) {
+                    docs.add(new Document("_id", n).append("status", "S" + (n % 1000)));
+                }
+                big.insertMany(docs);
+            }
+            big.listIndexes().into(new ArrayList<>()).stream().map(i -> i.getString("name"))
+                    .filter("status_1"::equals).forEach(big::dropIndex);
+            String createIndex = "{\"createIndexes\": \"change_it_big\", \"indexes\": [{\"key\": {\"status\": 1}, \"name\": \"status_1\"}]}";
+            OperatorException ddlDry = assertThrows(OperatorException.class, () -> op.executeChange(root,
+                    new ChangePlan(Kind.DDL, createIndex, null, null, null, null, 100, 10, true)));
+            System.out.println("[MONGODB DDL 드라이런] " + ddlDry.getMessage());
+            ChangeOutcome ddl = op.executeChange(root, new ChangePlan(Kind.DDL, createIndex, null, null, null,
+                    "{\"find\": \"change_it_big\", \"filter\": {\"status\": \"S7\"}}", 100, 10, false));
+            System.out.println("[MONGODB DDL 전 계획] " + ddl.probeBefore().plan().replaceAll("\\s+", " ") + " timings(us)=" + ddl.probeBefore().timingsMicros());
+            System.out.println("[MONGODB DDL 후 계획] " + ddl.probeAfter().plan().replaceAll("\\s+", " ") + " timings(us)=" + ddl.probeAfter().timingsMicros());
+            assertTrue(ddl.probeBefore().plan().contains("COLLSCAN"), ddl.probeBefore().plan());
+            assertTrue(ddl.probeAfter().plan().contains("IXSCAN"), ddl.probeAfter().plan());
+            big.dropIndex("status_1");
+        } finally {
+            cache.closeAll();
+        }
     }
 
     private static void msInsert(PreparedStatement ps, int id, String name, String note, String amount, Boolean flag,

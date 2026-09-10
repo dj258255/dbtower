@@ -306,7 +306,7 @@ db.getSiblingDB('admin').createUser({
 | PostgreSQL | `CONNECT` + `USAGE ON SCHEMA public` + `SELECT ON ALL TABLES` | 위 + `INSERT, UPDATE, DELETE` + `USAGE ON ALL SEQUENCES` + 소유 역할 멤버십 `GRANT sample_owner`(DDL용, 소유 역할에 `CREATE ON SCHEMA public` — 15+에서 인덱스 생성이 스키마 CREATE를 따로 본다) |
 | Oracle | `CREATE SESSION` + 테이블별 `READ`(SELECT와 달리 `FOR UPDATE` 락을 못 건다) | `CREATE SESSION` + 테이블별 `SELECT, INSERT, UPDATE, DELETE`(DDL 없음) |
 | SQL Server 계열(Azure SQL Edge 실측) | DB 사용자 매핑 + `SELECT ON SCHEMA::dbo` | 위 + `INSERT, UPDATE, DELETE ON SCHEMA::dbo` + `SHOWPLAN` + 테이블별 `ALTER`(인덱스·열 추가) |
-| MongoDB | `read@sample` (admin db에 생성) | `readWrite@sample`(변경 티켓 실행은 아직 미지원) |
+| MongoDB | `read@sample` (admin db에 생성) | `readWrite@sample`(문서 사본을 트랜잭션 안에서 잡으므로 복제셋 필요, 인덱스 생성·삭제 포함) |
 
 권한 변경 권한은 어느 계정에도 주지 않는다. 변경 계정의 DDL은 인덱스·열 추가 수준까지만 준다(MySQL `ALTER, INDEX`,
 PostgreSQL은 테이블 소유자만 DDL을 하므로 로그인 불가 소유 역할의 멤버십). 승인된 티켓이라도 계정 권한 밖의 문장

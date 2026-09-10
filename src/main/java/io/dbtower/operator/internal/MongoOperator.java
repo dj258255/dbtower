@@ -1,7 +1,11 @@
 package io.dbtower.operator.internal;
 
+import com.mongodb.MongoException;
+import io.dbtower.operator.model.ChangeOutcome;
+import io.dbtower.operator.model.ChangePlan;
 import io.dbtower.operator.model.QueryResult;
 import io.dbtower.operator.model.ResultColumn;
+import io.dbtower.operator.model.RevertPlan;
 import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.registry.CredentialPurpose;
 import java.util.LinkedHashSet;
@@ -509,6 +513,45 @@ public class MongoOperator implements DbmsOperator {
         } catch (RuntimeException e) {
             throw new OperatorException("MongoDB 콘솔 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    /** 승인 변경 실행 — 트랜잭션·문서 사본·불변식은 {@link MongoChangeRunner}. 변경 계정(WRITE) 클라이언트로만 닿는다 */
+    @Override
+    public ChangeOutcome executeChange(ConsoleCredential credential, ChangePlan plan) {
+        try {
+            return new MongoChangeRunner(clients.console(instance, CredentialPurpose.WRITE, credential), instance.getDbName())
+                    .execute(plan);
+        } catch (MongoException e) {
+            throw new OperatorException("MongoDB 변경 실행 실패: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public RevertPlan.Outcome revertChange(ConsoleCredential credential, RevertPlan plan) {
+        try {
+            return new MongoChangeRunner(clients.console(instance, CredentialPurpose.WRITE, credential), instance.getDbName())
+                    .revert(plan);
+        } catch (MongoException e) {
+            throw new OperatorException("MongoDB 되돌리기 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /** 역변경 제안의 인덱스 제거 — SQL이 아니라 워크벤치가 받는 명령 JSON으로 */
+    @Override
+    public String dropIndexStatement(String table, String index) {
+        return new Document("dropIndexes", table).append("index", index).toJson();
+    }
+
+    /** drop 명령은 워크벤치 허용 목록 밖이라(분류기 MONGO_UNKNOWN) 제안하지 않는다 */
+    @Override
+    public String dropTableStatement(String table) {
+        return null;
+    }
+
+    /** 스키마리스라 열을 지우는 DDL이 없다 */
+    @Override
+    public String dropColumnStatement(String table, String column) {
+        return null;
     }
 
     /** 문서 목록을 표로 편다 — 열은 상한 안 문서들의 최상위 키 합집합(등장 순), 중첩 값은 JSON 문자열. */

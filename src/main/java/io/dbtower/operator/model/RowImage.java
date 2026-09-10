@@ -13,6 +13,12 @@ import java.util.List;
  */
 public record RowImage(List<ImageColumn> columns, List<String> keyColumns, List<List<String>> rows) {
 
+    /**
+     * 문서형 기종(MongoDB)의 되돌리기 원본 열 — 문서 전체의 canonical Extended JSON. 화면용 열은 타입을 잃어(정수와 실수, 날짜와
+     * 문자열) 되돌리기에 쓸 수 없어서 따로 둔다. 마스킹을 거치지 않은 원래 값이라 화면 비교에서는 반드시 뺀다.
+     */
+    public static final String RAW_DOCUMENT_COLUMN = "__raw_document";
+
     public record ImageColumn(String name, int sqlType, String typeName) {
     }
 

@@ -1,5 +1,7 @@
 package io.dbtower.workbench.internal;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.dbtower.operator.model.ChangePlan.Kind;
 
 import java.util.ArrayList;
@@ -42,7 +44,8 @@ final class ChangeStatementParser {
         }
     }
 
-    private static final String RETURNING = "RETURNING 절이 있는 변경은 결과 집합을 돌려줘 영향 행 수 대조 계약이 달라진다";
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final String RETURNING ="RETURNING 절이 있는 변경은 결과 집합을 돌려줘 영향 행 수 대조 계약이 달라진다";
     private static final String MULTI_TABLE = "여러 테이블을 함께 바꾸는 문장은 행 사본을 한 테이블로 잡을 수 없다";
 
     private ChangeStatementParser() {
@@ -213,6 +216,48 @@ final class ChangeStatementParser {
 
     private static Parsed uncaptured(String reason) {
         return new Parsed(Kind.UNCAPTURED, null, null, null, reason);
+    }
+
+    /**
+     * MongoDB 명령 JSON — 컬렉션과 변경 모양만 가른다. 사본 조건은 오퍼레이터가 명령 안의 q에서 그대로 읽는다(다시 쓰지 않는다).
+     * 한 명령에 문이 여럿이거나 upsert·findAndModify·bulkWrite처럼 바뀔 문서를 미리 확정할 수 없는 모양은 캡처하지 않는다.
+     */
+    static Parsed parseMongo(String json) {
+        JsonNode command;
+        try {
+            command = JSON.readTree(json);
+        } catch (Exception e) {
+            return uncaptured("MongoDB 명령 JSON을 해석할 수 없다");
+        }
+        if (command == null || !command.isObject() || command.isEmpty()) {
+            return uncaptured("명령 이름이 있는 JSON 객체가 아니다");
+        }
+        String name = command.fieldNames().next();
+        String collection = command.get(name).asText();
+        return switch (name.toLowerCase(Locale.ROOT)) {
+            case "update" -> singleSpec(command, "updates", Kind.UPDATE, collection);
+            case "delete" -> singleSpec(command, "deletes", Kind.DELETE, collection);
+            case "insert" -> command.path("documents").isArray() && !command.path("documents").isEmpty()
+                    ? new Parsed(Kind.INSERT, collection, null, null, null)
+                    : uncaptured("삽입할 문서가 없다");
+            case "create", "createindexes", "dropindexes", "collmod", "renamecollection" -> new Parsed(Kind.DDL, collection, null, null, null);
+            default -> uncaptured(name + " 명령은 바꿀 문서를 미리 확정하지 않아 사본 대응을 잡을 수 없다");
+        };
+    }
+
+    private static Parsed singleSpec(JsonNode command, String field, Kind kind, String collection) {
+        JsonNode specs = command.path(field);
+        if (!specs.isArray() || specs.size() != 1) {
+            return uncaptured("한 명령에 " + field + " 문이 하나가 아니면 문서 사본 대응을 확정할 수 없다. 문마다 티켓을 나눠 올려라");
+        }
+        JsonNode spec = specs.get(0);
+        if (spec.path("upsert").asBoolean(false)) {
+            return uncaptured("upsert는 없던 문서가 생길지 확정할 수 없어 사본을 잡지 않는다");
+        }
+        if (!spec.path("q").isObject()) {
+            return uncaptured("조건(q)이 객체가 아니다");
+        }
+        return new Parsed(kind, collection, collection, "", null);
     }
 
     static String trimTerminator(String sql) {

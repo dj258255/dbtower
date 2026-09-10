@@ -56,6 +56,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 승인된 변경 티켓의 실행 계층 — 드라이런, 실행, 되돌리기와 전후 비교(행·구조·실행계획·워크로드)를 한 흐름으로 묶는다.
@@ -320,30 +321,29 @@ public class ChangeExecutionService {
     private Prepared prepare(ChangeTicket ticket, boolean dryRun, boolean withoutCapture) {
         DatabaseInstance instance = registry.findById(ticket.instanceId());
         String sql = ticket.sql();
-        if (SqlCanonical.hasStatementSeparator(SqlCanonical.canonical(sql))) {
-            throw new WorkbenchRejection(422, "변경 티켓은 한 문장만 실행합니다. 문장마다 티켓을 나눠 올리세요", null);
-        }
         // 승인은 사람이 했지만 분류기는 실행 직전에 다시 판정한다 — 승인이 차단 목록을 우회하는 통로가 되지 않게
         Classification c = StatementClassifier.classify(sql);
+        boolean mongo = c.kind().startsWith("MONGO_");
+        if (!mongo && SqlCanonical.hasStatementSeparator(SqlCanonical.canonical(sql))) {
+            throw new WorkbenchRejection(422, "변경 티켓은 한 문장만 실행합니다. 문장마다 티켓을 나눠 올리세요", null);
+        }
         if (c.tier() == Tier.BLOCKED) {
             throw new WorkbenchRejection(422, "차단 문장은 승인돼도 실행하지 않습니다: " + c.reason(), c);
         }
         if (c.tier() == Tier.READ) {
             throw new WorkbenchRejection(422, "조회 문장은 티켓이 아니라 워크벤치에서 바로 실행합니다", c);
         }
-        if (c.kind().startsWith("MONGO_")) {
-            throw new WorkbenchRejection(422, "MongoDB 변경 티켓 실행은 아직 지원하지 않습니다", c);
-        }
         String probe = null;
         if (ticket.verifySql() != null && !ticket.verifySql().isBlank()) {
             Classification pc = StatementClassifier.classify(ticket.verifySql());
-            if (pc.tier() != Tier.READ || pc.kind().startsWith("MONGO_")) {
-                throw new WorkbenchRejection(422, "검증 조회는 SQL 읽기 문장이어야 합니다: " + pc.reason(), pc);
+            if (pc.tier() != Tier.READ || pc.kind().startsWith("MONGO_") != mongo) {
+                throw new WorkbenchRejection(422, "검증 조회는 티켓과 같은 언어(" + (mongo ? "MongoDB 명령" : "SQL")
+                        + ")의 읽기 문장이어야 합니다: " + pc.reason(), pc);
             }
             probe = ticket.verifySql();
         }
         ConsoleCredential credential = writeCredential(ticket.instanceId());
-        Parsed parsed = ChangeStatementParser.parse(sql);
+        Parsed parsed = mongo ? ChangeStatementParser.parseMongo(sql) : ChangeStatementParser.parse(sql);
         Kind kind = parsed.kind();
         if (kind == Kind.UNCAPTURED && !withoutCapture) {
             throw new WorkbenchRejection(409, "행 사본을 잡을 수 없는 문장입니다: " + parsed.reason()
@@ -426,18 +426,24 @@ public class ChangeExecutionService {
             return null;
         }
         DbmsOperator operator = operators.create(registry.findById(e.getInstanceId()));
-        List<String> statements = new ArrayList<>();
-        diff.addedTables().forEach(t -> statements.add("DROP TABLE " + t.name()));
+        List<String> proposed = new ArrayList<>();
+        diff.addedTables().forEach(t -> proposed.add(operator.dropTableStatement(t.name())));
         boolean lossy = !diff.removedTables().isEmpty();
         for (TableDiff t : diff.changedTables()) {
-            t.addedIndexes().forEach(i -> statements.add(operator.dropIndexStatement(t.table(), i.name())));
-            t.addedColumns().forEach(c -> statements.add("ALTER TABLE " + t.table() + " DROP COLUMN " + c.name()));
+            t.addedIndexes().forEach(i -> proposed.add(operator.dropIndexStatement(t.table(), i.name())));
+            t.addedColumns().forEach(c -> proposed.add(operator.dropColumnStatement(t.table(), c.name())));
             lossy |= !t.removedColumns().isEmpty() || !t.changedColumns().isEmpty()
                     || !t.removedIndexes().isEmpty() || !t.changedIndexes().isEmpty();
         }
-        String note = lossy
-                ? "지워지거나 바뀐 구조는 원래 정의와 데이터가 사본에 없어 역변경을 만들지 않았다. 사람이 작성해 새 티켓으로 올린다"
-                : null;
+        List<String> statements = proposed.stream().filter(Objects::nonNull).toList();
+        List<String> notes = new ArrayList<>();
+        if (lossy) {
+            notes.add("지워지거나 바뀐 구조는 원래 정의와 데이터가 사본에 없어 역변경을 만들지 않았다. 사람이 작성해 새 티켓으로 올린다");
+        }
+        if (statements.size() < proposed.size()) {
+            notes.add("이 기종은 일부 역변경을 워크벤치가 받는 문장으로 만들지 않는다(예: MongoDB 컬렉션 삭제는 허용 목록 밖)");
+        }
+        String note = notes.isEmpty() ? null : String.join(" / ", notes);
         return statements.isEmpty() && note == null ? null : new InverseProposal(statements, note);
     }
 
@@ -474,13 +480,31 @@ public class ChangeExecutionService {
         if (images.before() == null || images.after() == null) {
             return new RowChanges(null, List.of(), "변경 전후 사본이 한쪽만 있어 행 비교를 만들 수 없다: " + e.getRollbackNote());
         }
-        List<String> beforeColumns = images.before().columns().stream().map(ImageColumn::name).toList();
-        List<String> afterColumns = images.after().columns().stream().map(ImageColumn::name).toList();
-        RowImage keyed = images.before().keyColumns().isEmpty() ? images.after() : images.before();
-        RowDiff.Result diff = RowDiff.diff(beforeColumns, objects(images.before()), afterColumns, objects(images.after()),
+        RowImage before = visible(images.before());
+        RowImage after = visible(images.after());
+        List<String> beforeColumns = before.columns().stream().map(ImageColumn::name).toList();
+        List<String> afterColumns = after.columns().stream().map(ImageColumn::name).toList();
+        RowImage keyed = before.keyColumns().isEmpty() ? after : before;
+        RowDiff.Result diff = RowDiff.diff(beforeColumns, objects(before), afterColumns, objects(after),
                 keyed.keyColumns(), DIFF_ROWS_MAX);
         MaskedDiff masked = ResultMasker.maskDiff(diff, workbench.policies(e.getInstanceId()));
         return new RowChanges(masked.diff(), masked.maskedColumns(), null);
+    }
+
+    /** 되돌리기 원본 열(문서 전체 JSON)은 마스킹을 거치지 않은 값이라 화면 비교에서 뺀다 */
+    static RowImage visible(RowImage image) {
+        int raw = image.indexOf(RowImage.RAW_DOCUMENT_COLUMN);
+        if (raw < 0) {
+            return image;
+        }
+        List<ImageColumn> columns = new ArrayList<>(image.columns());
+        columns.remove(raw);
+        List<List<String>> rows = image.rows().stream().map(r -> {
+            List<String> copy = new ArrayList<>(r);
+            copy.remove(raw);
+            return (List<String>) copy;
+        }).toList();
+        return new RowImage(columns, image.keyColumns(), rows);
     }
 
     private static List<List<Object>> objects(RowImage image) {

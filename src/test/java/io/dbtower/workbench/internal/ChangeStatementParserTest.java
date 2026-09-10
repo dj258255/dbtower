@@ -107,6 +107,27 @@ class ChangeStatementParserTest {
     }
 
     @Test
+    void MongoDB_명령은_갱신_삭제_삽입_DDL을_가르고_사본을_확정할_수_없는_모양은_캡처하지_않는다() {
+        Parsed many = ChangeStatementParser.parseMongo(
+                "{\"update\": \"customers\", \"updates\": [{\"q\": {\"grade\": \"SILVER\"}, \"u\": {\"$set\": {\"grade\": \"GOLD\"}}, \"multi\": true}]}");
+        assertEquals(Kind.UPDATE, many.kind());
+        assertEquals("customers", many.table());
+
+        assertEquals(Kind.UNCAPTURED, ChangeStatementParser.parseMongo(
+                "{\"update\": \"c\", \"updates\": [{\"q\": {}, \"u\": {\"$set\": {\"a\": 1}}}, {\"q\": {}, \"u\": {\"$set\": {\"b\": 1}}}]}").kind(),
+                "갱신 문이 여럿이면 사본 대응을 확정할 수 없다");
+        assertEquals(Kind.UNCAPTURED, ChangeStatementParser.parseMongo(
+                "{\"update\": \"c\", \"updates\": [{\"q\": {\"_id\": 9}, \"u\": {\"$set\": {\"a\": 1}}, \"upsert\": true}]}").kind(),
+                "upsert는 없던 문서가 생길지 확정할 수 없다");
+        assertEquals(Kind.DELETE, ChangeStatementParser.parseMongo("{\"delete\": \"c\", \"deletes\": [{\"q\": {\"_id\": 3}, \"limit\": 1}]}").kind());
+        assertEquals(Kind.INSERT, ChangeStatementParser.parseMongo("{\"insert\": \"c\", \"documents\": [{\"_id\": 4}]}").kind());
+        assertEquals(Kind.DDL, ChangeStatementParser.parseMongo(
+                "{\"createIndexes\": \"c\", \"indexes\": [{\"key\": {\"grade\": 1}, \"name\": \"grade_1\"}]}").kind());
+        assertEquals(Kind.UNCAPTURED, ChangeStatementParser.parseMongo(
+                "{\"findAndModify\": \"c\", \"query\": {}, \"update\": {\"$set\": {\"a\": 1}}}").kind());
+    }
+
+    @Test
     void DDL과_행_대응이_없는_문장을_구분한다() {
         assertEquals(Kind.DDL, parse("ALTER TABLE customers ADD COLUMN memo VARCHAR(10)").kind());
         assertEquals(Kind.DDL, parse("CREATE INDEX idx_a ON a (x)").kind());

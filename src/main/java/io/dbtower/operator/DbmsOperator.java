@@ -337,6 +337,16 @@ public interface DbmsOperator {
         return "DROP INDEX " + index;
     }
 
+    /** 생긴 테이블을 지우는 역변경 문장. 이 기종에서 워크벤치가 허용하지 않는 명령이면 null(제안하지 않는다) */
+    default String dropTableStatement(String table) {
+        return "DROP TABLE " + table;
+    }
+
+    /** 생긴 열을 지우는 역변경 문장. 열 개념이 없는 기종은 null */
+    default String dropColumnStatement(String table, String column) {
+        return "ALTER TABLE " + table + " DROP COLUMN " + column;
+    }
+
     /** 커밋된 변경을 행 사본으로 되돌린다. 실행 이후 달라진 행이 있으면 아무것도 쓰지 않고 충돌을 돌려준다. */
     default RevertPlan.Outcome revertChange(ConsoleCredential credential, RevertPlan plan) {
         throw new UnsupportedOperationException("이 기종은 변경 되돌리기를 지원하지 않습니다");
