@@ -178,9 +178,12 @@ Discord 리치 embed로 발송한다 (VERIFICATION 34절 · 65절). 문의받는
 
 ### 8.2 제공 기능
 
-JSON-RPC 2.0을 SDK 없이 직접 구현했고(stdio·HTTP 두 전송, 프로토콜 코어 공유), 도구 16종을
-제공한다 (VERIFICATION 17절 · 71절). compare, explain, wait_events, sessions, partitions,
-schema_diff, metrics 등 전부 읽기 전용이다. kill은 위험해서 도구로 만들지 않았다. 등록은 한 줄이다.
+JSON-RPC 2.0을 SDK 없이 직접 구현했고(stdio·HTTP 두 전송, 프로토콜 코어 공유), 도구 19종을
+제공한다 (VERIFICATION 17절 · 71절 · 131절). compare, explain, wait_events, sessions, partitions,
+schema_diff, metrics 등 진단 도구는 전부 읽기 전용이다. kill은 위험해서 도구로 만들지 않았다.
+워크벤치 도구 3종은 변경을 "요청"만 한다 — `change_ticket_submit`은 승인 티켓을 대기로 올릴 뿐 실행하지 않고,
+`workbench_query`는 인스턴스 설정이 결과 값 AI 공유를 허용할 때만 마스킹된 조회를 연다. 드라이런·실행·되돌리기·승인은
+에이전트 도구로 열지 않았다. 등록은 한 줄이다.
 
 ```
 claude mcp add --transport http dbtower http://localhost:8080/mcp
@@ -317,8 +320,14 @@ VERIFICATION의 해당 절에 실측과 함께 있다.
   자격증명은 Vault 동적 계정으로 유출 창을 TTL로 줄였다(89절). 관리형 서비스 대응으로 TLS 강제
   접속을 넣었고 검증 우회 옵션은 일부러 만들지 않았다(54절).
 
-범위 밖은 여전히 범위 밖이다. SQL 승인 워크플로, 자동 인덱스 생성, DBaaS 멀티테넌시는 하지 않는다.
-대상 DB를 스스로 바꾸는 순간 다른 제품이 되기 때문이다. 남은 외부 의존(CloudWatch 라이브 e2e는
+- 거버넌스 SQL 워크벤치(128~131절): DBeaver처럼 대상 DB를 직접 조회하되 정책은 플랫폼이 강제한다 — 분리된 조회 계정,
+  읽기 전용 트랜잭션(드라이버마다 다르게 걸리는 것을 쓰기 권한 계정으로 증명), 결과 마스킹, 실행 기록. AI는 SQL을 제안만 하고
+  실행 도구가 없다. 변경은 **승인된 티켓만** 실행한다: 같은 트랜잭션에서 변경 전 사본을 락과 함께 잡아 영향 행 수가 같을 때만
+  커밋하고, 되돌리기는 실행 직후 사본과 지금 행이 같을 때만 쓴다. 5기종(SQL Server는 Azure SQL Edge, MongoDB는 복제셋 트랜잭션)을
+  실DB로 검증했고, 부하를 건 인덱스 티켓 전후를 pgbench로 쟀다(131절).
+
+범위 밖은 여전히 범위 밖이다. 승인 없는 변경 실행, 자동 인덱스 생성, 에이전트의 실행 도구, DBaaS 멀티테넌시는 하지 않는다.
+대상 DB를 사람의 승인 없이 스스로 바꾸는 순간 다른 제품이 되기 때문이다. 남은 외부 의존(CloudWatch 라이브 e2e는
 실 AWS 필요, lakehouse 연동은 별도 저장소)은 정직하게 명시해 두었다.
 
 ## 11. 마치며

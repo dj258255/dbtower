@@ -4962,3 +4962,274 @@ GET /api/workbench/tickets/13/executions
 ![DDL 실행 기록 — 구조 변화와 같은 트랜잭션 안 전후 실행계획](images/webui/74-workbench-ticket-ddl-probe.png)
 ![인스턴스 간 결과 비교 — 한 칸 차이만 짚는다](images/webui/75-workbench-instance-compare.png)
 
+
+## 131. 남은 과제를 끝까지 — 티켓의 빠진 출구, SQL Server·MongoDB 변경 실행, MCP 채널, 암호화·성능 실측 (2026-09-11)
+
+### 무엇이 남아 있었나
+
+130절까지 커밋한 뒤 원래 요구와 코드를 다시 대조했다. 기능 공백 넷(테이블 상세 창, 승인 티켓의 취소·커밋 불명 정리 경로,
+DDL 역변경 도우미, MCP 채널), 검증 공백 다섯(SQL Server 조회·변경 미검증, 사본 암호화 라이브 미확인, 부하 기반 성능 전후 수치 없음,
+HTTP 바인딩 테스트 없음, Oracle 앱 흐름·요청자/승인자 분리·결과 카드 미확인), MongoDB 변경 티켓 미지원, 문서 공백이 나왔다.
+사용자가 SQL Server는 Azure SQL Edge로, MongoDB 변경 티켓까지, 브랜치는 커밋만 하기로 정했다.
+
+### 1. 승인 티켓의 빠진 출구 (커밋 3db52b4)
+
+- V38: `review_request`에 사람 개입(누가·언제·근거) 열, 상태 `CANCELLED`.
+- 취소: 요청자 본인이나 ADMIN, 대기·승인 상태에서만(조건부 UPDATE). 승인된 채 실행하지 않을 티켓이 APPROVED로 남으면 나중에
+  맥락 없이 실행될 수 있는 열린 권한이 된다.
+- 커밋 불명 정리: EXECUTING/ROLLING_BACK에 묶인 티켓을 ADMIN이 대상 DB 확인 근거(5자 이상)와 결과(반영됨/안 됨)를 적어 푼다.
+  플랫폼이 대상 DB를 다시 봐서 자동 판정하지 않는다 — 트리거·다른 세션의 같은 변경처럼 행만 봐서는 확정할 수 없는 경우가 있다.
+- DDL 역변경 제안: 실행 기록의 구조 diff에서 생긴 테이블·열·인덱스만 지우는 문장을 기종 문법으로 만든다(`DROP INDEX i ON t`는
+  MySQL·SQL Server, `DROP INDEX i`는 PostgreSQL·Oracle, MongoDB는 `{"dropIndexes": ...}`). 지워지거나 바뀐 구조는 원래 정의·데이터가
+  사본에 없어 만들지 않고 이유를 알린다. 제안은 실행 버튼이 아니라 "새 티켓으로 올리기"다.
+- 워크벤치 테이블 상세 탭: 스키마 트리의 "상세"에서 행 수·크기·인덱스 카디널리티·DDL, 열을 누르면 채팅 칩.
+- 처리기가 없어 500으로 새던 `IllegalStateException`을 409로.
+
+```
+WorkbenchTicketApiTest 5        앱의 실제 Jackson 설정으로: {} 드라이런은 캡처 유지, 본문 없는 실행도 캡처 유지, 캡처 포기는
+                                명시만, 되돌리기 dryRun 누락 400, 정리 applied 누락 400, VIEWER 정리 403
+ReviewServiceCancelTest 3       남의 티켓 비ADMIN 취소 거부, 요청자 취소, 실행권 잡힌 티켓 취소는 상태 충돌
+ChangeTicketGatePersistenceTest +2  H2 실제 JPQL: 대기·승인만 취소, 정리 결과별 전이(EXECUTED/APPROVED/ROLLED_BACK), 실행권 없는 티켓 정리 불가
+ChangeExecutionServiceTest +2   정리 근거 5자 미만 400·실행권 없는 티켓 409, 역변경은 기종 훅 문법 + 잃는 부분 알림
+전체                            732 tests, 실패 0, 규약 검사 통과
+```
+
+라이브(dev 앱, 130절 데모 데이터):
+
+```
+[A] 첫 실행 실패로 APPROVED에 남은 #1~#4 취소        HTTP 200 CANCELLED x4 (intervenedBy=api-token)
+    되돌림 끝난 #5 취소                             HTTP 409 대기·승인 상태에서만 취소할 수 있습니다(현재 ROLLED_BACK)
+[B] viewer가 남의 티켓 #12 취소                     HTTP 403
+    ADMIN이 #12 취소                                HTTP 200 CANCELLED note=캡처 불가 문장이라 폐기
+[C] 결과 기록 전에 앱이 멈춘 상태 재현(플랫폼 DB에서 status=EXECUTING)
+    실행 시도                                       HTTP 409 승인된 티켓만 실행합니다(현재 EXECUTING)
+    취소 시도                                       HTTP 409 대기·승인 상태에서만 취소할 수 있습니다(현재 EXECUTING)
+    근거 4자 정리 / applied 누락 정리               HTTP 400 / HTTP 400
+    postgres로 확인(grade=GOLD 그대로) 뒤 "반영 안 됨"  RESOLVE ROLLED_BACK -> APPROVED
+    재실행 -> 되돌리기                              COMMITTED(GOLD->SILVER) -> COMMITTED(GOLD), 기록 [REVERT, EXECUTE, RESOLVE]
+[D] 역변경 제안  #9 PostgreSQL ['DROP INDEX idx_orders_amount'] / #10 MySQL ['ALTER TABLE customers DROP COLUMN memo']
+[E] 테이블 상세  PostgreSQL orders rows=2000 RECONSTRUCTED / MySQL orders rows=2000 NATIVE
+```
+
+Oracle `customers` 상세는 비어 나왔다. Oracle 테이블 상세는 `user_*` 뷰(모니터 계정 자신의 스키마)를 읽도록 설계돼 있고
+(OracleOperator 주석: 다른 스키마를 보려면 그 스키마를 기본으로 하는 계정으로 등록), 데모 모니터 계정의 스키마에는 테이블이 없다.
+이번 범위에서 바꾸지 않았다.
+
+![테이블 상세 탭](images/webui/76-workbench-table-detail.png)
+
+### 2. SQL Server 계열 변경 실행 (커밋 2a7e43c, Azure SQL Edge)
+
+기본 compose의 SQL Server 2022 이미지는 amd64 전용이라 Rosetta 없는 로컬 VM에서 뜨지 않는다(128절). arm64 Azure SQL Edge를
+같은 서비스 이름·포트로 띄우는 `docker-compose.arm64.yml`을 더했다. SQL Edge는 SQL Server 엔진을 공유하지만 2025-09-30에 지원이
+끝난 제품이고 SQL Agent·CLR이 없다. 아래 결과는 "SQL Server 호환 엔진에서의 검증"이며 실제 SQL Server 2022 검증을 대신하지 않는다.
+
+구현 전에 드라이버·엔진 동작부터 쟀다(`MssqlProbe`):
+
+| 사실 | 실측 | 설계에 준 영향 |
+|---|---|---|
+| 엔진 | `Microsoft Azure SQL Edge Developer 15.0.2000.1574 (ARM64)`, EngineEdition=9 | |
+| DDL 트랜잭션 | `dataDefinitionCausesTransactionCommit=false`, 트랜잭션 안 CREATE INDEX 롤백 뒤 인덱스 0개 | DDL 드라이런 가능 |
+| 락 문법 | `SELECT * FROM t p WITH (UPDLOCK, ROWLOCK) WHERE ...` 성공, FOR UPDATE 절 없음 | 사본 조회의 FROM과 WHERE를 나눠 오퍼레이터가 조립(`lockedSelect` 훅) |
+| 생성 키 | 열 이름으로 요청해도 `GENERATED_KEYS` 한 열 | 기존 한 열 대체 규칙으로 흡수 |
+| 실행계획 | `SET SHOWPLAN_TEXT ON` 뒤 첫 결과 집합은 문장, 다음이 계획 | `explainInTransaction` 훅 |
+| 오류 뒤 트랜잭션 | 세이브포인트 롤백 뒤 계속 사용 가능 | 측정 실패가 변경을 죽이지 않음 |
+| 메타데이터 | schema=dbo, 인용 `"`, 대소문자 변환 없음 | 기본 키 조회 그대로 |
+
+삭제 되돌리기가 IDENTITY 열에 같은 키를 다시 넣으려면 `SET IDENTITY_INSERT`가 필요했다(다른 기종은 명시 값을 그대로 받는다).
+`beforeExplicitKeyInsert`/`afterExplicitKeyInsert` 훅으로 SQL Server만 켜고 끈다.
+
+계정 권한 실측(`docker/workbench-mssql.sql`을 `scripts/ApplySql.java`로 두 번 적용, 두 번째도 10/10 성공):
+
+```
+[dbtower_reader]  OK SELECT customers / DENY UPDATE customers -> The UPDATE permission was denied on the object 'customers'
+[dbtower_writer]  OK UPDATE(롤백) / OK SET SHOWPLAN_TEXT ON·OFF / OK CREATE INDEX(롤백) / OK ALTER TABLE ADD(롤백)
+                  DENY DROP TABLE orders -> Cannot drop the table 'orders', because it does not exist or you do not have permission.
+                  DENY CREATE TABLE -> CREATE TABLE permission denied in database 'sample'.
+[dbtower_monitor] OK 카탈로그(sys.tables) / DENY SELECT customers / OK sys.dm_exec_query_stats
+```
+
+실DB IT(`DBTOWER_CONSOLE_IT=1 DBTOWER_MSSQL_IT=1`): ChangeExecutionIT 4기종 4/4, ConsoleReadOnlyIT 4/4.
+
+```
+[MSSQL 드라이런] committed=false affected=2 keys=[id] unavailable=null
+[MSSQL UPDATE 되돌리기] committed=true restored=2
+[MSSQL 드리프트] committed=false conflicts=[Conflict[keyValues=[1], changedColumns=[name], ...]]
+[MSSQL INSERT] affected=1 unavailable=null afterRows=1
+[MSSQL 사본 어긋남] 영향 행 수(2)가 변경 전 사본 행 수(1)와 달라 커밋하지 않았다. ...
+[MSSQL DDL 드라이런 전 계획] |--Clustered Index Scan(OBJECT:([sample].[dbo].[change_it_big].[PK__...]), WHERE:(...[status]=...))  timings(us)=[4212, 2597, 3270]
+[MSSQL DDL 드라이런 후 계획] |--Index Seek(OBJECT:([sample].[dbo].[change_it_big].[change_it_big_status_idx]), SEEK:(...) ORDERED FORWARD)  timings(us)=[2624, 944, 877]
+[MSSQL reader UPDATE] MSSQL 콘솔 조회 실패: The UPDATE permission was denied on the object 'customers' ...
+```
+
+SQL Server 계열 콘솔 조회에는 읽기 전용 겹이 없다는 것도 그대로 단언했다: 쓰기 권한 계정(sa)의 INSERT가 `executeReadOnly`에서
+거부되지 않고 끝의 롤백으로만 사라졌다(행 0). 이 기종의 조회 경계는 조회 계정 권한뿐이다.
+
+라이브(앱에 `live-mssql-edge` 등록):
+
+```
+[M0] 등록 HTTP 201 / READ·WRITE 계정 200 / health up / 스키마 트리 5테이블 / 테이블 상세 orders rows=2000 RECONSTRUCTED
+     콘솔 조회 [[1,'홍길동','ho************om','VIP'], ...] / 콘솔에 변경 문장 HTTP 409
+[M1] UPDATE 드라이런 changed=1 grade:SILVER->VIP masked=[email, phone] / 실행 COMMITTED / phone 드리프트 CONFLICT / 해소 뒤 되돌리기 COMMITTED -> ROLLED_BACK
+[M2] DELETE id=5 실행 -> 되돌리기(IDENTITY 재삽입)  원래 [[5,3,185,'REFUND','2026-09-10 13:44:03.2500000']] = 복원 (같음: True)
+[M3] INSERT 실행 ADDED key=[2001] -> 되돌리기, orders 2000
+[M4] CREATE INDEX 드라이런 planChanged=True  Clustered Index Scan -> Index Seek(idx_orders_amount)
+     실행 COMMITTED 구조 diff addedIndexes=[idx_orders_amount] / 역변경 제안 ['DROP INDEX idx_orders_amount ON orders']
+     역변경 티켓 #19 드라이런 -> 승인 -> 실행 COMMITTED 구조 diff removedIndexes=[idx_orders_amount]
+[M5] 승인된 DROP TABLE orders 실행  HTTP 422 Cannot drop the table 'orders', because it does not exist or you do not have permission.
+     티켓 APPROVED 유지(실행권 반환), orders 2000, 뒤이어 취소
+[M6] SQL Server 계열 대 PostgreSQL customers 비교  changed=0 unchanged=3 masked=[email]
+```
+
+M4 드라이런의 응답시간 중앙값은 887µs -> 1058µs로 오히려 늘었다. 2,000행 표라 인덱스 탐색 + 키 조회 비용과 캐시 영향이 계획 차이보다
+커서다. 계획 모양 변화만 근거로 쓰고 이 µs는 성능 수치로 쓰지 않는다(부하 기반 수치는 아래 5절).
+
+### 3. MongoDB 변경 실행 (커밋 0050627)
+
+구현 전 실측(`MongoProbe`, 로컬 단일 노드 복제셋 rs0, 변경 계정으로 직접 연결):
+
+| 사실 | 실측 | 설계에 준 영향 |
+|---|---|---|
+| 직접 연결 트랜잭션 | `mode=SINGLE`에서 세션 트랜잭션 안 find·update 성공, abort 뒤 원래 값 | 사본·실행·대조를 한 트랜잭션에 |
+| 트랜잭션 안 explain | `error 263 OperationNotSupportedInTransaction: Cannot run 'explain' in a multi-document transaction` | 실행계획은 트랜잭션 밖에서 잰다 |
+| 트랜잭션 안 인덱스 생성 | `Cannot create new indexes on existing collection sample.customers in a multi-document transaction` | DDL 드라이런 거부 |
+| 문서 표현 | canonical `{"_id": {"$numberInt": "3"}, ...}` / relaxed `{"_id": 3, ...}` | 되돌리기 원본은 canonical, 화면은 펼친 값 |
+
+- MongoDB에는 행 락이 없다. 같은 트랜잭션 안에서 명령의 조건(q)으로 사본을 잡고 서버가 보고한 영향 수(n)가 사본 수와 같을 때만
+  커밋하며, 동시 변경은 트랜잭션의 쓰기 충돌 감지로 끊긴다.
+- 한 문서만 바꾸는 명령(multi 없음·limit 1)인데 조건에 문서가 둘 이상 걸리면 서버가 어느 문서를 고를지 확정할 수 없어 거부한다.
+  한 명령에 문이 여럿·upsert·findAndModify·bulkWrite는 캡처 불가로 분류한다. `_id` 없이 넣은 문서는 서버가 붙인 키를 돌려주지 않아
+  되돌리기를 닫는다.
+- 되돌리기 원본 열(`__raw_document`, 문서 전체 canonical JSON)은 마스킹 전 값이라 화면 비교에서 반드시 뺀다.
+- 검증 조회는 티켓과 같은 언어의 읽기 문장만 받는다(MongoDB 티켓에 SQL 검증 조회 422).
+
+실DB IT(ChangeExecutionIT 5기종 5/5):
+
+```
+[MONGODB 드라이런] committed=false affected=2 keys=[_id] unavailable=null
+[MONGODB UPDATE 되돌리기] committed=true restored=2      (원래 문서와 canonical JSON 일치 — Decimal128·Date·배열·중첩·주입 모양 문자열)
+[MONGODB 드리프트] committed=false conflicts=[Conflict[keyValues=[1], changedColumns=[name], ...]]
+[MONGODB _id 없는 INSERT] unavailable=_id 없이 넣은 문서는 서버가 키를 붙여 돌려주지 않아 되돌릴 문서를 짚을 수 없다. ...
+[MONGODB 한 문서 명령의 모호한 조건] 한 문서만 바꾸는 명령인데 조건에 문서가 둘 이상 걸려 어느 문서가 바뀔지 확정할 수 없다. ...
+[MONGODB DDL 드라이런] MongoDB는 기존 컬렉션의 인덱스 생성 같은 DDL을 트랜잭션 안에서 실행하지 않아 드라이런이 곧 실제 실행이 된다. ...
+[MONGODB DDL 전 계획] { "stage": "COLLSCAN", "filter": { "status": { "$eq": "S7" } } }  timings(us)=[6463, 5359, 5340]
+[MONGODB DDL 후 계획] { "stage": "FETCH", "inputStage": { "stage": "IXSCAN", "indexName": "status_1", ... } }  timings(us)=[2108, 1340, 1188]
+```
+
+라이브(앱의 `live-mongo`):
+
+```
+[G1] SQL 검증 조회를 붙인 MongoDB 티켓 드라이런  HTTP 422 검증 조회는 티켓과 같은 언어(MongoDB 명령)의 읽기 문장이어야 합니다
+     updateOne 드라이런 changed=1 grade:SILVER->VIP masked=[email, phone]
+     화면 비교 열 ['_id','name','email','phone','grade'] (원본 열 없음)
+     실행 COMMITTED / phone 드리프트 CONFLICT / 해소 뒤 되돌리기 COMMITTED -> ROLLED_BACK
+[G2] 한 문서 명령인데 조건에 여러 문서  HTTP 422 ... 어느 문서가 바뀔지 확정할 수 없다
+[G3] createIndexes 드라이런 HTTP 422 / 실행 COMMITTED planChanged=True COLLSCAN -> IXSCAN(grade_1)
+     구조 diff addedIndexes=[grade_1] / 역변경 제안 ['{"dropIndexes": "customers", "index": "grade_1"}']
+     역변경 티켓 #25 승인 -> 실행 COMMITTED removedIndexes=[grade_1], 남은 인덱스 _id_
+```
+
+### 4. MCP 채널 — 요청·상태·조회만, 실행 도구는 없다 (커밋 efcb76b)
+
+에이전트가 워크벤치에 닿는 도구 셋을 열었다. 채널 계층 원칙대로 전부 기존 REST에 서비스 토큰으로 위임한다.
+
+| 도구 | 위임하는 REST | 경계 |
+|---|---|---|
+| `change_ticket_submit` | `POST /api/instances/{id}/reviews` | 요청만 올린다. 판정·승인·실행은 사람 화면과 같은 게이트를 지난다 |
+| `change_ticket_status` | `GET /api/reviews/{id}` + `GET .../tickets/{id}/executions` | 새 단건 조회 API. 팀 범위 밖 티켓은 존재도 드러내지 않는다(404) |
+| `workbench_query` | `POST /api/workbench/instances/{id}/agent-query` | 인스턴스의 결과 값 AI 공유 설정이 꺼져 있으면 대상 DB에 닿기 전에 403. 켜져도 행 상한 50, 마스킹, 기록 action `AGENT_QUERY` |
+
+드라이런·실행·되돌리기·승인·정리·취소는 도구로 만들지 않았다. 에이전트가 쓰는 서비스 토큰은 ADMIN이라, 도구로 여는 순간
+"사람이 승인한 티켓만 실행"이 "토큰을 가진 에이전트가 승인하고 실행"으로 바뀐다. 진단 루프의 도구 목록은 이 셋을
+`DELIBERATELY_HIDDEN_TOOLS`에 이유와 함께 넣었다(진단은 읽기 전용 도구만 쓴다 — 일관성 테스트가 지킨다).
+
+```
+McpProtocolHandlerTest  도구 19종 이름·입력 스키마 / 워크벤치 도구 셋은 있고 execute·dry_run·revert·approve·resolve·cancel 이름은 없다
+AgentQueryServiceTest 2 설정 없는 인스턴스는 WorkbenchService를 부르기 전에 403 / 켜진 인스턴스는 요청한 1,000행이 50으로 낮아지고 AGENT_QUERY로 기록
+McpRestContractTest     도구가 부르는 URL이 실제 컨트롤러 매핑에 있는지
+전체                    741 tests, 실패 0, 건너뜀 14(실DB IT 게이트), 규약 검사 통과
+```
+
+계약 테스트 추출기에 사각이 있었다. `"/api/reviews/" + id`처럼 URL 끝에 오는 경로 변수를 떨궈 `/api/reviews/`로 만들었고,
+새 도구가 매핑 없음으로 실패하면서 드러났다(도구가 아니라 추출기 쪽 결함). 마지막 리터럴 뒤에 값이 붙으면 `{}`를 덧붙이게 고쳤고,
+`post(url, body)`의 본문을 경로 변수로 오인하지 않도록 첫 인자(최상위 쉼표 앞)만 보게 했다.
+
+라이브(암호화 키로 재기동한 앱, `POST /mcp` JSON-RPC, 서비스 토큰):
+
+```
+[C1] tools/list  도구 19종, 워크벤치 도구 ['change_ticket_submit','change_ticket_status','workbench_query'], 실행 계열 이름 []
+[C2] change_ticket_submit(UPDATE customers SET grade='VIP' WHERE id=3, 사유·검증 조회 포함)
+     id=31 status=PENDING requester=api-token / 대상 행 3|SILVER 그대로(실행 안 됨)
+[C3] change_ticket_status  ticket.status=PENDING findings=1 executions=0
+[C4] 결과 값 AI 공유 끔   workbench_query -> DBTower API 403: 이 인스턴스는 조회 결과 값을 AI로 보내지 않는다(...)
+     켬                   rows=[[1,'홍길동','ho************om','VIP'], [2,'김철수','ki***********om','GOLD'], [3,'이영희','le***********om','SILVER']] masked=['email']
+     UPDATE 문장으로 조회  DBTower API 409: 데이터나 구조를 바꾸는 문장이다. 변경 요청(승인 티켓)으로 올려야 실행된다 (tier=NEEDS_APPROVAL)
+     실행 기록            [('AGENT_QUERY','REJECTED','UPDATE'), ('AGENT_QUERY','OK','SELECT'), ...]  (설정은 검증 뒤 다시 끔)
+[C5] viewer(team-a)가 team-b 티켓 GET /api/reviews/31  HTTP 404 / 서비스 토큰 GET HTTP 200 PENDING
+     검증용 티켓 #31 취소 HTTP 200 CANCELLED
+```
+
+- 라이브 표본은 3행이라 행 상한 50으로 낮추는 동작은 라이브에서 드러나지 않았다. 이 동작의 근거는 단위 테스트다.
+- MCP로 올린 티켓의 요청자는 사람이 아니라 서비스 토큰(`api-token`)으로 남는다. 누가 에이전트를 부렸는지는 MCP 호출 쪽 기록에
+  의존하며, 요청자·승인자 분리(5절)는 이 토큰과 다른 사람의 승인을 요구하는 방식으로만 걸린다.
+
+### 5. 남은 라이브 확인 — 요청자·승인자 분리, 사본 암호화, 결과 카드, Oracle 앱 흐름
+
+앱을 `DBTOWER_ENCRYPTION_KEY`(새로 만든 키), `--dbtower.review.require-separate-approver=true`, 로컬 웹훅 수신기
+(`DBTOWER_WEBHOOK_URL=http://127.0.0.1:18099/hook`, 받은 본문을 줄 단위로 저장)로 다시 띄웠다. 이전 평문 행은 암호화 변환기가
+접두사로 가려 읽으므로(`enc:v1:`) 키를 새로 넣어도 기존 등록 정보가 그대로 읽혔다.
+
+```
+[E1] 요청자(api-token)가 자기 티켓 #26 승인      HTTP 409 요청자는 자기 변경 요청을 승인할 수 없습니다(dbtower.review.require-separate-approver)
+     admin 세션이 승인                           HTTP 200 APPROVED decidedBy=admin
+[E2] 실행 COMMITTED  changed=1 grade:SILVER->VIP masked=[email, phone]
+     플랫폼 DB workbench_change_execution        images_encrypted=t  length=1220  평문 'lee@example.com' 포함=f  앞 12자 'F/QZ2Lhl75sB'
+     화면 비교(복호화 뒤 마스킹)                 email le***********om -> le***********om, grade SILVER -> VIP
+     되돌리기(암호문을 복호화해 씀)              COMMITTED, 대상 행 3|SILVER
+[E3] 웹훅 수신 본문(text 필드)
+     [DBTower 변경 리뷰 요청 #26] live-postgres-team-b — 요청자 api-token / UPDATE customers SET grade = ? WHERE id = ?
+     [DBTower 변경 리뷰 #26 승인] live-postgres-team-b — 결정자 admin
+     [DBTower 변경 티켓 #26 실행] live-postgres-team-b · api-token · 1행
+     [DBTower 변경 티켓 #26 되돌림] live-postgres-team-b · api-token · 1행
+     (Oracle #27·#28, 인덱스 #29도 요청·승인·실행 카드가 같은 모양으로 발송)
+[E4] Oracle UPDATE sample.customers SET grade = 'SILVER' WHERE id = 2
+     드라이런 changed=1 GRADE:GOLD->SILVER keys=[ID] masked=[EMAIL, PHONE], 대상 행 GOLD 그대로
+     admin 승인 -> 실행 COMMITTED(SILVER) -> 되돌리기 COMMITTED(GOLD)
+     Oracle DELETE FROM sample.customers WHERE id = 3 -> 되돌리기  복원 행 같음: True
+```
+
+검증 스크립트는 처음에 카드 제목을 Discord embed 필드에서 찾아 "0건"으로 셌다. 실제 본문은 Slack 호환 `text` 필드였고 카드는
+전부 발송돼 있었다 — 제품이 아니라 검증 스크립트의 파싱 실수라 스크립트 쪽을 고쳐 다시 확인했다.
+
+부하 도중 플랫폼의 회귀 감지도 따로 울렸다(같은 수신기): `[DBTower 회귀 감지] instance=live-postgres-team-b (최근 5분 vs 직전 15분)
+- 신규 쿼리 유입: SELECT count(*) FROM payment_events WHERE merchant_id = $1`.
+
+### 6. 부하를 건 인덱스 티켓 전후 — 같은 부하, 같은 트랜잭션 계획, 같은 구간 스냅샷
+
+130절의 전후 비교는 트래픽 없는 데모라 동작 확인뿐이었다. 이번에는 100만 행 `payment_events`(가맹점 5만 곳, 가맹점당 약 20행)에
+`SELECT count(*) FROM payment_events WHERE merchant_id = :mid`(무작위 가맹점)를 pgbench로 걸고, 그 사이에 인덱스 티켓을 워크벤치 흐름
+그대로(제출 -> 승인 전 드라이런 -> admin 승인 -> 실행) 통과시켰다. 측정 중에는 다른 빌드·테스트를 돌리지 않았다.
+
+| 측정 | 인덱스 전 | 인덱스 후 |
+|---|---|---|
+| pgbench(4클라이언트·4스레드·120초) 처리 건수 | 9,672 | 16,402,198 |
+| pgbench 평균 지연 | 49.634 ms | 0.029 ms |
+| pgbench tps | 80.59 | 136,686.65 |
+| 드라이런 검증 조회 계획(같은 트랜잭션) | Finalize Aggregate -> Gather -> Partial Aggregate(병렬 순차 스캔) | Aggregate -> Index Only Scan using idx_payment_events_merchant |
+| 드라이런 검증 조회 중앙값(3회) | 34,357 µs | 926 µs |
+| 실행 검증 조회 중앙값(3회) | 36,320 µs | 672 µs |
+| 플랫폼 스냅샷 비교(실행 시각 기준 앞뒤 구간, 그 쿼리) | 49.31 ms, QPS 37.34 | 0.0 ms(소수 둘째 자리 반올림), QPS 68,116.99 |
+
+```
+워크로드 전 구간(앱 시각) 22:06:55~22:11:55  calls=9779     avg=48.95ms
+워크로드 후 구간(앱 시각) 22:11:55~22:15:10  calls=8174074  avg=0.0ms
+구조 diff  payment_events addedIndexes=[idx_payment_events_merchant]
+역변경 제안 ['DROP INDEX idx_payment_events_merchant'] -> 티켓 #30 승인 -> 실행 COMMITTED removedIndexes=[idx_payment_events_merchant]
+```
+
+해석의 한계:
+- pgbench는 DB 컨테이너 안에서 돌아 네트워크 왕복이 없다. 조회는 합계 한 줄이라 인덱스만 읽고 끝나는(Index Only Scan) 가장 유리한
+  모양이다. 수치의 쓸모는 "승인된 변경의 전후를 같은 부하로 재서 한 기록에 남길 수 있다"는 증거이지 일반적인 개선 폭이 아니다.
+- 스냅샷 비교의 "스캔 행 +706%"는 개선이 아니라 호출 수가 836배로 늘어난 결과다. PostgreSQL의 행 수 지표는 돌려준 행(호출당 1.0)이라
+  스캔한 행을 뜻하지 않는다.
+- 스냅샷 비교의 평균 0.0 ms는 표시 반올림이다. 정밀한 수치는 pgbench 쪽 0.029 ms를 쓴다.
+- 워크로드 구간 시각은 앱이 기록한 시각이고, 셸 시계와 9시간 차이가 났다(앱과 셸의 시간대 설정 차이, 이번 변경과 무관).

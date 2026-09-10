@@ -220,6 +220,16 @@ AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 �
 
 ![변경 티켓 — DDL 실행의 구조 변화와 같은 트랜잭션 안 전후 실행계획](docs/images/webui/74-workbench-ticket-ddl-probe.png)
 
+**티켓의 출구와 5기종 확장** — 승인된 채 실행하지 않을 티켓은 요청자나 ADMIN이 취소하고, 커밋 여부를 모른 채 멈춘 티켓은 ADMIN이
+대상 DB를 무엇으로 확인했는지 근거를 적어 정리합니다. DDL 실행 기록에는 생긴 구조만 지우는 역변경 문장을 기종 문법으로 제안하고
+(실행이 아니라 새 티켓으로 올리기), 스키마 트리에서 테이블 상세(행 수·크기·인덱스 카디널리티·DDL)를 엽니다. 변경 실행은 SQL Server 계열
+(Apple Silicon 로컬은 `docker compose -f docker-compose.yml -f docker-compose.arm64.yml up -d mssql`의 Azure SQL Edge)과 MongoDB(복제셋
+트랜잭션 안의 문서 사본)까지 5기종으로 넓혔고, MCP에는 변경 요청·상태·조회 도구만 열었습니다(조회는 인스턴스의 결과 값 AI 공유 설정이
+켜진 경우만). 100만 행 표에 pgbench로 같은 부하를 인덱스 티켓 전후에 걸어 평균 지연 49.634 ms -> 0.029 ms를 쟀습니다
+(컨테이너 내부·합계 한 줄 조회라는 한계와 함께, [VERIFICATION 131절](docs/VERIFICATION.md)).
+
+![테이블 상세 탭](docs/images/webui/76-workbench-table-detail.png)
+
 ### MCP — AI 에이전트의 채널
 
 웹 콘솔이 사람의 채널이라면 MCP는 AI 에이전트의 채널입니다. 회귀 감지가 push(플랫폼이
@@ -230,7 +240,7 @@ AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 �
 claude mcp add --transport http dbtower http://localhost:8080/mcp
 ```
 
-![MCP 연동 카드 — 도구 목록은 tools/list 실시간 응답, 현재 16종](docs/images/webui/06-mcp.png)
+![MCP 연동 카드 — 2026-07 촬영(도구 13종 시점). 이후 /mcp가 토큰 전용 체인이 되어(91절) 콘솔 세션에서는 목록 대신 안내 문구가 나온다. 현재 tools/list는 19종(131절)](docs/images/webui/06-mcp.png)
 
 ## 보안 — 사람은 세션, 기계는 토큰
 
@@ -412,13 +422,15 @@ POST /api/workbench/worksheets/{wid}/versions/{n}/restore  되돌리기(새 버�
 POST /api/workbench/tickets/{rid}/dry-run    승인 전후 드라이런(실행 후 롤백, ADMIN)   POST .../execute  승인 티켓 실행(ADMIN)
 POST /api/workbench/tickets/{rid}/revert     행 사본으로 되돌리기 {dryRun}(ADMIN)     GET  .../executions  실행 기록·전후 비교
 GET  /api/workbench/executions/{eid}/workload  실행 전후 워크로드 비교   POST /api/workbench/compare  인스턴스 간 결과 비교
+POST /api/reviews/{rid}/cancel               티켓 취소(요청자·ADMIN)        POST /api/workbench/tickets/{rid}/resolve  커밋 불명 정리(ADMIN, 근거 필수)
+GET  /api/reviews/{rid}                      티켓 단건(팀 범위)             POST /api/workbench/instances/{id}/agent-query  에이전트 조회(AI 공유 설정 필요, 최대 50행)
 
 # 운영 행위 (ADMIN)
 POST {base}/backup                 즉시 백업                  POST {base}/backup/verify  복원 검증
 PUT  {base}/backup-policy          백업 정책                  POST {base}/online-ddl     gh-ost (기본 dry-run)
 POST {base}/sessions/{pid}/kill    세션 종료                  GET  /api/audit            감사 로그 검색
 
-POST /mcp                          MCP (Streamable HTTP) — 도구 16종
+POST /mcp                          MCP (Streamable HTTP) — 도구 19종(워크벤치 요청·조회 3종 포함, 실행 도구 없음)
 ```
 
 ## 문서
@@ -426,7 +438,7 @@ POST /mcp                          MCP (Streamable HTTP) — 도구 16종
 - [PORTFOLIO-AX.md](docs/PORTFOLIO-AX.md) — AX 케이스 스터디: AI를 운영 플랫폼에 들일 때 정책을 코드로 강제한 사례별 결정·실측
 - [PRESENTATION.md](docs/PRESENTATION.md) — 문제 정의부터 설계·실측·교훈까지 전체 서사
 - [DESIGN.md](docs/DESIGN.md) — 인터페이스 경계, 시점 비교 데이터 모델
-- [VERIFICATION.md](docs/VERIFICATION.md) — 130개 절의 실측 기록 (명령·출력·스크린샷)
+- [VERIFICATION.md](docs/VERIFICATION.md) — 131개 절의 실측 기록 (명령·출력·스크린샷)
 - [ai-analysis-rules.md](docs/ai-analysis-rules.md) — 기종별 실행계획 판단 규칙: 근거와 예외
 - [operations.md](docs/operations.md) — 운영 규칙: 통계 소스의 함정과 대응 (digest 포화·PS 가시성·AAS)
 - [least-privilege.md](docs/least-privilege.md) — 기종별 최소 권한 모니터링 계정 (실측 확정)

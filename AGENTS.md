@@ -32,7 +32,7 @@ src/main/java/io/dbtower/    Spring Modulith 모듈 16개 (순환·internal 침�
 ├── advisor/     운영 모범규칙 자동 점검 (일일 스윕)
 ├── audit/       상태변경·로그인·월권 감사 기록
 ├── finops/      미사용·중복 인덱스 등 낭비 신호
-├── mcp/         MCP 서버 (프로토콜 코어 + stdio/HTTP 전송) + 자연어 진단
+├── mcp/         MCP 서버 (프로토콜 코어 + stdio/HTTP 전송) + 자연어 진단 + 워크벤치 요청·조회 도구(실행 도구 없음)
 ├── onlineddl/   gh-ost 온라인 스키마 변경 (MySQL)
 ├── review/      변경 리뷰 게이트 (판정·승인·상태 전이의 단일 권위 — 실행권은 ChangeTicketGate의 조건부 UPDATE로만)
 ├── score/       통합 헬스 스코어 + 대상별 운영 종합(overview: 정체·건강·복제·백업을 한 대상에)
