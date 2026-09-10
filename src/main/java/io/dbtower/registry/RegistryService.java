@@ -102,6 +102,14 @@ public class RegistryService {
         }
     }
 
+    /**
+     * 현재 주체가 전역 범위인지 — 서비스 토큰으로 자기 REST를 대리 호출하는 쪽(자연어 진단 루프)이
+     * 호출자의 원래 범위를 기억해 두는 데 쓴다. 대리 호출 순간 주체가 ADMIN 토큰으로 바뀌기 때문이다.
+     */
+    public boolean hasGlobalScope() {
+        return currentTeamScope() == null;
+    }
+
     /** 라벨 없는 인스턴스는 전역(모든 팀이 봄), 라벨이 있으면 같은 팀만. */
     private static boolean inScope(DatabaseInstance instance, String team) {
         return instance.getTeamLabel() == null || instance.getTeamLabel().isBlank()

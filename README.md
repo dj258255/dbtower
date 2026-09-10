@@ -379,6 +379,7 @@ POST /mcp                          MCP (Streamable HTTP) — 도구 16종
 
 ## 문서
 
+- [PORTFOLIO-AX.md](docs/PORTFOLIO-AX.md) — AX 케이스 스터디: AI를 운영 플랫폼에 들일 때 정책을 코드로 강제한 사례별 결정·실측
 - [PRESENTATION.md](docs/PRESENTATION.md) — 문제 정의부터 설계·실측·교훈까지 전체 서사
 - [DESIGN.md](docs/DESIGN.md) — 인터페이스 경계, 시점 비교 데이터 모델
 - [VERIFICATION.md](docs/VERIFICATION.md) — 122개 절의 실측 기록 (명령·출력·스크린샷)
