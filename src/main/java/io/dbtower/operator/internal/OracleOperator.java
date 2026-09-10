@@ -14,6 +14,7 @@ import io.dbtower.operator.RestoreSupport;
 import io.dbtower.operator.model.QueryStat;
 import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.model.RestoreVerification;
+import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
@@ -37,12 +38,15 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Oracle 어댑터.
@@ -69,6 +73,9 @@ public class OracleOperator extends AbstractJdbcOperator {
     /** 앱 스키마 미지정 시 노이즈로 제외할 Oracle 시스템 스키마들. */
     private static final String SYSTEM_SCHEMAS = "'SYS', 'SYSTEM', 'DBSNMP', 'SYSMAN'";
 
+    private static final Pattern SCHEMA_NAME = Pattern.compile("^[A-Z][A-Z0-9_$#]{0,127}$");
+    private static final Pattern OWNER_CLAUSE = Pattern.compile("\\{and:([^}]*)}");
+
     public OracleOperator(DatabaseInstance instance, ConnectionPools pools, BackupTools backupTools) {
         this(instance, pools, backupTools, null);
     }
@@ -76,7 +83,11 @@ public class OracleOperator extends AbstractJdbcOperator {
     public OracleOperator(DatabaseInstance instance, ConnectionPools pools, BackupTools backupTools,
                           String appSchema) {
         super(instance, pools, backupTools);
-        this.appSchema = appSchema == null ? "" : appSchema.trim();
+        this.appSchema = appSchema == null ? "" : appSchema.trim().toUpperCase(Locale.ROOT);
+        // ALTER SESSION SET CURRENT_SCHEMA는 바인딩이 안 돼 이름을 문장에 넣는다 — 설정값이라도 여기서 모양을 막는다
+        if (!this.appSchema.isEmpty() && !SCHEMA_NAME.matcher(this.appSchema).matches()) {
+            throw new IllegalArgumentException("dbtower.oracle.app-schema는 Oracle 스키마 이름이어야 합니다: " + appSchema);
+        }
     }
 
     /** 앱 스키마 설정 여부. */
@@ -106,16 +117,46 @@ public class OracleOperator extends AbstractJdbcOperator {
         return args;
     }
 
+    /**
+     * 딕셔너리 조회의 소유자 범위. 앱 스키마가 지정되면 DBA_* 뷰를 그 소유자로 거르고(모니터 계정은 V$SQL 때문에 이미
+     * SELECT_CATALOG_ROLE을 전제한다), 아니면 접속 계정 자신의 USER_* 뷰를 쓴다. USER_*만 보던 때는 모니터 계정과 앱 스키마가
+     * 다른 흔한 구성(최소 권한 모니터)에서 테이블 상세·스키마 트리가 비었다(VERIFICATION 131·132절).
+     * 템플릿의 {v}는 뷰 접두사, {and:식}은 앱 스키마일 때만 " AND 식"으로 펼친다 — USER_* 뷰에는 소유자 열이 없다.
+     */
+    private String dictionary(String template) {
+        String sql = template.replace("{v}", hasAppSchema() ? "dba_" : "user_");
+        return OWNER_CLAUSE.matcher(sql).replaceAll(m -> hasAppSchema() ? Matcher.quoteReplacement(" AND " + m.group(1)) : "");
+    }
+
+    /** 앱 스키마일 때만 소유자 바인딩을 뒤에 붙인다 — {and:… = ?}가 앞선 바인딩들 뒤에 오는 문장용. */
+    private Object[] withOwner(Object... head) {
+        if (!hasAppSchema()) {
+            return head;
+        }
+        Object[] args = Arrays.copyOf(head, head.length + 1);
+        args[head.length] = appSchema;
+        return args;
+    }
+
+    /** 조회·변경 계정 세션의 기본 스키마를 앱 스키마로 — 스키마 트리가 소유자 없이 보여주는 테이블 이름이 편집기에서 그대로 풀려야 한다. */
+    private void useAppSchema(Statement st) throws SQLException {
+        if (hasAppSchema()) {
+            st.execute("ALTER SESSION SET CURRENT_SCHEMA = " + appSchema);
+        }
+    }
+
     /** dbName은 서비스명(예: FREEPDB1) — Oracle은 데이터베이스가 아니라 서비스로 붙는다 */
     /** Oracle JDBC의 setReadOnly는 서버에 아무것도 보내지 않는다(실측) — 콘솔 트랜잭션의 첫 문장으로 직접 건다. */
     @Override
-    protected void beginReadOnly(java.sql.Statement st) throws java.sql.SQLException {
+    protected void beginReadOnly(Statement st) throws SQLException {
+        useAppSchema(st); // ALTER SESSION은 트랜잭션을 열지 않아 SET TRANSACTION이 여전히 첫 문장이다
         st.execute("SET TRANSACTION READ ONLY");
     }
 
     /** DDL의 락 대기 상한. 행 락 대기는 세션 설정이 없어 사본 조회의 FOR UPDATE WAIT로 건다. */
     @Override
     protected void beginChange(Statement st, int timeoutSeconds) throws SQLException {
+        useAppSchema(st);
         st.execute("ALTER SESSION SET DDL_LOCK_TIMEOUT = " + timeoutSeconds);
     }
 
@@ -304,21 +345,28 @@ public class OracleOperator extends AbstractJdbcOperator {
         }
     }
 
+    /** V$SQL.buffer_gets — 읽은 행이 아니라 버퍼에서 가져온 블록 수다 */
+    @Override
+    public RowsMetric rowsMetric() {
+        return RowsMetric.BUFFER_GETS;
+    }
+
     @Override
     public List<TableStat> tableStats(int limit) {
         // num_rows는 옵티마이저 통계 기준이라 통계 수집(DBMS_STATS) 이후에만 채워진다
-        String sql = """
+        String sql = dictionary("""
                 SELECT t.table_name,
                        NVL(t.num_rows, 0) AS row_count,
-                       NVL((SELECT SUM(s.bytes) FROM user_segments s
-                             WHERE s.segment_name = t.table_name), 0) AS data_bytes,
-                       NVL((SELECT SUM(s.bytes) FROM user_indexes i
-                             JOIN user_segments s ON s.segment_name = i.index_name
-                             WHERE i.table_name = t.table_name), 0) AS index_bytes
-                FROM user_tables t
+                       NVL((SELECT SUM(s.bytes) FROM {v}segments s
+                             WHERE s.segment_name = t.table_name{and:s.owner = t.owner}), 0) AS data_bytes,
+                       NVL((SELECT SUM(s.bytes) FROM {v}indexes i
+                             JOIN {v}segments s ON s.segment_name = i.index_name{and:s.owner = i.owner}
+                             WHERE i.table_name = t.table_name{and:i.table_owner = t.owner}), 0) AS index_bytes
+                FROM {v}tables t
+                WHERE 1 = 1{and:t.owner = ?}
                 ORDER BY data_bytes DESC
                 FETCH FIRST ? ROWS ONLY
-                """;
+                """);
         try {
             return jdbc().query(sql,
                     (rs, i) -> new TableStat(
@@ -326,7 +374,7 @@ public class OracleOperator extends AbstractJdbcOperator {
                             rs.getLong("row_count"),
                             rs.getLong("data_bytes"),
                             rs.getLong("index_bytes")),
-                    limit);
+                    schemaFilterArgs(limit));
         } catch (DataAccessException e) {
             throw new OperatorException("Oracle 테이블 통계 조회 실패: " + e.getMessage(), e);
         }
@@ -346,27 +394,27 @@ public class OracleOperator extends AbstractJdbcOperator {
     @Override
     public TableDetail tableDetail(String tableName) {
         String table = TableDetailSupport.requireIdentifier(tableName);
-        String t = table.toUpperCase(); // user_* 뷰는 대문자 식별자로 저장
+        String t = table.toUpperCase(); // 딕셔너리 뷰는 대문자 식별자로 저장
         try {
             // 기본 통계 — 세그먼트 바이트 합은 tableStats와 동일한 서브쿼리(데이터/인덱스 분리),
-            // 생성 시각은 user_objects.created(TABLE 객체)를 TO_CHAR로 문자열화
-            String headSql = """
+            // 생성 시각은 objects.created(TABLE 객체)를 TO_CHAR로 문자열화
+            String headSql = dictionary("""
                     SELECT NVL(t.num_rows, 0) AS row_count,
-                           NVL((SELECT SUM(s.bytes) FROM user_segments s
-                                 WHERE s.segment_name = t.table_name), 0) AS data_bytes,
-                           NVL((SELECT SUM(s.bytes) FROM user_indexes i
-                                 JOIN user_segments s ON s.segment_name = i.index_name
-                                 WHERE i.table_name = t.table_name), 0) AS index_bytes,
+                           NVL((SELECT SUM(s.bytes) FROM {v}segments s
+                                 WHERE s.segment_name = t.table_name{and:s.owner = t.owner}), 0) AS data_bytes,
+                           NVL((SELECT SUM(s.bytes) FROM {v}indexes i
+                                 JOIN {v}segments s ON s.segment_name = i.index_name{and:s.owner = i.owner}
+                                 WHERE i.table_name = t.table_name{and:i.table_owner = t.owner}), 0) AS index_bytes,
                            NVL(t.avg_row_len, 0) AS avg_row_bytes,
-                           (SELECT TO_CHAR(o.created, 'YYYY-MM-DD HH24:MI:SS') FROM user_objects o
-                             WHERE o.object_type = 'TABLE' AND o.object_name = t.table_name) AS created_at
-                    FROM user_tables t
-                    WHERE t.table_name = ?
-                    """;
+                           (SELECT TO_CHAR(o.created, 'YYYY-MM-DD HH24:MI:SS') FROM {v}objects o
+                             WHERE o.object_type = 'TABLE' AND o.object_name = t.table_name{and:o.owner = t.owner}) AS created_at
+                    FROM {v}tables t
+                    WHERE t.table_name = ?{and:t.owner = ?}
+                    """);
             Object[] head = jdbc().query(headSql,
                     rs -> rs.next() ? new Object[]{rs.getLong("row_count"), rs.getLong("data_bytes"),
                             rs.getLong("index_bytes"), rs.getLong("avg_row_bytes"), rs.getString("created_at")} : null,
-                    t);
+                    withOwner(t));
             if (head == null) {
                 return TableDetail.unsupported(table, "테이블을 찾을 수 없습니다: " + table);
             }
@@ -381,8 +429,12 @@ public class OracleOperator extends AbstractJdbcOperator {
             try {
                 // DBMS_METADATA.GET_DDL은 '함수'라 인자가 바인딩 가능하다(SHOW CREATE 같은 식별자 연결이 아님).
                 // 결과는 CLOB — ojdbc는 getString으로 CLOB 전문을 문자열로 내주므로 그대로 읽는다(DDL 크기는 무난).
-                ddl = jdbc().query("SELECT DBMS_METADATA.GET_DDL('TABLE', ?) FROM dual",
-                        rs -> rs.next() ? rs.getString(1) : null, t);
+                // 스키마 인자에 null을 바인딩하면 드라이버가 타입을 못 정해 두 문장으로 나눈다(생략하면 접속 스키마)
+                ddl = hasAppSchema()
+                        ? jdbc().query("SELECT DBMS_METADATA.GET_DDL('TABLE', ?, ?) FROM dual",
+                                rs -> rs.next() ? rs.getString(1) : null, t, appSchema)
+                        : jdbc().query("SELECT DBMS_METADATA.GET_DDL('TABLE', ?) FROM dual",
+                                rs -> rs.next() ? rs.getString(1) : null, t);
                 ddlSource = DdlSource.NATIVE;
                 note = baseNote;
             } catch (DataAccessException e) {
@@ -407,18 +459,18 @@ public class OracleOperator extends AbstractJdbcOperator {
     private List<TableDetail.IndexDetail> oracleIndexes(String upperTable) {
         record IdxRow(String name, String column, boolean unique, String type, long cardinality) {
         }
-        List<IdxRow> rows = jdbc().query("""
+        List<IdxRow> rows = jdbc().query(dictionary("""
                 SELECT i.index_name, ic.column_name, i.uniqueness, i.index_type,
                        NVL(i.distinct_keys, 0) AS cardinality
-                FROM user_indexes i
-                JOIN user_ind_columns ic ON ic.index_name = i.index_name
-                WHERE i.table_name = ?
+                FROM {v}indexes i
+                JOIN {v}ind_columns ic ON ic.index_name = i.index_name{and:ic.index_owner = i.owner}
+                WHERE i.table_name = ?{and:i.table_owner = ?}
                 ORDER BY i.index_name, ic.column_position
-                """,
+                """),
                 (rs, i) -> new IdxRow(rs.getString("index_name"), rs.getString("column_name"),
                         "UNIQUE".equalsIgnoreCase(rs.getString("uniqueness")), rs.getString("index_type"),
                         rs.getLong("cardinality")),
-                upperTable);
+                withOwner(upperTable));
         Map<String, TableDetail.IndexDetail> byName = new LinkedHashMap<>();
         for (IdxRow r : rows) {
             byName.merge(r.name(),
@@ -438,26 +490,27 @@ public class OracleOperator extends AbstractJdbcOperator {
      * 파티션 조회 (D5) — user_tab_partitions(파티션별 경계·행수)에 user_part_tables(파티션 방식)를 붙인다.
      * partitioning_type이 RANGE/LIST/HASH, high_value가 이 파티션의 상한 경계(LONG 컬럼 — 문자열로 읽는다).
      * 파티션 키 컬럼은 user_part_key_columns에서, 크기는 user_segments의 파티션별 바이트 합에서 얻는다.
-     * 현재 접속 스키마(USER_*) 소유 객체만 본다. 읽기 전용.
+     * 앱 스키마가 지정되면 그 스키마(DBA_*), 아니면 현재 접속 스키마(USER_*) 소유 객체만 본다. 읽기 전용.
      */
     @Override
     public List<PartitionInfo> partitions(int limit) {
-        String sql = """
+        String sql = dictionary("""
                 SELECT tp.table_name,
                        tp.partition_name,
                        pt.partitioning_type AS method,
                        (SELECT LISTAGG(kc.column_name, ',') WITHIN GROUP (ORDER BY kc.column_position)
-                          FROM user_part_key_columns kc WHERE kc.name = tp.table_name) AS part_expr,
+                          FROM {v}part_key_columns kc WHERE kc.name = tp.table_name{and:kc.owner = tp.table_owner}) AS part_expr,
                        tp.high_value AS boundary,
                        tp.num_rows AS row_count,
-                       (SELECT SUM(s.bytes) FROM user_segments s
+                       (SELECT SUM(s.bytes) FROM {v}segments s
                          WHERE s.segment_name = tp.table_name
-                           AND s.partition_name = tp.partition_name) AS size_bytes
-                FROM user_tab_partitions tp
-                JOIN user_part_tables pt ON pt.table_name = tp.table_name
+                           AND s.partition_name = tp.partition_name{and:s.owner = tp.table_owner}) AS size_bytes
+                FROM {v}tab_partitions tp
+                JOIN {v}part_tables pt ON pt.table_name = tp.table_name{and:pt.owner = tp.table_owner}
+                WHERE 1 = 1{and:tp.table_owner = ?}
                 ORDER BY tp.table_name, tp.partition_position
                 FETCH FIRST ? ROWS ONLY
-                """;
+                """);
         try {
             return jdbc().query(sql,
                     (rs, i) -> new PartitionInfo(
@@ -468,7 +521,7 @@ public class OracleOperator extends AbstractJdbcOperator {
                             rs.getString("boundary"),
                             rs.getObject("row_count", Long.class),
                             rs.getObject("size_bytes", Long.class)),
-                    limit);
+                    schemaFilterArgs(limit));
         } catch (DataAccessException e) {
             throw new OperatorException("Oracle 파티션 조회 실패: " + e.getMessage(), e);
         }
@@ -991,14 +1044,14 @@ public class OracleOperator extends AbstractJdbcOperator {
     }
 
     /**
-     * 스키마 구조 — 컬럼은 user_tab_columns, 인덱스는 user_indexes + user_ind_columns(현재 스키마).
-     * 뷰의 컬럼이 섞이지 않게 user_tables에 있는 것만 남긴다. nullable은 'Y'/'N', uniqueness는
+     * 스키마 구조 — 컬럼은 tab_columns, 인덱스는 indexes + ind_columns(앱 스키마가 지정되면 DBA_*를 그 소유자로, 아니면 USER_*).
+     * 뷰의 컬럼이 섞이지 않게 tables에 있는 것만 남긴다. nullable은 'Y'/'N', uniqueness는
      * 'UNIQUE'/'NONUNIQUE'로 오므로 각각 boolean으로 환산한다. column_id/column_position이 순서다.
      * data_type은 길이 없이 VARCHAR2처럼만 와서, data_length를 붙여 기종 표기에 가깝게 만든다.
      */
     @Override
     public SchemaSnapshot describeSchema() {
-        String columnsSql = """
+        String columnsSql = dictionary("""
                 SELECT c.table_name,
                        c.column_name,
                        CASE WHEN c.data_type IN ('VARCHAR2', 'CHAR', 'NVARCHAR2', 'RAW')
@@ -1006,28 +1059,32 @@ public class OracleOperator extends AbstractJdbcOperator {
                             ELSE c.data_type END AS column_type,
                        c.nullable,
                        c.column_id
-                FROM user_tab_columns c
-                WHERE c.table_name IN (SELECT table_name FROM user_tables)
+                FROM {v}tab_columns c
+                WHERE c.table_name IN (SELECT tt.table_name FROM {v}tables tt WHERE 1 = 1{and:tt.owner = ?}){and:c.owner = ?}
                 ORDER BY c.table_name, c.column_id
-                """;
-        String indexesSql = """
+                """);
+        String indexesSql = dictionary("""
                 SELECT i.table_name, i.index_name, ic.column_name, i.uniqueness
-                FROM user_indexes i
-                JOIN user_ind_columns ic ON ic.index_name = i.index_name
-                WHERE i.table_name IN (SELECT table_name FROM user_tables)
+                FROM {v}indexes i
+                JOIN {v}ind_columns ic ON ic.index_name = i.index_name{and:ic.index_owner = i.owner}
+                WHERE i.table_name IN (SELECT tt.table_name FROM {v}tables tt WHERE 1 = 1{and:tt.owner = ?}){and:i.table_owner = ?}
                 ORDER BY i.table_name, i.index_name, ic.column_position
-                """;
+                """);
+        // 두 문장 모두 소유자 바인딩이 둘(안쪽 테이블 목록, 바깥 열·인덱스)이다
+        Object[] owners = hasAppSchema() ? new Object[]{appSchema, appSchema} : new Object[0];
         try {
             List<SchemaSupport.ColumnRow> columns = jdbc().query(columnsSql,
                     (rs, i) -> new SchemaSupport.ColumnRow(
                             rs.getString("table_name"),
                             new ColumnSchema(rs.getString("column_name"), rs.getString("column_type"),
                                     "Y".equalsIgnoreCase(rs.getString("nullable")),
-                                    rs.getInt("column_id"))));
+                                    rs.getInt("column_id"))),
+                    owners);
             List<SchemaSupport.IndexColumnRow> indexes = jdbc().query(indexesSql,
                     (rs, i) -> new SchemaSupport.IndexColumnRow(
                             rs.getString("table_name"), rs.getString("index_name"),
-                            rs.getString("column_name"), "UNIQUE".equalsIgnoreCase(rs.getString("uniqueness"))));
+                            rs.getString("column_name"), "UNIQUE".equalsIgnoreCase(rs.getString("uniqueness"))),
+                    owners);
             return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
                     columns, indexes, SchemaSupport.DEFAULT_MAX_TABLES);
         } catch (DataAccessException e) {

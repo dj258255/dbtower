@@ -15,6 +15,7 @@ import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
 import io.dbtower.operator.model.QueryStat;
+import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.RestoreSupport;
 import io.dbtower.operator.model.RestoreVerification;
@@ -339,6 +340,12 @@ public class MySqlOperator extends AbstractJdbcOperator {
     @Override
     protected String versionSql() {
         return "SELECT VERSION()";
+    }
+
+    /** events_statements_summary_by_digest.SUM_ROWS_EXAMINED — 필드 이름 그대로 검사한 행이다 */
+    @Override
+    public RowsMetric rowsMetric() {
+        return RowsMetric.EXAMINED_ROWS;
     }
 
     @Override

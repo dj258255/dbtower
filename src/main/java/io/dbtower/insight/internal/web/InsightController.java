@@ -21,6 +21,7 @@ import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.QueryStat;
+import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableStat;
@@ -264,6 +265,16 @@ public class InsightController {
             @RequestParam @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime targetFrom,
             @RequestParam @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime targetTo) {
         return comparisonService.compare(id, baseFrom, baseTo, targetFrom, targetTo);
+    }
+
+    public record RowsMetricView(RowsMetric metric, String label) {
+    }
+
+    /** 이 인스턴스의 누적 통계 행 지표가 무엇을 세는지 — 비교 화면이 "읽은 행수"를 기종에 맞는 이름으로 적게 한다(132절) */
+    @GetMapping("/rows-metric")
+    public RowsMetricView rowsMetric(@PathVariable Long id) {
+        RowsMetric metric = operatorFactory.create(registryService.findById(id)).rowsMetric();
+        return new RowsMetricView(metric, metric.label());
     }
 
     /** 활동 그래프 한 점 — 배치 간 차분으로 계산한 그 구간의 QPS/평균 레이턴시 */

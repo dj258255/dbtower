@@ -1,7 +1,7 @@
 // 거버넌스 SQL 워크벤치 — 인스턴스·워크시트·편집기·결과 미리보기·AI 대화를 잇는다.
 // 정책(분류·계정·읽기 전용·마스킹·기록)과 판정은 전부 서버가 강제한다. 이 화면은 결과를 보여줄 뿐 판정하지 않는다.
 
-import { request, esc, csrfToken, ApiError } from "./api.js";
+import { request, esc, csrfToken, ApiError, localTime } from "./api.js";
 import { SqlEditor, highlight } from "./editor.js";
 import { renderTree } from "./schema-tree.js";
 import { renderGrid } from "./grid.js";
@@ -570,7 +570,7 @@ async function loadHistory() {
     }
     box.innerHTML = `<table class="history"><tbody>${items.map((h, i) => `
       <tr data-i="${i}">
-        <td class="muted">${esc(String(h.occurredAt).replace("T", " ").slice(0, 19))}</td>
+        <td class="muted">${esc(localTime(h.occurredAt, { seconds: true }))}</td>
         <td><span class="outcome ${esc(h.outcome)}">${esc(h.outcome)}</span> ${esc(h.action)}</td>
         <td class="muted">${esc(h.kind)}${h.rowCount !== null ? ` · ${esc(h.rowCount)}행` : ""}</td>
         <td><code>${esc(h.statement.slice(0, 300))}</code>${h.error ? `<div class="muted">${esc(h.error.slice(0, 200))}</div>` : ""}</td>

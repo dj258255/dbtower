@@ -1,7 +1,7 @@
 // 변경 티켓 — 리뷰 게이트의 요청을 워크벤치에서 드라이런·승인·실행·되돌리기까지 잇고, 실행마다 전후 비교를 보여준다.
 // 상태 전이와 판정은 전부 서버(리뷰 게이트·실행 계층)가 한다. 이 화면은 상태에 맞는 버튼을 보여줄 뿐이다.
 
-import { request, esc, ApiError } from "./api.js";
+import { request, esc, ApiError, localTime } from "./api.js";
 import { highlight } from "./editor.js";
 import { renderDiff, renderSchemaDiff, renderProbe, renderWorkload } from "./diff.js";
 
@@ -27,7 +27,7 @@ const OUTCOME = {
 // 되돌릴 수 없거나 대상 DB·티켓 상태에 흔적을 남기는 동작은 한 번 더 눌러야 나간다(브라우저 확인창 대신 버튼 자체로)
 const ARMED = new Set(["execute", "execute-raw", "revert", "approve", "cancel", "resolve-applied", "resolve-not-applied"]);
 const OPEN = ["PENDING", "APPROVED", "EXECUTING", "ROLLING_BACK"];
-const time = (t) => (t ? String(t).replace("T", " ").slice(0, 19) : "");
+const time = (t) => localTime(t, { seconds: true });
 
 export class TicketPanel {
   constructor({ list, detail, count, isAdmin, me, onOpenSql, onProposeTicket }) {

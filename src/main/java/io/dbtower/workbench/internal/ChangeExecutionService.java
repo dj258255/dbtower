@@ -140,8 +140,9 @@ public class ChangeExecutionService {
                             String beforeError, String afterError) {
     }
 
+    /** rowsMetricLabel: 비교 결과의 행 지표가 이 기종에서 무엇을 세는지(검사한 행·돌려준 행·논리 읽기 등) */
     public record WorkloadView(LocalDateTime baseFrom, LocalDateTime baseTo, LocalDateTime targetFrom,
-                               LocalDateTime targetTo, CompareResult result, String note) {
+                               LocalDateTime targetTo, CompareResult result, String note, String rowsMetricLabel) {
     }
 
     record Images(RowImage before, RowImage after) {
@@ -308,13 +309,14 @@ public class ChangeExecutionService {
                 ? "실행 뒤 구간이 아직 다 지나지 않아 " + Duration.between(pivot, targetTo).toMinutes()
                 + "분만 비교했다. 스냅샷 수집 주기보다 짧으면 뒤 구간이 비어 있을 수 있다"
                 : null;
+        String rowsMetric = operators.create(registry.findById(e.getInstanceId())).rowsMetric().label();
         try {
             return new WorkloadView(pivot.minusMinutes(minutes), pivot, pivot, targetTo,
-                    comparison.compare(e.getInstanceId(), pivot.minusMinutes(minutes), pivot, pivot, targetTo), note);
+                    comparison.compare(e.getInstanceId(), pivot.minusMinutes(minutes), pivot, pivot, targetTo), note, rowsMetric);
         } catch (IllegalArgumentException notEnough) {
             // 실행 직후에는 뒤 구간에 스냅샷 배치가 아직 없다 — 오류가 아니라 "아직 비교할 재료가 없다"는 상태로 돌려준다(라이브 검증에서 400으로 보였다)
             return new WorkloadView(pivot.minusMinutes(minutes), pivot, pivot, targetTo, null,
-                    "비교할 스냅샷이 아직 부족하다. 수집 주기가 지난 뒤 다시 보라: " + notEnough.getMessage());
+                    "비교할 스냅샷이 아직 부족하다. 수집 주기가 지난 뒤 다시 보라: " + notEnough.getMessage(), rowsMetric);
         }
     }
 

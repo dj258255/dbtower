@@ -1,9 +1,12 @@
 // 전후 비교 렌더링 — 행 차이(변경 전후 사본, 인스턴스 간 결과), 구조 변화, 검증 조회 실행계획, 워크로드 비교.
 // 값은 서버가 마스킹한 뒤에 온다. 바뀌었는지 판정도 서버가 원래 값으로 해서 보낸다 — 여기서는 다시 판정하지 않는다.
 
-import { esc } from "./api.js";
+import { esc, localTime } from "./api.js";
 
-const time = (t) => (t ? String(t).replace("T", " ").slice(0, 16) : "");
+const time = (t) => localTime(t);
+// 1ms 미만 평균은 소수 둘째 자리 표시가 0으로 뭉갠다(131절의 "0.0ms") — 그 구간만 유효숫자 3자리로 보인다
+const ms = (v) => (v === null || v === undefined ? "-"
+  : Number(v).toLocaleString("ko-KR", v !== 0 && Math.abs(v) < 1 ? { maximumSignificantDigits: 3 } : { maximumFractionDigits: 2 }));
 const cell = (v) => (v === null || v === undefined ? '<span class="null">NULL</span>' : esc(v));
 const micros = (v) => (v === null || v === undefined ? "-" : v < 1000 ? `${v}µs` : `${(v / 1000).toFixed(v < 10000 ? 2 : 1)}ms`);
 const pct = (v) => (v === null || v === undefined ? "-" : `${v > 0 ? "+" : ""}${Number(v).toFixed(1)}%`);
@@ -86,16 +89,16 @@ export function renderWorkload(w) {
   const table = queries.length
     ? `<table class="history"><tbody>${queries.map((q) => `<tr>
         <td><code>${esc(String(q.queryText || q.queryId).slice(0, 140))}</code></td>
-        <td class="muted">${q.newQuery ? "새 쿼리" : `${num(q.baseAvgMs)}ms → ${num(q.targetAvgMs)}ms`}</td>
+        <td class="muted">${q.newQuery ? "새 쿼리" : `${ms(q.baseAvgMs)}ms → ${ms(q.targetAvgMs)}ms`}</td>
         <td>${q.newQuery ? "" : esc(pct(q.latencyChangePct))}</td></tr>`).join("")}</tbody></table>`
     : '<div class="muted">두 구간 모두에 잡힌 쿼리 스냅샷이 없습니다.</div>';
   return `<div class="df-workload">
     <div class="muted">전 ${esc(time(w.baseFrom))} ~ ${esc(time(w.baseTo))} / 후 ${esc(time(w.targetFrom))} ~ ${esc(time(w.targetTo))}</div>
     ${w.note ? `<div class="hint">${esc(w.note)}</div>` : ""}
     <div class="df-summary">
-      <span>평균 지연 ${num(r.base.avgLatencyMs)}ms → ${num(r.target.avgLatencyMs)}ms (${esc(pct(r.avgLatencyChangePct))})</span>
+      <span>평균 지연 ${ms(r.base.avgLatencyMs)}ms → ${ms(r.target.avgLatencyMs)}ms (${esc(pct(r.avgLatencyChangePct))})</span>
       <span>호출 ${num(r.base.totalCalls)} → ${num(r.target.totalCalls)}</span>
-      <span>스캔 행 ${num(r.base.totalRowsExamined)} → ${num(r.target.totalRowsExamined)}</span>
+      <span title="기종마다 누적 통계의 행 지표가 다르다">${esc(w.rowsMetricLabel || "행 지표")} ${num(r.base.totalRowsExamined)} → ${num(r.target.totalRowsExamined)}</span>
       <span>새 쿼리 ${num(r.newQueryCount)}</span>
     </div>${table}</div>`;
 }

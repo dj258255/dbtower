@@ -7,6 +7,9 @@ import io.dbtower.alert.internal.job.RegressionDetector;
 import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.QueryDiff;
+import io.dbtower.operator.DbmsOperator;
+import io.dbtower.operator.DbmsOperatorFactory;
+import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
 import io.dbtower.registry.DbmsType;
@@ -35,6 +38,8 @@ class RegressionDetectorTest {
     private final WebhookNotifier notifier = Mockito.mock(WebhookNotifier.class);
     private final AiAnalyzer aiAnalyzer = Mockito.mock(AiAnalyzer.class);
     private final PlanChangeTracker planChangeTracker = Mockito.mock(PlanChangeTracker.class);
+    private final DbmsOperatorFactory operators = Mockito.mock(DbmsOperatorFactory.class);
+    private final DbmsOperator operator = Mockito.mock(DbmsOperator.class);
 
     private RegressionDetector detector;
 
@@ -45,7 +50,9 @@ class RegressionDetectorTest {
         Mockito.when(notifier.sendEmbed(Mockito.anyString(), Mockito.any(), Mockito.any()))
                 .thenReturn(true);
         detector = new RegressionDetector(instanceRepository, comparisonService, notifier, aiAnalyzer,
-                new QueryMasker(true, false), planChangeTracker, 5, 15, 30, "");
+                new QueryMasker(true, false), planChangeTracker, operators, 5, 15, 30, "");
+        when(operators.create(any())).thenReturn(operator);
+        when(operator.rowsMetric()).thenReturn(RowsMetric.EXAMINED_ROWS);
         DatabaseInstance instance = new DatabaseInstance(
                 "test-db", DbmsType.MYSQL, "127.0.0.1", 3306, "sample", "root", "pw");
         when(instanceRepository.findAll()).thenReturn(List.of(instance));
@@ -95,7 +102,17 @@ class RegressionDetectorTest {
         detector.detect();
         String message = notifiedMessage();
         assertTrue(message.contains("레이턴시 회귀"));
-        assertTrue(message.contains("읽는 행수 폭증"));
+        assertTrue(message.contains("검사한 행 폭증(플랜 변화 의심)"), message);
+    }
+
+    @Test
+    void 행_지표가_돌려준_행인_기종은_급증을_플랜_변화로_적지_않고_계획을_뜨지_않는다() {
+        when(operator.rowsMetric()).thenReturn(RowsMetric.RETURNED_ROWS);
+        stubDiffs(new QueryDiff("q2", "SELECT * FROM big", 1, 1, 0.0, 1, 1, 0.0, 10, 8_000, 79_900.0, false));
+        detector.detect();
+        String message = notifiedMessage();
+        assertTrue(message.contains("돌려주거나 바꾼 행 폭증(결과 크기 변화, 스캔량 지표 아님)"), message);
+        verify(planChangeTracker, never()).check(any(), any(), any());
     }
 
     @Test

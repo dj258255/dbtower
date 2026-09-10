@@ -23,6 +23,7 @@ import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
 import io.dbtower.operator.model.QueryStat;
+import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.RestoreSupport;
 import io.dbtower.operator.model.RestoreVerification;
@@ -132,6 +133,12 @@ public class MongoOperator implements DbmsOperator {
      * system.profile을 queryHash 단위로 집계 — performance_schema digest 집계와 같은 역할.
      * queryHash가 없는 연산(insert 등)은 op:ns로 묶는다.
      */
+    /** system.profile의 docsExamined — 검사한 문서 수다 */
+    @Override
+    public RowsMetric rowsMetric() {
+        return RowsMetric.EXAMINED_DOCUMENTS;
+    }
+
     @Override
     public List<QueryStat> queryStats(int limit) {
         List<org.bson.conversions.Bson> pipeline = List.of(

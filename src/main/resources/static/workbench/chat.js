@@ -1,12 +1,12 @@
 // 워크시트 AI 대화 — 사람 말풍선, AI 답변(설명·제안 SQL·분류), 체크포인트 카드(제목·만든 사람·시각)를 시간순으로.
 // TOI류 도구처럼 요청 하나가 커밋 같은 카드로 남고, 카드에서 편집기로 가져오기·미리보기·되돌리기를 한다.
 
-import { esc } from "./api.js";
+import { esc, localTime } from "./api.js";
 import { highlight } from "./editor.js";
 
 const TIER = { READ: ["읽기", "read"], NEEDS_APPROVAL: ["변경 · 승인 필요", "change"], BLOCKED: ["차단", "blocked"] };
 const SOURCE = { AI: "AI 제안", RUN: "직접 실행", RESTORE: "되돌림" };
-const time = (t) => String(t || "").replace("T", " ").slice(0, 16);
+const time = (t) => localTime(t);
 
 export function renderTimeline(container, items, { currentVersion, pending, onApply, onPreview, onRestore }) {
   if (!items.length && !pending) {

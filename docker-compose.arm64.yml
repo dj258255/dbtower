@@ -6,6 +6,14 @@
 # 실제 SQL Server 2022 검증을 대신하지 않는다. 이미지에 sqlcmd가 없어 계정·데모 스크립트는 scripts/ApplySql.java로 적용한다.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.arm64.yml up -d mssql
+#
+# Mac에 Rosetta가 있으면 이 덮어쓰기 없이 실제 SQL Server 2022를 띄울 수 있다(VERIFICATION 132절). 기존 VM은 그대로 두고
+# Rosetta를 켠 Colima 프로필을 하나 더 만든다. 호스트 포트가 겹치지 않게 고른다(11434는 Ollama가 흔히 쓴다).
+#
+#   colima start mssql2022 --vm-type vz --vz-rosetta --cpu 4 --memory 6
+#   MSSQL_SA_PASSWORD='...' docker --context colima-mssql2022 run -d --name dbtower-mssql2022 --platform linux/amd64 \
+#     -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD -p 14330:1433 mcr.microsoft.com/mssql/server:2022-latest
+#   DBTOWER_CONSOLE_IT=1 DBTOWER_MSSQL_IT=1 DBTOWER_MSSQL_PORT=14330 ./gradlew test --tests '*ChangeExecutionIT'
 services:
   mssql:
     image: mcr.microsoft.com/azure-sql-edge:latest

@@ -120,12 +120,13 @@ class ConsoleReadOnlyIT {
 
     /**
      * SQL Server 계열은 서버 쪽 읽기 전용 트랜잭션이 없고 드라이버도 setReadOnly를 무시한다 — 이 겹은 없고, 남는 방어는 끝의 롤백과
-     * 조회 계정 권한뿐이라는 것을 그대로 증명한다(Azure SQL Edge, docker-compose.arm64.yml + docker/workbench-mssql.sql).
+     * 조회 계정 권한뿐이라는 것을 그대로 증명한다(Azure SQL Edge 11433 또는 실제 SQL Server 2022 DBTOWER_MSSQL_PORT, docker/workbench-mssql.sql).
      */
     @Test
     @EnabledIfEnvironmentVariable(named = "DBTOWER_MSSQL_IT", matches = "1")
     void SQLServer계열은_읽기_전용_겹이_없어_끝의_롤백과_조회_계정_권한이_경계다() throws Exception {
-        MsSqlOperator op = new MsSqlOperator(instance(9104, DbmsType.MSSQL, 11433, "sample"), pools, null);
+        int port = Integer.parseInt(System.getenv().getOrDefault("DBTOWER_MSSQL_PORT", "11433"));
+        MsSqlOperator op = new MsSqlOperator(instance(9104, DbmsType.MSSQL, port, "sample"), pools, null);
         ConsoleCredential sa = new ConsoleCredential("sa", "Dbtower1234!");
         exec(op.jdbcUrl(), sa, "IF OBJECT_ID('dbo.console_ro_probe') IS NULL CREATE TABLE dbo.console_ro_probe (id INT)",
                 "DELETE FROM dbo.console_ro_probe");

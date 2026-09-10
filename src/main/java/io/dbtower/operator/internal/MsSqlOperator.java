@@ -14,6 +14,7 @@ import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
 import io.dbtower.operator.model.QueryStat;
+import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.RestoreSupport;
 import io.dbtower.operator.model.RestoreVerification;
@@ -403,6 +404,12 @@ public class MsSqlOperator extends AbstractJdbcOperator {
     @Override
     protected String versionSql() {
         return "SELECT @@VERSION";
+    }
+
+    /** sys.dm_exec_query_stats.total_logical_reads — 행이 아니라 버퍼 풀에서 읽은 8KB 페이지 수다 */
+    @Override
+    public RowsMetric rowsMetric() {
+        return RowsMetric.LOGICAL_READS;
     }
 
     @Override

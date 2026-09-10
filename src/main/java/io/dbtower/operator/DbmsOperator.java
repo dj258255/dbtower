@@ -4,6 +4,7 @@ import io.dbtower.operator.model.ChangeOutcome;
 import io.dbtower.operator.model.ChangePlan;
 import io.dbtower.operator.model.QueryResult;
 import io.dbtower.operator.model.RevertPlan;
+import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.operator.model.VolumeStat;
 import io.dbtower.operator.model.WaitEvent;
@@ -65,6 +66,9 @@ public interface DbmsOperator {
 
     /** 정규화된 쿼리별 누적 통계 상위 N개 (시점 비교의 원천 데이터) */
     List<QueryStat> queryStats(int limit);
+
+    /** queryStats의 rowsExamined 자리에 이 기종이 담는 지표 — 화면·알림이 같은 이름으로 다른 단위를 읽지 않게 기본값을 두지 않는다 */
+    RowsMetric rowsMetric();
 
     /** 느린 쿼리 상위 N개 */
     List<SlowQuery> slowQueries(int limit);

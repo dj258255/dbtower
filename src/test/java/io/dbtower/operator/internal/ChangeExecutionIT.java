@@ -17,6 +17,7 @@ import io.dbtower.operator.model.ChangeOutcome;
 import io.dbtower.operator.model.ChangePlan;
 import io.dbtower.operator.model.ChangePlan.Kind;
 import io.dbtower.operator.model.RevertPlan;
+import io.dbtower.operator.model.TableDetail;
 import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
@@ -56,6 +57,8 @@ class ChangeExecutionIT {
 
     private static final String GATE = "DBTOWER_CONSOLE_IT";
     private static final String MSSQL_GATE = "DBTOWER_MSSQL_IT";
+    // SQL Edge(기본 11433)와 Rosetta VM의 실제 SQL Server 2022를 다른 포트에 같이 띄워 두고 같은 시나리오를 돌린다(132절)
+    private static final int MSSQL_PORT = Integer.parseInt(System.getenv().getOrDefault("DBTOWER_MSSQL_PORT", "11433"));
     private static final String TRICKY = "O'Brien \\ \"q\" ; DROP TABLE x; --";
 
     private final ConnectionPools pools = new ConnectionPools(new VaultCredentials("", ""),
@@ -319,14 +322,65 @@ class ChangeExecutionIT {
     }
 
     /**
-     * SQL Server 계열 — 로컬(Apple Silicon, Rosetta 없음)에서는 arm64 Azure SQL Edge로 잰다(docker-compose.arm64.yml).
-     * 다른 기종과 게이트를 나눈 이유: 기본 compose의 SQL Server 이미지는 이 환경에서 뜨지 않아 늘 켜 둘 수 없다.
-     * {@code DBTOWER_MSSQL_IT=1 ./gradlew test --tests '*ChangeExecutionIT'}
+     * 앱 스키마(dbtower.oracle.app-schema)를 주면 모니터 계정은 자기 스키마가 아닌 앱 스키마의 테이블 상세·구조를 DBA_* 뷰로 보고,
+     * 조회·변경 계정은 세션 기본 스키마가 앱 스키마라 스키마 트리가 보여주는 소유자 없는 이름 그대로 조회·드라이런이 된다(132절).
+     * 앱 스키마가 없으면 같은 모니터 계정에게 sample.customers는 보이지 않는다(예전 동작 그대로).
+     */
+    @Test
+    @EnabledIfEnvironmentVariable(named = GATE, matches = "1")
+    void Oracle_앱_스키마를_주면_모니터와_콘솔_세션이_앱_스키마를_기본으로_본다() throws Exception {
+        OracleOperator plain = new OracleOperator(oracleMonitor(9205), pools, null, null);
+        OracleOperator scoped = new OracleOperator(oracleMonitor(9206), pools, null, "sample");
+
+        TableDetail missing = plain.tableDetail("customers");
+        System.out.println("[Oracle 앱 스키마 없음 상세] " + missing.ddlSource() + " " + missing.note());
+        assertEquals(TableDetail.DdlSource.UNSUPPORTED, missing.ddlSource());
+        assertTrue(plain.describeSchema().tables().stream().noneMatch(t -> t.name().equals("CUSTOMERS")));
+
+        TableDetail detail = scoped.tableDetail("customers");
+        System.out.println("[Oracle 앱 스키마 상세] rows=" + detail.rowCount() + " created=" + detail.createdAt()
+                + " indexes=" + detail.indexes().stream().map(TableDetail.IndexDetail::name).toList()
+                + " ddl=" + (detail.ddl() == null ? null : detail.ddl().strip().lines().findFirst().orElse("")));
+        assertNotNull(detail.createdAt(), "앱 스키마의 테이블을 찾아야 한다");
+        assertFalse(detail.indexes().isEmpty(), "기본 키 인덱스가 보여야 한다");
+        assertTrue(detail.ddl() != null && detail.ddl().contains("\"SAMPLE\".\"CUSTOMERS\""), detail.note());
+        List<String> tables = scoped.describeSchema().tables().stream().map(t -> t.name()).toList();
+        System.out.println("[Oracle 앱 스키마 구조] " + tables);
+        assertTrue(tables.contains("CUSTOMERS"), tables.toString());
+
+        ConsoleCredential reader = new ConsoleCredential("dbtower_reader", "dbtower1234");
+        OperatorException unresolved = assertThrows(OperatorException.class,
+                () -> plain.executeReadOnly(reader, "SELECT COUNT(*) FROM customers", 10, 5));
+        System.out.println("[Oracle 앱 스키마 없음 조회] " + unresolved.getMessage());
+        assertDoesNotThrow(() -> scoped.executeReadOnly(reader, "SELECT COUNT(*) FROM customers", 10, 5),
+                "세션 기본 스키마가 앱 스키마라 소유자 없는 이름이 풀린다");
+
+        ConsoleCredential writer = new ConsoleCredential("dbtower_writer", "dbtower1234");
+        ChangeOutcome dry = scoped.executeChange(writer,
+                plan(Kind.UPDATE, "UPDATE customers SET grade = grade WHERE id = 1", "customers", "WHERE id = 1", 10, true));
+        System.out.println("[Oracle 앱 스키마 드라이런] committed=" + dry.committed() + " affected=" + dry.affectedRows()
+                + " unavailable=" + dry.rollbackUnavailable());
+        assertFalse(dry.committed());
+        assertEquals(1, dry.affectedRows());
+        assertNull(dry.rollbackUnavailable(), "기본 키를 앱 스키마에서 찾아 되돌리기 경로가 열려야 한다");
+    }
+
+    private static DatabaseInstance oracleMonitor(long id) {
+        DatabaseInstance instance = new DatabaseInstance("change-it-" + id, DbmsType.ORACLE, "127.0.0.1", 11521, "FREEPDB1",
+                "dbtower_monitor", "dbtower1234");
+        ReflectionTestUtils.setField(instance, "id", id);
+        return instance;
+    }
+
+    /**
+     * SQL Server 계열 — Apple Silicon에서는 arm64 Azure SQL Edge(docker-compose.arm64.yml, 11433)나 Rosetta VM의 실제
+     * SQL Server 2022(DBTOWER_MSSQL_PORT)로 잰다. 다른 기종과 게이트를 나눈 이유: 기본 compose의 amd64 이미지는 Rosetta 없는 VM에서 뜨지 않아 늘 켜 둘 수 없다.
+     * {@code DBTOWER_MSSQL_IT=1 [DBTOWER_MSSQL_PORT=11434] ./gradlew test --tests '*ChangeExecutionIT'}
      */
     @Test
     @EnabledIfEnvironmentVariable(named = MSSQL_GATE, matches = "1")
     void SQLServer계열_실행_되돌리기_드리프트_불변식과_트랜잭션_안_실행계획() throws Exception {
-        MsSqlOperator op = new MsSqlOperator(instance(9204, DbmsType.MSSQL, 11433, "sample"), pools, null);
+        MsSqlOperator op = new MsSqlOperator(instance(9204, DbmsType.MSSQL, MSSQL_PORT, "sample"), pools, null);
         ConsoleCredential sa = new ConsoleCredential("sa", "Dbtower1234!");
         exec(op.jdbcUrl(), sa, "IF OBJECT_ID('dbo.change_it') IS NULL CREATE TABLE dbo.change_it (id INT IDENTITY(100, 1) PRIMARY KEY,"
                 + " name NVARCHAR(50) NOT NULL, note NVARCHAR(200), amount DECIMAL(10,2), flag BIT, updated DATETIME2(6), payload VARBINARY(16))");

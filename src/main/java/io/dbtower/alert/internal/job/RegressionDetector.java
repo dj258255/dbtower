@@ -8,6 +8,8 @@ import io.dbtower.analysis.AiAnalyzer.CallSite;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.QueryDiff;
+import io.dbtower.operator.DbmsOperatorFactory;
+import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
@@ -29,7 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 쿼리 회귀 자동 감지 (확장3) — 시점 비교의 자동화 버전.
  *
  * 사람이 구간을 고르는 대신, 플랫폼이 주기적으로 "최근 구간 vs 직전 베이스라인 구간"을
- * 비교해 신규 쿼리·호출량 급증·레이턴시 회귀·읽는 행수 폭증을 잡아 웹훅으로 알린다.
+ * 비교해 신규 쿼리·호출량 급증·레이턴시 회귀·행 지표 폭증을 잡아 웹훅으로 알린다.
  * (Datadog Query Regression Detection의 축소판 — 베이스라인은 직전 구간 하나로 단순화)
  *
  * 같은 쿼리로 알림이 반복되지 않게 쿼리별 쿨다운을 둔다.
@@ -62,6 +64,7 @@ public class RegressionDetector {
 
 
     private final PlanChangeTracker planChangeTracker;
+    private final DbmsOperatorFactory operators;
 
     public RegressionDetector(RegistryService registryService,
                               ComparisonService comparisonService,
@@ -69,6 +72,7 @@ public class RegressionDetector {
                               AiAnalyzer aiAnalyzer,
                               QueryMasker queryMasker,
                               PlanChangeTracker planChangeTracker,
+                              DbmsOperatorFactory operators,
                               @Value("${dbtower.regression.recent-minutes:5}") int recentMinutes,
                               @Value("${dbtower.regression.baseline-minutes:15}") int baselineMinutes,
                               @Value("${dbtower.regression.cooldown-minutes:30}") int cooldownMinutes,
@@ -79,6 +83,7 @@ public class RegressionDetector {
         this.aiAnalyzer = aiAnalyzer;
         this.queryMasker = queryMasker;
         this.planChangeTracker = planChangeTracker;
+        this.operators = operators;
         this.recentMinutes = recentMinutes;
         this.baselineMinutes = baselineMinutes;
         this.cooldownMinutes = cooldownMinutes;
@@ -128,9 +133,20 @@ public class RegressionDetector {
         }
     }
 
+    /** 행 지표의 뜻은 기종 오퍼레이터가 안다. 오퍼레이터를 못 만들면(드라이버·설정 문제) 검사량 지표로 보고 기존 판정을 유지한다. */
+    private RowsMetric rowsMetric(DatabaseInstance instance) {
+        try {
+            return operators.create(instance).rowsMetric();
+        } catch (RuntimeException e) {
+            log.debug("행 지표 확인 실패 instance={} cause={}", instance.getName(), e.getMessage());
+            return RowsMetric.EXAMINED_ROWS;
+        }
+    }
+
     private List<String> evaluate(DatabaseInstance instance, ComparisonService.CompareResult result,
                                   LocalDateTime now) {
         List<String> findings = new ArrayList<>();
+        RowsMetric metric = rowsMetric(instance);
         for (QueryDiff d : result.queries()) {
             // 외부(웹훅)로 나가는 유일한 SQL 지점 — 리터럴을 가린다. MySQL/PG 정규화 텍스트에는
             // 멱등이고, Oracle(V$SQL 원문)·Mongo(명령 JSON)의 실값이 실제 보호 대상이다.
@@ -155,9 +171,13 @@ public class RegressionDetector {
             }
             if (d.rowsPerCallChangePct() != null && d.rowsPerCallChangePct() >= 500 && d.targetRowsPerCall() >= 100
                     && underCooldown(instance, d, "rows", now)) {
-                findings.add("읽는 행수 폭증(플랜 변화 의심): %s (rows/call %.0f -> %.0f, %+.0f%%)"
-                        .formatted(shortText, d.baseRowsPerCall(), d.targetRowsPerCall(), d.rowsPerCallChangePct()));
-                planSuspect = true;
+                // 행 지표가 "돌려주거나 바꾼 행"인 기종(PostgreSQL)에서 이 급증은 결과 크기 변화지 스캔량 변화가 아니다 —
+                // 플랜 변화로 적거나 추정 explain을 뜨지 않는다(132절)
+                boolean scanWork = metric != RowsMetric.RETURNED_ROWS;
+                findings.add("%s 폭증(%s): %s (rows/call %.0f -> %.0f, %+.0f%%)"
+                        .formatted(metric.label(), scanWork ? "플랜 변화 의심" : "결과 크기 변화, 스캔량 지표 아님",
+                                shortText, d.baseRowsPerCall(), d.targetRowsPerCall(), d.rowsPerCallChangePct()));
+                planSuspect = planSuspect || scanWork;
             }
             // 플랜 변경(plan flip) 확인 — "느려졌다"에서 "계획이 갈아탔다"까지. 회귀가 감지된
             // 쿼리만 추정 explain을 뜨므로 실행 부하 없음(A9). 첫 관측은 기준선이라 조용하다.
