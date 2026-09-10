@@ -217,6 +217,7 @@ GRANT VIEW SERVER PERFORMANCE STATE TO dbtower_monitor;
 | query-stats | `SELECT_CATALOG_ROLE` (V$SQL) | `ORA-00942: 테이블 또는 뷰 "SYS"."V_$SQL"이(가) 존재하지 않습니다` |
 | slow-queries | 동일 (V$SQL) | 동일 |
 | table-stats | 추가 권한 불요 (`user_tables` — 단, 자기 스키마만 보임) | 에러 없이 빈 결과 |
+| table-stats·테이블 상세·스키마 트리(앱 스키마 지정 시) | `SELECT_CATALOG_ROLE` (`dba_tables`·`dba_indexes`·`dba_segments`·`DBMS_METADATA.GET_DDL`의 다른 스키마) | `dbtower.oracle.app-schema` 미지정이면 모니터 자신의 스키마만 봐서 "테이블을 찾을 수 없습니다"(VERIFICATION 132절) |
 | explain | `EXPLAIN PLAN` 자체는 불요, 대상 테이블 `READ` 필요 | `ORA-00942: 테이블 또는 뷰 "SAMPLE"."USERS"이(가) 존재하지 않습니다` |
 | replication | `SELECT_CATALOG_ROLE` (V$DATABASE) | `ORA-00942: 테이블 또는 뷰 "SYS"."V_$DATABASE"이(가) 존재하지 않습니다` |
 
@@ -305,7 +306,7 @@ db.getSiblingDB('admin').createUser({
 | MySQL | `GRANT SELECT ON sample.*` | `GRANT SELECT, INSERT, UPDATE, DELETE, ALTER, INDEX ON sample.*` |
 | PostgreSQL | `CONNECT` + `USAGE ON SCHEMA public` + `SELECT ON ALL TABLES` | 위 + `INSERT, UPDATE, DELETE` + `USAGE ON ALL SEQUENCES` + 소유 역할 멤버십 `GRANT sample_owner`(DDL용, 소유 역할에 `CREATE ON SCHEMA public` — 15+에서 인덱스 생성이 스키마 CREATE를 따로 본다) |
 | Oracle | `CREATE SESSION` + 테이블별 `READ`(SELECT와 달리 `FOR UPDATE` 락을 못 건다) | `CREATE SESSION` + 테이블별 `SELECT, INSERT, UPDATE, DELETE`(DDL 없음) |
-| SQL Server 계열(Azure SQL Edge 실측) | DB 사용자 매핑 + `SELECT ON SCHEMA::dbo` | 위 + `INSERT, UPDATE, DELETE ON SCHEMA::dbo` + `SHOWPLAN` + 테이블별 `ALTER`(인덱스·열 추가) |
+| SQL Server(Azure SQL Edge·SQL Server 2022 RTM-CU26 실측) | DB 사용자 매핑 + `SELECT ON SCHEMA::dbo` | 위 + `INSERT, UPDATE, DELETE ON SCHEMA::dbo` + `SHOWPLAN` + 테이블별 `ALTER`(인덱스·열 추가) |
 | MongoDB | `read@sample` (admin db에 생성) | `readWrite@sample`(문서 사본을 트랜잭션 안에서 잡으므로 복제셋 필요, 인덱스 생성·삭제 포함) |
 
 권한 변경 권한은 어느 계정에도 주지 않는다. 변경 계정의 DDL은 인덱스·열 추가 수준까지만 준다(MySQL `ALTER, INDEX`,
@@ -320,7 +321,8 @@ PostgreSQL은 테이블 소유자만 DDL을 하므로 로그인 불가 소유 �
   직접 넣는 INSERT에서 키를 돌려주지 않아 그 경우 되돌리기가 닫힌다(실행 기록에 이유가 남는다).
 - 검증 조회의 실행계획·응답시간은 변경과 같은 트랜잭션 안에서 변경 계정으로 잰다(MySQL·PostgreSQL `EXPLAIN`은 SELECT 권한,
   Oracle `EXPLAIN PLAN`은 세션의 PLAN_TABLE, SQL Server `SET SHOWPLAN_TEXT`는 DB 수준 `SHOWPLAN` 권한).
-- SQL Server 계열(VERIFICATION 131절, arm64 Azure SQL Edge로 실측 — 실제 SQL Server 2022가 아니다):
+- SQL Server(VERIFICATION 131절 arm64 Azure SQL Edge, 132절 Rosetta VM의 실제 SQL Server 2022 RTM-CU26 16.0.4275.2 — 같은
+  `docker/workbench-mssql.sql`에서 아래 거부·허용이 두 엔진 모두 한 줄도 다르지 않았다):
   - 조회 계정은 읽기 전용 겹이 없다. 드라이버가 `setReadOnly`를 무시하고 서버에 읽기 전용 트랜잭션이 없어, 쓰기 권한 계정으로 보낸 INSERT가
     거부되지 않고 끝의 롤백으로만 사라졌다. 조회 계정에서 쓰기 권한을 빼는 것이 이 기종의 조회 경계 전부다
     (`dbtower_reader`의 UPDATE: `The UPDATE permission was denied on the object 'customers'`).
@@ -330,7 +332,8 @@ PostgreSQL은 테이블 소유자만 DDL을 하므로 로그인 불가 소유 �
   - 삭제한 행을 같은 키로 되돌려 넣을 때 IDENTITY 열이면 `SET IDENTITY_INSERT`가 필요하고, 이는 그 테이블의 `ALTER` 권한을 요구한다.
     ALTER가 없는 테이블의 DELETE 되돌리기는 대상 DB가 거부한다(되돌리기 트랜잭션 전체가 롤백된다).
   - SQL Server 2022의 `VIEW SERVER PERFORMANCE STATE`는 SQL Edge(15.0 엔진)에 없어 모니터에는 이전 형태인 `VIEW SERVER STATE`를,
-    스키마 트리·테이블 상세용으로 `VIEW DEFINITION ON SCHEMA::dbo`를 줬다(모니터는 행 SELECT가 거부된다).
+    스키마 트리·테이블 상세용으로 `VIEW DEFINITION ON SCHEMA::dbo`를 줬다(모니터는 행 SELECT가 거부된다). 실제 2022에는
+    `docker/mssql-init.sql`의 `VIEW SERVER PERFORMANCE STATE`가 그대로 들어가고 `sys.dm_exec_query_stats` 조회가 통과했다.
 
 ### 민감 컬럼은 계정 권한으로 뺀다 (본 방어선)
 

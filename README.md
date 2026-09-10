@@ -222,13 +222,19 @@ AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 �
 
 **티켓의 출구와 5기종 확장** — 승인된 채 실행하지 않을 티켓은 요청자나 ADMIN이 취소하고, 커밋 여부를 모른 채 멈춘 티켓은 ADMIN이
 대상 DB를 무엇으로 확인했는지 근거를 적어 정리합니다. DDL 실행 기록에는 생긴 구조만 지우는 역변경 문장을 기종 문법으로 제안하고
-(실행이 아니라 새 티켓으로 올리기), 스키마 트리에서 테이블 상세(행 수·크기·인덱스 카디널리티·DDL)를 엽니다. 변경 실행은 SQL Server 계열
-(Apple Silicon 로컬은 `docker compose -f docker-compose.yml -f docker-compose.arm64.yml up -d mssql`의 Azure SQL Edge)과 MongoDB(복제셋
-트랜잭션 안의 문서 사본)까지 5기종으로 넓혔고, MCP에는 변경 요청·상태·조회 도구만 열었습니다(조회는 인스턴스의 결과 값 AI 공유 설정이
-켜진 경우만). 100만 행 표에 pgbench로 같은 부하를 인덱스 티켓 전후에 걸어 평균 지연 49.634 ms -> 0.029 ms를 쟀습니다
-(컨테이너 내부·합계 한 줄 조회라는 한계와 함께, [VERIFICATION 131절](docs/VERIFICATION.md)).
+(실행이 아니라 새 티켓으로 올리기), 스키마 트리에서 테이블 상세(행 수·크기·인덱스 카디널리티·DDL)를 엽니다. 변경 실행은 SQL Server
+(Apple Silicon 로컬은 `docker-compose.arm64.yml`의 Azure SQL Edge, Rosetta가 있으면 Rosetta VM의 실제 SQL Server 2022 RTM-CU26)와
+MongoDB(복제셋 트랜잭션 안의 문서 사본)까지 5기종으로 넓혔고, MCP에는 변경 요청·상태·조회 도구만 열었습니다(조회는 인스턴스의 결과 값
+AI 공유 설정이 켜진 경우만). Oracle은 `dbtower.oracle.app-schema`를 주면 모니터 계정이 앱 스키마의 테이블 상세·스키마 트리를 봅니다.
+
+100만 행 표에 pgbench로 같은 부하를 인덱스 티켓 전후에 걸었습니다. 컨테이너 안·합계 한 줄 조회로는 평균 지연 49.634 ms -> 0.029 ms였고,
+호스트에서 포트 포워딩 TCP로 붙어 행 20건을 돌려주는 조회로 다시 재면 46.378 ms -> 0.521 ms입니다(서버 안 실행 시간은 0.0325 ms,
+나머지는 왕복 비용, [VERIFICATION 131·132절](docs/VERIFICATION.md)). 비교 화면의 행 지표는 기종마다 세는 것이 달라(PostgreSQL은 돌려준 행,
+SQL Server는 논리 읽기 페이지 등) 오퍼레이터가 알려준 이름으로 적습니다.
 
 ![테이블 상세 탭](docs/images/webui/76-workbench-table-detail.png)
+
+![티켓 워크로드 비교 — 행 지표 이름, 1ms 미만 정밀도, 브라우저 시간대 시각](docs/images/webui/77-workbench-workload-rows-metric.png)
 
 ### MCP — AI 에이전트의 채널
 
@@ -240,7 +246,11 @@ AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 �
 claude mcp add --transport http dbtower http://localhost:8080/mcp
 ```
 
-![MCP 연동 카드 — 2026-07 촬영(도구 13종 시점). 이후 /mcp가 토큰 전용 체인이 되어(91절) 콘솔 세션에서는 목록 대신 안내 문구가 나온다. 현재 tools/list는 19종(131절)](docs/images/webui/06-mcp.png)
+![MCP 연동 카드 — 콘솔 세션이 GET /api/mcp/tools로 받은 MCP 코어의 tools/list 그대로, 19종(132절 재촬영)](docs/images/webui/06-mcp.png)
+
+HTTP 전송은 도구 호출을 서비스 토큰이 아니라 그 요청을 인증한 호출자의 토큰으로 REST에 위임합니다. 서비스 토큰으로 위임하던 때는
+관리자가 MCP로 올린 변경 요청의 요청자가 `api-token`으로 남아, 같은 사람이 화면에서 자기 요청을 승인해도 요청자·승인자 분리가
+막지 못했습니다(수정 전 HTTP 200 APPROVED, 수정 뒤 409, [VERIFICATION 132절](docs/VERIFICATION.md)).
 
 ## 보안 — 사람은 세션, 기계는 토큰
 

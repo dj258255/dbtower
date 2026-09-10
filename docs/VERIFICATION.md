@@ -5233,3 +5233,285 @@ McpRestContractTest     도구가 부르는 URL이 실제 컨트롤러 매핑에
   스캔한 행을 뜻하지 않는다.
 - 스냅샷 비교의 평균 0.0 ms는 표시 반올림이다. 정밀한 수치는 pgbench 쪽 0.029 ms를 쓴다.
 - 워크로드 구간 시각은 앱이 기록한 시각이고, 셸 시계와 9시간 차이가 났다(앱과 셸의 시간대 설정 차이, 이번 변경과 무관).
+
+## 132. 남은 한계를 걷어내기 — 실제 SQL Server 2022, MCP 요청자 신원, Oracle 앱 스키마, 행 지표의 뜻, 시각·정밀도, 측정 경로 (2026-09-11)
+
+### 무엇이 남아 있었나
+
+131절을 커밋하며 한계로 적어 둔 것들이다. SQL Server는 Azure SQL Edge로만 검증했고, Oracle 테이블 상세·스키마 트리는 모니터 계정
+자신의 스키마만 봤다. 성능 수치는 컨테이너 안 pgbench와 인덱스만 읽고 끝나는 합계 조회였고, 스냅샷 비교는 0.0 ms로 뭉개졌으며
+"스캔 행 +706%"와 앱·셸 시각 9시간 차이를 해석으로 덮었다. MCP로 올린 티켓의 요청자는 `api-token`이었고, README의 MCP 카드
+사진은 13종 시절 것인데 콘솔 세션으로는 다시 찍을 수 없었다. 사용자가 "남은 한계도 다 해줘"라고 해서 하나씩 코드와 실측으로
+다시 봤다. 파 보니 넷은 한계가 아니라 제품 결함이었다(MCP 요청자 신원, 행 지표 이름, 1ms 미만 정밀도, 워크벤치 시각 표시).
+
+### 1. 실제 SQL Server 2022 (Rosetta VM)
+
+128·131절에서 막혔던 이유는 "Rosetta 없는 VM"이었다. 다시 보니 Mac에 Rosetta가 설치돼 있었다(`/Library/Apple/usr/share/rosetta`,
+`oahd` 실행 중). 대상 DB 5종이 떠 있는 기존 Colima VM은 건드리지 않고, Rosetta를 켠 프로필을 하나 더 띄웠다.
+
+```
+colima start mssql2022 --vm-type vz --vz-rosetta --arch aarch64 --cpu 4 --memory 6 --disk 30
+docker --context colima-mssql2022 run -d --platform linux/amd64 -p 14330:1433 mcr.microsoft.com/mssql/server:2022-latest
+-> Microsoft SQL Server 2022 (RTM-CU26-GDR) (KB5122768) - 16.0.4275.2 (X64), EngineEdition=3
+```
+
+처음엔 호스트 11434 포트로 띄웠는데 스크립트 적용이 `Prelogin error: host 127.0.0.1 port 11434 Unexpected response type:72`로
+멈췄다. 72는 ASCII `H`다. `lsof`로 보니 그 포트를 로컬 Ollama(HTTP)가 이미 쓰고 있었다. 14330으로 옮겼다. (처음 적용이 5분 넘게
+멈춘 것처럼 보인 이유는 따로 있었다 — 출력을 `| tail`로 받아 끝날 때까지 한 줄도 안 보였다. 서버 쪽 `sys.dm_exec_requests`는 비어 있었다.)
+
+변경 실행 계층이 기대는 엔진 동작(`MssqlProbe`, 131절 SQL Edge 표와 같은 순서):
+
+| 사실 | Azure SQL Edge 15.0 (131절) | SQL Server 2022 16.0.4275.2 |
+|---|---|---|
+| DDL 트랜잭션 | `dataDefinitionCausesTransactionCommit=false`, 롤백 뒤 인덱스 0 | 같음 |
+| `WITH (UPDLOCK, ROWLOCK)` 사본 조회 | 성공 | 성공 |
+| 생성 키 | `GENERATED_KEYS` 한 열 | 같음 |
+| `SET SHOWPLAN_TEXT` | 첫 결과 집합은 문장, 다음이 계획 | 같음 (`Clustered Index Scan`) |
+| 오류 뒤 트랜잭션 | 세이브포인트 롤백 뒤 사용 가능 | 같음 |
+| 메타데이터 | schema=dbo, 인용 `"` | 같음 |
+
+계정 권한(`docker/mssql-init.sql` 2/2, `docker/workbench-mssql.sql` 10/10 적용 뒤 `MssqlGrantProbe`):
+
+```
+[dbtower_reader]  OK SELECT customers / DENY UPDATE customers -> The UPDATE permission was denied on the object 'customers', database 'sample', schema 'dbo'.
+[dbtower_writer]  OK UPDATE(롤백) / OK SET SHOWPLAN_TEXT ON·OFF / OK CREATE INDEX(롤백) / OK ALTER TABLE ADD(롤백)
+                  DENY DROP TABLE orders -> Cannot drop the table 'orders', because it does not exist or you do not have permission.
+                  DENY CREATE TABLE -> CREATE TABLE permission denied in database 'sample'.
+[dbtower_monitor] OK 카탈로그(sys.tables) / DENY SELECT customers / OK sys.dm_exec_query_stats
+```
+
+131절 SQL Edge 결과와 한 줄도 다르지 않았다. 차이는 모니터 권한 하나다 — SQL Edge에는 없던 2022의 세분 권한
+`VIEW SERVER PERFORMANCE STATE`가 그대로 들어가 DMV 조회가 통과했다.
+
+실DB IT(`DBTOWER_CONSOLE_IT=1 DBTOWER_MSSQL_IT=1 DBTOWER_MSSQL_PORT=14330`, 포트만 바꾸는 환경변수를 IT에 더했다):
+
+```
+[MSSQL 드라이런] committed=false affected=2 keys=[id] unavailable=null
+[MSSQL UPDATE 되돌리기] committed=true restored=2
+[MSSQL 드리프트] committed=false conflicts=[Conflict[keyValues=[1], changedColumns=[name], reason=실행 뒤 값이 바뀌었다]]
+[MSSQL INSERT] affected=1 unavailable=null afterRows=1
+[MSSQL 사본 어긋남] 영향 행 수(2)가 변경 전 사본 행 수(1)와 달라 커밋하지 않았다. ...
+[MSSQL dataDefinitionCausesTransactionCommit] false
+[MSSQL DDL 드라이런 전 계획] |--Clustered Index Scan(OBJECT:([sample].[dbo].[change_it_big].[PK__change_i__...]), WHERE:(...[status]=...))  timings(us)=[8088, 2691, 2766]
+[MSSQL DDL 드라이런 후 계획] |--Index Seek(OBJECT:([sample].[dbo].[change_it_big].[change_it_big_status_idx]), SEEK:(...) ORDERED FORWARD)  timings(us)=[5712, 908, 660]
+[MSSQL reader UPDATE] MSSQL 콘솔 조회 실패: The UPDATE permission was denied on the object 'customers', database 'sample', schema 'dbo'.
+```
+
+라이브(앱에 `live-mssql-2022` 등록, 131절과 같은 스크립트를 포트·이름만 바꿔 실행. 결정은 요청자와 다른 admin 세션):
+
+```
+[M0] 등록 HTTP 201 / READ·WRITE 계정 200 / health up "Microsoft SQL Server 2022 (RTM-CU26-GDR) (KB5122768) - 16.0.4275.2 (X64)"
+     스키마 트리 [change_it, change_it_big, console_ro_probe, customers, orders, probe_it] / 테이블 상세 orders rows=2000 RECONSTRUCTED
+     콘솔 조회 [[1,'홍길동','ho************om','VIP'], ...] / 콘솔에 변경 문장 HTTP 409
+[M1] UPDATE 드라이런 changed=1 grade:SILVER->VIP masked=[email, phone] / 실행 COMMITTED / phone 드리프트 CONFLICT / 해소 뒤 되돌리기 COMMITTED -> ROLLED_BACK
+[M2] DELETE id=5 실행 -> 되돌리기(IDENTITY 재삽입)  원래 [[5,3,185,'REFUND','2026-09-10 22:58:23.3938439']] = 복원 (같음: True)
+[M3] INSERT 실행 ADDED key=[2001] -> 되돌리기, orders 2000
+[M4] CREATE INDEX 드라이런 planChanged=True  Clustered Index Scan -> Index Seek(idx_orders_amount)
+     실행 COMMITTED 구조 diff addedIndexes=[idx_orders_amount] / 역변경 제안 ['DROP INDEX idx_orders_amount ON orders']
+     역변경 티켓 #41 드라이런 -> 승인 -> 실행 COMMITTED 구조 diff removedIndexes=[idx_orders_amount]
+[M5] 승인된 DROP TABLE orders 실행  HTTP 422 Cannot drop the table 'orders', because it does not exist or you do not have permission.
+     티켓 APPROVED 유지, orders 2000, 뒤이어 취소
+[M6] SQL Server 2022 대 PostgreSQL customers 비교  changed=0 unchanged=3 masked=[email]
+```
+
+131절 SQL Edge 결과와 흐름·판정이 모두 같다. 이것으로 "SQL Edge는 실제 SQL Server 2022 검증이 아니다"라는 131절 단서를 걷는다.
+남는 단서는 x64 에뮬레이션이라는 점뿐이고, 여기서 잰 µs는 네이티브 성능 수치로 쓰지 않는다.
+
+### 2. MCP로 올린 변경 요청의 요청자 — 요청자·승인자 분리를 비껴가던 결함
+
+131절 한계 "MCP 요청자는 api-token"을 들여다보다 원인을 찾았다. `McpHttpController`가 핸들러를 한 번 만들며 서비스 토큰을 넣었고,
+모든 도구 호출이 그 토큰으로 REST에 위임됐다. 누가 OAuth로 로그인해 MCP를 부르든 REST가 보는 주체는 `api-token`이었다.
+
+처음엔 역할·팀 범위도 넓어진다고 의심했다. VIEWER(team-a)의 OAuth 토큰으로 재 보니 그렇지 않았다 — `/mcp` 체인이 ADMIN 전용이라
+도구 호출 자체가 403이고, ADMIN은 원래 전역 범위다. 넓어진 것은 범위가 아니라 **신원**이었다.
+
+```
+[before] VIEWER OAuth 토큰(같은 토큰의 REST 신원 viewer/VIEWER)
+  REST /api/instances            HTTP 200 [team-a·팀 없음 4대]      MCP list_instances          HTTP 403
+  REST GET /api/reviews/31(team-b) HTTP 404                          MCP change_ticket_status    HTTP 403
+```
+
+신원이 사람을 잃으면 무엇이 깨지는가. 요청자·승인자 분리(`dbtower.review.require-separate-approver`)는 요청자와 승인자 이름을
+비교한다. 수정 전 코드(HEAD 0738775를 별도 worktree로 띄움, 분리 옵션 켬)에서 관리자 한 사람이 OAuth 토큰으로:
+
+```
+[before] 관리자 OAuth 토큰(REST 신원 admin/ADMIN)
+  [MCP]  change_ticket_submit     id=32 requester=api-token  -> 같은 관리자가 승인  HTTP 200 APPROVED decidedBy=admin
+  [REST] 같은 토큰으로 직접 제출  id=33 requester=admin      -> 같은 관리자가 승인  HTTP 409 요청자는 자기 변경 요청을 승인할 수 없습니다
+```
+
+같은 사람이 같은 토큰으로 같은 문장을 올렸는데, MCP를 거치면 자기 승인이 통과했다. 감사 기록의 요청자도 사람이 아니었다.
+
+수정: HTTP 전송은 요청마다 그 요청을 인증한 Bearer 토큰으로 위임한다(`McpProtocolHandler.withToken`). REST는 원래 `/mcp`와 같은
+두 Bearer 필터(정적 토큰·OAuth 토큰)를 받으므로 추가 인증 경로가 필요 없다. 토큰이 없으면 위임하지 않고 401이다.
+stdio 전송(`scripts/dbtower-mcp.sh`)은 실행자가 넣은 토큰 그대로이고, 자연어 진단 루프는 서비스 토큰 + 호출자 범위 가드(0단계)를 유지한다.
+
+수정한 코드로 재기동(분리 옵션 켬)하고 같은 절차를 다시 돌렸다:
+
+```
+[after] 관리자 OAuth 토큰(REST 신원 admin/ADMIN)
+  [MCP]  change_ticket_submit     id=34 requester=admin  -> 같은 관리자가 승인  HTTP 409 요청자는 자기 변경 요청을 승인할 수 없습니다(dbtower.review.require-separate-approver)
+  [REST] 같은 토큰으로 직접 제출  id=35 requester=admin  -> 같은 관리자가 승인  HTTP 409 (같음)
+[after] VIEWER OAuth 토큰          MCP 도구 호출 전부 HTTP 403, 같은 토큰의 REST 결과도 수정 전과 같음
+```
+
+검증용 티켓 #32~#35는 전부 취소로 정리했다.
+
+### 3. Oracle 앱 스키마 — 모니터 계정이 앱 스키마를 보게
+
+Oracle 테이블 상세·스키마 트리·테이블 통계·파티션은 `user_*` 뷰만 읽었다. 최소 권한 구성에서는 모니터 계정(`dbtower_monitor`)과
+앱 스키마(`SAMPLE`)가 다르니 늘 비었다. 쿼리 통계에는 이미 `dbtower.oracle.app-schema` 설정이 있었다(C-4). 같은 설정을 딕셔너리 조회에도 쓴다.
+
+- 앱 스키마가 지정되면 `dba_*` 뷰를 그 소유자로 거르고(모니터는 V$SQL 때문에 이미 `SELECT_CATALOG_ROLE` 전제), 아니면 예전 그대로 `user_*`.
+  한 템플릿에서 `{v}`(뷰 접두사)와 `{and:식}`(앱 스키마일 때만 붙는 소유자 조건)을 펼친다 — `user_*` 뷰에는 소유자 열이 없다.
+- `DBMS_METADATA.GET_DDL`은 스키마 인자를 준다. null 바인딩은 드라이버가 타입을 못 정해 문장을 둘로 나눴다.
+- 조회·변경 계정 세션은 `ALTER SESSION SET CURRENT_SCHEMA = <앱 스키마>`로 연다. 스키마 트리가 소유자 없이 보여주는 이름을 편집기에
+  넣으면 그대로 풀려야 하기 때문이다. 바인딩이 안 되는 문장이라 설정값을 생성자에서 식별자 모양으로 검증한다. `ALTER SESSION`은 트랜잭션을
+  열지 않아 `SET TRANSACTION READ ONLY`가 여전히 첫 문장이다.
+
+실DB IT(같은 모니터 계정, 앱 스키마 없음/`sample`):
+
+```
+[Oracle 앱 스키마 없음 상세] UNSUPPORTED 테이블을 찾을 수 없습니다: customers
+[Oracle 앱 스키마 상세] rows=0 created=2026-09-10 11:12:28 indexes=[SYS_C008721] ddl=CREATE TABLE "SAMPLE"."CUSTOMERS"
+[Oracle 앱 스키마 구조] [CHANGE_IT, CONSOLE_RO_PROBE, CUSTOMERS, USERS]
+[Oracle 앱 스키마 없음 조회] ORACLE 콘솔 조회 실패: ORA-00942: 테이블 또는 뷰 "DBTOWER_READER"."CUSTOMERS"이(가) 존재하지 않습니다.
+[Oracle 앱 스키마 드라이런] committed=false affected=1 unavailable=null   (변경 계정 세션에서 소유자 없는 이름의 기본 키를 찾아 되돌리기 경로가 열림)
+```
+
+(rows=0은 `num_rows`가 옵티마이저 통계라 `DBMS_STATS` 수집 전이어서다 — 기존 주석대로.)
+
+라이브(앱을 `--dbtower.oracle.app-schema=SAMPLE`로 재기동, `live-oracle`):
+
+```
+[O1] 스키마 트리 HTTP 200 tables=[CHANGE_IT, CONSOLE_RO_PROBE, CUSTOMERS, USERS]      (131절: 비어 있었다)
+     테이블 상세 customers HTTP 200 created=2026-09-10 11:12:28 ddlSource=NATIVE indexes=[SYS_C008721] ddl=CREATE TABLE "SAMPLE"."CUSTOMERS"
+     콘솔 조회 SELECT id, name, email, grade FROM customers  [[1,'Hong Gildong','ho************om','VIP'], [2,'Kim Chulsoo','ki***********om','GOLD'], ...]
+[O2] UPDATE customers SET grade = 'SILVER' WHERE id = 2   (131절 E4는 조회 계정 기본 스키마 때문에 sample.customers로 써야 했다)
+     드라이런 ROLLED_BACK changed=1 GRADE:GOLD->SILVER keys=[ID] masked=[EMAIL, PHONE], 대상 행 GOLD 그대로
+     admin 승인 -> 실행 COMMITTED(SILVER) -> 되돌리기 COMMITTED(GOLD), 티켓 ROLLED_BACK
+```
+
+앱 스키마 설정은 앱 전역 하나다(기존 C-4 설계). Oracle 인스턴스마다 앱 스키마가 다르면 인스턴스별 설정이 필요하고, 이번 범위에서는 만들지 않았다.
+
+### 4. 행 지표의 뜻 — 같은 이름에 다른 단위
+
+131절의 "스캔 행 +706%"를 해석으로 덮었는데, 원인은 화면이었다. 누적 통계의 `rowsExamined` 자리에 기종마다 다른 카운터가 들어온다.
+
+| 기종 | 소스 | 실제로 세는 것 |
+|---|---|---|
+| MySQL | `events_statements_summary_by_digest.SUM_ROWS_EXAMINED` | 검사한 행 |
+| PostgreSQL | `pg_stat_statements.rows` | 돌려주거나 바꾼 행 |
+| SQL Server | `sys.dm_exec_query_stats.total_logical_reads` | 논리 읽기(8KB 페이지) |
+| Oracle | `V$SQL.buffer_gets` | 버퍼 읽기(블록) |
+| MongoDB | `system.profile.docsExamined` | 검사한 문서 |
+
+그런데 대시보드는 "읽은 행수", 워크벤치는 "스캔 행"이라 적었고, 회귀 알림은 이 값이 5배 늘면 "읽는 행수 폭증(플랜 변화 의심)"으로
+추정 explain까지 떴다. PostgreSQL에서 이 급증은 결과 크기 변화지 스캔 증가가 아니다.
+
+- `DbmsOperator.rowsMetric()`을 기본값 없이 더했다 — 새 기종이 이 질문을 건너뛰지 못하게. 기종 분기는 늘지 않았다(각 오퍼레이터가 답한다).
+- `GET /api/instances/{id}/rows-metric`, 워크벤치 워크로드 비교에 `rowsMetricLabel`. 대시보드 표 머리·요약, 워크벤치 요약이 이 이름을 쓴다.
+- 회귀 알림: 지표 이름으로 적고, "돌려주거나 바꾼 행"인 기종에서는 플랜 변화로 적지 않고 계획 변경 확인도 뜨지 않는다.
+- MCP `query_stats`·`compare` 도구 설명에 기종별 뜻을 적었다(에이전트가 같은 오해를 하지 않게).
+
+```
+[R1] GET /api/instances/{id}/rows-metric
+     POSTGRESQL live-postgres-team-b  RETURNED_ROWS       돌려주거나 바꾼 행
+     MYSQL      live-mysql-team-a     EXAMINED_ROWS       검사한 행
+     MONGODB    live-mongo            EXAMINED_DOCUMENTS  검사한 문서
+     ORACLE     live-oracle           BUFFER_GETS         버퍼 읽기(블록)
+     MSSQL      live-mssql-edge       LOGICAL_READS       논리 읽기(페이지)
+```
+
+### 5. 1ms 미만 레이턴시와 워크벤치 시각
+
+- 시점 비교는 모든 값을 소수 둘째 자리로 반올림했다. 인덱스를 탄 조회의 평균 0.004 ms가 0.0이 돼 전후 차이가 사라졌다(131절).
+  평균 레이턴시만 넷째 자리까지 두고, 화면은 1 ms 미만일 때 유효숫자 3자리(워크벤치)·소수 넷째 자리(대시보드)로 보인다.
+- 앱은 JVM 기본 시간대를 UTC로 고정하고(C-6) 오프셋 없는 시각을 준다. 대시보드는 `parseApiTime`으로 브라우저 시간대로 바꾸는데,
+  워크벤치 네 곳(체크포인트 카드, 티켓 이력, 실행 이력, 워크로드 구간)은 문자열을 잘라 그대로 찍어 KST 화면에 9시간 이른 시각이 보였다.
+  131절의 "앱과 셸 시계 9시간 차이"는 셸이 아니라 이 표시였다. 워크벤치 공통 `localTime`으로 같은 규칙을 쓴다.
+
+131절 인덱스 티켓(#29)의 실행 기록을 수정한 코드로 다시 조회했다(같은 스냅샷, 코드만 바뀜):
+
+```
+[W1] 실행 #52 워크로드 비교  rowsMetricLabel=돌려주거나 바꾼 행
+     전 avg=48.9453ms calls=9,779 / 후 avg=0.0036ms calls=8,174,113            (131절 표시: 49.31 ms -> 0.0 ms)
+     SELECT count(*) FROM payment_events WHERE merchant_id = $1 | 49.3144ms -> 0.0036ms, rows/call 1.0 -> 1.0
+```
+
+pgbench 쪽 평균 0.029 ms와 서버 쪽 0.0036 ms가 다른 것은 오류가 아니다. `pg_stat_statements`는 서버 안 실행 시간만,
+pgbench 지연은 클라이언트가 보낸 뒤 받을 때까지(프로토콜 왕복 포함)를 잰다. calls가 131절 기록(8,174,074)보다 39건 많은 것은
+그때는 뒤 구간 4분이 다 지나기 전에 조회해서다.
+
+화면(Playwright, 수정한 코드, 브라우저 시간대 KST):
+
+```
+실행 기록 API occurredAt  2026-09-10T13:14:20.914714 (UTC, 오프셋 없음)  -> 화면 2026-09-10 22:14:20
+티켓 #29 이력               제출 api-token · 2026-09-11 07:11:54 / 승인 admin · 07:11:55 / 실행 · 07:11:55
+워크로드 비교(화면 버튼, 60분 창)  전 2026-09-11 06:11 ~ 07:11 / 후 07:11 ~ 08:11
+                                  평균 지연 46.64ms → 0.0037ms (-100.0%) · 호출 10,264 → 8,175,210 · 돌려주거나 바꾼 행 1,023,980 → 8,210,389
+```
+
+화면 버튼은 60분 창이라 API로 본 4분 창(48.9453 → 0.0036)과 수치가 조금 다르다.
+
+![워크벤치 티켓 워크로드 비교 — 행 지표 이름, 1ms 미만 정밀도, 브라우저 시간대 시각](images/webui/77-workbench-workload-rows-metric.png)
+
+### 6. MCP 카드
+
+`/mcp`는 Bearer 전용 체인이라(91절) 콘솔 세션으로 부르면 401이고, 카드는 목록 대신 안내 문구만 보였다 — 131절에 README 사진을 다시
+못 찍은 이유다. 도구 이름·설명은 비밀이 아니고 위임도 일어나지 않으니, 같은 코어의 `tools/list`를 세션 경로 `GET /api/mcp/tools`로 열었다.
+
+```
+[R2] GET /api/mcp/tools  admin 세션 HTTP 200 19종 / viewer 세션 HTTP 200 19종
+     같은 admin 세션으로 POST /mcp  HTTP 401 (Bearer 전용 체인은 그대로)
+```
+
+README·PRESENTATION의 카드 사진을 다시 찍었다. 첫 재촬영본에는 ADMIN 세션이 완성해 주는 등록 명령에 서비스 토큰 원문이 그대로
+찍혀 있었다 — 커밋하지 않고, 예전 사진과 같이 화면에서 토큰을 `****`로 가린 뒤 다시 찍었다(고정 헤더가 카드 위에 겹친 것도 숨겼다).
+
+![MCP 연동 카드 — 세션 경로로 받은 도구 19종](images/webui/06-mcp.png)
+
+### 7. 성능 전후 재측정 — 컨테이너 밖 부하, 행을 돌려주는 조회
+
+131절 측정의 한계 둘을 걷었다. pgbench를 DB 컨테이너 안이 아니라 호스트에서 돌려 Colima 포트 포워딩을 거친 TCP
+(`127.0.0.1:15432`)로 붙였고, 조회를 인덱스만 읽고 끝나는 합계 한 줄에서 행을 돌려주는 모양으로 바꿨다 — 가맹점의 최근 결제 20건
+(`SELECT id, amount, created_at FROM payment_events WHERE merchant_id = :mid ORDER BY created_at DESC LIMIT 20`, 힙 접근과 정렬이 붙는다).
+표·데이터는 131절 그대로(100만 행, 가맹점 5만 곳)이고, 인덱스 티켓은 워크벤치 흐름 그대로 통과시켰다. 측정 중에는 빌드·테스트·브라우저를
+돌리지 않았고 SQL Server VM은 멈춰 뒀다.
+
+| 측정 | 인덱스 전 | 인덱스 후 |
+|---|---|---|
+| 호스트 pgbench(4클라이언트·4스레드·120초) 처리 건수 | 10,351 | 920,927 |
+| 평균 지연 | 46.378 ms | 0.521 ms |
+| tps | 86.25 | 7,675.20 |
+| 드라이런 검증 조회 계획(같은 트랜잭션) | Limit -> Gather Merge -> Sort(병렬 워커 2) | Limit -> Sort -> Bitmap Heap Scan <- Bitmap Index Scan on idx_payment_events_merchant |
+| 드라이런 검증 조회 중앙값(3회) | 33,953 µs | 625 µs |
+| 실행 검증 조회 중앙값(3회) | 35,526 µs | 392 µs |
+| 플랫폼 스냅샷 비교(그 쿼리, 서버 안 실행 시간) | 48.142 ms, QPS 27.74 | 0.0325 ms, QPS 6,739.93 |
+
+```
+워크로드 행 지표 = 돌려주거나 바꾼 행, rows/call 18.23 -> 18.23
+전 23:14:56~23:19:56(UTC) calls=6,905 avg=47.3945ms / 후 23:19:56~23:23:11(UTC) calls=842,514 avg=0.0325ms
+역변경 제안 ['DROP INDEX idx_payment_events_merchant'] -> 티켓 #44 승인 -> 실행 COMMITTED removedIndexes=[idx_payment_events_merchant]
+```
+
+해석:
+- 131절(컨테이너 안·합계 조회)은 평균 지연 49.634 -> 0.029 ms, 약 1,700배였다. 경로와 조회 모양을 바꾸자 46.378 -> 0.521 ms, 약 89배다.
+  인덱스 뒤 서버 안 실행 시간은 0.0325 ms인데 클라이언트가 본 지연은 0.521 ms다. 차이 약 0.49 ms는 포트 포워딩 왕복·프로토콜·클라이언트 몫이고,
+  인덱스는 서버 몫만 줄인다. 131절의 1,700배는 이 경로 비용이 없는 자리에서 잰 수치였다.
+- 인덱스 전 tps(86.25)는 131절(80.59)과 비슷하다. 인덱스 없는 조회는 서버 시간이 지배해 경로·조회 모양 차이가 거의 안 보인다.
+- rows/call이 전후 18.23으로 같다. PostgreSQL 행 지표는 돌려준 행이라 인덱스가 바꾸지 않는다 — 4절에서 고친 이름이 여기서 그대로 맞는다
+  (131절 "스캔 행 +706%"는 이 값에 호출 수가 곱해진 합계였다).
+- pgbench 클라이언트와 DB VM이 같은 Mac을 나눠 쓴다. 다른 호스트를 거친 네트워크 수치가 아니다. 클라이언트는 pgbench 14.19, 서버는 16.
+- 뒤 구간 스냅샷 비교는 벤치 뒤 75초에 조회해 4분 창 중 3분 15초만 들어갔다.
+- 측정 스크립트의 준비 단계 `docker exec`(행 수·계획 출력)는 빈 값이었다. `colima start mssql2022`가 기본 Docker 컨텍스트를 바꿔 둔 탓이고,
+  컨텍스트를 `colima`로 되돌린 뒤의 "인덱스 후" 계획 출력부터 정상이다. 인덱스 전 계획은 위 표의 드라이런 검증 조회(API)가 근거다.
+
+### 테스트
+
+```
+McpHttpControllerTest 3   위임 Authorization이 호출자 토큰 그대로(두 호출자 순서대로) / Bearer 없거나 Basic이면 401·위임 0 / 세션용 목록 19종·위임 0
+RegressionDetectorTest +1 돌려준 행 지표 기종은 "결과 크기 변화"로 적고 계획 변경 확인을 부르지 않는다(기존 테스트는 "검사한 행 폭증(플랜 변화 의심)")
+ChangeExecutionIT +1      Oracle 앱 스키마(위 3절), SQL Server 시나리오는 DBTOWER_MSSQL_PORT로 2022에서
+전체                      746 tests, 실패 0, 건너뜀 15(실DB IT 게이트 — 131절 741/14에서 새 테스트 5, 게이트 IT 1), 규약 검사 통과
+```
