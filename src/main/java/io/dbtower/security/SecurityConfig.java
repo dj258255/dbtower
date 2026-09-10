@@ -204,6 +204,8 @@ public class SecurityConfig {
                         // 마스킹 규칙 변경은 누가 무엇을 볼지 정하는 정책이라 ADMIN. 조회(GET)는 왜 가려졌는지 알 수 있게 연다.
                         .requestMatchers(HttpMethod.POST, "/api/workbench/masking-rules").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/workbench/masking-rules/*").hasRole("ADMIN")
+                        // 조회 결과 값을 외부 LLM에 보낼지는 데이터 반출 결정이라 ADMIN만 바꾼다(기본은 막힘)
+                        .requestMatchers(HttpMethod.PUT, "/api/workbench/instances/*/settings").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage("/login.html")

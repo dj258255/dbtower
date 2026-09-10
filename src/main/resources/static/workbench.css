@@ -1,48 +1,49 @@
-/* 거버넌스 SQL 워크벤치 — style.css의 변수·버튼을 그대로 쓰고 레이아웃과 편집기만 더한다 */
+/* 거버넌스 SQL 워크벤치 — style.css의 변수·버튼을 그대로 쓰고 레이아웃·편집기·채팅만 더한다 */
 
 /* hidden 속성이 display를 지정한 규칙(.wb-modal의 flex 등)에 지지 않게 한다 — 브라우저 기본 [hidden]은
    작성자 CSS보다 약해서, 모달이 로드 직후부터 떠 실행 버튼 클릭을 가로막았다(화면 검증에서 발견) */
 [hidden] { display: none !important; }
+
 .wb-body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .wb-shell {
   flex: 1; min-height: 0;
-  display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 14px;
-  padding: 14px 18px;
+  display: grid; grid-template-columns: 230px minmax(0, 1fr) 420px; gap: 12px;
+  padding: 12px 16px;
 }
-.wb-side, .wb-main {
+.wb-left, .wb-main, .wb-right {
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   box-shadow: 0 1px 2px rgba(16, 24, 40, .04); min-height: 0;
 }
-.wb-side { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
 .wb-label { font-size: 12px; color: var(--muted); }
-.wb-side select, .wb-side input[type=search] {
+.wb-spacer { flex: 1; }
+.wb-note { font-size: 12px; background: #fff6e5; color: #8a5a00; border-radius: 6px; padding: 6px 8px; }
+
+/* 좌 */
+.wb-left { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.wb-left select, .wb-cpane input[type=search] {
   width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit;
 }
-.wb-note { font-size: 12px; background: #fff6e5; color: #8a5a00; border-radius: 6px; padding: 6px 8px; }
-.wb-policy { font-size: 11.5px; margin: 0; }
-.wb-tree { flex: 1; overflow: auto; font-size: 13px; }
-.tree, .tree-cols { list-style: none; margin: 0; padding: 0; }
-.tree-row { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
-.tree-caret { border: 0; background: none; cursor: pointer; width: 18px; color: var(--muted); padding: 0; }
-.tree-name { cursor: pointer; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-name:hover, .tree-col:hover span:first-child { color: var(--primary); }
-.tree-count { font-size: 11px; }
-.tree-cols { padding-left: 22px; }
-.tree-col { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; padding: 1px 0; font-size: 12.5px; }
-.tree-col span:last-child { font-size: 11px; }
-
-.wb-main { display: flex; flex-direction: column; overflow: hidden; }
-.wb-tabs { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
-.wb-tab {
-  border: 1px solid var(--line); border-bottom: 0; background: var(--bg); border-radius: 6px 6px 0 0;
-  padding: 4px 10px; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap;
+.wb-left-head { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.wb-sheets { list-style: none; margin: 0; padding: 0; flex: 1; overflow: auto; }
+.wb-sheets li {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px;
 }
-.wb-tab.active { background: var(--panel); font-weight: 700; }
-.wb-tab .x { margin-left: 8px; color: var(--muted); }
-.wb-tab-add { border: 0; background: none; cursor: pointer; font-size: 16px; color: var(--muted); padding: 0 8px; }
+.wb-sheets li:hover { background: #f3f4f8; }
+.wb-sheets li.active { background: #eef0ff; font-weight: 700; }
+.wb-sheets li .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-sheets li .ver { font-size: 11px; color: var(--muted); }
+.wb-sheets li .x { border: 0; background: none; color: var(--muted); cursor: pointer; visibility: hidden; }
+.wb-sheets li:hover .x { visibility: visible; }
+.wb-policy { font-size: 11.5px; margin: 0; }
 
-/* 편집기: 투명한 textarea를 하이라이트된 pre 위에 겹친다(글꼴·여백이 같아야 커서가 맞는다) */
-.editor { position: relative; height: 34%; min-height: 150px; border-bottom: 1px solid var(--line); }
+/* 중 */
+.wb-main { display: flex; flex-direction: column; overflow: hidden; }
+.wb-sheetbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.wb-title { border: 1px solid transparent; border-radius: 6px; font: inherit; font-size: 15px; font-weight: 700; padding: 3px 6px; min-width: 220px; }
+.wb-title:hover, .wb-title:focus { border-color: var(--line); outline: none; }
+.wb-version { font-size: 12px; color: var(--muted); }
+
+.editor { position: relative; height: 30%; min-height: 140px; border-bottom: 1px solid var(--line); }
 .editor-highlight, .editor-input {
   position: absolute; inset: 0; margin: 0; padding: 10px 12px; border: 0;
   font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace; font-size: 13px; line-height: 20px;
@@ -66,16 +67,22 @@
 
 .wb-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .wb-toolbar select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 12.5px; }
-.wb-spacer { flex: 1; }
 .wb-class { font-size: 12px; border-radius: 999px; padding: 2px 10px; }
-.wb-class.read { background: #e7f6ee; color: #137a4b; }
-.wb-class.change { background: #fff1e0; color: #a35200; }
-.wb-class.blocked { background: #fdecee; color: #b42335; }
+.wb-class.read, .badge.read { background: #e7f6ee; color: #137a4b; }
+.wb-class.change, .badge.change { background: #fff1e0; color: #a35200; }
+.wb-class.blocked, .badge.blocked { background: #fdecee; color: #b42335; }
 
-.wb-result-tabs { display: flex; gap: 4px; padding: 6px 10px 0; }
-.wb-rtab { border: 0; background: none; font: inherit; font-size: 12.5px; padding: 4px 8px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
-.wb-rtab.active { color: var(--text); border-bottom-color: var(--primary); font-weight: 700; }
+.wb-result-tabs { display: flex; gap: 4px; }
+.wb-rtab, .wb-ctab { border: 0; background: none; font: inherit; font-size: 12.5px; padding: 4px 8px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
+.wb-rtab.active, .wb-ctab.active { color: var(--text); border-bottom-color: var(--primary); font-weight: 700; }
 .wb-pane { flex: 1; min-height: 0; overflow: auto; padding: 8px 10px 12px; }
+.wb-preview { position: relative; }
+.wb-overlay {
+  position: absolute; left: 10px; right: 10px; top: 8px; z-index: 5;
+  background: rgba(255, 255, 255, .96); border-radius: 8px; box-shadow: 0 6px 20px rgba(16, 24, 40, .14);
+}
+.wb-overlay .wb-msg { margin: 0; }
+.wb-overlay-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
 
 .grid-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12.5px; }
 .grid-filter { padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 12.5px; width: 200px; }
@@ -86,6 +93,7 @@ table.grid th { position: sticky; top: 0; background: #f3f4f8; cursor: pointer; 
 table.grid td.null { color: var(--muted); font-style: italic; }
 table.grid .rownum { color: var(--muted); width: 1%; }
 .mask-badge { font-size: 10.5px; background: #fdecee; color: #b42335; border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+body.picking table.grid th:not(.rownum), body.picking .tree-name, body.picking .tree-col { outline: 1px dashed var(--primary); cursor: crosshair; }
 
 .wb-msg { border-radius: 8px; padding: 10px 12px; font-size: 13px; }
 .wb-msg p { margin: 4px 0 0; }
@@ -104,14 +112,66 @@ table.grid .rownum { color: var(--muted); width: 1%; }
 .outcome.REJECTED { background: #fff1e0; color: #a35200; }
 .outcome.ERROR { background: #fdecee; color: #b42335; }
 
+/* 우: 채팅 | 스키마 */
+.wb-right { display: flex; flex-direction: column; overflow: hidden; }
+.wb-right-tabs { display: flex; gap: 4px; padding: 8px 10px 0; border-bottom: 1px solid var(--line); }
+.wb-count { font-size: 11px; background: #f3f4f8; border-radius: 999px; padding: 0 6px; margin-left: 2px; }
+.wb-cpane { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px; }
+.wb-tree { flex: 1; overflow: auto; font-size: 13px; }
+.tree, .tree-cols { list-style: none; margin: 0; padding: 0; }
+.tree-row { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
+.tree-caret { border: 0; background: none; cursor: pointer; width: 18px; color: var(--muted); padding: 0; }
+.tree-name { cursor: pointer; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-name:hover, .tree-col:hover span:first-child { color: var(--primary); }
+.tree-count { font-size: 11px; }
+.tree-cols { padding-left: 22px; }
+.tree-col { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; padding: 1px 0; font-size: 12.5px; }
+.tree-col span:last-child { font-size: 11px; }
+
+.wb-timeline { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 2px; }
+.wb-empty { color: var(--muted); font-size: 13px; line-height: 1.7; }
+.msg { font-size: 13.5px; line-height: 1.65; }
+.msg.user { align-self: flex-end; max-width: 88%; background: #f1f2f6; border-radius: 12px; padding: 8px 12px; white-space: pre-wrap; }
+.msg.user .shared { display: block; font-size: 11px; color: #a35200; margin-top: 2px; }
+.msg.ai .ai-text { white-space: pre-wrap; }
+.msg.ai.pending { color: var(--muted); }
+.ai-sql { margin: 8px 0 4px; padding: 8px 10px; background: #fbfbfd; border: 1px solid var(--line); border-radius: 8px; font-family: "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; }
+.ai-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11.5px; }
+.badge { border-radius: 999px; padding: 1px 8px; font-size: 11px; }
+.unknown { color: #b42335; }
+.checkpoint {
+  display: flex; align-items: flex-start; gap: 10px; margin-top: 8px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+}
+.checkpoint.current { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary) inset; }
+.checkpoint .check { width: 18px; height: 18px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; flex: none; margin-top: 2px; }
+.cp-body { flex: 1; min-width: 0; }
+.cp-title { font-weight: 700; font-size: 13px; }
+.cp-meta { font-size: 11.5px; color: var(--muted); }
+.cp-actions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.cp-actions button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; font: inherit; font-size: 11.5px; padding: 2px 8px; cursor: pointer; }
+.cp-actions button:hover { border-color: var(--primary); color: var(--primary); }
+
+.wb-composer { border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+.wb-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; background: #eef0ff; color: #3340c9; border-radius: 999px; padding: 1px 8px; font-size: 12px; }
+.chip button { border: 0; background: none; color: inherit; cursor: pointer; padding: 0; }
+.wb-composer textarea { width: 100%; border: 0; resize: none; font: inherit; font-size: 13.5px; outline: none; margin-top: 4px; }
+.wb-composer-bar { display: flex; align-items: center; gap: 8px; }
+.wb-icon-btn { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; font: inherit; font-size: 12px; padding: 2px 8px; cursor: pointer; }
+.wb-icon-btn[aria-pressed="true"] { background: var(--primary); color: #fff; border-color: var(--primary); }
+.wb-share { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+.wb-backend { font-size: 11px; }
+.wb-share-note { margin: 4px 0 0; font-size: 11.5px; }
+
 .wb-modal { position: fixed; inset: 0; background: rgba(15, 18, 25, .35); display: flex; align-items: center; justify-content: center; z-index: 50; }
 .wb-dialog { background: var(--panel); border-radius: 10px; padding: 16px 18px; width: min(460px, 92vw); }
 .wb-dialog h3 { margin: 0 0 6px; }
 .wb-dialog textarea { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
 .wb-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 
-@media (max-width: 900px) {
+@media (max-width: 1200px) {
   .wb-body { height: auto; overflow: auto; }
   .wb-shell { grid-template-columns: 1fr; }
-  .wb-tree { max-height: 240px; }
+  .wb-right { min-height: 520px; }
 }

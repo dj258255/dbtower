@@ -1,4 +1,5 @@
 // 결과 그리드 — 받은 행(최대 1000) 안에서 정렬·찾기·페이지 나눔. 서버를 다시 부르지 않는다.
+// 선택 모드에서는 열 머리를 누르면 정렬 대신 그 열을 채팅에 붙인다.
 
 import { esc } from "./api.js";
 
@@ -12,7 +13,7 @@ function compare(a, b) {
   return String(a).localeCompare(String(b), "ko", { numeric: true });
 }
 
-export function renderGrid(container, view) {
+export function renderGrid(container, view, { isPicking = () => false, onPickColumn = () => {} } = {}) {
   if (!view.columns.length) {
     container.innerHTML = '<div class="muted">결과 열이 없는 문장입니다.</div>';
     return;
@@ -68,6 +69,10 @@ export function renderGrid(container, view) {
     }
     container.querySelectorAll("th[data-sort]").forEach((th) => th.addEventListener("click", () => {
       const k = Number(th.dataset.sort);
+      if (isPicking()) {
+        onPickColumn(view.columns[k].name);
+        return;
+      }
       state.dir = state.sort === k ? -state.dir : 1;
       state.sort = k;
       draw(false);

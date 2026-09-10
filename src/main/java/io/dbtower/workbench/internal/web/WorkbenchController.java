@@ -1,6 +1,11 @@
 package io.dbtower.workbench.internal.web;
 
 import io.dbtower.workbench.StatementClassifier.Classification;
+import io.dbtower.workbench.internal.WorkbenchAssistant;
+import io.dbtower.workbench.internal.WorkbenchAssistant.AssistantRequest;
+import io.dbtower.workbench.internal.WorkbenchAssistant.Reply;
+import io.dbtower.workbench.internal.WorkbenchAssistant.ResultSample;
+import io.dbtower.workbench.internal.WorkbenchAssistant.SettingView;
 import io.dbtower.workbench.internal.WorkbenchService;
 import io.dbtower.workbench.internal.WorkbenchService.CsvExport;
 import io.dbtower.workbench.internal.WorkbenchService.HistoryItem;
@@ -8,6 +13,10 @@ import io.dbtower.workbench.internal.WorkbenchService.InstanceView;
 import io.dbtower.workbench.internal.WorkbenchService.QueryView;
 import io.dbtower.workbench.internal.WorkbenchService.RuleView;
 import io.dbtower.workbench.internal.WorkbenchService.WorkbenchRejection;
+import io.dbtower.workbench.internal.WorksheetService;
+import io.dbtower.workbench.internal.WorksheetService.TimelineItem;
+import io.dbtower.workbench.internal.WorksheetService.VersionView;
+import io.dbtower.workbench.internal.WorksheetService.WorksheetView;
 import io.dbtower.workbench.internal.domain.MaskingStrategy;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -20,8 +29,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -32,18 +43,25 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** 거버넌스 SQL 워크벤치 API. 마스킹 규칙 변경은 ADMIN(SecurityConfig), 나머지는 로그인 사용자 + 팀 범위. */
+/**
+ * 거버넌스 SQL 워크벤치 API. 마스킹 규칙 변경·인스턴스 설정 변경은 ADMIN(SecurityConfig), 나머지는 로그인 사용자 + 팀 범위.
+ * 판정은 전부 서비스가 한다 — 여기서는 실행 성공 뒤 워크시트에 버전을 남기는 순서만 잇는다.
+ */
 @RestController
 @RequestMapping("/api/workbench")
 public class WorkbenchController {
 
     private final WorkbenchService workbench;
+    private final WorksheetService worksheets;
+    private final WorkbenchAssistant assistant;
 
-    public WorkbenchController(WorkbenchService workbench) {
+    public WorkbenchController(WorkbenchService workbench, WorksheetService worksheets, WorkbenchAssistant assistant) {
         this.workbench = workbench;
+        this.worksheets = worksheets;
+        this.assistant = assistant;
     }
 
-    public record StatementRequest(@NotBlank @Size(max = 100_000) String sql, Integer rowLimit) {
+    public record StatementRequest(@NotBlank @Size(max = 100_000) String sql, Integer rowLimit, Long worksheetId) {
     }
 
     public record ExportRequest(@NotBlank @Size(max = 100_000) String sql, @NotBlank @Size(max = 500) String reason) {
@@ -51,6 +69,23 @@ public class WorkbenchController {
 
     public record RuleRequest(Long instanceId, @NotBlank String columnPattern, @NotNull MaskingStrategy strategy,
                               @Size(max = 200) String note) {
+    }
+
+    public record WorksheetCreate(@Size(max = 100) String title) {
+    }
+
+    public record WorksheetPatch(@Size(max = 100) String title, @Size(max = 100_000) String currentSql) {
+    }
+
+    public record AssistantBody(@NotBlank @Size(max = 4_000) String message, List<String> tables, List<String> columns,
+                                @Size(max = 100_000) String failedSql, @Size(max = 4_000) String failedError,
+                                ResultSample result) {
+    }
+
+    public record SettingBody(boolean allowAiResultValues) {
+    }
+
+    public record QueryResponse(QueryView result, VersionView version) {
     }
 
     @GetMapping("/instances")
@@ -64,8 +99,11 @@ public class WorkbenchController {
     }
 
     @PostMapping("/instances/{id}/query")
-    public QueryView query(@PathVariable Long id, @Valid @RequestBody StatementRequest req) {
-        return workbench.run(id, req.sql(), req.rowLimit());
+    public QueryResponse query(@PathVariable Long id, @Valid @RequestBody StatementRequest req) {
+        QueryView view = workbench.run(id, req.sql(), req.rowLimit());
+        VersionView version = req.worksheetId() == null ? null
+                : worksheets.recordRun(req.worksheetId(), id, req.sql()).orElse(null);
+        return new QueryResponse(view, version);
     }
 
     @PostMapping("/instances/{id}/export")
@@ -83,6 +121,57 @@ public class WorkbenchController {
     @GetMapping("/instances/{id}/history")
     public List<HistoryItem> history(@PathVariable Long id, @RequestParam(defaultValue = "30") int limit) {
         return workbench.history(id, limit);
+    }
+
+    // ---------- 워크시트 ----------
+
+    @GetMapping("/instances/{id}/worksheets")
+    public List<WorksheetView> worksheets(@PathVariable Long id) {
+        return worksheets.list(id);
+    }
+
+    @PostMapping("/instances/{id}/worksheets")
+    public WorksheetView createWorksheet(@PathVariable Long id, @Valid @RequestBody WorksheetCreate req) {
+        return worksheets.create(id, req.title());
+    }
+
+    @PatchMapping("/worksheets/{worksheetId}")
+    public WorksheetView updateWorksheet(@PathVariable Long worksheetId, @Valid @RequestBody WorksheetPatch req) {
+        return worksheets.update(worksheetId, req.title(), req.currentSql());
+    }
+
+    @DeleteMapping("/worksheets/{worksheetId}")
+    public Map<String, Object> archiveWorksheet(@PathVariable Long worksheetId) {
+        worksheets.archive(worksheetId);
+        return Map.of("archived", worksheetId);
+    }
+
+    @GetMapping("/worksheets/{worksheetId}/timeline")
+    public List<TimelineItem> timeline(@PathVariable Long worksheetId) {
+        return worksheets.timeline(worksheetId);
+    }
+
+    @PostMapping("/worksheets/{worksheetId}/versions/{versionNo}/restore")
+    public VersionView restore(@PathVariable Long worksheetId, @PathVariable int versionNo) {
+        return worksheets.restore(worksheetId, versionNo);
+    }
+
+    @PostMapping("/worksheets/{worksheetId}/assistant")
+    public Reply ask(@PathVariable Long worksheetId, @Valid @RequestBody AssistantBody req) {
+        return assistant.ask(worksheetId, new AssistantRequest(req.message(), req.tables(), req.columns(),
+                req.failedSql(), req.failedError(), req.result()));
+    }
+
+    // ---------- 인스턴스 설정·마스킹 규칙 ----------
+
+    @GetMapping("/instances/{id}/settings")
+    public SettingView setting(@PathVariable Long id) {
+        return assistant.setting(id);
+    }
+
+    @PutMapping("/instances/{id}/settings")
+    public SettingView updateSetting(@PathVariable Long id, @RequestBody SettingBody req) {
+        return assistant.updateSetting(id, req.allowAiResultValues());
     }
 
     @GetMapping("/masking-rules")

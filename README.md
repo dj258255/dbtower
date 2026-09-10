@@ -204,6 +204,13 @@ DBeaver처럼 스키마 트리·탭 편집기·자동완성·결과 그리드로
 
 ![워크벤치 — 분류 배지, 마스킹된 email·phone 열](docs/images/webui/67-workbench-query-masked.png)
 
+**워크시트와 AI 제안** — 사내 AI 화면 생성 도구(TOI Studio)처럼 워크시트마다 대화와 체크포인트(버전) 카드가 쌓입니다.
+AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 서버가 분류(읽기/승인 필요/차단)와 스키마에 없는 테이블을 표시하고,
+"선택" 모드로 결과 열이나 스키마 테이블을 눌러 질문에 붙입니다. 조회 결과 값은 인스턴스 설정(ADMIN)이 켜진 경우에만 AI로 나갑니다.
+정확도는 AI SQL을 실제로 실행한 결과로 채점합니다(`scripts/eval-workbench-nl2sql.py`, 데모 12문항 lenient 12/12 · strict 7/12).
+
+![AI 답변과 체크포인트 카드](docs/images/webui/70-workbench-ai-checkpoint.png)
+
 ### MCP — AI 에이전트의 채널
 
 웹 콘솔이 사람의 채널이라면 MCP는 AI 에이전트의 채널입니다. 회귀 감지가 push(플랫폼이
@@ -390,6 +397,9 @@ POST /api/workbench/instances/{id}/query     조회(분류→콘솔 계정→읽
 POST /api/workbench/instances/{id}/classify  문장 분류(읽기/변경/차단)   POST .../export  CSV(사유 필수)
 GET  /api/workbench/instances/{id}/history   내 실행 기록               GET  /api/workbench/masking-rules  마스킹 규칙
 PUT  {base}/credentials/{READ|WRITE}         콘솔 계정 등록(ADMIN, 저장 전 접속 검증)
+GET|POST /api/workbench/instances/{id}/worksheets      워크시트 목록·생성    PATCH|DELETE /api/workbench/worksheets/{wid}
+POST /api/workbench/worksheets/{wid}/assistant         AI 제안(실행 안 함)   GET .../timeline  대화+체크포인트
+POST /api/workbench/worksheets/{wid}/versions/{n}/restore  되돌리기(새 버전)  PUT .../instances/{id}/settings  결과 값 AI 공유(ADMIN)
 
 # 운영 행위 (ADMIN)
 POST {base}/backup                 즉시 백업                  POST {base}/backup/verify  복원 검증
@@ -404,7 +414,7 @@ POST /mcp                          MCP (Streamable HTTP) — 도구 16종
 - [PORTFOLIO-AX.md](docs/PORTFOLIO-AX.md) — AX 케이스 스터디: AI를 운영 플랫폼에 들일 때 정책을 코드로 강제한 사례별 결정·실측
 - [PRESENTATION.md](docs/PRESENTATION.md) — 문제 정의부터 설계·실측·교훈까지 전체 서사
 - [DESIGN.md](docs/DESIGN.md) — 인터페이스 경계, 시점 비교 데이터 모델
-- [VERIFICATION.md](docs/VERIFICATION.md) — 128개 절의 실측 기록 (명령·출력·스크린샷)
+- [VERIFICATION.md](docs/VERIFICATION.md) — 129개 절의 실측 기록 (명령·출력·스크린샷)
 - [ai-analysis-rules.md](docs/ai-analysis-rules.md) — 기종별 실행계획 판단 규칙: 근거와 예외
 - [operations.md](docs/operations.md) — 운영 규칙: 통계 소스의 함정과 대응 (digest 포화·PS 가시성·AAS)
 - [least-privilege.md](docs/least-privilege.md) — 기종별 최소 권한 모니터링 계정 (실측 확정)

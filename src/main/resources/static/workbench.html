@@ -23,19 +23,30 @@
 </header>
 
 <div class="wb-shell">
-  <!-- 좌: 인스턴스와 스키마 트리 — 클릭하면 이름이 편집기에, 더블클릭하면 미리보기 쿼리가 새 탭에 -->
-  <aside class="wb-side">
+  <!-- 좌: 인스턴스와 워크시트(TOI의 페이지에 해당 — 대화와 SQL 버전이 워크시트마다 쌓인다) -->
+  <aside class="wb-left">
     <label class="wb-label" for="wb-instance">인스턴스</label>
     <select id="wb-instance"></select>
     <div id="wb-instance-note" class="wb-note" hidden></div>
-    <input id="wb-tree-filter" type="search" placeholder="테이블·컬럼 검색" autocomplete="off">
-    <div id="wb-tree" class="wb-tree muted">인스턴스를 고르세요</div>
-    <p class="hint wb-policy">조회는 조회 전용 계정·읽기 전용 트랜잭션으로 즉시 실행됩니다. 변경 문장은 승인 티켓으로, 위험한 문장은 차단됩니다. 모든 실행은 기록됩니다.</p>
+    <div class="wb-left-head">
+      <span class="wb-label">워크시트</span>
+      <button id="wb-sheet-add" class="btn btn-small" title="새 워크시트">+ 새로</button>
+    </div>
+    <ul id="wb-sheets" class="wb-sheets"></ul>
+    <p class="hint wb-policy">조회는 조회 전용 계정·읽기 전용 트랜잭션으로 즉시 실행되고, 변경은 승인 티켓으로, 위험한 문장은 차단됩니다. AI는 SQL을 제안만 합니다. 모든 실행과 대화는 기록됩니다.</p>
   </aside>
 
-  <!-- 중: 탭 편집기 + 결과 -->
+  <!-- 중: 편집기와 결과 미리보기 -->
   <main class="wb-main">
-    <div class="wb-tabs" id="wb-tabs"></div>
+    <div class="wb-sheetbar">
+      <input id="wb-title" class="wb-title" maxlength="100" aria-label="워크시트 이름">
+      <span id="wb-version" class="wb-version"></span>
+      <span class="wb-spacer"></span>
+      <div class="wb-result-tabs">
+        <button class="wb-rtab active" data-pane="grid">결과</button>
+        <button class="wb-rtab" data-pane="history">내 실행 기록</button>
+      </div>
+    </div>
     <div class="editor" id="wb-editor">
       <pre class="editor-highlight" aria-hidden="true"><code id="wb-highlight"></code></pre>
       <textarea id="wb-input" class="editor-input" spellcheck="false" autocomplete="off" autocapitalize="off"
@@ -55,17 +66,43 @@
       <span class="wb-spacer"></span>
       <span id="wb-status" class="muted"></span>
     </div>
-    <div class="wb-result-tabs">
-      <button class="wb-rtab active" data-pane="grid">결과</button>
-      <button class="wb-rtab" data-pane="history">내 실행 기록</button>
-    </div>
-    <section id="wb-pane-grid" class="wb-pane">
+    <section id="wb-pane-grid" class="wb-pane wb-preview">
       <div id="wb-grid" class="muted">문장을 실행하면 결과가 여기에 나옵니다.</div>
+      <!-- 실패해도 마지막 정상 결과를 지우지 않고 그 위에 오류를 겹친다(TOI Preview의 에러 오버레이와 같은 원칙) -->
+      <div id="wb-overlay" class="wb-overlay" hidden></div>
     </section>
     <section id="wb-pane-history" class="wb-pane" hidden>
       <div id="wb-history" class="muted"></div>
     </section>
   </main>
+
+  <!-- 우: 채팅 | 스키마 (TOI의 채팅 | 연결된 API) -->
+  <aside class="wb-right">
+    <div class="wb-right-tabs">
+      <button class="wb-ctab active" data-cpane="chat">채팅</button>
+      <button class="wb-ctab" data-cpane="schema">스키마 <span id="wb-schema-count" class="wb-count"></span></button>
+    </div>
+    <div id="wb-cpane-chat" class="wb-cpane">
+      <div id="wb-timeline" class="wb-timeline"></div>
+      <div class="wb-composer">
+        <div id="wb-chips" class="wb-chips"></div>
+        <textarea id="wb-ask" rows="3" placeholder="보고 싶은 데이터를 설명해주세요. 예: 어제 결제 실패 건을 고객 등급별로"></textarea>
+        <div class="wb-composer-bar">
+          <button id="wb-pick" class="wb-icon-btn" title="선택 모드: 결과 열이나 스키마의 테이블·컬럼을 눌러 질문에 붙입니다" aria-pressed="false">선택</button>
+          <label id="wb-share-wrap" class="wb-share" hidden><input type="checkbox" id="wb-share"> 결과 함께 보내기</label>
+          <span class="wb-spacer"></span>
+          <span id="wb-backend" class="muted wb-backend"></span>
+          <button id="wb-send" class="btn btn-primary btn-small">보내기</button>
+        </div>
+        <div id="wb-share-note" class="hint wb-share-note"></div>
+      </div>
+    </div>
+    <div id="wb-cpane-schema" class="wb-cpane" hidden>
+      <input id="wb-tree-filter" type="search" placeholder="테이블·컬럼 검색" autocomplete="off">
+      <div id="wb-tree" class="wb-tree muted">인스턴스를 고르세요</div>
+      <p class="hint">클릭: 편집기에 이름 넣기 · 더블클릭: 미리보기 쿼리 · 선택 모드에서 클릭: 채팅에 붙이기</p>
+    </div>
+  </aside>
 </div>
 
 <div id="wb-modal" class="wb-modal" hidden>
