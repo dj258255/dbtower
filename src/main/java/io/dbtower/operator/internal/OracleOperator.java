@@ -107,6 +107,12 @@ public class OracleOperator extends AbstractJdbcOperator {
     }
 
     /** dbName은 서비스명(예: FREEPDB1) — Oracle은 데이터베이스가 아니라 서비스로 붙는다 */
+    /** Oracle JDBC의 setReadOnly는 서버에 아무것도 보내지 않는다(실측) — 콘솔 트랜잭션의 첫 문장으로 직접 건다. */
+    @Override
+    protected void beginReadOnly(java.sql.Statement st) throws java.sql.SQLException {
+        st.execute("SET TRANSACTION READ ONLY");
+    }
+
     @Override
     protected String jdbcUrl() {
         // useTls면 TCPS 프로토콜 — Oracle은 URL 파라미터가 아니라 프로토콜 지정 방식이다.

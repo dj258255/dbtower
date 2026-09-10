@@ -1,5 +1,7 @@
 package io.dbtower.operator;
 
+import io.dbtower.operator.model.QueryResult;
+import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.operator.model.VolumeStat;
 import io.dbtower.operator.model.WaitEvent;
 import io.dbtower.operator.model.TableStat;
@@ -301,5 +303,16 @@ public interface DbmsOperator {
      */
     default Optional<Long> deadlockCount() {
         return Optional.empty();
+    }
+
+    /**
+     * 워크벤치 콘솔 조회 — 모니터 계정이 아니라 조회 전용 콘솔 계정으로 한 문장을 실행하고 행 상한까지만 읽는다.
+     *
+     * <p>이 메서드는 실행 계층의 방어를 책임진다: 분리된 계정, 읽기 전용 트랜잭션(기종이 지원하는 만큼),
+     * 타임아웃, 행 상한, 끝에 항상 롤백. "읽기 문장인가"의 분류는 호출자(workbench)가 먼저 한다 —
+     * 분류는 첫 방어선일 뿐이라 여기서 다시 믿지 않는다.
+     */
+    default QueryResult executeReadOnly(ConsoleCredential credential, String statement, int rowCap, int timeoutSeconds) {
+        throw new UnsupportedOperationException("이 기종은 콘솔 조회를 지원하지 않습니다");
     }
 }

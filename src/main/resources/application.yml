@@ -73,6 +73,10 @@ dbtower:
   # 오래 붙잡지 않게 — "진단이 부하 유발자가 되면 안 된다"는 원칙. 심층 진단(explain 실제 실행)은
   # 이와 별개로 더 짧은 명시적 타임아웃을 건다.
   query-timeout-seconds: 15
+  # 거버넌스 SQL 워크벤치 — 사람이 여는 조회의 기본 행 수와 실행 상한. 행 상한의 최댓값은 오퍼레이터 상한(1000)이다.
+  workbench:
+    default-row-limit: 200
+    timeout-seconds: 15
   # 스케일 제어 (Phase F)
   scheduler:
     pool-size: 4         # @Scheduled 폴러 공용 스레드 풀 — 느린 폴러가 뒤 전부를 막는 head-of-line blocking 방지

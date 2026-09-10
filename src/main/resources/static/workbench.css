@@ -1,0 +1,117 @@
+/* 거버넌스 SQL 워크벤치 — style.css의 변수·버튼을 그대로 쓰고 레이아웃과 편집기만 더한다 */
+
+/* hidden 속성이 display를 지정한 규칙(.wb-modal의 flex 등)에 지지 않게 한다 — 브라우저 기본 [hidden]은
+   작성자 CSS보다 약해서, 모달이 로드 직후부터 떠 실행 버튼 클릭을 가로막았다(화면 검증에서 발견) */
+[hidden] { display: none !important; }
+.wb-body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.wb-shell {
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 14px;
+  padding: 14px 18px;
+}
+.wb-side, .wb-main {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .04); min-height: 0;
+}
+.wb-side { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.wb-label { font-size: 12px; color: var(--muted); }
+.wb-side select, .wb-side input[type=search] {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit;
+}
+.wb-note { font-size: 12px; background: #fff6e5; color: #8a5a00; border-radius: 6px; padding: 6px 8px; }
+.wb-policy { font-size: 11.5px; margin: 0; }
+.wb-tree { flex: 1; overflow: auto; font-size: 13px; }
+.tree, .tree-cols { list-style: none; margin: 0; padding: 0; }
+.tree-row { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
+.tree-caret { border: 0; background: none; cursor: pointer; width: 18px; color: var(--muted); padding: 0; }
+.tree-name { cursor: pointer; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-name:hover, .tree-col:hover span:first-child { color: var(--primary); }
+.tree-count { font-size: 11px; }
+.tree-cols { padding-left: 22px; }
+.tree-col { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; padding: 1px 0; font-size: 12.5px; }
+.tree-col span:last-child { font-size: 11px; }
+
+.wb-main { display: flex; flex-direction: column; overflow: hidden; }
+.wb-tabs { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.wb-tab {
+  border: 1px solid var(--line); border-bottom: 0; background: var(--bg); border-radius: 6px 6px 0 0;
+  padding: 4px 10px; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap;
+}
+.wb-tab.active { background: var(--panel); font-weight: 700; }
+.wb-tab .x { margin-left: 8px; color: var(--muted); }
+.wb-tab-add { border: 0; background: none; cursor: pointer; font-size: 16px; color: var(--muted); padding: 0 8px; }
+
+/* 편집기: 투명한 textarea를 하이라이트된 pre 위에 겹친다(글꼴·여백이 같아야 커서가 맞는다) */
+.editor { position: relative; height: 34%; min-height: 150px; border-bottom: 1px solid var(--line); }
+.editor-highlight, .editor-input {
+  position: absolute; inset: 0; margin: 0; padding: 10px 12px; border: 0;
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace; font-size: 13px; line-height: 20px;
+  white-space: pre-wrap; word-wrap: break-word; overflow: auto; tab-size: 2;
+}
+.editor-highlight { color: var(--text); pointer-events: none; background: #fbfbfd; }
+.editor-input { background: transparent; color: transparent; caret-color: var(--text); resize: none; outline: none; }
+.editor-input::selection { background: rgba(79, 94, 247, .25); color: transparent; }
+.tk-kw { color: #4f5ef7; font-weight: 600; }
+.tk-str { color: #22a06b; }
+.tk-num { color: #c2410c; }
+.tk-cmt { color: #9aa1ad; font-style: italic; }
+.autocomplete {
+  position: absolute; z-index: 20; list-style: none; margin: 0; padding: 4px 0; min-width: 220px; max-height: 240px; overflow: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 18px rgba(16, 24, 40, .12);
+  font-size: 12.5px;
+}
+.autocomplete li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 10px; cursor: pointer; }
+.autocomplete li.active { background: #eef0ff; }
+.autocomplete li span:last-child { color: var(--muted); font-size: 11px; }
+
+.wb-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.wb-toolbar select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 12.5px; }
+.wb-spacer { flex: 1; }
+.wb-class { font-size: 12px; border-radius: 999px; padding: 2px 10px; }
+.wb-class.read { background: #e7f6ee; color: #137a4b; }
+.wb-class.change { background: #fff1e0; color: #a35200; }
+.wb-class.blocked { background: #fdecee; color: #b42335; }
+
+.wb-result-tabs { display: flex; gap: 4px; padding: 6px 10px 0; }
+.wb-rtab { border: 0; background: none; font: inherit; font-size: 12.5px; padding: 4px 8px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
+.wb-rtab.active { color: var(--text); border-bottom-color: var(--primary); font-weight: 700; }
+.wb-pane { flex: 1; min-height: 0; overflow: auto; padding: 8px 10px 12px; }
+
+.grid-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12.5px; }
+.grid-filter { padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 12.5px; width: 200px; }
+.grid-scroll { overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+table.grid { border-collapse: collapse; font-size: 12.5px; width: max-content; min-width: 100%; }
+table.grid th, table.grid td { border-bottom: 1px solid var(--line); padding: 4px 10px; text-align: left; white-space: nowrap; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+table.grid th { position: sticky; top: 0; background: #f3f4f8; cursor: pointer; user-select: none; }
+table.grid td.null { color: var(--muted); font-style: italic; }
+table.grid .rownum { color: var(--muted); width: 1%; }
+.mask-badge { font-size: 10.5px; background: #fdecee; color: #b42335; border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+
+.wb-msg { border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+.wb-msg p { margin: 4px 0 0; }
+.wb-msg.change { background: #fff6e5; border: 1px solid #f3d6a4; }
+.wb-msg.blocked { background: #fdecee; border: 1px solid #f2c0c7; }
+.wb-msg.error { background: #f3f4f8; border: 1px solid var(--line); }
+.wb-msg pre { white-space: pre-wrap; margin: 6px 0 0; font-size: 12px; }
+
+.history { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.history td { border-bottom: 1px solid var(--line); padding: 4px 8px; vertical-align: top; }
+.history tr { cursor: pointer; }
+.history tr:hover { background: #f7f8fb; }
+.history code { white-space: pre-wrap; word-break: break-all; }
+.outcome { font-size: 11px; border-radius: 4px; padding: 0 6px; }
+.outcome.OK { background: #e7f6ee; color: #137a4b; }
+.outcome.REJECTED { background: #fff1e0; color: #a35200; }
+.outcome.ERROR { background: #fdecee; color: #b42335; }
+
+.wb-modal { position: fixed; inset: 0; background: rgba(15, 18, 25, .35); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.wb-dialog { background: var(--panel); border-radius: 10px; padding: 16px 18px; width: min(460px, 92vw); }
+.wb-dialog h3 { margin: 0 0 6px; }
+.wb-dialog textarea { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+.wb-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+
+@media (max-width: 900px) {
+  .wb-body { height: auto; overflow: auto; }
+  .wb-shell { grid-template-columns: 1fr; }
+  .wb-tree { max-height: 240px; }
+}

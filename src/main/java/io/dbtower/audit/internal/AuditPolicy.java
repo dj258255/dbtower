@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
 public final class AuditPolicy {
 
     private static final Set<String> RECORDED_METHODS = Set.of("POST", "PUT", "DELETE");
-    private static final Pattern INSTANCE_PATH = Pattern.compile("/api/instances/(\\d+)(?:/.*)?");
+    private static final Pattern INSTANCE_PATH = Pattern.compile("/api/(?:workbench/)?instances/(\\d+)(?:/.*)?");
 
     private AuditPolicy() {
     }
@@ -31,7 +31,7 @@ public final class AuditPolicy {
         return path != null && path.startsWith("/api/") && RECORDED_METHODS.contains(method);
     }
 
-    /** /api/instances/{id}/... 꼴이면 대상 인스턴스 id, 아니면 null — 인스턴스별 이력 추적용 */
+    /** /api/instances/{id}/... 또는 /api/workbench/instances/{id}/... 꼴이면 대상 인스턴스 id, 아니면 null — 인스턴스별 이력 추적용 */
     public static Long extractInstanceId(String path) {
         if (path == null) {
             return null;

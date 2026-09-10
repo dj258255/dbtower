@@ -1,9 +1,17 @@
 package io.dbtower.operator.internal;
 
+import io.dbtower.operator.OperatorException;
+import io.dbtower.operator.model.QueryResult;
+import io.dbtower.registry.ConsoleCredential;
+import io.dbtower.registry.CredentialPurpose;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.util.List;
 import io.dbtower.operator.BackupCommands;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.ConnectionPools;
 import io.dbtower.operator.DbmsOperator;
+import io.dbtower.operator.SqlCanonical;
 import io.dbtower.operator.model.IndexAdvice;
 import io.dbtower.operator.model.LatencyPercentile;
 import io.dbtower.operator.model.RestoreVerification;
@@ -179,133 +187,13 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
         }
     }
 
-    /**
-     * 판정용 정규화 — 주석({@code --}, 중첩 가능한 블록 주석)과 인용 구간(문자열·식별자·달러 인용)을
-     * 같은 길이의 공백으로 지운 사본을 만든다. 원문은 그대로 실행하고 판정만 이 사본으로 한다.
-     *
-     * <p>백슬래시는 <b>이스케이프로 보지 않는다</b>(PostgreSQL의 standard_conforming_strings=on 동작).
-     * 이게 fail-closed인 이유: {@code 'a\'; DROP TABLE x}에서 백슬래시를 이스케이프로 보면 문자열이
-     * 계속 이어진다고 판단해 세미콜론을 놓치지만(통과), 안 보면 문자열이 거기서 끝나 세미콜론을 발견한다(거부).
-     * 놓치는 쪽보다 더 거부하는 쪽이 안전하다. 다만 PostgreSQL의 {@code E'...'}는 명세상 백슬래시가
-     * 이스케이프라 그때만 예외로 처리한다 — {@code SELECT E'\''; DROP TABLE x}가 정확히 이 경로로 뚫렸었다.
-     *
-     * <p>인용이 닫히지 않으면 남은 전체를 삼키지만, 그런 SQL은 DB가 문법 오류로 거부하므로
-     * "우리에게는 숨기면서 DB에서는 실행되는" 조합이 성립하지 않는다.
-     */
+    /** 판정용 정규화 — 규칙과 근거는 {@link SqlCanonical}. 워크벤치 문장 분류기와 같은 규칙을 쓰려고 옮겼다. */
     static String canonical(String sql) {
-        StringBuilder out = new StringBuilder(sql.length());
-        int i = 0;
-        int n = sql.length();
-        while (i < n) {
-            char c = sql.charAt(i);
-            if (c == '-' && i + 1 < n && sql.charAt(i + 1) == '-') {          // 라인 주석
-                while (i < n && sql.charAt(i) != '\n') {
-                    out.append(' ');
-                    i++;
-                }
-                continue;
-            }
-            if (c == '/' && i + 1 < n && sql.charAt(i + 1) == '*') {          // 블록 주석 (PostgreSQL은 중첩 허용)
-                int depth = 0;
-                while (i < n) {
-                    if (sql.charAt(i) == '/' && i + 1 < n && sql.charAt(i + 1) == '*') {
-                        depth++;
-                        out.append("  ");
-                        i += 2;
-                    } else if (sql.charAt(i) == '*' && i + 1 < n && sql.charAt(i + 1) == '/') {
-                        depth--;
-                        out.append("  ");
-                        i += 2;
-                        if (depth == 0) {
-                            break;
-                        }
-                    } else {
-                        out.append(' ');
-                        i++;
-                    }
-                }
-                continue;
-            }
-            if (c == '$') {                                                   // 달러 인용 $tag$ ... $tag$
-                int close = sql.indexOf('$', i + 1);
-                if (close > i && isDollarTag(sql, i + 1, close)) {
-                    String tag = sql.substring(i, close + 1);
-                    int end = sql.indexOf(tag, close + 1);
-                    int stop = end < 0 ? n : end + tag.length();
-                    out.append(" ".repeat(stop - i));
-                    i = stop;
-                    continue;
-                }
-            }
-            if (c == '\'' || c == '"' || c == '`') {                          // 문자열·식별자 인용
-                boolean backslashEscapes = c == '\'' && isEscapeStringPrefix(sql, i);
-                out.append(' ');
-                i++;
-                while (i < n) {
-                    char d = sql.charAt(i);
-                    if (backslashEscapes && d == '\\' && i + 1 < n) {
-                        out.append("  ");
-                        i += 2;
-                        continue;
-                    }
-                    if (d == c) {
-                        if (i + 1 < n && sql.charAt(i + 1) == c) {            // '' "" `` 는 이스케이프된 인용부호
-                            out.append("  ");
-                            i += 2;
-                            continue;
-                        }
-                        out.append(' ');
-                        i++;
-                        break;
-                    }
-                    out.append(' ');
-                    i++;
-                }
-                continue;
-            }
-            out.append(c);
-            i++;
-        }
-        return out.toString();
+        return SqlCanonical.canonical(sql);
     }
 
-    /** 달러 인용 태그는 비었거나 영숫자·밑줄만 (PostgreSQL 규약) */
-    private static boolean isDollarTag(String sql, int from, int toExclusive) {
-        for (int k = from; k < toExclusive; k++) {
-            char c = sql.charAt(k);
-            if (!Character.isLetterOrDigit(c) && c != '_') {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /** PostgreSQL의 E'...' — 이 안에서만 백슬래시가 이스케이프다. 앞 글자가 식별자면 E가 아니라 이름의 끝이다. */
-    private static boolean isEscapeStringPrefix(String sql, int quoteIndex) {
-        if (quoteIndex == 0) {
-            return false;
-        }
-        char prev = sql.charAt(quoteIndex - 1);
-        if (prev != 'E' && prev != 'e') {
-            return false;
-        }
-        return quoteIndex < 2 || !(Character.isLetterOrDigit(sql.charAt(quoteIndex - 2))
-                || sql.charAt(quoteIndex - 2) == '_');
-    }
-
-    /**
-     * 문장 구분자 세미콜론이 문장 <b>중간</b>에 있는지 검사한다(입력은 canonical 사본).
-     * 끝에 하나 붙은 세미콜론(뒤가 공백뿐)은 정상 종결로 허용한다.
-     */
     private static boolean hasStatementSeparator(String canonical) {
-        int idx = canonical.indexOf(';');
-        while (idx >= 0) {
-            if (!canonical.substring(idx + 1).isBlank()) {
-                return true;
-            }
-            idx = canonical.indexOf(';', idx + 1);
-        }
-        return false;
+        return SqlCanonical.hasStatementSeparator(canonical);
     }
 
     /**
@@ -331,5 +219,67 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
         return java.util.List.of(LatencyPercentile.unsupported(instance.getType()
                 + " 레이턴시 백분위 미지원 — 이 기종의 통계 뷰는 min/max/평균/총계만 제공하고 "
                 + "p95/p99 분위수 원자료도 근사에 필요한 표준편차도 없어, 실측 백분위도 정직한 근사도 낼 수 없다."));
+    }
+
+    /**
+     * 워크벤치 콘솔 조회 — 계약은 {@link DbmsOperator#executeReadOnly}.
+     *
+     * <p>읽기 전용은 JDBC 표준 {@code setReadOnly(true)}로 건다. MySQL Connector/J는 세션 READ ONLY로, pgjdbc는
+     * BEGIN READ ONLY로, Oracle JDBC는 SET TRANSACTION READ ONLY로 번역한다 — 기종 분기 없이 드라이버가 흡수한다.
+     * SQL Server 드라이버는 이 힌트를 무시하므로 그 기종의 경계는 콘솔 계정 권한뿐이다. 그래서 끝은 항상 롤백한다:
+     * 트랜잭션 안으로 새어 들어간 쓰기가 있어도 커밋되지 않는다(MySQL DDL의 암묵 커밋은 예외라 분류기가 먼저 막는다).
+     */
+    @Override
+    public QueryResult executeReadOnly(ConsoleCredential credential, String statement, int rowCap, int timeoutSeconds) {
+        if (statement == null || statement.isBlank()) {
+            throw new IllegalArgumentException("실행할 문장이 비었습니다");
+        }
+        if (hasStatementSeparator(canonical(statement))) {
+            throw new IllegalArgumentException("콘솔은 한 번에 한 문장만 실행합니다");
+        }
+        int cap = DbmsOperator.clampLimit(rowCap);
+        long start = System.nanoTime();
+        try (Connection c = pools.getConsoleDataSource(instance, jdbcUrl(), CredentialPurpose.READ, credential)
+                .getConnection()) {
+            c.setAutoCommit(false);
+            c.setReadOnly(true);
+            try (Statement st = c.createStatement()) {
+                beginReadOnly(st);
+                st.setQueryTimeout(Math.max(1, timeoutSeconds));
+                // 상한+1행까지만 받아 잘림 여부를 판정한다 — 나머지 행은 드라이버가 서버 쪽에서 끊는다
+                st.setMaxRows(cap + 1);
+                if (!st.execute(withoutTrailingSemicolon(statement))) {
+                    return new QueryResult(List.of(), List.of(), false, (System.nanoTime() - start) / 1_000_000);
+                }
+                try (ResultSet rs = st.getResultSet()) {
+                    return JdbcValues.read(rs, cap, start);
+                }
+            } finally {
+                try {
+                    c.rollback();
+                } catch (SQLException ignored) {
+                    // 커넥션이 깨졌다면 풀이 버린다 — 원래 예외를 롤백 실패가 덮지 않게 한다
+                }
+            }
+        } catch (SQLException | RuntimeException e) {
+            throw new OperatorException(instance.getType() + " 콘솔 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 드라이버가 {@code setReadOnly(true)}를 서버의 읽기 전용 트랜잭션으로 번역하지 않는 기종이 트랜잭션 첫 문장으로 직접 건다.
+     * 실측(VERIFICATION 128절): MySQL·PostgreSQL 드라이버는 번역한다(콘솔 실행 안에서 @@transaction_read_only=1,
+     * transaction_read_only=on). Oracle JDBC는 번역하지 않아 쓰기 권한 계정의 INSERT가 들어갔고 끝의 롤백만 막고 있었다.
+     */
+    protected void beginReadOnly(Statement st) throws SQLException {
+    }
+
+    /** Oracle JDBC는 끝 세미콜론을 문법 오류(ORA-00911)로 본다 — 사람이 흔히 붙이는 종결자만 걷어낸다. */
+    static String withoutTrailingSemicolon(String sql) {
+        String s = sql.stripTrailing();
+        while (s.endsWith(";")) {
+            s = s.substring(0, s.length() - 1).stripTrailing();
+        }
+        return s;
     }
 }

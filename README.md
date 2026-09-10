@@ -188,6 +188,22 @@ Seq Scan, Clustered Index Scan, TABLE ACCESS FULL, COLLSCAN 등)으로 비효율
 
 ![수정안 원클릭 재진단 — 괴리 300배에서 없음으로, 풀스캔에서 Index lookup으로](docs/images/webui/17-deep-before-after.png)
 
+### 거버넌스 SQL 워크벤치 — 자유 SQL, 경계는 플랫폼이
+
+DBeaver처럼 스키마 트리·탭 편집기·자동완성·결과 그리드로 대상 DB를 직접 조회하되, 정책은 플랫폼 코드가 강제합니다.
+외부 DB 클라이언트를 붙이지 않은 이유가 이 정책 계층입니다(그 도구들은 DB에 직접 붙어 마스킹·팀 범위·감사를 우회).
+
+- **문장 분류**: 읽기는 즉시, 변경은 승인 티켓으로, 트랜잭션 제어·다중문·부작용 함수는 차단(허용 목록)
+- **콘솔 계정 분리**: 모니터 계정과 다른 조회(READ)·변경(WRITE) 계정, 저장 전 실제 접속 검증, 응답에 비밀번호 없음
+- **읽기 전용 실행**: 콘솔 전용 풀 + 읽기 전용 트랜잭션(Oracle은 `SET TRANSACTION READ ONLY`) + 타임아웃 + 행 상한 + 항상 롤백
+- **결과 마스킹**: 개인정보 컬럼 기본 규칙, 별칭(`email AS e`)까지 추적. 표현식 우회는 컬럼 GRANT가 막는다는 역할 분담을 실측으로 확인
+- **실행 기록**: 거부·오류 포함, 리터럴을 가린 문장과 행 수·가린 열·CSV 사유
+
+"읽기 전용"은 쓰기 권한 계정으로 INSERT를 넣어 3기종에서 따로 증명했습니다 — 같은 JDBC 호출이 Oracle에서는 아무것도 막지 않았고,
+그걸 고쳤습니다([VERIFICATION 128절](docs/VERIFICATION.md), [AX 케이스 스터디](docs/PORTFOLIO-AX.md)).
+
+![워크벤치 — 분류 배지, 마스킹된 email·phone 열](docs/images/webui/67-workbench-query-masked.png)
+
 ### MCP — AI 에이전트의 채널
 
 웹 콘솔이 사람의 채널이라면 MCP는 AI 에이전트의 채널입니다. 회귀 감지가 push(플랫폼이
@@ -369,6 +385,12 @@ GET  {base}/deadlocks              최근 데드락(MSSQL XE·MySQL INNODB STATU
 GET  {base}/slo                    SLO/에러 버짓              GET  {base}/finops         미사용·중복 인덱스
 GET  /api/health-score             전 인스턴스 헬스 스코어(나쁜 순)   GET  /api/backup-freshness  백업 신선도
 
+# 거버넌스 SQL 워크벤치 (/workbench.html)
+POST /api/workbench/instances/{id}/query     조회(분류→콘솔 계정→읽기 전용→마스킹→기록)
+POST /api/workbench/instances/{id}/classify  문장 분류(읽기/변경/차단)   POST .../export  CSV(사유 필수)
+GET  /api/workbench/instances/{id}/history   내 실행 기록               GET  /api/workbench/masking-rules  마스킹 규칙
+PUT  {base}/credentials/{READ|WRITE}         콘솔 계정 등록(ADMIN, 저장 전 접속 검증)
+
 # 운영 행위 (ADMIN)
 POST {base}/backup                 즉시 백업                  POST {base}/backup/verify  복원 검증
 PUT  {base}/backup-policy          백업 정책                  POST {base}/online-ddl     gh-ost (기본 dry-run)
@@ -382,7 +404,7 @@ POST /mcp                          MCP (Streamable HTTP) — 도구 16종
 - [PORTFOLIO-AX.md](docs/PORTFOLIO-AX.md) — AX 케이스 스터디: AI를 운영 플랫폼에 들일 때 정책을 코드로 강제한 사례별 결정·실측
 - [PRESENTATION.md](docs/PRESENTATION.md) — 문제 정의부터 설계·실측·교훈까지 전체 서사
 - [DESIGN.md](docs/DESIGN.md) — 인터페이스 경계, 시점 비교 데이터 모델
-- [VERIFICATION.md](docs/VERIFICATION.md) — 127개 절의 실측 기록 (명령·출력·스크린샷)
+- [VERIFICATION.md](docs/VERIFICATION.md) — 128개 절의 실측 기록 (명령·출력·스크린샷)
 - [ai-analysis-rules.md](docs/ai-analysis-rules.md) — 기종별 실행계획 판단 규칙: 근거와 예외
 - [operations.md](docs/operations.md) — 운영 규칙: 통계 소스의 함정과 대응 (digest 포화·PS 가시성·AAS)
 - [least-privilege.md](docs/least-privilege.md) — 기종별 최소 권한 모니터링 계정 (실측 확정)

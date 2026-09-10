@@ -4556,3 +4556,125 @@ amd64 전용 이미지가 Rosetta 없는 에뮬레이션에서 기동 즉시 죽
 높지만, 사용자 머신의 Docker VM 전체를 재시작하는 조작이라 하지 않았다. SQL Server는 07-04 실측(`VIEW SERVER
 PERFORMANCE STATE` 단 하나)을 유지하고, 그 뒤 추가된 기능의 권한은 미검증으로 남긴다.
 
+## 128. 거버넌스 SQL 워크벤치 1단계 — 조회 경계를 겹으로 쌓고, 겹마다 따로 증명한다 (2026-09-10)
+
+사람이 대상 DB를 자유 SQL로 조회하는 콘솔을 붙였다. DBeaver·CloudBeaver를 임베드하지 않은 이유는 그 도구들이
+DB에 직접 붙어 마스킹·팀 범위·감사를 우회하기 때문이다. 이 절의 요점은 기능이 아니라 **경계를 겹으로 쌓고, 한 겹을 뺀
+상태에서도 다음 겹이 막는지를 겹마다 따로 잰 것**이다.
+
+### 무엇을 만들었나
+
+| 겹 | 구현 | 막는 것 |
+|---|---|---|
+| 1. 문장 분류기 | `StatementClassifier`: 허용 목록. 읽기 / 변경(승인 티켓) / 차단. 주석·인용을 지운 canonical로 판정 | 다중문(`COMMIT; DROP`), 트랜잭션·세션 제어, 부작용 함수, 락 조회, `$out` |
+| 2. 콘솔 계정 분리 | V33 `instance_credential`(READ/WRITE, AES-256-GCM). 모니터 계정과 같으면 저장 거부, 저장 전 실제 접속 | 수집기 권한과 사람의 조회 권한이 한 계정에 섞이는 것 |
+| 3. 읽기 전용 실행 | 콘솔 전용 풀(모니터 풀과 분리, 상한 2), `setReadOnly(true)`, Oracle은 `SET TRANSACTION READ ONLY`, 타임아웃, 행 상한+1, **항상 롤백** | 분류기를 통과한 쓰기 |
+| 4. 결과 마스킹 | V35 기본 규칙 17개, 결과 열 이름·드라이버 원래 이름·문장의 `원래열 AS 별칭` 쌍을 모두 대조 | 개인정보를 "실수로" 보는 것 |
+| 5. 컬럼 GRANT | 콘솔 계정에서 민감 컬럼 권한을 빼는 운영 패턴(least-privilege.md) | 표현식으로 감싼 우회까지 |
+| 기록 | V34 `workbench_query_log`: 거부·실패 포함, 리터럴 마스킹 후 문장, 행 수, 가린 열, 내보내기 사유 | "누가 무엇을 봤나"의 공백 |
+
+화면은 `workbench.html` + 네이티브 ES 모듈(의존성 0): 스키마 트리(클릭=이름 넣기, 더블클릭=미리보기 탭), textarea와
+하이라이트 오버레이를 겹친 편집기, 별칭을 풀어 쓰는 자동완성, 입력 중 분류 배지, 정렬·찾기·페이지 그리드, 사유를 받는 CSV.
+
+### 검증: 단위·통합
+
+```
+StatementClassifierTest 67   (과거 requireSelect 우회 입력 E'\'' · 주석 속 아포스트로피 포함)
+ResultMaskerTest 8           (별칭 쌍 추출, 표현식 한계를 테스트로 고정)
+WorkbenchServiceTest 7       (분류에서 막히면 오퍼레이터·계정 조회 호출 0회, 조회 계정 없으면 모니터로 대신 실행 안 함)
+ConsolePoolIsolationTest 4   (H2로 실제 HikariCP: 모니터/READ/WRITE 풀 분리, 비밀번호 회전 시 옛 풀 닫힘, id 33이 3의 정리에 휩쓸리지 않음)
+./gradlew test               전체 통과 (수치는 커밋 메시지에)
+```
+
+### 검증: 읽기 전용 트랜잭션 겹을 단독으로 (ConsoleReadOnlyIT)
+
+분류기와 콘솔 계정 권한을 **둘 다 빼고**, 쓰기 권한이 있는 계정(root/postgres/스키마 소유자)으로 쓰기 문장을
+`executeReadOnly`에 직접 넣었다. 재현: `DBTOWER_CONSOLE_IT=1 ./gradlew test --tests '*ConsoleReadOnlyIT'`
+
+```
+[MySQL INSERT] Connection is read-only. Queries leading to data modification are not allowed.
+[MySQL DDL]    Connection is read-only. Queries leading to data modification are not allowed.
+[MySQL server @@transaction_read_only] 1
+[PG INSERT]     ERROR: cannot execute INSERT in a read-only transaction
+[PG set_config] ERROR: transaction read-write mode must be set before any query
+[PG nextval]    ERROR: cannot execute nextval() in a read-only transaction
+[Oracle INSERT] ORA-01456: READ ONLY 트랜잭션 내에 삽입, 삭제, 업데이트 작업을 수행할 수 없습니다.
+```
+
+MySQL의 거부 문구는 Connector/J의 **클라이언트 텍스트 검사**가 낸 것이다. 텍스트 검사는 경계로 믿지 않으므로
+같은 실행 안에서 서버 플래그를 따로 쟀고 1이었다(워크벤치 조회로도 `tx_ro=1, session_ro=1, dbtower_reader@%`).
+
+### 실측이 잡은 결함 4건
+
+1. **Oracle은 `setReadOnly(true)`가 아무것도 하지 않았다.** 처음 IT에서 쓰기 권한 계정의 INSERT가 예외 없이 들어갔고,
+   끝의 롤백만 행을 막고 있었다(`Expected java.lang.Exception to be thrown, but nothing was thrown`). "JDBC 표준 호출이라
+   드라이버가 흡수한다"는 가정이 드라이버마다 달랐다. `beginReadOnly` 훅을 두고 Oracle만 `SET TRANSACTION READ ONLY`를
+   첫 문장으로 건다. 수정 후 위 `ORA-01456`.
+2. **PostgreSQL에서 별칭 하나로 마스킹이 뚫렸다.** pgjdbc는 `getColumnName` 자리에 별칭을 돌려준다.
+   ```
+   수정 전 SELECT id, email AS e, phone AS p FROM customers  masked=[]  row: [1, 'hong@example.com', '01012345678']
+   수정 후 같은 문장                                          masked=['e','p'] row: [1, 'ho************om', '01*******78']
+   수정 후 SELECT e FROM (SELECT email AS e FROM customers) t masked=['e']
+   수정 후 MySQL  SELECT c.email e, c.phone `p` ...          masked=['e','p']
+   수정 후 Oracle SELECT email AS e FROM sample.customers      masked=['E']
+   ```
+   문장에서 `원래열 AS 별칭` 쌍을 겹쳐 훑어(첫 매치가 "SELECT email"을 먹으면 "email AS e"를 놓치던 것까지) 별칭도 원래
+   컬럼 규칙에 대 본다. 가리는 쪽으로만 틀리게 짰다.
+3. **로그인한 VIEWER가 ADMIN 경로를 부르면 403 대신 로그인 페이지(302)를 받았다.** 감사에는 403이 정확히 남았지만,
+   컨테이너가 403을 `/error`로 재디스패치하고 `/error`가 인증 대상이라 로그인 리다이렉트로 덮였다. 기존 ADMIN 경로
+   (리뷰 승인)도 같았다. `/error`를 허용해 `HTTP 403 application/json`으로 온다.
+4. **CSV 모달이 로드 직후부터 떠서 실행 버튼 클릭을 가로막았다.** `.wb-modal { display: flex }`가 브라우저 기본
+   `[hidden]`을 이겼다. Playwright 클릭이 `<div hidden id="wb-modal"> intercepts pointer events`로 실패해 드러났다.
+
+### 검증: 라이브 API (4기종, 콘솔 계정 dbtower_reader)
+
+```
+[거부: 모니터와 같은 계정]  HTTP 400 콘솔 계정은 모니터 계정과 달라야 합니다
+[거부: 틀린 비밀번호]        HTTP 400 접속 실패로 저장 거부
+[응답]                       [{"purpose":"READ","username":"dbtower_reader","updatedAt":"..."}]   비밀번호 없음
+MySQL  SELECT id,name,email,phone,grade   masked=['email','phone'] row: [1, '홍길동', 'ho************om', '01*******78', 'VIP']
+Oracle SELECT id,name,email,phone         masked=['EMAIL','PHONE']
+Mongo  {"find":"customers",...}           masked=['email','phone'] kind=MONGO_FIND
+MySQL  SELECT id,status,amount FROM orders rows=50 truncated=True
+UPDATE customers SET grade='VIP' ...      HTTP 409 NEEDS_APPROVAL
+COMMIT; DROP SCHEMA public CASCADE        HTTP 400 BLOCKED MULTI_STATEMENT
+SELECT 1 /* ' */; DROP TABLE customers    HTTP 400 BLOCKED MULTI_STATEMENT
+SELECT pg_terminate_backend(...)          HTTP 400 BLOCKED SIDE_EFFECT_FUNCTION
+{"aggregate": ..., [{"$out": "stolen"}]}  HTTP 400 BLOCKED MONGO_AGGREGATE_WRITE
+SELECT * FROM no_such_table               HTTP 422 Table 'sample.no_such_table' doesn't exist
+CSV 사유 "ab"                              HTTP 400
+CSV 사유 있음                              BOM + 마스킹 적용, X-Row-Count: 3
+VIEWER(team-a) -> team-b PG 조회          HTTP 404
+VIEWER -> 콘솔 계정 등록                   HTTP 403 (결함 3 수정 후)
+```
+
+실행 기록(메타 DB)에는 `UPDATE customers SET grade = ? WHERE id = ?`처럼 리터럴이 가려진 문장이 거부·오류와 함께 남았다.
+
+### 검증: 이름 기반 마스킹의 한계와 본 방어선
+
+```
+SELECT email || '' AS x FROM customers     masked=[]  row: ['hong@example.com']      <- 이름 기반으로는 못 잡는다
+-- 콘솔 계정에서 email 컬럼 권한만 뺀 뒤
+REVOKE SELECT ON customers FROM dbtower_reader;
+GRANT SELECT (id, name, phone, grade, created_at) ON customers TO dbtower_reader;
+SELECT email || '' AS x FROM customers     HTTP 422 permission denied for table customers
+SELECT email AS e FROM customers           HTTP 422 permission denied for table customers
+SELECT id, name, grade FROM customers      HTTP 200
+-- 원복
+```
+
+표현식 한계는 `ResultMaskerTest`에 "가려지지 않는다"로 박아 뒀다. 이 테스트가 깨지면 문서의 한계 서술을 고쳐야 한다.
+
+### 화면
+
+![워크벤치 조회 — 분류 배지·마스킹된 열](images/webui/67-workbench-query-masked.png)
+![변경 문장은 실행 전에 승인 티켓으로 안내](images/webui/68-workbench-change-rejected.png)
+![별칭 o를 orders로 풀어 쓰는 자동완성](images/webui/69-workbench-autocomplete.png)
+
+### 한계
+
+- SQL Server: 로컬에서 기동하지 못해(127절) 미측정. 드라이버가 읽기 전용을 무시하므로 그 기종의 경계는 콘솔 계정 권한과 끝의 롤백뿐이다.
+- MongoDB: 읽기 전용 트랜잭션에 해당하는 장치가 없어 명령 허용 목록 + `$out/$merge` 거부 + read 롤로 막는다.
+- 스키마 트리는 모니터 계정의 카탈로그 권한을 따른다(PostgreSQL은 테이블 SELECT가 있어야 보인다).
+- CSV는 오퍼레이터 상한 1000행까지다.
+

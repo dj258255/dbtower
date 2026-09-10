@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>워크벤치 - DBTower</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="workbench.css">
+</head>
+<body class="wb-body">
+<header class="topbar">
+  <div class="brand">
+    <img class="brand-logo" src="favicon.svg" alt="" width="28" height="28">
+    <span class="brand-name">DBTower</span>
+    <span class="brand-tag">거버넌스 SQL 워크벤치</span>
+  </div>
+  <nav class="topnav">
+    <a href="/">대시보드</a>
+    <span id="user-chip" class="user-chip"></span>
+    <button id="logout-btn" class="btn btn-small">로그아웃</button>
+  </nav>
+</header>
+
+<div class="wb-shell">
+  <!-- 좌: 인스턴스와 스키마 트리 — 클릭하면 이름이 편집기에, 더블클릭하면 미리보기 쿼리가 새 탭에 -->
+  <aside class="wb-side">
+    <label class="wb-label" for="wb-instance">인스턴스</label>
+    <select id="wb-instance"></select>
+    <div id="wb-instance-note" class="wb-note" hidden></div>
+    <input id="wb-tree-filter" type="search" placeholder="테이블·컬럼 검색" autocomplete="off">
+    <div id="wb-tree" class="wb-tree muted">인스턴스를 고르세요</div>
+    <p class="hint wb-policy">조회는 조회 전용 계정·읽기 전용 트랜잭션으로 즉시 실행됩니다. 변경 문장은 승인 티켓으로, 위험한 문장은 차단됩니다. 모든 실행은 기록됩니다.</p>
+  </aside>
+
+  <!-- 중: 탭 편집기 + 결과 -->
+  <main class="wb-main">
+    <div class="wb-tabs" id="wb-tabs"></div>
+    <div class="editor" id="wb-editor">
+      <pre class="editor-highlight" aria-hidden="true"><code id="wb-highlight"></code></pre>
+      <textarea id="wb-input" class="editor-input" spellcheck="false" autocomplete="off" autocapitalize="off"
+                aria-label="SQL 편집기"></textarea>
+      <ul id="wb-complete" class="autocomplete" role="listbox" hidden></ul>
+    </div>
+    <div class="wb-toolbar">
+      <button id="wb-run" class="btn btn-primary btn-small" title="Ctrl/Cmd + Enter · 선택 영역이 있으면 그 부분만">실행</button>
+      <select id="wb-limit" aria-label="행 상한">
+        <option value="100">100행</option>
+        <option value="200" selected>200행</option>
+        <option value="500">500행</option>
+        <option value="1000">1000행</option>
+      </select>
+      <button id="wb-export" class="btn btn-small">CSV 내보내기</button>
+      <span id="wb-class" class="wb-class"></span>
+      <span class="wb-spacer"></span>
+      <span id="wb-status" class="muted"></span>
+    </div>
+    <div class="wb-result-tabs">
+      <button class="wb-rtab active" data-pane="grid">결과</button>
+      <button class="wb-rtab" data-pane="history">내 실행 기록</button>
+    </div>
+    <section id="wb-pane-grid" class="wb-pane">
+      <div id="wb-grid" class="muted">문장을 실행하면 결과가 여기에 나옵니다.</div>
+    </section>
+    <section id="wb-pane-history" class="wb-pane" hidden>
+      <div id="wb-history" class="muted"></div>
+    </section>
+  </main>
+</div>
+
+<div id="wb-modal" class="wb-modal" hidden>
+  <div class="wb-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-modal-title">
+    <h3 id="wb-modal-title">CSV 내보내기</h3>
+    <p class="muted">파일로 가져가는 데이터는 화면보다 유출 반경이 큽니다. 사유는 실행 기록에 남고, 마스킹이 그대로 적용됩니다. 최대 1000행.</p>
+    <textarea id="wb-reason" rows="3" placeholder="예: 주간 결제 실패 건을 CS팀에 전달"></textarea>
+    <div class="wb-dialog-actions">
+      <button id="wb-modal-cancel" class="btn btn-small">취소</button>
+      <button id="wb-modal-ok" class="btn btn-primary btn-small">내보내기</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="workbench/main.js"></script>
+</body>
+</html>

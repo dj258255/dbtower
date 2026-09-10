@@ -7,6 +7,8 @@ import com.mongodb.MongoCredential;
 import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import io.dbtower.registry.ConsoleCredential;
+import io.dbtower.registry.CredentialPurpose;
 import io.dbtower.registry.DatabaseInstance;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Component;
@@ -27,6 +29,10 @@ import java.util.concurrent.TimeUnit;
 public class MongoClientCache {
 
     private final Map<Long, MongoClient> clients = new ConcurrentHashMap<>();
+
+    /** 워크벤치 콘솔 계정 클라이언트 — 모니터 클라이언트와 섞지 않는다. 키는 "인스턴스id:용도". */
+    private final Map<String, MongoClient> consoleClients = new ConcurrentHashMap<>();
+    private final Map<String, ConsoleCredential> consoleCredentials = new ConcurrentHashMap<>();
 
     /**
      * A9: Mongo 조회의 소켓 read 상한(초). JDBC의 setQueryTimeout과 같은 목적 —
@@ -60,7 +66,28 @@ public class MongoClientCache {
         return instance.getId() == null;
     }
 
+    /** 콘솔 계정 클라이언트 — 자격증명이 바뀌면 옛 클라이언트를 닫고 새로 만든다(JDBC 콘솔 풀과 같은 원칙). */
+    public MongoClient console(DatabaseInstance instance, CredentialPurpose purpose, ConsoleCredential credential) {
+        if (instance.getId() == null) {
+            throw new IllegalArgumentException("콘솔 클라이언트는 등록된 인스턴스에만 만든다");
+        }
+        String key = instance.getId() + ":" + purpose;
+        ConsoleCredential previous = consoleCredentials.put(key, credential);
+        if (previous != null && !previous.equals(credential)) {
+            MongoClient stale = consoleClients.remove(key);
+            if (stale != null) {
+                stale.close();
+            }
+        }
+        return consoleClients.computeIfAbsent(key,
+                k -> create(instance, credential.username(), credential.password()));
+    }
+
     private MongoClient create(DatabaseInstance instance) {
+        return create(instance, instance.getUsername(), instance.getPassword());
+    }
+
+    private MongoClient create(DatabaseInstance instance, String username, String password) {
         // 접속 URI 문자열 대신 빌더를 쓴다 — 비밀번호에 특수문자가 있어도 URL 인코딩 이슈가 없다.
         // authSource=admin 가정: 관리 플랫폼은 admin에 만든 모니터링 계정으로 붙는다(다른 기종의 root/sa/postgres와 동일한 전제)
         MongoClientSettings settings = MongoClientSettings.builder()
@@ -80,7 +107,7 @@ public class MongoClientCache {
                         .minSize(0)
                         .maxConnectionIdleTime(idleTimeoutSeconds, TimeUnit.SECONDS))
                 .credential(MongoCredential.createCredential(
-                        instance.getUsername(), "admin", instance.getPassword().toCharArray()))
+                        username, "admin", password.toCharArray()))
                 .applicationName("dbtower")
                 .build();
         return MongoClients.create(settings);
@@ -92,11 +119,23 @@ public class MongoClientCache {
         if (client != null) {
             client.close();
         }
+        String prefix = id + ":";
+        consoleClients.entrySet().removeIf(e -> {
+            if (!e.getKey().startsWith(prefix)) {
+                return false;
+            }
+            e.getValue().close();
+            return true;
+        });
+        consoleCredentials.keySet().removeIf(k -> k.startsWith(prefix));
     }
 
     @PreDestroy
     public void closeAll() {
         clients.values().forEach(MongoClient::close);
         clients.clear();
+        consoleClients.values().forEach(MongoClient::close);
+        consoleClients.clear();
+        consoleCredentials.clear();
     }
 }

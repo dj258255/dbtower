@@ -2,6 +2,8 @@ package io.dbtower.operator;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import io.dbtower.registry.ConsoleCredential;
+import io.dbtower.registry.CredentialPurpose;
 import io.dbtower.registry.DatabaseInstance;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -18,6 +20,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -46,6 +49,14 @@ public class ConnectionPools {
     private static final Logger log = LoggerFactory.getLogger(ConnectionPools.class);
 
     private final Map<Long, HikariDataSource> pools = new ConcurrentHashMap<>();
+
+    /**
+     * 워크벤치 콘솔 계정 풀 — 모니터 풀과 절대 섞지 않는다. 키는 "인스턴스id:용도"(READ/WRITE).
+     * 사람이 여는 조회라 수집기처럼 동시 접근자가 많지 않아 상한을 작게 둔다(대상 DB 슬롯은 서비스의 자원).
+     */
+    private final Map<String, HikariDataSource> consolePools = new ConcurrentHashMap<>();
+    private final Map<String, Long> consoleLastUsedMs = new ConcurrentHashMap<>();
+    private static final int CONSOLE_POOL_MAX = 2;
 
     /** Vault 동적 자격증명(선택) — username이 vault: 접두인 인스턴스의 실제 계정을 접속 시점에 해석 */
     private final VaultCredentials vaultCredentials;
@@ -193,6 +204,7 @@ public class ConnectionPools {
             return;
         }
         long cutoff = System.currentTimeMillis() - evictAfterMinutes * 60_000;
+        evictIdleConsolePools(cutoff);
         List<Long> stale = new ArrayList<>();
         lastUsedMs.forEach((id, used) -> {
             if (used < cutoff && pools.containsKey(id)) {
@@ -209,11 +221,69 @@ public class ConnectionPools {
         }
     }
 
+    /**
+     * 콘솔 계정 풀 — 모니터 풀과 같은 자원 정책(온디맨드·유휴 회수·수명)을 따르되 상한만 작다.
+     * 등록 전 인스턴스(id 없음)에는 만들지 않는다: 콘솔 계정은 등록된 대상에만 붙는다.
+     */
+    public DataSource getConsoleDataSource(DatabaseInstance instance, String jdbcUrl,
+                                           CredentialPurpose purpose, ConsoleCredential credential) {
+        if (instance.getId() == null) {
+            throw new IllegalArgumentException("콘솔 풀은 등록된 인스턴스에만 만든다");
+        }
+        String key = instance.getId() + ":" + purpose;
+        consoleLastUsedMs.put(key, System.currentTimeMillis());
+        HikariDataSource existing = consolePools.get(key);
+        // 계정이나 비밀번호가 바뀌었으면 옛 풀을 버린다 — 모니터 풀의 동적 자격증명 회전과 같은 원칙
+        if (existing != null && (!Objects.equals(existing.getUsername(), credential.username())
+                || !Objects.equals(existing.getPassword(), credential.password()))) {
+            consolePools.remove(key, existing);
+            existing.close();
+        }
+        return consolePools.computeIfAbsent(key, k -> newConsolePool(instance, jdbcUrl, purpose, credential));
+    }
+
+    private HikariDataSource newConsolePool(DatabaseInstance instance, String jdbcUrl,
+                                            CredentialPurpose purpose, ConsoleCredential credential) {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(jdbcUrl);
+        config.setUsername(credential.username());
+        config.setPassword(credential.password());
+        config.setMaximumPoolSize(CONSOLE_POOL_MAX);
+        config.setMinimumIdle(0);
+        config.setIdleTimeout(idleTimeoutMs);
+        config.setMaxLifetime(maxLifetimeMs);
+        config.setConnectionTimeout(connectionTimeoutMs);
+        config.setPoolName("dbtower-" + instance.getName() + "-" + purpose.name().toLowerCase());
+        return new HikariDataSource(config);
+    }
+
+    private void evictIdleConsolePools(long cutoff) {
+        consoleLastUsedMs.forEach((key, used) -> {
+            if (used < cutoff) {
+                HikariDataSource ds = consolePools.remove(key);
+                consoleLastUsedMs.remove(key);
+                if (ds != null) {
+                    ds.close();
+                    log.info("유휴 콘솔 풀 정리 — pool={}", ds.getPoolName());
+                }
+            }
+        });
+    }
+
     /** 인스턴스 삭제 시 풀도 정리한다 — 안 하면 죽은 대상의 커넥션이 남는다 */
     public void close(Long instanceId) {
         HikariDataSource ds = pools.remove(instanceId);
         lastUsedMs.remove(instanceId);
         vaultCredentials.evict(instanceId);
+        String prefix = instanceId + ":";
+        consolePools.entrySet().removeIf(e -> {
+            if (!e.getKey().startsWith(prefix)) {
+                return false;
+            }
+            e.getValue().close();
+            return true;
+        });
+        consoleLastUsedMs.keySet().removeIf(k -> k.startsWith(prefix));
         if (ds != null) {
             ds.close();
         }
@@ -224,5 +294,8 @@ public class ConnectionPools {
         pools.values().forEach(HikariDataSource::close);
         pools.clear();
         lastUsedMs.clear();
+        consolePools.values().forEach(HikariDataSource::close);
+        consolePools.clear();
+        consoleLastUsedMs.clear();
     }
 }

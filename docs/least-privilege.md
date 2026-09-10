@@ -294,6 +294,43 @@ db.getSiblingDB('admin').createUser({
 
 ---
 
+## 워크벤치 콘솔 계정 (2026-09-10)
+
+거버넌스 SQL 워크벤치는 모니터 계정을 쓰지 않는다. 사람이 여는 자유 조회는 인스턴스마다 따로 등록한 **콘솔 계정**으로만
+실행된다(`PUT /api/instances/{id}/credentials/READ`, ADMIN). 플랫폼은 모니터 계정과 같은 이름을 거부하고, 저장 전에 실제로
+접속해 본다. 재현 스크립트: `docker/workbench-{mysql,postgres,oracle}.sql`, `docker/workbench-mongo.js`.
+
+| 기종 | 조회 계정(READ) | 변경 계정(WRITE, 3단계: 승인된 티켓만 실행) |
+|---|---|---|
+| MySQL | `GRANT SELECT ON sample.*` | `GRANT SELECT, INSERT, UPDATE, DELETE ON sample.*` |
+| PostgreSQL | `CONNECT` + `USAGE ON SCHEMA public` + `SELECT ON ALL TABLES` | 위 + `INSERT, UPDATE, DELETE` + `USAGE ON ALL SEQUENCES` |
+| Oracle | `CREATE SESSION` + 테이블별 `READ`(SELECT와 달리 `FOR UPDATE` 락을 못 건다) | `CREATE SESSION` + 테이블별 `SELECT, INSERT, UPDATE, DELETE` |
+| MongoDB | `read@sample` (admin db에 생성) | `readWrite@sample` |
+
+DDL·권한 변경 권한은 어느 계정에도 주지 않는다.
+
+### 민감 컬럼은 계정 권한으로 뺀다 (본 방어선)
+
+워크벤치의 결과 마스킹은 컬럼 이름 기반이라 표현식(`email || ''`)은 원리상 못 잡는다. 반드시 가려야 하는 컬럼은 조회 계정의
+컬럼 단위 권한에서 뺀다. 실측(VERIFICATION 128절):
+
+```sql
+-- PostgreSQL
+REVOKE SELECT ON customers FROM dbtower_reader;
+GRANT SELECT (id, name, phone, grade, created_at) ON customers TO dbtower_reader;
+-- SELECT email || '' AS x FROM customers  ->  ERROR: permission denied for table customers
+-- MySQL도 같은 형태: GRANT SELECT (id, name, grade) ON sample.customers TO 'dbtower_reader'@'%';
+```
+
+### 읽기 전용 트랜잭션은 드라이버마다 다르게 걸린다
+
+콘솔 실행은 `setReadOnly(true)` 후 끝에 항상 롤백한다. 쓰기 권한 계정으로 직접 INSERT를 넣어 잰 결과:
+MySQL은 드라이버 텍스트 검사 + 서버 `@@transaction_read_only=1`, PostgreSQL은 서버가 `read-only transaction`으로 거부,
+**Oracle JDBC는 아무것도 하지 않아** 플랫폼이 `SET TRANSACTION READ ONLY`를 직접 건다(`ORA-01456`), SQL Server 드라이버는
+힌트를 무시하므로 그 기종의 경계는 조회 계정 권한뿐이다. 그래서 조회 계정에서 쓰기 권한을 빼는 것이 모든 기종에 공통인 마지막 겹이다.
+
+---
+
 ## 백업은 이 계정의 범위 밖이다
 
 백업(`POST /api/instances/{id}/backup`)은 모니터링이 아니라 **관리 작업**이다.

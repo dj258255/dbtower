@@ -155,6 +155,10 @@ public class SecurityConfig {
                                 "/favicon.ico", "/favicon.svg", "/favicon-96x96.png", "/apple-touch-icon.png").permitAll()
                         // Prometheus 수집 경로 — 네트워크 레벨 제한 전제 (docs/operations.md)
                         .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
+                        // 인가 거부(403)는 컨테이너가 /error로 다시 디스패치한다. /error가 인증 대상이면 그 디스패치가
+                        // 로그인 리다이렉트(302)로 덮여, 로그인한 VIEWER가 ADMIN 경로를 부르면 "권한 없음" 대신
+                        // 로그인 화면 HTML을 받았다(실측, VERIFICATION 128절). 오류 본문엔 스택트레이스가 없다(Boot 기본).
+                        .requestMatchers("/error").permitAll()
                         // OAuth discovery·등록·토큰은 미인증 허용(클라이언트가 로그인 전에 부른다).
                         // authorize는 authenticated() — 미로그인이면 기존 폼 로그인으로 유도되고, 로그인 후 재생된다.
                         .requestMatchers("/.well-known/oauth-authorization-server",
@@ -195,6 +199,11 @@ public class SecurityConfig {
                         // 인시던트 리포트(B4)·월간 점검 리포트(B5)는 설정 값·성능을 담아 ADMIN.
                         .requestMatchers(HttpMethod.POST, "/api/instances/*/incident-report").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/instances/*/monthly-report").hasRole("ADMIN")
+                        // 워크벤치 콘솔 계정(조회·변경 DB 계정)은 대상 DB 데이터 접근 권한 그 자체라 조회·등록·삭제 전부 ADMIN.
+                        .requestMatchers("/api/instances/*/credentials", "/api/instances/*/credentials/*").hasRole("ADMIN")
+                        // 마스킹 규칙 변경은 누가 무엇을 볼지 정하는 정책이라 ADMIN. 조회(GET)는 왜 가려졌는지 알 수 있게 연다.
+                        .requestMatchers(HttpMethod.POST, "/api/workbench/masking-rules").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/workbench/masking-rules/*").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage("/login.html")
