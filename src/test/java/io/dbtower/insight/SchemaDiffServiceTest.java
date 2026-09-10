@@ -1,6 +1,6 @@
 package io.dbtower.insight;
 
-import io.dbtower.insight.internal.SchemaDiffService;
+import io.dbtower.insight.SchemaDiffService;
 import io.dbtower.operator.model.ColumnSchema;
 import io.dbtower.operator.model.IndexSchema;
 import io.dbtower.operator.model.SchemaSnapshot;

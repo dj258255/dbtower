@@ -19,6 +19,7 @@ import io.dbtower.review.internal.domain.ReviewRequest.Status;
 import io.dbtower.review.internal.persistence.ReviewRequestRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,7 +31,8 @@ import java.util.Optional;
 /**
  * 스키마 변경 리뷰 게이트 서비스 (운영 병목 아크 B2). 제출 시 규칙 판정(ChangeReviewRules) +
  * 대테이블 락 위험 확인(tableDetail 행수) + AI 1차 소견(AiAnalyzer)을 붙여 PENDING으로 저장하고,
- * ADMIN이 승인/반려한다. 실행은 하지 않는다 — 승인된 MySQL DDL이면 gh-ost 화면 안내만 붙인다.
+ * ADMIN이 승인/반려한다. 실행은 이 서비스가 하지 않는다 — 승인된 티켓만 워크벤치 실행 계층이 {@link io.dbtower.review.ChangeTicketGate}로
+ * 실행권을 얻어 실행하고, 대형 MySQL DDL은 gh-ost 화면 안내를 붙인다.
  *
  * 판정 근거는 사람이 정한 규칙(ChangeReviewRules)이고 AI는 그 위 1차 소견이다(ai-analysis-rules
  * 원칙 승계). 카드 발송은 이벤트로 alert에 위임한다(Modulith 순환 회피).
@@ -53,10 +55,12 @@ public class ReviewService {
     private final AiAnalyzer aiAnalyzer;
     private final QueryMasker queryMasker;
     private final ApplicationEventPublisher events;
+    private final boolean requireSeparateApprover;
 
     public ReviewService(ReviewRequestRepository repository, RegistryService registryService,
                          DbmsOperatorFactory operatorFactory, AiAnalyzer aiAnalyzer,
-                         QueryMasker queryMasker, ApplicationEventPublisher events) {
+                         QueryMasker queryMasker, ApplicationEventPublisher events,
+                         @Value("${dbtower.review.require-separate-approver:false}") boolean requireSeparateApprover) {
         this.repository = repository;
         this.registryService = registryService;
         this.operatorFactory = operatorFactory;
@@ -64,9 +68,11 @@ public class ReviewService {
         this.aiAnalyzer = aiAnalyzer;
         this.queryMasker = queryMasker;
         this.events = events;
+        this.requireSeparateApprover = requireSeparateApprover;
     }
 
-    public record SubmitRequest(String sql, String reason) {
+    /** @param verifySql 변경 전후로 실행계획·응답시간을 잴 검증 조회(선택). 실행 시점에 읽기 문장인지 다시 판정한다 */
+    public record SubmitRequest(String sql, String reason, String verifySql) {
     }
 
     /** 제출 — 규칙 판정 + 락 위험 확인 + AI 소견을 굳혀 PENDING 저장, 리뷰 카드 이벤트 발행. */
@@ -86,7 +92,8 @@ public class ReviewService {
         String aiOpinion = aiOpinion(req.sql(), findings);
         ReviewRequest saved = repository.save(new ReviewRequest(
                 instanceId, req.sql(), req.reason(), requester,
-                String.join("\n", findings), aiOpinion, ChangeReviewRules.VERSION, verdict.parseLimited()));
+                String.join("\n", findings), aiOpinion, ChangeReviewRules.VERSION, verdict.parseLimited(),
+                req.verifySql() == null || req.verifySql().isBlank() ? null : req.verifySql().strip()));
 
         events.publishEvent(new ReviewSubmittedEvent(saved.getId(), instanceId, requester,
                 queryMasker.apply(req.sql()), findings, aiOpinion, verdict.parseLimited()));
@@ -101,6 +108,10 @@ public class ReviewService {
         if (review.getStatus() != Status.PENDING) {
             throw new IllegalStateException("이미 처리된 요청입니다: " + review.getStatus());
         }
+        // 승인이 곧 실행 권한이 되었으므로, 조직이 원하면 "요청자 != 승인자"를 강제한다(단일 ADMIN 데모 환경은 꺼 둔다)
+        if (approved && requireSeparateApprover && review.getRequester().equals(decidedBy)) {
+            throw new IllegalStateException("요청자는 자기 변경 요청을 승인할 수 없습니다(dbtower.review.require-separate-approver)");
+        }
         review.decide(approved ? Status.APPROVED : Status.REJECTED, decidedBy, comment);
         repository.save(review);
 
@@ -108,7 +119,8 @@ public class ReviewService {
         if (approved) {
             DatabaseInstance instance = registryService.findById(review.getInstanceId());
             if (instance.getType() == DbmsType.MYSQL && isDdl(review.getTargetSql())) {
-                hint = "승인된 MySQL DDL — 대형 테이블이면 온라인 DDL(gh-ost) 화면에서 dry-run 후 실행하세요. 실행은 사람이 합니다.";
+                hint = "승인된 MySQL DDL — 대형 테이블이면 온라인 DDL(gh-ost) 화면에서 dry-run 후 실행하세요. "
+                        + "작은 테이블은 워크벤치 변경 티켓 실행으로 전후 구조 비교와 함께 실행할 수 있습니다.";
             }
         }
         events.publishEvent(new ReviewDecidedEvent(reviewId, review.getInstanceId(), approved,

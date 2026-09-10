@@ -13,8 +13,12 @@ import io.dbtower.operator.model.LatencyPercentile;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
+import io.dbtower.operator.model.ChangeOutcome;
+import io.dbtower.operator.model.ChangePlan;
 import io.dbtower.operator.model.QueryStat;
 import io.dbtower.operator.model.ReplicationState;
+import io.dbtower.operator.model.RevertPlan;
+import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.operator.RestoreSupport;
 import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.SchemaSnapshot;
@@ -71,6 +75,20 @@ public class MsSqlOperator extends AbstractJdbcOperator {
 
     public MsSqlOperator(DatabaseInstance instance, ConnectionPools pools, BackupTools backupTools) {
         super(instance, pools, backupTools);
+    }
+
+    /**
+     * 변경 티켓 실행은 실측으로 검증한 기종에만 연다. SQL Server는 행 락 문법(UPDLOCK 힌트)과 생성 키 동작이 다른데,
+     * 로컬 환경(Colima, Rosetta 없음)에서 컨테이너가 뜨지 않아 재지 못했다(VERIFICATION 128절).
+     */
+    @Override
+    public ChangeOutcome executeChange(ConsoleCredential credential, ChangePlan plan) {
+        throw new UnsupportedOperationException("SQL Server 변경 티켓 실행은 실측 검증 전이라 열지 않았습니다");
+    }
+
+    @Override
+    public RevertPlan.Outcome revertChange(ConsoleCredential credential, RevertPlan plan) {
+        throw new UnsupportedOperationException("SQL Server 변경 되돌리기는 실측 검증 전이라 열지 않았습니다");
     }
 
     /**

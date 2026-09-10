@@ -29,7 +29,9 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 워크벤치 조회의 정책 계층 — 문장 분류, 콘솔 계정 확인, 읽기 전용 실행, 결과 마스킹, 실행 기록을 한 흐름으로 묶는다.
@@ -42,6 +44,7 @@ public class WorkbenchService {
 
     private static final int STATEMENT_LOG_MAX = 4_000;
     private static final int EXPORT_REASON_MIN = 5;
+    private static final int COMPARE_CHANGES_MAX = 200;
 
     private final RegistryService registry;
     private final ConsoleCredentialService credentials;
@@ -139,6 +142,45 @@ public class WorkbenchService {
                 e.result().rowCount(), e.result().truncated());
     }
 
+    public record CompareSide(Long instanceId, String name, String type, int rowCount, boolean truncated, long elapsedMs) {
+    }
+
+    public record CompareView(Classification classification, CompareSide left, CompareSide right, RowDiff.Result diff,
+                              List<String> maskedColumns) {
+    }
+
+    /**
+     * 같은 조회를 두 인스턴스에서 실행해 결과를 행 단위로 비교한다(스테이징 대 운영, 원본 대 복제 등). 양쪽 다 조회 경로를 그대로
+     * 탄다 — 각 인스턴스의 조회 계정·읽기 전용·기록. 차이 판정은 원래 값으로 하고, 보여줄 때는 두 인스턴스 마스킹 규칙의 합집합으로
+     * 가린다(한쪽에서만 가리는 열이 비교 화면으로 새지 않게).
+     */
+    public CompareView compare(Long leftId, Long rightId, String statement, List<String> keyColumns, Integer rowLimit) {
+        if (leftId == null || rightId == null || Objects.equals(leftId, rightId)) {
+            throw new WorkbenchRejection(400, "서로 다른 두 인스턴스를 골라야 합니다", null);
+        }
+        int limit = rowLimit == null ? defaultRowLimit : rowLimit;
+        Execution left = execute(leftId, statement, limit, "COMPARE", null);
+        Execution right = execute(rightId, statement, limit, "COMPARE", null);
+        RowDiff.Result diff = RowDiff.diff(names(left.result()), left.result().rows(), names(right.result()),
+                right.result().rows(), keyColumns == null ? List.of() : keyColumns, COMPARE_CHANGES_MAX);
+        if (left.result().truncated() || right.result().truncated()) {
+            diff = diff.withNote("행 상한(" + limit + "행)에 걸려 일부 행만 비교했다. 차이가 상한 밖에 있을 수 있어 조건이나 키로 좁혀야 한다");
+        }
+        List<Policy> policies = new ArrayList<>(policies(leftId));
+        policies.addAll(policies(rightId));
+        ResultMasker.MaskedDiff masked = ResultMasker.maskDiff(diff, policies);
+        return new CompareView(left.classification(), side(left), side(right), masked.diff(), masked.maskedColumns());
+    }
+
+    private static CompareSide side(Execution e) {
+        return new CompareSide(e.instance().getId(), e.instance().getName(), e.instance().getType().name(),
+                e.result().rowCount(), e.result().truncated(), e.result().elapsedMs());
+    }
+
+    private static List<String> names(QueryResult result) {
+        return result.columns().stream().map(ResultColumn::name).toList();
+    }
+
     public List<HistoryItem> history(Long instanceId, int limit) {
         registry.findById(instanceId);
         return logs.findByInstanceIdAndPrincipalOrderByOccurredAtDesc(instanceId, currentPrincipal(),
@@ -203,7 +245,7 @@ public class WorkbenchService {
     private record Outcome(QueryResult result, Masked masked) {
     }
 
-    private List<Policy> policies(Long instanceId) {
+    List<Policy> policies(Long instanceId) {
         return maskingRules.findApplicable(instanceId).stream()
                 .map(r -> new Policy(r.getColumnPattern(), r.getStrategy()))
                 .toList();

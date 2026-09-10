@@ -170,6 +170,69 @@ body.picking table.grid th:not(.rownum), body.picking .tree-name, body.picking .
 .wb-dialog textarea { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
 .wb-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 
+/* 변경 티켓 */
+.tk-list { flex: none; max-height: 32%; overflow: auto; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.tk-items { list-style: none; margin: 0; padding: 0; }
+.tk-items li { display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
+.tk-items li:hover { background: #f3f4f8; }
+.tk-items li.active { background: #eef0ff; }
+.tk-sql { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-family: "JetBrains Mono", Menlo, Consolas, monospace; font-size: 11.5px; }
+.tk-id { font-weight: 700; font-size: 12.5px; }
+.tk-st { font-size: 11px; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.st-pending { background: #f3f4f8; color: #4b5563; }
+.st-approved { background: #eef0ff; color: #3340c9; }
+.st-rejected { background: #fdecee; color: #b42335; }
+.st-running { background: #fff1e0; color: #a35200; }
+.st-executed { background: #e7f6ee; color: #137a4b; }
+.st-rolled { background: #f1f2f6; color: #4b5563; }
+.tk-detail { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.tk-head { display: flex; align-items: center; gap: 8px; }
+.tk-line { font-size: 12.5px; line-height: 1.6; }
+.tk-findings, .tk-steps, .tk-conflicts { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.6; }
+.tk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tk-comment { flex: 1; min-width: 120px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 12px; }
+.tk-sub { margin: 6px 0 0; font-size: 13px; }
+.tk-exec { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.tk-exec summary { cursor: pointer; font-size: 12.5px; line-height: 1.7; }
+.tk-exec[open] summary { margin-bottom: 6px; }
+.tk-act { font-weight: 700; margin-right: 6px; }
+.tk-out { font-size: 11px; border-radius: 4px; padding: 0 6px; margin-right: 6px; }
+.o-ok { background: #e7f6ee; color: #137a4b; }
+.o-info { background: #eef0ff; color: #3340c9; }
+.o-warn { background: #fff1e0; color: #a35200; }
+.o-bad { background: #fdecee; color: #b42335; }
+.tk-error { white-space: pre-wrap; font-size: 12px; background: #f3f4f8; border-radius: 6px; padding: 6px 8px; margin: 4px 0; }
+.tk-workload { margin-top: 6px; }
+
+/* 전후 비교 */
+.df { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.df-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12.5px; }
+.df-table th, .df-table td { max-width: 260px; }
+.df-table .null { color: var(--muted); font-style: italic; }
+.df-key { background: #e4e7ff !important; }
+tr.df-added td { background: #effaf3; }
+tr.df-removed td { background: #fdf1f2; }
+.df-type { font-size: 11px; font-weight: 700; }
+.df-cell del { color: #b42335; }
+.df-cell ins { color: #137a4b; text-decoration: none; font-weight: 600; }
+.df-arrow { color: var(--muted); margin: 0 4px; }
+.df-title { font-weight: 700; font-size: 12.5px; margin-top: 6px; }
+.df-schema ul { margin: 4px 0; padding-left: 18px; font-size: 12.5px; line-height: 1.6; }
+.sd-add { color: #137a4b; }
+.sd-remove { color: #b42335; }
+.sd-change { color: #a35200; }
+.probe-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+.probe-cols pre { margin: 2px 0 0; font-size: 11px; background: #fbfbfd; border: 1px solid var(--line); border-radius: 6px; padding: 6px; white-space: pre-wrap; max-height: 240px; overflow: auto; }
+
+/* 인스턴스 간 비교 */
+.cmp-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12.5px; }
+.cmp-bar select, .cmp-bar input { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 12.5px; }
+.cmp-bar input { width: 240px; }
+.cmp-sides { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12.5px; margin-bottom: 4px; }
+.wb-dialog-wide { width: min(640px, 94vw); }
+.wb-dialog label { display: block; margin-top: 8px; }
+.wb-dialog pre.ai-sql { max-height: 160px; overflow: auto; }
+
 @media (max-width: 1200px) {
   .wb-body { height: auto; overflow: auto; }
   .wb-shell { grid-template-columns: 1fr; }

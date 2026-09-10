@@ -30,13 +30,16 @@ public class ReviewController {
     public record ReviewView(Long id, Long instanceId, String targetSql, String reason,
                              String requester, String status, List<String> findings, String aiOpinion,
                              int rulesVersion, boolean parseLimited, LocalDateTime submittedAt,
-                             String decidedBy, LocalDateTime decidedAt, String decisionComment) {
+                             String decidedBy, LocalDateTime decidedAt, String decisionComment,
+                             String verifySql, String executedBy, LocalDateTime executedAt,
+                             String rolledBackBy, LocalDateTime rolledBackAt) {
         static ReviewView of(ReviewRequest r) {
             return new ReviewView(r.getId(), r.getInstanceId(), r.getTargetSql(), r.getReason(),
                     r.getRequester(), r.getStatus().name(),
                     r.getFindings() == null ? List.of() : List.of(r.getFindings().split("\n")),
                     r.getAiOpinion(), r.getRulesVersion(), r.isParseLimited(), r.getSubmittedAt(),
-                    r.getDecidedBy(), r.getDecidedAt(), r.getDecisionComment());
+                    r.getDecidedBy(), r.getDecidedAt(), r.getDecisionComment(),
+                    r.getVerifySql(), r.getExecutedBy(), r.getExecutedAt(), r.getRolledBackBy(), r.getRolledBackAt());
         }
     }
 

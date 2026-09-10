@@ -77,6 +77,11 @@ dbtower:
   workbench:
     default-row-limit: 200
     timeout-seconds: 15
+    # 승인 티켓 실행 — 행 사본 상한(넘으면 실행하지 않는다), 문장·락 대기 상한, 사본 보존 기한(지나면 되돌리기 닫힘)
+    change:
+      max-rows: 10000
+      timeout-seconds: 30
+      image-retention-days: 7
   # 스케일 제어 (Phase F)
   scheduler:
     pool-size: 4         # @Scheduled 폴러 공용 스레드 풀 — 느린 폴러가 뒤 전부를 막는 head-of-line blocking 방지

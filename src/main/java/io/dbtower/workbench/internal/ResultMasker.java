@@ -81,6 +81,51 @@ public final class ResultMasker {
         return new Masked(out, List.copyOf(masked));
     }
 
+    record MaskedDiff(RowDiff.Result diff, List<String> maskedColumns) {
+    }
+
+    /** 열 이름 하나에 적용될 전략 — 행 사본·비교 결과처럼 결과 집합 모양이 아닌 곳에서 쓴다. 없으면 null */
+    static MaskingStrategy strategyFor(String column, List<Policy> policies) {
+        for (Policy policy : policies) {
+            if (matches(glob(policy.columnPattern()), column)) {
+                return policy.strategy();
+            }
+        }
+        return null;
+    }
+
+    /** 차이 결과의 값과 키를 가린다. 바뀌었는지(changed)는 원래 값으로 이미 판정됐으므로 그대로 둔다 */
+    static MaskedDiff maskDiff(RowDiff.Result diff, List<Policy> policies) {
+        Map<String, MaskingStrategy> byColumn = new HashMap<>();
+        List<String> masked = new ArrayList<>();
+        for (String column : diff.columns()) {
+            MaskingStrategy strategy = strategyFor(column, policies);
+            if (strategy != null) {
+                byColumn.put(lower(column), strategy);
+                masked.add(column);
+            }
+        }
+        if (byColumn.isEmpty()) {
+            return new MaskedDiff(diff, List.of());
+        }
+        List<RowDiff.RowChange> changes = new ArrayList<>(diff.changes().size());
+        for (RowDiff.RowChange change : diff.changes()) {
+            List<Object> key = new ArrayList<>(change.key().size());
+            for (int i = 0; i < change.key().size(); i++) {
+                MaskingStrategy strategy = byColumn.get(lower(diff.keyColumns().get(i)));
+                key.add(strategy == null ? change.key().get(i) : mask(change.key().get(i), strategy));
+            }
+            List<RowDiff.Cell> cells = new ArrayList<>(change.cells().size());
+            for (RowDiff.Cell cell : change.cells()) {
+                MaskingStrategy strategy = byColumn.get(lower(cell.column()));
+                cells.add(strategy == null ? cell
+                        : new RowDiff.Cell(cell.column(), mask(cell.left(), strategy), mask(cell.right(), strategy), cell.changed()));
+            }
+            changes.add(new RowDiff.RowChange(change.type(), key, cells));
+        }
+        return new MaskedDiff(diff.withChanges(changes), List.copyOf(masked));
+    }
+
     static Object mask(Object value, MaskingStrategy strategy) {
         if (value == null) {
             return null;

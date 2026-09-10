@@ -3,6 +3,7 @@ package io.dbtower.alert.internal;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
 import io.dbtower.review.ReviewDecidedEvent;
+import io.dbtower.review.ReviewExecutedEvent;
 import io.dbtower.review.ReviewSubmittedEvent;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
@@ -53,5 +54,17 @@ public class ReviewAlertListener {
                 + "] " + instance.getName() + " — 결정자 " + e.decidedBy();
         notifier.sendEmbed(fallback, e.instanceId(), AlertEmbeds.forReviewDecision(
                 instance, e.reviewId(), e.approved(), e.decidedBy(), e.comment(), e.onlineDdlHint()));
+    }
+
+    @EventListener
+    public void onExecuted(ReviewExecutedEvent e) {
+        if (!notifier.isConfigured()) {
+            return;
+        }
+        DatabaseInstance instance = registryService.findById(e.instanceId());
+        String fallback = "[DBTower 변경 티켓 #" + e.reviewId() + " " + (e.rolledBack() ? "되돌림" : "실행") + "] "
+                + instance.getName() + " · " + e.actor() + " · " + e.affectedRows() + "행";
+        notifier.sendEmbed(fallback, e.instanceId(), AlertEmbeds.forReviewExecution(
+                instance, e.reviewId(), e.rolledBack(), e.actor(), e.affectedRows()));
     }
 }

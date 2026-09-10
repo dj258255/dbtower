@@ -300,14 +300,25 @@ db.getSiblingDB('admin').createUser({
 실행된다(`PUT /api/instances/{id}/credentials/READ`, ADMIN). 플랫폼은 모니터 계정과 같은 이름을 거부하고, 저장 전에 실제로
 접속해 본다. 재현 스크립트: `docker/workbench-{mysql,postgres,oracle}.sql`, `docker/workbench-mongo.js`.
 
-| 기종 | 조회 계정(READ) | 변경 계정(WRITE, 3단계: 승인된 티켓만 실행) |
+| 기종 | 조회 계정(READ) | 변경 계정(WRITE, 승인된 티켓만 실행) |
 |---|---|---|
-| MySQL | `GRANT SELECT ON sample.*` | `GRANT SELECT, INSERT, UPDATE, DELETE ON sample.*` |
-| PostgreSQL | `CONNECT` + `USAGE ON SCHEMA public` + `SELECT ON ALL TABLES` | 위 + `INSERT, UPDATE, DELETE` + `USAGE ON ALL SEQUENCES` |
-| Oracle | `CREATE SESSION` + 테이블별 `READ`(SELECT와 달리 `FOR UPDATE` 락을 못 건다) | `CREATE SESSION` + 테이블별 `SELECT, INSERT, UPDATE, DELETE` |
-| MongoDB | `read@sample` (admin db에 생성) | `readWrite@sample` |
+| MySQL | `GRANT SELECT ON sample.*` | `GRANT SELECT, INSERT, UPDATE, DELETE, ALTER, INDEX ON sample.*` |
+| PostgreSQL | `CONNECT` + `USAGE ON SCHEMA public` + `SELECT ON ALL TABLES` | 위 + `INSERT, UPDATE, DELETE` + `USAGE ON ALL SEQUENCES` + 소유 역할 멤버십 `GRANT sample_owner`(DDL용, 소유 역할에 `CREATE ON SCHEMA public` — 15+에서 인덱스 생성이 스키마 CREATE를 따로 본다) |
+| Oracle | `CREATE SESSION` + 테이블별 `READ`(SELECT와 달리 `FOR UPDATE` 락을 못 건다) | `CREATE SESSION` + 테이블별 `SELECT, INSERT, UPDATE, DELETE`(DDL 없음) |
+| MongoDB | `read@sample` (admin db에 생성) | `readWrite@sample`(변경 티켓 실행은 아직 미지원) |
 
-DDL·권한 변경 권한은 어느 계정에도 주지 않는다.
+권한 변경 권한은 어느 계정에도 주지 않는다. 변경 계정의 DDL은 인덱스·열 추가 수준까지만 준다(MySQL `ALTER, INDEX`,
+PostgreSQL은 테이블 소유자만 DDL을 하므로 로그인 불가 소유 역할의 멤버십). 승인된 티켓이라도 계정 권한 밖의 문장
+(`DROP TABLE` 등)은 대상 DB가 거부한다 — 게이트·분류기 다음의 마지막 겹이다.
+
+### 변경 계정이 권한을 쓰는 곳 (승인 티켓 실행, VERIFICATION 130절)
+
+- 변경 전 행 사본은 `SELECT * ... FOR UPDATE`로 잡는다. 그래서 변경 계정에는 `READ`가 아니라 `SELECT`가 필요하다(Oracle).
+- 기본 키는 JDBC 메타데이터(`getPrimaryKeys`)로 찾는다. 테이블을 볼 수 있으면 추가 권한이 없다.
+- INSERT를 되돌리려면 생성된 키를 돌려받아야 한다. PostgreSQL `SERIAL`은 시퀀스 `USAGE`가 필요하고, MySQL은 키 값을
+  직접 넣는 INSERT에서 키를 돌려주지 않아 그 경우 되돌리기가 닫힌다(실행 기록에 이유가 남는다).
+- 검증 조회의 실행계획·응답시간은 변경과 같은 트랜잭션 안에서 변경 계정으로 잰다(MySQL·PostgreSQL `EXPLAIN`은 SELECT 권한,
+  Oracle `EXPLAIN PLAN`은 세션의 PLAN_TABLE).
 
 ### 민감 컬럼은 계정 권한으로 뺀다 (본 방어선)
 

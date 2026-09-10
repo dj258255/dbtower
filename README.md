@@ -211,6 +211,15 @@ AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 �
 
 ![AI 답변과 체크포인트 카드](docs/images/webui/70-workbench-ai-checkpoint.png)
 
+**승인 티켓 실행과 전후 비교** — 변경 문장은 워크벤치에서 바로 실행되지 않고 "변경 요청으로 올리기"로 리뷰 게이트에 올라갑니다.
+승인 전에도 드라이런(실제로 실행한 뒤 롤백)으로 바뀔 행과, 커밋 전 인덱스가 반영된 실행계획을 봅니다. 승인된 티켓만 변경 계정으로 실행하고,
+실행권은 조건부 UPDATE로 한 요청만 얻습니다. 실행은 같은 트랜잭션에서 변경 전 행 사본을 락과 함께 잡아 영향 행 수가 사본과 같을 때만 커밋하고,
+되돌리기는 실행 직후 사본과 지금 행이 같을 때만 파라미터 바인딩으로 씁니다. 실행마다 행 diff·구조 diff·검증 조회 실행계획 전후·실행 시각 기준
+워크로드 비교가 남고, 같은 조회를 두 인스턴스에서 돌려 행 단위로 비교할 수도 있습니다. MySQL·PostgreSQL·Oracle 실DB로 실행·되돌리기·
+드리프트 충돌·불변식 위반을 증명했습니다([VERIFICATION 130절](docs/VERIFICATION.md), [AX 사례 5](docs/PORTFOLIO-AX.md)).
+
+![변경 티켓 — DDL 실행의 구조 변화와 같은 트랜잭션 안 전후 실행계획](docs/images/webui/74-workbench-ticket-ddl-probe.png)
+
 ### MCP — AI 에이전트의 채널
 
 웹 콘솔이 사람의 채널이라면 MCP는 AI 에이전트의 채널입니다. 회귀 감지가 push(플랫폼이
@@ -400,6 +409,9 @@ PUT  {base}/credentials/{READ|WRITE}         콘솔 계정 등록(ADMIN, 저장 
 GET|POST /api/workbench/instances/{id}/worksheets      워크시트 목록·생성    PATCH|DELETE /api/workbench/worksheets/{wid}
 POST /api/workbench/worksheets/{wid}/assistant         AI 제안(실행 안 함)   GET .../timeline  대화+체크포인트
 POST /api/workbench/worksheets/{wid}/versions/{n}/restore  되돌리기(새 버전)  PUT .../instances/{id}/settings  결과 값 AI 공유(ADMIN)
+POST /api/workbench/tickets/{rid}/dry-run    승인 전후 드라이런(실행 후 롤백, ADMIN)   POST .../execute  승인 티켓 실행(ADMIN)
+POST /api/workbench/tickets/{rid}/revert     행 사본으로 되돌리기 {dryRun}(ADMIN)     GET  .../executions  실행 기록·전후 비교
+GET  /api/workbench/executions/{eid}/workload  실행 전후 워크로드 비교   POST /api/workbench/compare  인스턴스 간 결과 비교
 
 # 운영 행위 (ADMIN)
 POST {base}/backup                 즉시 백업                  POST {base}/backup/verify  복원 검증
@@ -414,7 +426,7 @@ POST /mcp                          MCP (Streamable HTTP) — 도구 16종
 - [PORTFOLIO-AX.md](docs/PORTFOLIO-AX.md) — AX 케이스 스터디: AI를 운영 플랫폼에 들일 때 정책을 코드로 강제한 사례별 결정·실측
 - [PRESENTATION.md](docs/PRESENTATION.md) — 문제 정의부터 설계·실측·교훈까지 전체 서사
 - [DESIGN.md](docs/DESIGN.md) — 인터페이스 경계, 시점 비교 데이터 모델
-- [VERIFICATION.md](docs/VERIFICATION.md) — 129개 절의 실측 기록 (명령·출력·스크린샷)
+- [VERIFICATION.md](docs/VERIFICATION.md) — 130개 절의 실측 기록 (명령·출력·스크린샷)
 - [ai-analysis-rules.md](docs/ai-analysis-rules.md) — 기종별 실행계획 판단 규칙: 근거와 예외
 - [operations.md](docs/operations.md) — 운영 규칙: 통계 소스의 함정과 대응 (digest 포화·PS 가시성·AAS)
 - [least-privilege.md](docs/least-privilege.md) — 기종별 최소 권한 모니터링 계정 (실측 확정)

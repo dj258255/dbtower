@@ -1,6 +1,6 @@
 package io.dbtower.insight.internal.web;
 
-import io.dbtower.insight.internal.SchemaDiffService;
+import io.dbtower.insight.SchemaDiffService;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.registry.RegistryService;

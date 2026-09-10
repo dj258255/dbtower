@@ -1,7 +1,10 @@
 package io.dbtower.operator.internal;
 
 import io.dbtower.operator.OperatorException;
+import io.dbtower.operator.model.ChangeOutcome;
+import io.dbtower.operator.model.ChangePlan;
 import io.dbtower.operator.model.QueryResult;
+import io.dbtower.operator.model.RevertPlan;
 import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.registry.CredentialPurpose;
 import java.sql.ResultSet;
@@ -272,6 +275,82 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
      * transaction_read_only=on). Oracle JDBC는 번역하지 않아 쓰기 권한 계정의 INSERT가 들어갔고 끝의 롤백만 막고 있었다.
      */
     protected void beginReadOnly(Statement st) throws SQLException {
+    }
+
+    /** 승인된 변경 실행 — 흐름과 불변식은 {@link JdbcChangeRunner}, 기종 차이는 아래 세 훅이 흡수한다. */
+    @Override
+    public ChangeOutcome executeChange(ConsoleCredential credential, ChangePlan plan) {
+        try (Connection c = writeConnection(credential)) {
+            return changeRunner().execute(c, plan);
+        } catch (SQLException e) {
+            throw new OperatorException(instance.getType() + " 변경 실행 실패: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public RevertPlan.Outcome revertChange(ConsoleCredential credential, RevertPlan plan) {
+        try (Connection c = writeConnection(credential)) {
+            return changeRunner().revert(c, plan);
+        } catch (SQLException e) {
+            throw new OperatorException(instance.getType() + " 되돌리기 실패: " + e.getMessage(), e);
+        }
+    }
+
+    private Connection writeConnection(ConsoleCredential credential) throws SQLException {
+        return pools.getConsoleDataSource(instance, jdbcUrl(), CredentialPurpose.WRITE, credential).getConnection();
+    }
+
+    private JdbcChangeRunner changeRunner() {
+        return new JdbcChangeRunner(new JdbcChangeRunner.Dialect() {
+            @Override
+            public void beginChange(Statement st, int timeoutSeconds) throws SQLException {
+                AbstractJdbcOperator.this.beginChange(st, timeoutSeconds);
+            }
+
+            @Override
+            public String lockClause(int timeoutSeconds) {
+                return AbstractJdbcOperator.this.lockClause(timeoutSeconds);
+            }
+
+            @Override
+            public String explain(Connection c, String sql) throws SQLException {
+                return explainInTransaction(c, sql);
+            }
+        });
+    }
+
+    /**
+     * 변경 트랜잭션 첫머리에서 락 대기 상한을 건다. 기본은 아무것도 하지 않는다 — 문장 타임아웃만으로는 락 대기가
+     * 끊기지 않는 기종(InnoDB 기본 50초, 메타데이터 락 기본 1년)이 덮어쓴다.
+     */
+    protected void beginChange(Statement st, int timeoutSeconds) throws SQLException {
+    }
+
+    /** 변경 전 사본 조회에 붙이는 행 락 절 */
+    protected String lockClause(int timeoutSeconds) {
+        return " FOR UPDATE";
+    }
+
+    /**
+     * 변경과 같은 커넥션·트랜잭션 안에서 실행계획을 본다. 모니터 풀의 explain은 다른 커넥션이라 커밋 전 변경(드라이런의
+     * 인덱스 생성 등)이 보이지 않는다 — 전후 비교는 같은 트랜잭션 안에서 재야 의미가 있다.
+     */
+    protected String explainInTransaction(Connection c, String sql) throws SQLException {
+        StringBuilder out = new StringBuilder();
+        try (Statement st = c.createStatement(); ResultSet rs = st.executeQuery(explainPrefix() + sql)) {
+            int n = rs.getMetaData().getColumnCount();
+            while (rs.next()) {
+                for (int i = 1; i <= n; i++) {
+                    out.append(i > 1 ? " | " : "").append(rs.getString(i));
+                }
+                out.append('\n');
+            }
+        }
+        return out.toString();
+    }
+
+    protected String explainPrefix() {
+        return "EXPLAIN ";
     }
 
     /** Oracle JDBC는 끝 세미콜론을 문법 오류(ORA-00911)로 본다 — 사람이 흔히 붙이는 종결자만 걷어낸다. */

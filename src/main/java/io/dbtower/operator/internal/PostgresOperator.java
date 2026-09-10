@@ -254,6 +254,12 @@ public class PostgresOperator extends AbstractJdbcOperator {
         }
     }
 
+    /** SET LOCAL은 트랜잭션이 끝나면 풀린다 — 풀로 돌아간 커넥션에 락 대기 설정이 남지 않는다. */
+    @Override
+    protected void beginChange(java.sql.Statement st, int timeoutSeconds) throws java.sql.SQLException {
+        st.execute("SET LOCAL lock_timeout = '" + timeoutSeconds + "s'");
+    }
+
     @Override
     protected String jdbcUrl() {
         // useTls면 require — RDS rds.force_ssl 같은 TLS 강제 환경 대응. 미지정 시 드라이버 기본(prefer).

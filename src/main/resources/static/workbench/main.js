@@ -6,6 +6,8 @@ import { SqlEditor } from "./editor.js";
 import { renderTree } from "./schema-tree.js";
 import { renderGrid } from "./grid.js";
 import { renderTimeline, renderChips } from "./chat.js";
+import { renderDiff } from "./diff.js";
+import { TicketPanel } from "./tickets.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -42,6 +44,7 @@ const state = {
   classifyTimer: null,
   classifySeq: 0,
   saveTimer: null,
+  pendingTicket: null,
 };
 
 const editor = new SqlEditor({
@@ -50,6 +53,14 @@ const editor = new SqlEditor({
   complete: $("wb-complete"),
   onRun: () => run(),
   onChange: onEdit,
+});
+
+const tickets = new TicketPanel({
+  list: $("wb-tickets"),
+  detail: $("wb-ticket"),
+  count: $("wb-ticket-count"),
+  isAdmin: () => Boolean(state.me && state.me.role === "ADMIN"),
+  onOpenSql: (sql) => { editor.value = sql; onEdit(); editor.focus(); },
 });
 
 init();
@@ -77,6 +88,7 @@ async function init() {
   const wanted = params.get("instance");
   if (wanted && state.instances.some((i) => String(i.id) === wanted)) select.value = wanted;
   select.addEventListener("change", () => selectInstance(select.value, null));
+  state.pendingTicket = params.get("ticket");
   if (select.value) selectInstance(select.value, params.get("sheet"));
 }
 
@@ -98,6 +110,9 @@ function bindChrome() {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") ask();
   });
   $("wb-pick").addEventListener("click", () => setPicking(!state.picking));
+  $("wb-cmp-run").addEventListener("click", runCompare);
+  $("wb-ticket-cancel").addEventListener("click", () => { $("wb-ticket-modal").hidden = true; });
+  $("wb-ticket-ok").addEventListener("click", submitTicket);
   document.querySelectorAll(".wb-rtab").forEach((b) => b.addEventListener("click", () => showPane(b.dataset.pane)));
   document.querySelectorAll(".wb-ctab").forEach((b) => b.addEventListener("click", () => showChatPane(b.dataset.cpane)));
 }
@@ -124,6 +139,10 @@ async function selectInstance(id, sheetId) {
   request(`/api/workbench/instances/${encodeURIComponent(id)}/settings`)
     .then((s) => { state.allowValues = s.allowAiResultValues; drawShare(); })
     .catch(() => { state.allowValues = false; drawShare(); });
+  drawCompareTargets();
+  const wantedTicket = state.pendingTicket;
+  state.pendingTicket = null;
+  tickets.load(id, wantedTicket).then(() => { if (wantedTicket) showChatPane("tickets"); });
 
   state.sheets = await request(`/api/workbench/instances/${encodeURIComponent(id)}/worksheets`);
   if (!state.sheets.length) {
@@ -336,10 +355,12 @@ function showFailure(e) {
   $("wb-status").textContent = "";
   const overlay = $("wb-overlay");
   let body;
+  let ticketButton = "";
   const c = e instanceof ApiError ? e.body.classification : null;
   if (e instanceof ApiError && e.status === 409 && c && c.tier === "NEEDS_APPROVAL") {
     body = `<div class="wb-msg change"><strong>변경 요청이 필요한 문장입니다 (${esc(c.kind)})</strong>
       <p>${esc(c.reason)}</p><p class="muted">워크벤치는 조회만 즉시 실행합니다. 데이터·구조 변경은 승인 티켓으로 올려 변경 계정으로 실행합니다.</p>`;
+    ticketButton = '<button class="btn btn-small btn-primary" data-overlay="ticket">변경 요청으로 올리기</button>';
   } else if (e instanceof ApiError && e.status === 400 && c) {
     body = `<div class="wb-msg blocked"><strong>차단된 문장입니다 (${esc(c.kind)})</strong><p>${esc(c.reason)}</p>`;
   } else if (e instanceof ApiError && e.status === 422) {
@@ -348,6 +369,7 @@ function showFailure(e) {
     body = `<div class="wb-msg error"><strong>실행하지 않았습니다${e instanceof ApiError ? " (" + esc(e.status) + ")" : ""}</strong><p>${esc(e.message)}</p>`;
   }
   overlay.innerHTML = `${body}<div class="wb-overlay-actions">
+      ${ticketButton}
       <button class="btn btn-small" data-overlay="fix">AI로 고치기</button>
       <button class="btn btn-small" data-overlay="close">닫기</button></div></div>`;
   overlay.hidden = false;
@@ -355,6 +377,10 @@ function showFailure(e) {
     const b = ev.target.closest("[data-overlay]");
     if (!b) return;
     if (b.dataset.overlay === "close") hideOverlay();
+    if (b.dataset.overlay === "ticket") {
+      hideOverlay();
+      openTicket(state.lastFailure ? state.lastFailure.sql : editor.statementToRun());
+    }
     if (b.dataset.overlay === "fix") {
       hideOverlay();
       $("wb-ask").value = "이 SQL이 실패했어. 원인을 짚고 고쳐줘.";
@@ -494,6 +520,7 @@ async function loadHistory() {
 function showPane(name) {
   document.querySelectorAll(".wb-rtab").forEach((b) => b.classList.toggle("active", b.dataset.pane === name));
   $("wb-pane-grid").hidden = name !== "grid";
+  $("wb-pane-compare").hidden = name !== "compare";
   $("wb-pane-history").hidden = name !== "history";
 }
 
@@ -501,4 +528,75 @@ function showChatPane(name) {
   document.querySelectorAll(".wb-ctab").forEach((b) => b.classList.toggle("active", b.dataset.cpane === name));
   $("wb-cpane-chat").hidden = name !== "chat";
   $("wb-cpane-schema").hidden = name !== "schema";
+  $("wb-cpane-tickets").hidden = name !== "tickets";
+}
+
+// ---------- 변경 요청·인스턴스 간 비교 ----------
+
+function openTicket(sql) {
+  if (!state.instance || !sql || !sql.trim()) return;
+  $("wb-ticket-sql").textContent = sql;
+  $("wb-ticket-reason").value = "";
+  $("wb-ticket-verify").value = "";
+  $("wb-ticket-error").hidden = true;
+  $("wb-ticket-ok").disabled = false;
+  $("wb-ticket-modal").hidden = false;
+  $("wb-ticket-reason").focus();
+}
+
+async function submitTicket() {
+  const ok = $("wb-ticket-ok");
+  ok.disabled = true;
+  ok.textContent = "올리는 중(규칙 판정·AI 소견)...";
+  try {
+    const created = await request(`/api/instances/${encodeURIComponent(state.instance.id)}/reviews`, {
+      method: "POST",
+      body: { sql: $("wb-ticket-sql").textContent, reason: $("wb-ticket-reason").value.trim(), verifySql: $("wb-ticket-verify").value.trim() || null },
+    });
+    $("wb-ticket-modal").hidden = true;
+    showChatPane("tickets");
+    await tickets.load(state.instance.id, created.id);
+  } catch (e) {
+    $("wb-ticket-error").textContent = `요청을 올리지 못했습니다: ${e.message}`;
+    $("wb-ticket-error").hidden = false;
+  } finally {
+    ok.disabled = false;
+    ok.textContent = "요청 올리기";
+  }
+}
+
+function drawCompareTargets() {
+  $("wb-cmp-left").textContent = state.instance ? `${state.instance.name} (${state.instance.type})` : "";
+  const others = state.instances.filter((i) => state.instance && i.id !== state.instance.id);
+  $("wb-cmp-right").innerHTML = others.length
+    ? others.map((i) => `<option value="${esc(i.id)}">${esc(i.name)} · ${esc(i.type)}${i.readConfigured ? "" : " (조회 계정 없음)"}</option>`).join("")
+    : '<option value="">비교할 다른 인스턴스가 없습니다</option>';
+}
+
+async function runCompare() {
+  const sql = editor.statementToRun();
+  const right = $("wb-cmp-right").value;
+  if (!state.instance || !sql.trim() || !right) return;
+  const keyColumns = $("wb-cmp-keys").value.split(",").map((k) => k.trim()).filter(Boolean);
+  const box = $("wb-compare");
+  box.className = "";
+  box.innerHTML = '<div class="muted">두 인스턴스에서 실행하는 중...</div>';
+  $("wb-cmp-run").disabled = true;
+  try {
+    const res = await request("/api/workbench/compare", {
+      method: "POST",
+      body: { leftInstanceId: state.instance.id, rightInstanceId: Number(right), sql, keyColumns, rowLimit: Number($("wb-limit").value) },
+    });
+    const side = (s) => `<span><b>${esc(s.name)}</b> <span class="muted">${esc(s.type)} · ${esc(s.rowCount)}행${s.truncated ? "+" : ""} · ${esc(s.elapsedMs)}ms</span></span>`;
+    box.innerHTML = `<div class="cmp-sides">${side(res.left)}<span class="muted">대</span>${side(res.right)}</div>`
+      + renderDiff(res.diff, {
+        leftLabel: res.left.name, rightLabel: res.right.name,
+        addedLabel: `${res.right.name}에만`, removedLabel: `${res.left.name}에만`, maskedColumns: res.maskedColumns,
+      });
+  } catch (e) {
+    box.innerHTML = `<div class="wb-msg error"><strong>비교하지 못했습니다${e instanceof ApiError ? " (" + esc(e.status) + ")" : ""}</strong><p>${esc(e.message)}</p></div>`;
+  } finally {
+    $("wb-cmp-run").disabled = false;
+    loadHistory();
+  }
 }

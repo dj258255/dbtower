@@ -113,6 +113,32 @@ public class OracleOperator extends AbstractJdbcOperator {
         st.execute("SET TRANSACTION READ ONLY");
     }
 
+    /** DDL의 락 대기 상한. 행 락 대기는 세션 설정이 없어 사본 조회의 FOR UPDATE WAIT로 건다. */
+    @Override
+    protected void beginChange(Statement st, int timeoutSeconds) throws SQLException {
+        st.execute("ALTER SESSION SET DDL_LOCK_TIMEOUT = " + timeoutSeconds);
+    }
+
+    @Override
+    protected String lockClause(int timeoutSeconds) {
+        return " FOR UPDATE WAIT " + timeoutSeconds;
+    }
+
+    /** EXPLAIN PLAN은 세션의 PLAN_TABLE에 쓰고 DBMS_XPLAN으로 읽는다 — 변경과 같은 커넥션이라 커밋 전 인덱스도 계획에 보인다. */
+    @Override
+    protected String explainInTransaction(Connection c, String sql) throws SQLException {
+        StringBuilder plan = new StringBuilder();
+        try (Statement st = c.createStatement()) {
+            st.execute("EXPLAIN PLAN FOR " + sql);
+            try (ResultSet rs = st.executeQuery("SELECT plan_table_output FROM TABLE(DBMS_XPLAN.DISPLAY())")) {
+                while (rs.next()) {
+                    plan.append(rs.getString(1)).append('\n');
+                }
+            }
+        }
+        return plan.toString();
+    }
+
     @Override
     protected String jdbcUrl() {
         // useTls면 TCPS 프로토콜 — Oracle은 URL 파라미터가 아니라 프로토콜 지정 방식이다.

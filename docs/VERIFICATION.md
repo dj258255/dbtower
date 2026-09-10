@@ -4767,3 +4767,198 @@ DELETE는 쓰지 않는다, `WHERE 1=1`도 결국 전체 삭제"라고 답했다
 수치가 아니고, 같은 문항을 다시 돌리면 결과가 달라질 수 있다. 백엔드가 `cli`면 모델은 로컬 claude CLI 설정을 따르며
 `dbtower.ai.model`은 API 경로에만 적용된다. 이 평가의 쓸모는 "프롬프트·컨텍스트를 바꿨을 때 전후 비교"다.
 
+## 130. 워크벤치 3단계 — 승인된 티켓만 실행하고, 되돌릴 사본과 전후 비교를 같은 기록에 남긴다 (2026-09-10)
+
+### 원칙을 바꾼 이유와 범위
+
+AGENTS.md의 "관리 플랫폼은 대상 DB에 임의 DML을 실행하지 않는다"를 "임의 변경은 실행하지 않는다 — **승인된 티켓만** 변경 계정으로
+실행한다"로 좁혀 바꿨다(사용자 결정). 지금까지 리뷰 게이트(V28)는 판정·승인까지만 했고 실행은 사람이 DB 도구로 따로 했다.
+그러면 "승인된 SQL = 실행된 SQL"의 증거도, 되돌릴 사본도, 전후 비교도 남지 않는다. 실행을 게이트 뒤로 끌어와 셋을 한 기록에 묶었다.
+
+| 전후 비교 | 무엇으로 | 어디서 |
+|---|---|---|
+| 데이터 행 diff + 되돌리기 | 변경 전 사본(`SELECT * ... FOR UPDATE`)과 변경 후 사본(기본 키로 재조회) | `JdbcChangeRunner`, `RowDiff` |
+| 스키마 diff | DDL 전후 `describeSchema` 두 번 + 기존 `SchemaDiffService`(insight 루트로 공개) | `ChangeExecutionService` |
+| 실행계획·성능 | 티켓의 검증 조회를 **변경과 같은 트랜잭션 안에서** 전후로 `EXPLAIN` + 3회 실행(µs) / 실행 시각 기준 앞뒤 구간 스냅샷 비교(`ComparisonService`) | `probe`, `workload` |
+| 인스턴스 간 결과 | 같은 조회를 두 인스턴스의 조회 경로로 실행해 키 기준 행 diff | `WorkbenchService.compare` |
+
+### 구조
+
+- **상태의 단일 권위는 리뷰 게이트다.** 실행 계층(workbench)은 `ChangeTicketGate`(review 루트, 공개)로만 상태를 바꾼다.
+  전이는 전부 조건부 UPDATE: `APPROVED -> EXECUTING -> EXECUTED -> ROLLING_BACK -> ROLLED_BACK`.
+  `update ... set status = :to where id = :id and status = :from`이 1을 돌려준 요청만 실행권을 얻는다.
+- **거부는 실행권을 잡기 전에 끝낸다.** 티켓 상태 -> 단일 문장 -> 분류기 재판정(승인돼도 차단 문장은 실행 안 함) -> 검증 조회는 읽기 문장인가
+  -> 변경 계정(WRITE)이 있는가 -> 사본을 잡을 수 있는 문장인가 -> 실행권 획득 -> 대상 DB. 거부된 요청이 티켓을 EXECUTING에 묶지 않는다.
+- **실패의 두 종류를 구분한다.** 대상 DB가 롤백을 확정한 실패는 실행권을 돌려준다(다시 실행 가능). 커밋 호출 자체가 실패해
+  반영 여부를 모르면(`ChangeCommitUncertainException`) 돌려주지 않는다 — 사람이 확인하기 전까지 같은 변경이 두 번 나가지 않게.
+- **안전은 파서가 아니라 불변식에서 나온다.** `ChangeStatementParser`는 원문 WHERE 이하를 그대로 붙여 사본 조회를 만들 뿐이다.
+  같은 트랜잭션에서 사본을 락과 함께 잡고, 대상 DB가 보고한 영향 행 수가 사본 행 수와 같을 때만 커밋한다. UPDATE 뒤 같은 키로
+  찾은 행 수가 다르면(키를 바꾼 UPDATE) 커밋하지 않는다. 다중 테이블·upsert·CTE·RETURNING은 캡처 불가로 돌려주고, 사람이 "캡처 없이 실행"을
+  명시해야만 되돌리기 경로 없이 실행한다.
+- **되돌리기는 문자열 SQL을 조립하지 않는다.** 사본 값은 JDBC 타입과 함께 정규화 문자열로 저장하고(`RowValues`, 시간은 java.time으로 읽어
+  소수 초 보존, 이진은 base64), 되돌릴 때 타입대로 파라미터 바인딩한다. 쓰기 전에 현재 행이 실행 직후 사본과 같은지 락을 걸고 대조하고,
+  하나라도 다르면 **아무것도 쓰지 않고** 충돌(키·달라진 열 이름, 값은 싣지 않음)을 돌려준다.
+- **사본은 개인정보 원본이다.** 암호화 키가 있으면 AES-GCM으로 저장하고, 보존 기한(기본 7일)이 지나면 `ChangeImageRetentionJob`이 지우고
+  되돌리기를 닫는다. 화면에는 마스킹 규칙을 거쳐 나가고, 바뀌었는지 판정은 원래 값으로 한다(가린 열이 같아 보여도 "바뀜"이 맞게 뜬다).
+- **기종 차이는 훅 셋.** 락 대기 상한(`beginChange`: MySQL `innodb_lock_wait_timeout`·`lock_wait_timeout`, PostgreSQL `SET LOCAL lock_timeout`,
+  Oracle `DDL_LOCK_TIMEOUT`), 락 절(Oracle `FOR UPDATE WAIT n`), 트랜잭션 안 실행계획(MySQL `EXPLAIN FORMAT=TREE`, Oracle `EXPLAIN PLAN` +
+  `DBMS_XPLAN`). DDL 드라이런 가능 여부는 기종 분기가 아니라 드라이버의 `dataDefinitionCausesTransactionCommit()`으로 정한다.
+  SQL Server는 실측 전이라 명시적으로 열지 않았다(`UnsupportedOperationException`). 기종 분기 기준선은 늘지 않았다(17 <= 32).
+- V37: `review_request`에 `verify_sql`·실행자·되돌린 사람 열, `workbench_change_execution`(동작·결과·해시·영향 행·사본·보존 기한·구조 diff·측정).
+- 화면: 오른쪽 탭 "변경 티켓"(상태별 버튼, 되돌릴 수 없는 동작은 두 번 눌러야 나감), 실행 기록마다 행 diff·구조 변화·전후 실행계획·워크로드 비교,
+  가운데 탭 "인스턴스 비교", 조회 편집기의 "변경 요청이 필요한 문장" 오버레이에 "변경 요청으로 올리기". 대시보드 리뷰 목록에 새 상태와 워크벤치 링크.
+
+### 검증: 테스트
+
+```
+ChangeStatementParserTest 12   원문 WHERE 보존, 문자열·주석·달러 인용 안의 키워드 무시, 끝 줄 주석이 락 절을 삼키지 않음,
+                               ORDER BY/LIMIT 동반, 인용 식별자, 다중 테이블·RETURNING·upsert·CTE·MERGE는 캡처 불가
+RowDiffTest 5                  1 대 1.00·T 구분자는 같음, 추가·삭제, 키 없으면 다중집합, 키 중복이면 방식 전환을 알림, 상한 절단
+ChangeExecutionServiceTest 13  승인 안 됨·차단 문장·검증 조회가 쓰기·변경 계정 없음·캡처 불가는 전부 실행권 획득 전에 거부,
+                               실행권을 못 얻으면 대상 DB 호출 0회, 롤백 확정 실패는 실행권 반환, 커밋 불명은 반환 안 함,
+                               사본은 암호화돼 평문 이메일 없음 + 화면 diff는 마스킹·changed 판정 유지, 드라이런은 실행권 안 잡음,
+                               되돌리기 충돌은 반환 + 키 값 마스킹, 되돌리기 성공은 원래 실행의 되돌리기를 닫고 사본은 남김,
+                               계획 숫자만 다르면 계획 변경 아님
+ChangeTicketGatePersistenceTest 3  H2에서 실제 JPQL로: 실행권은 승인 상태에서 한 번만, 완료 전이는 실행권이 있을 때만, 끝난 티켓 재실행 불가
+SecurityConfigTest +1          VIEWER는 dry-run·execute·revert 모두 403
+전체(라이브 수정 반영 뒤)      720 tests, 실패 0, 건너뜀 11(대상 DB가 필요한 게이트 IT), 규약 검사 전부 통과(기종 분기 17 <= 32)
+```
+
+### 검증: 실제 DB 3기종에서 실행 계층만 (`ChangeExecutionIT`, `DBTOWER_CONSOLE_IT=1`)
+
+분류기·서비스를 빼고 오퍼레이터만으로 돌렸다. 시드 행에 따옴표·백슬래시·주입 모양 문자열(`O'Brien \ "q" ; DROP TABLE x; --`),
+마이크로초 시각, 이진값, PostgreSQL `jsonb`·`timestamptz`를 넣고, 되돌린 뒤 **대상 DB가 직접 찍은 문자열**로 원래 행과 비교했다.
+3 tests, 실패 0, 3.05초.
+
+```
+[POSTGRESQL 드라이런] committed=false affected=2 keys=[id] unavailable=null
+[POSTGRESQL UPDATE 되돌리기] committed=true restored=2
+[POSTGRESQL 드리프트] committed=false conflicts=[Conflict[keyValues=[1], changedColumns=[name], reason=실행 뒤 값이 바뀌었다]]
+[POSTGRESQL INSERT] affected=1 unavailable=null afterRows=1
+[POSTGRESQL 사본 어긋남] 영향 행 수(2)가 변경 전 사본 행 수(1)와 달라 커밋하지 않았다. ...
+[PG DDL 드라이런 전 계획]
+Seq Scan on change_it_big  (cost=0.00..357.00 rows=20 width=4)
+  Filter: ((status)::text = 'S7'::text)
+  timings(us)=[1449, 1245, 1296]
+[PG DDL 드라이런 후 계획]
+Bitmap Heap Scan on change_it_big  (cost=4.44..56.67 rows=20 width=4)
+  Recheck Cond: ((status)::text = 'S7'::text)
+  ->  Bitmap Index Scan on change_it_big_status_idx  (cost=0.00..4.44 rows=20 width=0)
+  timings(us)=[556, 482, 452]
+[ORACLE 드라이런] committed=false affected=2 keys=[ID] unavailable=null
+[ORACLE UPDATE 되돌리기] committed=true restored=2
+[ORACLE 드리프트] committed=false conflicts=[Conflict[keyValues=[1], changedColumns=[NAME], ...]]
+[ORACLE INSERT] affected=1 unavailable=null afterRows=1
+[Oracle dataDefinitionCausesTransactionCommit] true
+[MYSQL 드라이런] committed=false affected=2 keys=[id] unavailable=null
+[MYSQL UPDATE 되돌리기] committed=true restored=2
+[MYSQL 드리프트] committed=false conflicts=[Conflict[keyValues=[1], changedColumns=[name], ...]]
+[MYSQL INSERT] affected=1 unavailable=null afterRows=1
+[MySQL DDL 드라이런] 이 기종의 DDL은 실행 즉시 커밋돼 드라이런이 곧 실제 실행이 된다. 드라이런하지 않았다
+```
+
+각 기종에서 단언한 것: 드라이런·되돌리기 드라이런 뒤 행이 그대로, UPDATE·DELETE·INSERT 되돌리기 뒤 원래 행과 문자열 단위로 같음,
+충돌이 한 행이라도 있으면 충돌 없는 행도 되돌리지 않음, 사본 조회를 일부러 틀리게 준 계획은 커밋 안 됨, 사본 상한 초과는 실행 안 됨.
+PostgreSQL은 드라이런이 커밋 전 인덱스를 같은 트랜잭션의 계획에서 보여주고(Seq Scan -> Bitmap Index Scan, 중앙값 1296µs -> 482µs),
+드라이런 뒤 `pg_indexes`에 인덱스가 없다. µs는 같은 트랜잭션·같은 커넥션의 3회 측정이라 캐시 영향이 있어 방향만 본다.
+
+### 검증: 앱 API 라이브 흐름 (dev 프로필, 데모 DB, 변경 계정 `dbtower_writer`)
+
+```
+[1] PostgreSQL  UPDATE customers SET grade = 'VIP' WHERE id = 3   검증 조회: SELECT id, grade FROM customers WHERE grade = 'VIP'
+  승인 전 드라이런          HTTP 200 DRY_RUN ROLLED_BACK affected=1 rollbackAvailable=True
+                            rows changed=1  CHANGED key=[3] grade:SILVER->VIP  masked=[email, phone]
+                            대상 행 [[3, 'SILVER']] (그대로)
+  승인 전 실행              HTTP 409 승인된 티켓만 실행합니다(현재 PENDING)
+  승인 뒤 동시 실행 2건     HTTP [200, 409]  "다른 요청이 이 티켓을 이미 실행 중이거나 상태가 바뀌었습니다"
+                            대상 행 [[3, 'VIP']]  티켓 EXECUTED
+  되돌리기 드라이런         HTTP 200 REVERT_DRY_RUN ROLLED_BACK  대상 행 VIP 그대로
+  root로 phone을 바꾼 뒤    HTTP 200 REVERT CONFLICT affected=0  [{"keyValues": ["3"], "changedColumns": ["phone"], "reason": "실행 뒤 값이 바뀌었다"}]
+    되돌리기                티켓 EXECUTED 유지, 대상 행 VIP 유지(아무것도 안 씀)
+  phone 원복 뒤 되돌리기    HTTP 200 REVERT COMMITTED affected=1  티켓 ROLLED_BACK  대상 행 [[3, 'SILVER']]
+  되돌린 티켓 재실행        HTTP 409 (현재 ROLLED_BACK)
+  실행 기록 5건 statement_sha256 == sha256(승인 원문)   True
+[2] 승인된 TRUNCATE orders  HTTP 422 차단 문장은 승인돼도 실행하지 않습니다: TRUNCATE는 되돌릴 행 사본을 남길 수 없다 ...  (orders 2000행 그대로)
+[3] PostgreSQL  DELETE FROM orders WHERE id = 5
+  실행                      COMMITTED  REMOVED key=[5]
+  되돌리기                  COMMITTED  원래 행 5|3|185|REFUND|2026-09-10 11:12:28.307409 = 복원 행 (마이크로초까지 같음)
+[4] PostgreSQL  CREATE INDEX idx_orders_amount ON orders (amount)   검증 조회: SELECT id FROM orders WHERE amount = 1234
+  승인 전 드라이런          DRY_RUN ROLLED_BACK  planChanged=True  중앙값 469µs -> 381µs
+                            전: Seq Scan on orders (cost=0.00..40.00 rows=1)  Filter: (amount = 1234)
+                            후: Index Scan using idx_orders_amount on orders (cost=0.28..8.29 rows=1)
+                            드라이런 뒤 pg_indexes 0개
+  승인 뒤 실행              EXECUTE COMMITTED  구조 diff: orders 인덱스 idx_orders_amount 생김  pg_indexes 1개
+                            되돌리기 불가 사유: DDL은 행 사본으로 되돌리지 않는다. 역변경은 새 티켓으로 올린다
+[5] MySQL  ALTER TABLE customers ADD COLUMN memo VARCHAR(20) NULL
+  드라이런                  HTTP 422 이 기종의 DDL은 실행 즉시 커밋돼 드라이런이 곧 실제 실행이 된다. 드라이런하지 않았다
+  승인 뒤 실행              COMMITTED  구조 diff: customers 열 memo 생김
+    MySQL  INSERT INTO orders (customer_id, amount, status) VALUES (3, 777, 'PAID')
+  실행                      COMMITTED  ADDED key=[2048]  rollbackAvailable=True (생성 키로 행을 짚음)
+  되돌리기                  COMMITTED  orders 2000 -> 2000
+    MySQL  UPDATE customers c JOIN orders o ON o.customer_id = c.id SET c.grade = c.grade WHERE o.amount > 99990
+  드라이런                  HTTP 409 행 사본을 잡을 수 없는 문장입니다: 여러 테이블을 함께 바꾸는 문장은 ... 캡처 없이 실행을 명시하세요
+  캡처 없이 드라이런        HTTP 200 kind=UNCAPTURED rollbackAvailable=False
+[6] 인스턴스 간 결과 비교  SELECT id, name, email, grade FROM customers ORDER BY id  (키 id)
+  MySQL 대 PostgreSQL               changed=0 unchanged=3 masked=[email]
+  MySQL id=1 등급만 GOLD로 바꾼 뒤  changed=1  grade:GOLD->VIP
+  MySQL 대 Oracle(열 이름 대문자)   changed=3  첫 차이 name:홍길동->Hong Gildong (데모 스크립트가 Oracle에는 영문 이름을 넣었다)
+[7] viewer 세션 POST dry-run / execute / revert   HTTP 403 / 403 / 403
+```
+
+플랫폼 DB에 남은 모양(`workbench_change_execution`, 일부): `EXECUTE|COMMITTED|UPDATE|images_encrypted=f|images=t|평문 이메일=t|rollback_available=t|2026-09-17`.
+이 앱은 dev 프로필로 `DBTOWER_ENCRYPTION_KEY` 없이 떠서 사본이 평문이다. 키가 있으면 AES-GCM으로 저장되고(단위 테스트가 평문 이메일 부재를 확인),
+dev 밖 프로필은 키가 없으면 기동을 거부한다(`SecretCipher`, 128절 이전부터의 동작). 화면도 "암호화 키가 없어 평문 저장"이라고 표시한다.
+
+실행 전후 워크로드(인덱스 실행 기록, 60분 창). 실행 직후에는 뒤 구간 배치가 없어 비교할 수 없었고(아래 넷째 발견), 약 2분 뒤:
+
+```
+전 12:07:40 ~ 13:07:40   calls 1293  avg 0.27ms  rowsExamined 57347  queries 70
+후 13:07:40 ~ 13:10:15   calls 54    avg 0.28ms  rowsExamined 2095   queries 20   (+3.7%)
+note: 실행 뒤 구간이 아직 다 지나지 않아 2분만 비교했다 ...
+```
+
+데모 DB에는 `amount` 조회 트래픽이 없어 잡힌 쿼리는 플랫폼의 모니터링 조회뿐이다. 성능 개선 수치로 쓰지 않는다 — 비교가 실행 시각을
+기준으로 구간을 잘라 동작한다는 확인이다.
+
+### 라이브에서 뒤집힌 가정 넷 (단위 테스트는 전부 통과한 상태였다)
+
+1. **Jackson 3는 원시 `boolean`이 빠진 본문을 거부한다.** 드라이런·실행에 `{}`를 보내자 서비스에 닿기 전에 400
+   (`Cannot map null into type boolean`, FAIL_ON_NULL_FOR_PRIMITIVES). 서비스 테스트는 HTTP 바인딩을 안 거치고, VIEWER 403 테스트는
+   바인딩 전에 끊겨 못 봤다. 요청 레코드를 `Boolean`으로 바꾸고, `dryRun`은 빠지면 거부(`@NotNull`)하게 했다 — 빠진 값이 실제 되돌리기로 해석되지 않게.
+   이 버그로 첫 실행의 티켓 #1~#4는 실행되지 못한 채 APPROVED로 남았다(화면 목록에 보인다).
+2. **PostgreSQL 15+는 테이블 소유자여도 스키마 `CREATE` 없이 인덱스를 못 만든다.** 소유 역할 멤버십만 준 변경 계정의 `CREATE INDEX`가
+   `permission denied for schema public`. `GRANT CREATE ON SCHEMA public TO sample_owner`를 데모 스크립트와 최소 권한 문서에 넣었다.
+3. **실행 직후 워크로드 비교가 오류였다.** 뒤 구간에 스냅샷 배치가 2개 미만이면 `ComparisonService`가 거부해 400. 이제 결과 없이 "아직 비교할 재료가 없다"
+   메모와 함께 200으로 돌려준다.
+4. **되돌린 뒤에도 원래 실행 기록이 "되돌리기 가능"이었다.** 플랫폼 DB에서 ROLLED_BACK 티켓의 EXECUTE 행이 `rollback_available=t`. 화면이 게이트가
+   거부할 버튼을 보여주게 된다. 되돌리기가 커밋되면 원래 실행의 되돌리기를 닫되, 전후 비교 화면과 감사를 위해 사본은 보존 기한까지 남긴다(테스트 추가).
+
+구현 중 단위 테스트에서 잡은 것도 둘 적는다: 사본 조회 끝에 원문의 줄 주석이 붙으면 오퍼레이터가 덧붙이는 ` FOR UPDATE`가 주석이 된다
+(마지막 토큰에서 자름). `RowDiff`의 시각 정규화 정규식이 소수부를 필수로 요구해 `12:00:00`과 `12:00`을 다르게 봤다.
+
+### 검증: 화면 (Playwright, ADMIN 세션, 수정 반영 후 재기동한 앱)
+
+편집기에 `UPDATE customers SET grade = 'GOLD' WHERE id = 3`을 넣고 실행 → "변경 요청이 필요한 문장입니다 (UPDATE)" 오버레이(콘솔에는
+조회 API의 409만) → "변경 요청으로 올리기" → 사유·검증 조회를 적어 제출(규칙 판정·AI 소견 포함 약 20초) → 오른쪽 "변경 티켓" 탭에 #13 대기로 열림 →
+드라이런: "드라이런: 롤백(흔적 없음) · 1행", 행 diff `3 · 이영희 · le***********om · 01*******44 · SILVER→GOLD`(email·phone 가림),
+"실행하면 이 사본으로 되돌릴 수 있습니다", 검증 조회 "실행계획 같음"(행 1개짜리 표라 Seq Scan 그대로) →
+승인·실행·되돌리기를 차례로 누름. 세 버튼 모두 첫 클릭에서 "승인 확인(한 번 더)"처럼 바뀌고 두 번째 클릭에서만 나갔다:
+
+```
+승인 확인(한 번 더)    => 승인했습니다. 이제 실행할 수 있습니다.
+실행 확인(한 번 더)    => 실행: 커밋 · 1행
+되돌리기 확인(한 번 더) => 되돌리기: 커밋 · 1행
+상태 #13 되돌림, 남은 버튼 [편집기로]
+GET /api/workbench/tickets/13/executions
+  19 REVERT  COMMITTED   rollbackAvailable=False
+  18 EXECUTE COMMITTED   rollbackAvailable=False note=되돌렸다(admin, 2026-09-10T13:15:27) 사본 보존
+  17 DRY_RUN ROLLED_BACK rollbackAvailable=True (실행하면 되돌릴 수 있다는 예고)
+```
+
+인스턴스 비교 탭: 같은 조회 `SELECT id, name, email, grade FROM customers ORDER BY id`를 PostgreSQL과 MySQL에서(키 id). MySQL id=1 등급만 GOLD로 바꿔 둔 상태에서
+"바뀜 1 · 같음 2", 바뀐 칸만 `VIP → GOLD`, email은 두 인스턴스 규칙을 합쳐 가림. 비교 뒤 MySQL 값은 원복했다.
+
+![승인 전 드라이런 — 마스킹된 행 diff와 검증 조회 전후](images/webui/73-workbench-ticket-dryrun-diff.png)
+![DDL 실행 기록 — 구조 변화와 같은 트랜잭션 안 전후 실행계획](images/webui/74-workbench-ticket-ddl-probe.png)
+![인스턴스 간 결과 비교 — 한 칸 차이만 짚는다](images/webui/75-workbench-instance-compare.png)
+

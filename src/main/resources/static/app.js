@@ -2319,7 +2319,11 @@ async function loadReviews() {
   box.innerHTML = rows.map((r) => {
     const badge = r.status === "PENDING" ? '<span class="rv-pending">대기</span>'
       : r.status === "APPROVED" ? '<span class="rv-approved">승인</span>'
+      : r.status === "EXECUTED" ? '<span class="rv-approved">실행됨</span>'
+      : r.status === "ROLLED_BACK" ? '<span class="rv-pending">되돌림</span>'
+      : r.status === "EXECUTING" || r.status === "ROLLING_BACK" ? '<span class="rv-pending">실행 중</span>'
       : '<span class="rv-rejected">반려</span>';
+    const workbenchLink = `<a class="muted" href="/workbench.html?instance=${esc(encodeURIComponent(r.instanceId))}&amp;ticket=${esc(encodeURIComponent(r.id))}">워크벤치에서 드라이런·실행·되돌리기</a>`;
     const findings = (r.findings || []).map((f) => `<li>${esc(f)}</li>`).join("");
     const ai = r.aiOpinion ? `<div class="rv-ai"><b>AI 1차 소견:</b> ${esc(r.aiOpinion)}</div>` : "";
     const limited = r.parseLimited ? '<div class="rv-limited">다중 문장·복잡 구문 — 규칙 판정이 불완전할 수 있습니다(사람이 전체 확인).</div>' : "";
@@ -2332,7 +2336,7 @@ async function loadReviews() {
          </div>`
       : (r.status === "PENDING" ? '<div class="hint">승인/반려는 ADMIN만 가능합니다.</div>' : "");
     return `<div class="rv-item">
-      <div class="rv-head">#${r.id} ${badge} <span class="muted">${esc(r.requester)} · rules v${r.rulesVersion}</span></div>
+      <div class="rv-head">#${r.id} ${badge} <span class="muted">${esc(r.requester)} · rules v${r.rulesVersion}</span> ${workbenchLink}</div>
       <pre class="rv-sql codeblock">${esc(r.targetSql)}</pre>
       ${r.reason ? `<div class="rv-reason muted">사유: ${esc(r.reason)}</div>` : ""}
       <ul class="rv-findings">${findings}</ul>

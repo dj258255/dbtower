@@ -306,6 +306,22 @@ public class MySqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * 변경 트랜잭션의 락 대기를 문장 타임아웃 안으로 묶는다. InnoDB 행 락 기본 대기는 50초, 메타데이터 락(DDL) 기본 대기는
+     * 1년이라 그대로 두면 운영 트래픽 뒤에 오래 매달린다. 세션 값이지만 변경 계정 풀은 이 경로만 쓰므로 매번 다시 건다.
+     */
+    @Override
+    protected void beginChange(Statement st, int timeoutSeconds) throws SQLException {
+        st.execute("SET SESSION innodb_lock_wait_timeout = " + timeoutSeconds);
+        st.execute("SET SESSION lock_wait_timeout = " + timeoutSeconds);
+    }
+
+    /** 트리 형식은 한 셀에 계획 전체가 들어와 전후를 나란히 읽기 쉽다(8.0.16+) */
+    @Override
+    protected String explainPrefix() {
+        return "EXPLAIN FORMAT=TREE ";
+    }
+
     @Override
     protected String jdbcUrl() {
         // useTls면 REQUIRED — 암호화를 강제하되 인증서 검증은 JVM truststore 기본을 따른다.

@@ -38,6 +38,7 @@ WHERE NOT EXISTS (SELECT 1 FROM sample.orders);
 CREATE USER IF NOT EXISTS 'dbtower_reader'@'%' IDENTIFIED BY 'dbtower1234';
 GRANT SELECT ON sample.* TO 'dbtower_reader'@'%';
 
--- 변경 계정(3단계, 승인된 티켓만 실행): DML만. DDL·권한 변경은 주지 않는다.
+-- 변경 계정(승인된 티켓만 실행): DML과 인덱스·열 추가 DDL(ALTER·INDEX). DROP·CREATE TABLE·권한 변경은 주지 않는다 —
+-- 승인된 티켓이라도 계정 권한 밖의 문장은 대상 DB가 거부한다(마지막 방어선). 대형 테이블 DDL은 gh-ost 경로로 보낸다.
 CREATE USER IF NOT EXISTS 'dbtower_writer'@'%' IDENTIFIED BY 'dbtower1234';
-GRANT SELECT, INSERT, UPDATE, DELETE ON sample.* TO 'dbtower_writer'@'%';
+GRANT SELECT, INSERT, UPDATE, DELETE, ALTER, INDEX ON sample.* TO 'dbtower_writer'@'%';

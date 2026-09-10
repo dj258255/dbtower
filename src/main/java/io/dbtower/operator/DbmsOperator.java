@@ -1,6 +1,9 @@
 package io.dbtower.operator;
 
+import io.dbtower.operator.model.ChangeOutcome;
+import io.dbtower.operator.model.ChangePlan;
 import io.dbtower.operator.model.QueryResult;
+import io.dbtower.operator.model.RevertPlan;
 import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.operator.model.VolumeStat;
 import io.dbtower.operator.model.WaitEvent;
@@ -314,5 +317,20 @@ public interface DbmsOperator {
      */
     default QueryResult executeReadOnly(ConsoleCredential credential, String statement, int rowCap, int timeoutSeconds) {
         throw new UnsupportedOperationException("이 기종은 콘솔 조회를 지원하지 않습니다");
+    }
+
+    /**
+     * 승인된 변경 한 문장을 변경 계정(WRITE)으로 실행한다 — 한 트랜잭션 안에서 변경 전 행 사본을 락과 함께 잡고, 실행하고,
+     * 영향 행 수와 사본을 대조한 뒤에만 커밋한다(드라이런이면 끝에서 롤백).
+     *
+     * <p>"승인된 티켓인가"는 호출자(workbench)가 티켓 게이트로 먼저 확인한다. 이 메서드는 실행 계층의 불변식만 책임진다.
+     */
+    default ChangeOutcome executeChange(ConsoleCredential credential, ChangePlan plan) {
+        throw new UnsupportedOperationException("이 기종은 변경 티켓 실행을 지원하지 않습니다");
+    }
+
+    /** 커밋된 변경을 행 사본으로 되돌린다. 실행 이후 달라진 행이 있으면 아무것도 쓰지 않고 충돌을 돌려준다. */
+    default RevertPlan.Outcome revertChange(ConsoleCredential credential, RevertPlan plan) {
+        throw new UnsupportedOperationException("이 기종은 변경 되돌리기를 지원하지 않습니다");
     }
 }

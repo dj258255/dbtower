@@ -1,12 +1,16 @@
 package io.dbtower.workbench.internal.web;
 
 import io.dbtower.workbench.StatementClassifier.Classification;
+import io.dbtower.workbench.internal.ChangeExecutionService;
+import io.dbtower.workbench.internal.ChangeExecutionService.ExecutionView;
+import io.dbtower.workbench.internal.ChangeExecutionService.WorkloadView;
 import io.dbtower.workbench.internal.WorkbenchAssistant;
 import io.dbtower.workbench.internal.WorkbenchAssistant.AssistantRequest;
 import io.dbtower.workbench.internal.WorkbenchAssistant.Reply;
 import io.dbtower.workbench.internal.WorkbenchAssistant.ResultSample;
 import io.dbtower.workbench.internal.WorkbenchAssistant.SettingView;
 import io.dbtower.workbench.internal.WorkbenchService;
+import io.dbtower.workbench.internal.WorkbenchService.CompareView;
 import io.dbtower.workbench.internal.WorkbenchService.CsvExport;
 import io.dbtower.workbench.internal.WorkbenchService.HistoryItem;
 import io.dbtower.workbench.internal.WorkbenchService.InstanceView;
@@ -54,11 +58,32 @@ public class WorkbenchController {
     private final WorkbenchService workbench;
     private final WorksheetService worksheets;
     private final WorkbenchAssistant assistant;
+    private final ChangeExecutionService changes;
 
-    public WorkbenchController(WorkbenchService workbench, WorksheetService worksheets, WorkbenchAssistant assistant) {
+    public WorkbenchController(WorkbenchService workbench, WorksheetService worksheets, WorkbenchAssistant assistant,
+                               ChangeExecutionService changes) {
         this.workbench = workbench;
         this.worksheets = worksheets;
         this.assistant = assistant;
+        this.changes = changes;
+    }
+
+    /**
+     * 요청 본문의 불리언은 박싱 타입으로 받는다. Jackson 3는 원시 boolean에 값이 빠지면 null 대입을 거부해(FAIL_ON_NULL_FOR_PRIMITIVES)
+     * `{}` 요청이 서비스에 닿기 전에 400이 됐다(라이브 검증에서 발견). 빠진 withoutCapture는 "캡처 포기 안 함"이다.
+     */
+    public record TicketRunBody(Boolean withoutCapture) {
+        boolean skipCapture() {
+            return Boolean.TRUE.equals(withoutCapture);
+        }
+    }
+
+    /** dryRun은 빠지면 거부한다 — 빠진 값을 실제 되돌리기로 해석하지 않게 */
+    public record RevertBody(@NotNull Boolean dryRun) {
+    }
+
+    public record CompareBody(@NotNull Long leftInstanceId, @NotNull Long rightInstanceId,
+                              @NotBlank @Size(max = 100_000) String sql, List<String> keyColumns, Integer rowLimit) {
     }
 
     public record StatementRequest(@NotBlank @Size(max = 100_000) String sql, Integer rowLimit, Long worksheetId) {
@@ -160,6 +185,39 @@ public class WorkbenchController {
     public Reply ask(@PathVariable Long worksheetId, @Valid @RequestBody AssistantBody req) {
         return assistant.ask(worksheetId, new AssistantRequest(req.message(), req.tables(), req.columns(),
                 req.failedSql(), req.failedError(), req.result()));
+    }
+
+    // ---------- 승인 티켓 실행·전후 비교 (드라이런·실행·되돌리기는 ADMIN, SecurityConfig) ----------
+
+    @PostMapping("/tickets/{reviewId}/dry-run")
+    public ExecutionView dryRun(@PathVariable Long reviewId, @RequestBody(required = false) TicketRunBody req) {
+        return changes.dryRun(reviewId, req != null && req.skipCapture());
+    }
+
+    @PostMapping("/tickets/{reviewId}/execute")
+    public ExecutionView execute(@PathVariable Long reviewId, @RequestBody(required = false) TicketRunBody req) {
+        return changes.execute(reviewId, req != null && req.skipCapture());
+    }
+
+    /** 본문을 필수로 받는다 — 본문이 빠진 요청이 드라이런이 아니라 실제 되돌리기로 해석되지 않게 */
+    @PostMapping("/tickets/{reviewId}/revert")
+    public ExecutionView revert(@PathVariable Long reviewId, @Valid @RequestBody RevertBody req) {
+        return changes.revert(reviewId, req.dryRun());
+    }
+
+    @GetMapping("/tickets/{reviewId}/executions")
+    public List<ExecutionView> executions(@PathVariable Long reviewId) {
+        return changes.executions(reviewId);
+    }
+
+    @GetMapping("/executions/{executionId}/workload")
+    public WorkloadView workload(@PathVariable Long executionId, @RequestParam(defaultValue = "60") int windowMinutes) {
+        return changes.workload(executionId, windowMinutes);
+    }
+
+    @PostMapping("/compare")
+    public CompareView compare(@Valid @RequestBody CompareBody req) {
+        return workbench.compare(req.leftInstanceId(), req.rightInstanceId(), req.sql(), req.keyColumns(), req.rowLimit());
     }
 
     // ---------- 인스턴스 설정·마스킹 규칙 ----------
