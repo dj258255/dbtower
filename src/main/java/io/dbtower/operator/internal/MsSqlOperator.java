@@ -77,6 +77,11 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         super(instance, pools, backupTools);
     }
 
+    @Override
+    public String dropIndexStatement(String table, String index) {
+        return "DROP INDEX " + index + " ON " + table;
+    }
+
     /**
      * 변경 티켓 실행은 실측으로 검증한 기종에만 연다. SQL Server는 행 락 문법(UPDLOCK 힌트)과 생성 키 동작이 다른데,
      * 로컬 환경(Colima, Rosetta 없음)에서 컨테이너가 뜨지 않아 재지 못했다(VERIFICATION 128절).

@@ -32,14 +32,16 @@ public class ReviewController {
                              int rulesVersion, boolean parseLimited, LocalDateTime submittedAt,
                              String decidedBy, LocalDateTime decidedAt, String decisionComment,
                              String verifySql, String executedBy, LocalDateTime executedAt,
-                             String rolledBackBy, LocalDateTime rolledBackAt) {
+                             String rolledBackBy, LocalDateTime rolledBackAt,
+                             String intervenedBy, LocalDateTime intervenedAt, String interventionNote) {
         static ReviewView of(ReviewRequest r) {
             return new ReviewView(r.getId(), r.getInstanceId(), r.getTargetSql(), r.getReason(),
                     r.getRequester(), r.getStatus().name(),
                     r.getFindings() == null ? List.of() : List.of(r.getFindings().split("\n")),
                     r.getAiOpinion(), r.getRulesVersion(), r.isParseLimited(), r.getSubmittedAt(),
                     r.getDecidedBy(), r.getDecidedAt(), r.getDecisionComment(),
-                    r.getVerifySql(), r.getExecutedBy(), r.getExecutedAt(), r.getRolledBackBy(), r.getRolledBackAt());
+                    r.getVerifySql(), r.getExecutedBy(), r.getExecutedAt(), r.getRolledBackBy(), r.getRolledBackAt(),
+                    r.getIntervenedBy(), r.getIntervenedAt(), r.getInterventionNote());
         }
     }
 
@@ -68,6 +70,17 @@ public class ReviewController {
     }
 
     public record DecisionRequest(boolean approved, String comment) {
+    }
+
+    /** 취소 — 요청자 본인 또는 ADMIN(서비스가 확인). 대기·승인 상태에서만. */
+    @PostMapping("/reviews/{reviewId}/cancel")
+    public ReviewView cancel(@PathVariable Long reviewId, @RequestBody(required = false) CancelRequest req) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean admin = auth != null && auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+        return ReviewView.of(reviewService.cancel(reviewId, req == null ? null : req.note(), principal(), admin));
+    }
+
+    public record CancelRequest(String note) {
     }
 
     private static String principal() {

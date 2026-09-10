@@ -44,6 +44,7 @@
       <span class="wb-spacer"></span>
       <div class="wb-result-tabs">
         <button class="wb-rtab active" data-pane="grid">결과</button>
+        <button class="wb-rtab" data-pane="table">테이블 상세</button>
         <button class="wb-rtab" data-pane="compare">인스턴스 비교</button>
         <button class="wb-rtab" data-pane="history">내 실행 기록</button>
       </div>
@@ -71,6 +72,10 @@
       <div id="wb-grid" class="muted">문장을 실행하면 결과가 여기에 나옵니다.</div>
       <!-- 실패해도 마지막 정상 결과를 지우지 않고 그 위에 오류를 겹친다(TOI Preview의 에러 오버레이와 같은 원칙) -->
       <div id="wb-overlay" class="wb-overlay" hidden></div>
+    </section>
+    <section id="wb-pane-table" class="wb-pane" hidden>
+      <div id="wb-table" class="hint">스키마 탭에서 테이블 옆 "상세"를 누르면 행 수·크기·인덱스(카디널리티)·DDL을 여기서 봅니다.
+        열 이름을 누르면 채팅에 붙고, 미리보기로 바로 조회할 수 있습니다.</div>
     </section>
     <section id="wb-pane-compare" class="wb-pane" hidden>
       <div class="cmp-bar">

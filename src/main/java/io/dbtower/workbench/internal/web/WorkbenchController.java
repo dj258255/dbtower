@@ -82,6 +82,10 @@ public class WorkbenchController {
     public record RevertBody(@NotNull Boolean dryRun) {
     }
 
+    /** applied도 빠지면 거부한다 — 확인 결과를 기본값으로 추측하지 않는다 */
+    public record ResolveBody(@NotNull Boolean applied, @NotBlank @Size(max = 1_000) String note) {
+    }
+
     public record CompareBody(@NotNull Long leftInstanceId, @NotNull Long rightInstanceId,
                               @NotBlank @Size(max = 100_000) String sql, List<String> keyColumns, Integer rowLimit) {
     }
@@ -203,6 +207,11 @@ public class WorkbenchController {
     @PostMapping("/tickets/{reviewId}/revert")
     public ExecutionView revert(@PathVariable Long reviewId, @Valid @RequestBody RevertBody req) {
         return changes.revert(reviewId, req.dryRun());
+    }
+
+    @PostMapping("/tickets/{reviewId}/resolve")
+    public ExecutionView resolve(@PathVariable Long reviewId, @Valid @RequestBody ResolveBody req) {
+        return changes.resolve(reviewId, req.applied(), req.note());
     }
 
     @GetMapping("/tickets/{reviewId}/executions")

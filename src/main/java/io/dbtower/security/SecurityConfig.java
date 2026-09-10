@@ -208,7 +208,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/workbench/instances/*/settings").hasRole("ADMIN")
                         // 승인 티켓을 대상 DB에 닿게 하는 세 경로 — 드라이런도 락을 잡고 문장을 실제로 실행한 뒤 롤백하므로 ADMIN
                         .requestMatchers(HttpMethod.POST, "/api/workbench/tickets/*/dry-run",
-                                "/api/workbench/tickets/*/execute", "/api/workbench/tickets/*/revert").hasRole("ADMIN")
+                                "/api/workbench/tickets/*/execute", "/api/workbench/tickets/*/revert",
+                                "/api/workbench/tickets/*/resolve").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage("/login.html")

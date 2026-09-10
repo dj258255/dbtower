@@ -5,7 +5,7 @@ import { esc } from "./api.js";
 
 const CLICK_DELAY_MS = 220;
 
-export function renderTree(container, schema, { filter, expanded, onInsert, onPreview, onToggle, isPicking, onPick }) {
+export function renderTree(container, schema, { filter, expanded, onInsert, onPreview, onToggle, isPicking, onPick, onDetail = () => {} }) {
   if (!schema) {
     container.innerHTML = '<div class="muted">스키마를 불러오지 못했습니다</div>';
     return;
@@ -32,6 +32,7 @@ export function renderTree(container, schema, { filter, expanded, onInsert, onPr
         <button class="tree-caret" data-toggle="${esc(t.name)}" aria-label="열 펼치기">${open ? "▾" : "▸"}</button>
         <span class="tree-name" data-insert="${esc(t.name)}" data-preview="${esc(t.name)}" data-table="${esc(t.name)}" title="클릭: 이름 넣기 · 더블클릭: 미리보기 쿼리">${esc(t.name)}</span>
         <span class="tree-count muted">${t.columns.length}</span>
+        <button class="tree-detail" data-detail="${esc(t.name)}" title="테이블 상세: 행 수·크기·인덱스·DDL">상세</button>
       </div>${columns}
     </li>`;
   }).join("")}</ul>`;
@@ -41,6 +42,11 @@ export function renderTree(container, schema, { filter, expanded, onInsert, onPr
     const toggle = e.target.closest("[data-toggle]");
     if (toggle) {
       onToggle(toggle.dataset.toggle);
+      return;
+    }
+    const detail = e.target.closest("[data-detail]");
+    if (detail) {
+      onDetail(detail.dataset.detail);
       return;
     }
     const target = e.target.closest("[data-insert]");

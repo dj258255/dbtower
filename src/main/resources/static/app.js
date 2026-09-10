@@ -2322,6 +2322,7 @@ async function loadReviews() {
       : r.status === "EXECUTED" ? '<span class="rv-approved">실행됨</span>'
       : r.status === "ROLLED_BACK" ? '<span class="rv-pending">되돌림</span>'
       : r.status === "EXECUTING" || r.status === "ROLLING_BACK" ? '<span class="rv-pending">실행 중</span>'
+      : r.status === "CANCELLED" ? '<span class="rv-rejected">취소</span>'
       : '<span class="rv-rejected">반려</span>';
     const workbenchLink = `<a class="muted" href="/workbench.html?instance=${esc(encodeURIComponent(r.instanceId))}&amp;ticket=${esc(encodeURIComponent(r.id))}">워크벤치에서 드라이런·실행·되돌리기</a>`;
     const findings = (r.findings || []).map((f) => `<li>${esc(f)}</li>`).join("");

@@ -329,6 +329,14 @@ public interface DbmsOperator {
         throw new UnsupportedOperationException("이 기종은 변경 티켓 실행을 지원하지 않습니다");
     }
 
+    /**
+     * 인덱스 제거 문장 — DDL 실행 뒤 역변경 티켓 제안에만 쓴다(실행은 새 티켓의 드라이런·승인을 다시 거친다).
+     * 표준 문법은 인덱스 이름만 받지만 MySQL·SQL Server는 테이블을 요구해 구현체가 덮어쓴다.
+     */
+    default String dropIndexStatement(String table, String index) {
+        return "DROP INDEX " + index;
+    }
+
     /** 커밋된 변경을 행 사본으로 되돌린다. 실행 이후 달라진 행이 있으면 아무것도 쓰지 않고 충돌을 돌려준다. */
     default RevertPlan.Outcome revertChange(ConsoleCredential credential, RevertPlan plan) {
         throw new UnsupportedOperationException("이 기종은 변경 되돌리기를 지원하지 않습니다");

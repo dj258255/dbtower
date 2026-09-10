@@ -2,7 +2,7 @@
 // 정책(분류·계정·읽기 전용·마스킹·기록)과 판정은 전부 서버가 강제한다. 이 화면은 결과를 보여줄 뿐 판정하지 않는다.
 
 import { request, esc, csrfToken, ApiError } from "./api.js";
-import { SqlEditor } from "./editor.js";
+import { SqlEditor, highlight } from "./editor.js";
 import { renderTree } from "./schema-tree.js";
 import { renderGrid } from "./grid.js";
 import { renderTimeline, renderChips } from "./chat.js";
@@ -60,7 +60,9 @@ const tickets = new TicketPanel({
   detail: $("wb-ticket"),
   count: $("wb-ticket-count"),
   isAdmin: () => Boolean(state.me && state.me.role === "ADMIN"),
+  me: () => (state.me ? state.me.username : null),
   onOpenSql: (sql) => { editor.value = sql; onEdit(); editor.focus(); },
+  onProposeTicket: (sql, reason) => openTicket(sql, reason),
 });
 
 init();
@@ -250,7 +252,73 @@ function drawTree() {
     },
     isPicking: () => state.picking,
     onPick: addChip,
+    onDetail: openTableDetail,
   });
+}
+
+// ---------- 테이블 상세 ----------
+
+const bytes = (n) => {
+  if (n === null || n === undefined || n < 0) return "미확보";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = n;
+  let u = 0;
+  while (v >= 1024 && u < units.length - 1) { v /= 1024; u++; }
+  return `${v.toFixed(u ? 1 : 0)} ${units[u]}`;
+};
+
+// 행 수·크기·인덱스·DDL은 모니터 계정의 카탈로그 조회(기존 테이블 상세 API)로, 열 목록은 이미 받은 스키마 트리로 채운다
+async function openTableDetail(name) {
+  if (!state.instance) return;
+  showPane("table");
+  const box = $("wb-table");
+  box.className = "";
+  box.innerHTML = `<div class="muted">${esc(name)} 상세를 불러오는 중...</div>`;
+  const table = state.schema ? state.schema.tables.find((t) => t.name === name) : null;
+  let d;
+  try {
+    d = await request(`/api/instances/${encodeURIComponent(state.instance.id)}/table-detail`, { method: "POST", body: { table: name } });
+  } catch (e) {
+    box.innerHTML = `<div class="wb-msg error"><strong>상세를 불러오지 못했습니다</strong><p>${esc(e.message)}</p></div>`;
+    return;
+  }
+  const preview = (PREVIEW[state.instance.type] || PREVIEW.MYSQL)(name);
+  const columns = table ? table.columns.map((c) => `<tr><td><button class="td-col" data-col="${esc(c.name)}" title="채팅에 붙이기">${esc(c.name)}</button></td>
+      <td class="muted">${esc(c.type)}</td><td class="muted">${c.nullable ? "NULL" : "NOT NULL"}</td></tr>`).join("") : "";
+  const indexes = (d.indexes || []).map((i) => `<tr><td>${esc(i.name)}</td><td>${esc((i.columns || []).join(", "))}</td>
+      <td class="muted">${i.unique ? "UNIQUE" : ""}</td><td class="muted">${esc(i.type || "")}</td>
+      <td class="muted">${i.cardinality === null || i.cardinality === undefined ? "미확보" : esc(i.cardinality)}</td></tr>`).join("");
+  box.innerHTML = `
+    <div class="td-head"><strong>${esc(d.table || name)}</strong>${d.engine ? `<span class="muted">${esc(d.engine)}</span>` : ""}
+      <span class="wb-spacer"></span>
+      <button class="btn btn-small" data-td="preview">미리보기 실행</button>
+      <button class="btn btn-small" data-td="editor">SELECT 편집기로</button>
+      <button class="btn btn-small" data-td="chip">채팅에 붙이기</button></div>
+    <div class="td-stats">
+      <div><span class="wb-label">행 수(추정)</span><b>${d.rowCount >= 0 ? esc(d.rowCount.toLocaleString("ko-KR")) : "미확보"}</b></div>
+      <div><span class="wb-label">데이터</span><b>${esc(bytes(d.dataBytes))}</b></div>
+      <div><span class="wb-label">인덱스</span><b>${esc(bytes(d.indexBytes))}</b></div>
+      <div><span class="wb-label">평균 행</span><b>${esc(bytes(d.avgRowBytes))}</b></div>
+      <div><span class="wb-label">생성</span><b>${esc(d.createdAt || "미확보")}</b></div>
+    </div>
+    ${d.note ? `<div class="hint">${esc(d.note)}</div>` : ""}
+    <div class="td-grid">
+      <section><div class="df-title">열 ${table ? table.columns.length : ""}</div>
+        ${columns ? `<table class="history"><tbody>${columns}</tbody></table>` : '<div class="muted">스키마 트리에 없는 테이블입니다.</div>'}</section>
+      <section><div class="df-title">인덱스 ${(d.indexes || []).length}</div>
+        ${indexes ? `<table class="history"><thead><tr><th>이름</th><th>열</th><th></th><th>타입</th><th>카디널리티</th></tr></thead><tbody>${indexes}</tbody></table>` : '<div class="muted">인덱스가 없거나 확보하지 못했습니다.</div>'}</section>
+    </div>
+    <div class="df-title">DDL <span class="muted">${esc({ NATIVE: "엔진이 준 원문", RECONSTRUCTED: "카탈로그로 재구성한 근사", UNSUPPORTED: "미지원" }[d.ddlSource] || d.ddlSource || "")}</span></div>
+    ${d.ddl ? `<pre class="ai-sql td-ddl"><code>${highlight(d.ddl)}</code></pre>` : '<div class="muted">DDL을 확보하지 못했습니다.</div>'}`;
+  box.onclick = (e) => {
+    const col = e.target.closest("[data-col]");
+    if (col) { addChip({ type: "column", value: `${name}.${col.dataset.col}` }); showChatPane("chat"); return; }
+    const b = e.target.closest("[data-td]");
+    if (!b) return;
+    if (b.dataset.td === "preview") { showPane("grid"); previewSql(preview); }
+    if (b.dataset.td === "editor") { editor.value = preview; onEdit(); editor.focus(); }
+    if (b.dataset.td === "chip") { addChip({ type: "table", value: name }); showChatPane("chat"); }
+  };
 }
 
 function setPicking(on) {
@@ -521,6 +589,7 @@ function showPane(name) {
   document.querySelectorAll(".wb-rtab").forEach((b) => b.classList.toggle("active", b.dataset.pane === name));
   $("wb-pane-grid").hidden = name !== "grid";
   $("wb-pane-compare").hidden = name !== "compare";
+  $("wb-pane-table").hidden = name !== "table";
   $("wb-pane-history").hidden = name !== "history";
 }
 
@@ -533,10 +602,10 @@ function showChatPane(name) {
 
 // ---------- 변경 요청·인스턴스 간 비교 ----------
 
-function openTicket(sql) {
+function openTicket(sql, reason = "") {
   if (!state.instance || !sql || !sql.trim()) return;
   $("wb-ticket-sql").textContent = sql;
-  $("wb-ticket-reason").value = "";
+  $("wb-ticket-reason").value = reason;
   $("wb-ticket-verify").value = "";
   $("wb-ticket-error").hidden = true;
   $("wb-ticket-ok").disabled = false;

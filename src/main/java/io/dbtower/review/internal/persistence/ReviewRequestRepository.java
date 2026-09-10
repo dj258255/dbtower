@@ -26,6 +26,13 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
     @Query("update ReviewRequest r set r.status = :to where r.id = :id and r.status = :from")
     int transition(@Param("id") Long id, @Param("from") Status from, @Param("to") Status to);
 
+    /** 사람 개입 전이(취소·커밋 불명 정리) — 조건부라 실행 중인 요청과 겹쳐도 한쪽만 이긴다 */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update ReviewRequest r set r.status = :to, r.intervenedBy = :by, r.intervenedAt = :at, r.interventionNote = :note"
+            + " where r.id = :id and r.status = :from")
+    int intervene(@Param("id") Long id, @Param("from") Status from, @Param("to") Status to, @Param("by") String by,
+                  @Param("at") LocalDateTime at, @Param("note") String note);
+
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update ReviewRequest r set r.status = io.dbtower.review.internal.domain.ReviewRequest.Status.EXECUTED,"
             + " r.executedBy = :by, r.executedAt = :at"

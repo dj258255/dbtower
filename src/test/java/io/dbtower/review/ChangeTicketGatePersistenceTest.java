@@ -73,6 +73,45 @@ class ChangeTicketGatePersistenceTest {
     }
 
     @Test
+    void 대기_승인_티켓만_취소되고_실행권이_잡힌_티켓은_취소되지_않는다() {
+        Long pending = ticket(Status.PENDING);
+        Long approved = ticket(Status.APPROVED);
+
+        assertThat(gate.cancel(pending, "dev", "필요 없어짐")).isTrue();
+        assertThat(gate.cancel(approved, "admin", null)).isTrue();
+        ReviewRequest cancelled = repository.findById(pending).orElseThrow();
+        assertThat(cancelled.getStatus()).isEqualTo(Status.CANCELLED);
+        assertThat(cancelled.getIntervenedBy()).isEqualTo("dev");
+        assertThat(cancelled.getInterventionNote()).isEqualTo("필요 없어짐");
+        assertThat(gate.claimExecution(approved)).as("취소된 티켓은 실행권을 얻지 못한다").isFalse();
+
+        Long running = ticket(Status.APPROVED);
+        gate.claimExecution(running);
+        assertThat(gate.cancel(running, "admin", null)).isFalse();
+        assertThat(status(running)).as("실행 중인 티켓은 취소로 풀지 않는다").isEqualTo(Status.EXECUTING);
+    }
+
+    @Test
+    void 커밋_불명_정리는_사람의_확인_결과에_따라_끝난_상태나_실행_전_상태로_간다() {
+        Long applied = ticket(Status.APPROVED);
+        gate.claimExecution(applied);
+        assertThat(gate.resolveUncertain(applied, true, "admin", "root로 조회해 반영 확인")).isEqualTo("EXECUTED");
+        assertThat(gate.claimExecution(applied)).as("반영됨으로 정리한 티켓은 재실행 불가").isFalse();
+
+        Long notApplied = ticket(Status.APPROVED);
+        gate.claimExecution(notApplied);
+        assertThat(gate.resolveUncertain(notApplied, false, "admin", "행이 그대로")).isEqualTo("APPROVED");
+        assertThat(gate.claimExecution(notApplied)).as("반영 안 됨이면 다시 실행할 수 있다").isTrue();
+
+        gate.completeExecution(notApplied, 1L, "admin", 1);
+        gate.claimRollback(notApplied);
+        assertThat(gate.resolveUncertain(notApplied, true, "admin", "원복 확인")).isEqualTo("ROLLED_BACK");
+
+        assertThat(gate.resolveUncertain(ticket(Status.APPROVED), true, "admin", "확인"))
+                .as("실행권에 묶이지 않은 티켓은 정리 대상이 아니다").isNull();
+    }
+
+    @Test
     void 완료_전이는_실행권을_가진_상태에서만_일어난다() {
         Long id = ticket(Status.APPROVED);
 

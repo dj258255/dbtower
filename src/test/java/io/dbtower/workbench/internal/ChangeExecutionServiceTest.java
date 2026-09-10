@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.dbtower.audit.AuditTrail;
 import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.SchemaDiffService;
+import io.dbtower.operator.model.ColumnSchema;
+import io.dbtower.operator.model.IndexSchema;
 import io.dbtower.operator.ChangeCommitUncertainException;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
@@ -297,6 +299,45 @@ class ChangeExecutionServiceTest {
         assertFalse(executed.isRollbackAvailable(), "되돌린 실행에 되돌리기 버튼이 다시 뜨면 안 된다");
         assertNotNull(executed.getImages(), "전후 비교 화면·감사용 사본은 보존 기한까지 남는다");
         assertTrue(executed.getRollbackNote().startsWith("되돌렸다"));
+    }
+
+    @Test
+    void 커밋_불명_정리는_확인_근거가_있어야_하고_실행권에_묶인_티켓만_푼다() {
+        ticket("EXECUTING", "UPDATE customers SET grade = 'VIP' WHERE id = 3", null);
+
+        assertEquals(400, assertThrows(WorkbenchRejection.class, () -> service.resolve(7L, true, "확인")).status(),
+                "무엇으로 확인했는지 없이 상태를 바꾸지 않는다");
+        verify(gate, never()).resolveUncertain(any(), anyBoolean(), any(), any());
+
+        when(gate.resolveUncertain(7L, true, "admin", "root로 id=3 조회, grade=VIP")).thenReturn("EXECUTED");
+        ExecutionView view = service.resolve(7L, true, " root로 id=3 조회, grade=VIP ");
+        assertEquals("RESOLVE", view.action());
+        assertEquals("COMMITTED", view.outcome());
+        assertTrue(view.detail().toString().contains("EXECUTED"));
+
+        when(gate.resolveUncertain(eq(7L), anyBoolean(), any(), any())).thenReturn(null);
+        assertEquals(409, assertThrows(WorkbenchRejection.class, () -> service.resolve(7L, false, "행이 그대로임")).status());
+    }
+
+    @Test
+    void DDL_실행에는_생긴_구조만_지우는_역변경을_기종_문법으로_제안하고_잃는_부분은_알린다() throws Exception {
+        ticket("EXECUTED", "ALTER TABLE customers ADD COLUMN memo VARCHAR(20)", null);
+        SchemaDiffService.SchemaDiff diff = new SchemaDiffService.SchemaDiff("MYSQL", "MYSQL", false, null, List.of(), List.of(),
+                List.of(new SchemaDiffService.TableDiff("customers",
+                        List.of(new ColumnSchema("memo", "varchar", true, 7)),
+                        List.of(new ColumnSchema("legacy", "int", true, 6)),
+                        List.of(), List.of(new IndexSchema("idx_memo", List.of("memo"), false)),
+                        List.of(), List.of())));
+        ChangeExecution executed = new ChangeExecution(7L, 1L, Action.EXECUTE, "DDL", null, "sha", "admin");
+        executed.finish(Outcome.COMMITTED, 0L, null);
+        executed.attachSchemaDiff(JSON.writeValueAsString(diff));
+        when(executions.findByReviewIdOrderByStartedAtDesc(7L)).thenReturn(List.of(executed));
+        when(operator.dropIndexStatement("customers", "idx_memo")).thenReturn("DROP INDEX idx_memo ON customers");
+
+        ChangeExecutionService.InverseProposal inverse = service.executions(7L).get(0).inverse();
+
+        assertEquals(List.of("DROP INDEX idx_memo ON customers", "ALTER TABLE customers DROP COLUMN memo"), inverse.statements());
+        assertNotNull(inverse.note(), "지워진 열(legacy)은 정의·데이터가 사본에 없어 자동 역변경을 만들지 않았다고 알린다");
     }
 
     @Test

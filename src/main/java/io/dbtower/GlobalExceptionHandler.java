@@ -17,6 +17,16 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    /**
+     * 상태 충돌(이미 결정된 리뷰 재결정, 실행권이 잡힌 티켓 취소 등) — 요청은 올바르지만 지금 상태에서 할 수 없다.
+     * 처리기가 없어 500으로 새던 것을 409로 좁힌다(서버 오류가 아니라 재시도 전에 상태를 다시 봐야 하는 응답).
+     */
+    @ExceptionHandler(IllegalStateException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public Map<String, String> conflict(IllegalStateException e) {
+        return Map.of("error", message(e));
+    }
+
     /** 잘못된 요청(스냅샷 부족, SELECT 아닌 explain 등) */
     @ExceptionHandler(IllegalArgumentException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)

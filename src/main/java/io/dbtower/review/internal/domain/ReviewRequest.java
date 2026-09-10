@@ -18,7 +18,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ReviewRequest {
 
-    public enum Status { PENDING, APPROVED, REJECTED, EXECUTING, EXECUTED, ROLLING_BACK, ROLLED_BACK }
+    public enum Status { PENDING, APPROVED, REJECTED, CANCELLED, EXECUTING, EXECUTED, ROLLING_BACK, ROLLED_BACK }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -68,6 +68,13 @@ public class ReviewRequest {
     private LocalDateTime executedAt;
     private String rolledBackBy;
     private LocalDateTime rolledBackAt;
+
+    /** 취소, 또는 커밋 불명 상태를 대상 DB 확인 뒤 정리한 사람 개입 — 마지막 한 번만 남는다(이력은 감사 로그) */
+    private String intervenedBy;
+    private LocalDateTime intervenedAt;
+
+    @Column(columnDefinition = "text")
+    private String interventionNote;
 
     public ReviewRequest(Long instanceId, String targetSql, String reason, String requester,
                          String findings, String aiOpinion, int rulesVersion, boolean parseLimited, String verifySql) {

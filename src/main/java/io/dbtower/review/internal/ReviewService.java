@@ -19,8 +19,10 @@ import io.dbtower.review.internal.domain.ReviewRequest.Status;
 import io.dbtower.review.internal.persistence.ReviewRequestRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import io.dbtower.review.ChangeTicketGate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -56,11 +58,13 @@ public class ReviewService {
     private final QueryMasker queryMasker;
     private final ApplicationEventPublisher events;
     private final boolean requireSeparateApprover;
+    private final ChangeTicketGate ticketGate;
 
     public ReviewService(ReviewRequestRepository repository, RegistryService registryService,
                          DbmsOperatorFactory operatorFactory, AiAnalyzer aiAnalyzer,
-                         QueryMasker queryMasker, ApplicationEventPublisher events,
+                         QueryMasker queryMasker, ApplicationEventPublisher events, ChangeTicketGate ticketGate,
                          @Value("${dbtower.review.require-separate-approver:false}") boolean requireSeparateApprover) {
+        this.ticketGate = ticketGate;
         this.repository = repository;
         this.registryService = registryService;
         this.operatorFactory = operatorFactory;
@@ -126,6 +130,23 @@ public class ReviewService {
         events.publishEvent(new ReviewDecidedEvent(reviewId, review.getInstanceId(), approved,
                 decidedBy, comment, hint));
         return review;
+    }
+
+    /**
+     * 취소 — 요청자 본인이나 ADMIN. 대기·승인 상태에서만 닫고, 실행권이 잡힌 티켓은 여기서 풀지 않는다(워크벤치의 확인 뒤 정리).
+     * 승인됐지만 실행하지 않을 티켓이 APPROVED로 영원히 남으면, 나중에 누군가 맥락 없이 실행할 수 있는 열린 권한이 된다.
+     */
+    @Transactional
+    public ReviewRequest cancel(Long reviewId, String note, String actor, boolean admin) {
+        ReviewRequest review = get(reviewId);
+        registryService.findById(review.getInstanceId());
+        if (!admin && !review.getRequester().equals(actor)) {
+            throw new AccessDeniedException("요청자 본인이나 ADMIN만 취소할 수 있습니다");
+        }
+        if (!ticketGate.cancel(reviewId, actor, note == null || note.isBlank() ? null : note.strip())) {
+            throw new IllegalStateException("대기·승인 상태에서만 취소할 수 있습니다(현재 " + get(reviewId).getStatus() + ")");
+        }
+        return get(reviewId);
     }
 
     public List<ReviewRequest> byInstance(Long instanceId) {

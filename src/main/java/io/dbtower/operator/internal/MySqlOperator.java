@@ -316,6 +316,11 @@ public class MySqlOperator extends AbstractJdbcOperator {
         st.execute("SET SESSION lock_wait_timeout = " + timeoutSeconds);
     }
 
+    @Override
+    public String dropIndexStatement(String table, String index) {
+        return "DROP INDEX " + index + " ON " + table;
+    }
+
     /** 트리 형식은 한 셀에 계획 전체가 들어와 전후를 나란히 읽기 쉽다(8.0.16+) */
     @Override
     protected String explainPrefix() {

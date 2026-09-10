@@ -23,7 +23,7 @@ public class ChangeTicketGate {
     /**
      * @param sql       승인된 원문(실행 계층은 이것만 실행한다 — 편집본을 받지 않는다)
      * @param verifySql 변경 전후 실행계획·응답시간을 잴 검증 조회(없으면 null)
-     * @param status    PENDING / APPROVED / REJECTED / EXECUTING / EXECUTED / ROLLING_BACK / ROLLED_BACK
+     * @param status    PENDING / APPROVED / REJECTED / CANCELLED / EXECUTING / EXECUTED / ROLLING_BACK / ROLLED_BACK
      */
     public record ChangeTicket(Long id, Long instanceId, String sql, String verifySql, String status,
                                String requester, String decidedBy) {
@@ -76,6 +76,38 @@ public class ChangeTicketGate {
     @Transactional
     public void releaseRollback(Long reviewId) {
         repository.transition(reviewId, Status.ROLLING_BACK, Status.EXECUTED);
+    }
+
+    /**
+     * 실행하지 않을 티켓을 닫는다 — 대기·승인 상태에서만. 실행권이 잡힌 티켓은 취소가 아니라 {@link #resolveUncertain}으로 푼다.
+     *
+     * @return 취소됐으면 true, 이미 실행 중이거나 끝난 티켓이면 false
+     */
+    @Transactional
+    public boolean cancel(Long reviewId, String actor, String note) {
+        LocalDateTime now = LocalDateTime.now();
+        return repository.intervene(reviewId, Status.PENDING, Status.CANCELLED, actor, now, note) == 1
+                || repository.intervene(reviewId, Status.APPROVED, Status.CANCELLED, actor, now, note) == 1;
+    }
+
+    /**
+     * 커밋 여부를 모른 채 실행권에 묶인 티켓을, 사람이 대상 DB를 확인한 결과로 정리한다. 확인 결과가 "반영됨"이면 끝난 상태로,
+     * "반영 안 됨"이면 실행권을 잡기 전 상태로 되돌린다. 플랫폼은 대상 DB를 다시 보지 않는다 — 판단의 근거는 사람이 적은 메모다.
+     *
+     * @return 바뀐 상태 이름. 실행권에 묶인 티켓이 아니면 null
+     */
+    @Transactional
+    public String resolveUncertain(Long reviewId, boolean applied, String actor, String note) {
+        LocalDateTime now = LocalDateTime.now();
+        Status afterExecute = applied ? Status.EXECUTED : Status.APPROVED;
+        if (repository.intervene(reviewId, Status.EXECUTING, afterExecute, actor, now, note) == 1) {
+            return afterExecute.name();
+        }
+        Status afterRollback = applied ? Status.ROLLED_BACK : Status.EXECUTED;
+        if (repository.intervene(reviewId, Status.ROLLING_BACK, afterRollback, actor, now, note) == 1) {
+            return afterRollback.name();
+        }
+        return null;
     }
 
     @Transactional

@@ -26,7 +26,8 @@ import java.time.LocalDateTime;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ChangeExecution {
 
-    public enum Action { DRY_RUN, EXECUTE, REVERT_DRY_RUN, REVERT }
+    /** RESOLVE는 대상 DB에 닿지 않는다 — 커밋 불명 티켓을 사람이 확인한 결과로 정리한 기록이다 */
+    public enum Action { DRY_RUN, EXECUTE, REVERT_DRY_RUN, REVERT, RESOLVE }
 
     public enum Outcome { RUNNING, COMMITTED, ROLLED_BACK, FAILED, CONFLICT, UNCERTAIN }
 

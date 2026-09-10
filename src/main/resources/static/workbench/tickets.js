@@ -9,12 +9,13 @@ const STATUS = {
   PENDING: ["대기", "st-pending"],
   APPROVED: ["승인", "st-approved"],
   REJECTED: ["반려", "st-rejected"],
+  CANCELLED: ["취소", "st-rolled"],
   EXECUTING: ["실행 중", "st-running"],
   EXECUTED: ["실행됨", "st-executed"],
   ROLLING_BACK: ["되돌리는 중", "st-running"],
   ROLLED_BACK: ["되돌림", "st-rolled"],
 };
-const ACTION = { DRY_RUN: "드라이런", EXECUTE: "실행", REVERT_DRY_RUN: "되돌리기 드라이런", REVERT: "되돌리기" };
+const ACTION = { DRY_RUN: "드라이런", EXECUTE: "실행", REVERT_DRY_RUN: "되돌리기 드라이런", REVERT: "되돌리기", RESOLVE: "확인 뒤 정리" };
 const OUTCOME = {
   RUNNING: ["진행 중(결과 미확인)", "o-warn"],
   COMMITTED: ["커밋", "o-ok"],
@@ -23,16 +24,18 @@ const OUTCOME = {
   CONFLICT: ["충돌(아무것도 쓰지 않음)", "o-warn"],
   UNCERTAIN: ["커밋 여부 불명", "o-bad"],
 };
-// 되돌릴 수 없거나 대상 DB에 흔적을 남기는 동작은 한 번 더 눌러야 나간다(브라우저 확인창 대신 버튼 자체로)
-const ARMED = new Set(["execute", "execute-raw", "revert", "approve"]);
+// 되돌릴 수 없거나 대상 DB·티켓 상태에 흔적을 남기는 동작은 한 번 더 눌러야 나간다(브라우저 확인창 대신 버튼 자체로)
+const ARMED = new Set(["execute", "execute-raw", "revert", "approve", "cancel", "resolve-applied", "resolve-not-applied"]);
+const OPEN = ["PENDING", "APPROVED", "EXECUTING", "ROLLING_BACK"];
 const time = (t) => (t ? String(t).replace("T", " ").slice(0, 19) : "");
 
 export class TicketPanel {
-  constructor({ list, detail, count, isAdmin, onOpenSql }) {
-    Object.assign(this, { list, detail, count, isAdmin, onOpenSql });
+  constructor({ list, detail, count, isAdmin, me, onOpenSql, onProposeTicket }) {
+    Object.assign(this, { list, detail, count, isAdmin, me, onOpenSql, onProposeTicket });
     this.instanceId = null;
     this.tickets = [];
     this.executions = [];
+    this.proposals = [];
     this.selected = null;
     this.message = null;
     this.armed = null;
@@ -65,7 +68,7 @@ export class TicketPanel {
       this.list.innerHTML = `<div class="muted">티켓을 불러오지 못했습니다: ${esc(e.message)}</div>`;
       return false;
     }
-    const open = this.tickets.filter((t) => ["PENDING", "APPROVED", "EXECUTING", "ROLLING_BACK"].includes(t.status)).length;
+    const open = this.tickets.filter((t) => OPEN.includes(t.status)).length;
     this.count.textContent = open || "";
     this.list.innerHTML = this.tickets.length ? `<ul class="tk-items">${this.tickets.map((t) => {
       const [label, cls] = STATUS[t.status] || [t.status, ""];
@@ -111,9 +114,11 @@ export class TicketPanel {
       t.decidedBy ? `${t.status === "REJECTED" ? "반려" : "승인"} ${esc(t.decidedBy)} · ${esc(time(t.decidedAt))}${t.decisionComment ? " · " + esc(t.decisionComment) : ""}` : null,
       t.executedBy ? `실행 ${esc(t.executedBy)} · ${esc(time(t.executedAt))}` : null,
       t.rolledBackBy ? `되돌림 ${esc(t.rolledBackBy)} · ${esc(time(t.rolledBackAt))}` : null,
+      t.intervenedBy ? `사람 개입(${t.status === "CANCELLED" ? "취소" : "확인 뒤 정리"}) ${esc(t.intervenedBy)} · ${esc(time(t.intervenedAt))}${t.interventionNote ? " · " + esc(t.interventionNote) : ""}` : null,
     ].filter(Boolean).map((s) => `<li>${s}</li>`).join("");
     const message = this.message
       ? `<div class="wb-msg ${this.message.error ? "blocked" : "change"}">${esc(this.message.text)}</div>` : "";
+    this.proposals = [];
     this.detail.innerHTML = `
       <div class="tk-head"><span class="tk-id">#${esc(t.id)}</span><span class="tk-st ${cls}">${esc(label)}</span>
         <span class="muted">rules v${esc(t.rulesVersion)}</span></div>
@@ -127,15 +132,17 @@ export class TicketPanel {
       ${message}
       <h4 class="tk-sub">실행 기록 <span class="muted">${this.executions.length}건</span></h4>
       ${this.executions.length
-        ? this.executions.map((x, i) => this.execution(x, i === 0)).join("")
+        ? this.executions.map((x, i) => this.execution(t, x, i === 0)).join("")
         : '<div class="muted">아직 드라이런·실행 기록이 없습니다. 드라이런은 실제로 실행한 뒤 롤백해 바뀔 행을 보여줍니다.</div>'}`;
   }
 
   actions(t) {
     const button = (act, text, cls = "") =>
       `<button class="btn btn-small ${cls}" data-act="${act}">${esc(this.armed === act ? `${text} 확인(한 번 더)` : text)}</button>`;
+    const admin = this.isAdmin();
+    const mine = this.me() === t.requester;
     const list = [];
-    if (this.isAdmin()) {
+    if (admin) {
       if (t.status === "PENDING") list.push(button("dry-run", "드라이런"), button("approve", "승인", "btn-primary"), button("reject", "반려", "btn-danger"));
       if (t.status === "APPROVED") list.push(button("dry-run", "드라이런"), button("execute", "실행", "btn-primary"));
       if (t.status === "EXECUTED") list.push(button("revert-dry-run", "되돌리기 드라이런"), button("revert", "되돌리기", "btn-danger"));
@@ -144,18 +151,26 @@ export class TicketPanel {
         list.push(button("dry-run-raw", "캡처 없이 드라이런"), button("execute-raw", "캡처 없이 실행(되돌리기 불가)", "btn-danger"));
       }
     }
+    if ((admin || mine) && ["PENDING", "APPROVED"].includes(t.status)) list.push(button("cancel", "티켓 취소"));
     list.push('<button class="btn btn-small" data-act="to-editor">편집기로</button>');
     const hints = [];
-    if (!this.isAdmin()) hints.push("드라이런·승인·실행·되돌리기는 ADMIN만 합니다.");
+    if (!admin) hints.push("드라이런·승인·실행·되돌리기는 ADMIN만 합니다. 요청자는 대기·승인 상태의 자기 티켓을 취소할 수 있습니다.");
+    let resolve = "";
     if (["EXECUTING", "ROLLING_BACK"].includes(t.status)) {
-      hints.push("실행 중이거나 커밋 여부를 확인하지 못한 상태입니다. 같은 변경이 두 번 나가지 않게 막아 두었으니, 대상 행을 직접 확인한 뒤 정리해야 합니다.");
+      hints.push("실행 중이거나 커밋 여부를 확인하지 못한 상태입니다. 같은 변경이 두 번 나가지 않게 막아 두었습니다. "
+        + "대상 행을 직접 확인한 뒤, 무엇으로 확인했는지 적고 결과를 고르세요.");
+      if (admin) {
+        resolve = `<div class="tk-actions"><input class="tk-resolve-note" placeholder="확인 근거(예: root로 id=3 조회, grade=VIP 확인)">
+          ${button("resolve-applied", "반영됨으로 정리")}${button("resolve-not-applied", "반영 안 됨으로 정리")}</div>`;
+      }
     }
-    return `<div class="tk-actions">${list.join("")}
-      ${t.status === "PENDING" && this.isAdmin() ? '<input class="tk-comment" placeholder="결정 코멘트(선택)">' : ""}</div>
+    const comment = ["PENDING", "APPROVED"].includes(t.status) && (admin || mine)
+      ? '<input class="tk-comment" placeholder="코멘트·취소 사유(선택)">' : "";
+    return `<div class="tk-actions">${list.join("")}${comment}</div>${resolve}
       ${hints.map((h) => `<div class="hint">${esc(h)}</div>`).join("")}`;
   }
 
-  execution(x, open) {
+  execution(t, x, open) {
     const [outcome, ocls] = OUTCOME[x.outcome] || [x.outcome, ""];
     let rollback = "";
     if (x.action === "DRY_RUN") {
@@ -177,8 +192,22 @@ export class TicketPanel {
       <summary><span class="tk-act">${esc(ACTION[x.action] || x.action)}</span><span class="tk-out ${ocls}">${esc(outcome)}</span>
         <span class="muted">${esc(x.affectedRows ?? "-")}행 · ${esc(x.kind)} · ${esc(x.principal)} · ${esc(time(x.startedAt))} · sha ${esc((x.statementSha256 || "").slice(0, 10))}</span></summary>
       ${rollback ? `<div class="tk-line">${esc(rollback)}</div>` : ""}
-      ${detail}${rows}${x.schemaDiff ? renderSchemaDiff(x.schemaDiff) : ""}${x.probe ? renderProbe(x.probe) : ""}${workload}
+      ${detail}${rows}${x.schemaDiff ? renderSchemaDiff(x.schemaDiff) : ""}${x.probe ? renderProbe(x.probe) : ""}
+      ${this.inverse(t, x)}${workload}
     </details>`;
+  }
+
+  /** DDL 역변경 제안 — 실행 버튼이 아니라 "새 티켓으로 올리기"다. 역변경도 드라이런·승인을 다시 거친다 */
+  inverse(t, x) {
+    if (!x.inverse) return "";
+    const items = (x.inverse.statements || []).map((sql) => {
+      const i = this.proposals.push({ sql, reason: `티켓 #${t.id} 역변경` }) - 1;
+      return `<li><pre class="ai-sql"><code>${highlight(sql)}</code></pre>
+        <button class="btn btn-small" data-act="propose" data-i="${i}">역변경 티켓으로 올리기</button></li>`;
+    }).join("");
+    return `<div class="df-title">역변경 제안</div>
+      ${items ? `<ul class="tk-inverse">${items}</ul>` : ""}
+      ${x.inverse.note ? `<div class="hint">${esc(x.inverse.note)}</div>` : ""}`;
   }
 
   async onClick(e) {
@@ -190,26 +219,44 @@ export class TicketPanel {
       this.onOpenSql(t.targetSql);
       return;
     }
+    if (act === "propose") {
+      const p = this.proposals[Number(btn.dataset.i)];
+      if (p) this.onProposeTicket(p.sql, p.reason);
+      return;
+    }
     if (act === "workload") {
       await this.workload(btn.dataset.exec);
       return;
     }
     if (ARMED.has(act) && this.armed !== act) {
+      // 다시 그리면 입력칸이 초기화되므로 적어 둔 메모를 보존한다
+      const kept = { comment: this.detail.querySelector(".tk-comment")?.value, note: this.detail.querySelector(".tk-resolve-note")?.value };
       this.armed = act;
       this.render();
+      this.restoreInputs(kept);
       clearTimeout(this.armTimer);
       this.armTimer = setTimeout(() => {
+        const again = { comment: this.detail.querySelector(".tk-comment")?.value, note: this.detail.querySelector(".tk-resolve-note")?.value };
         this.armed = null;
         this.render();
+        this.restoreInputs(again);
       }, 4000);
       return;
     }
     this.armed = null;
     const comment = this.detail.querySelector(".tk-comment")?.value || "";
-    await this.run(t, act, comment);
+    const note = this.detail.querySelector(".tk-resolve-note")?.value || "";
+    await this.run(t, act, comment, note);
   }
 
-  async run(t, act, comment) {
+  restoreInputs({ comment, note }) {
+    const c = this.detail.querySelector(".tk-comment");
+    const n = this.detail.querySelector(".tk-resolve-note");
+    if (c && comment) c.value = comment;
+    if (n && note) n.value = note;
+  }
+
+  async run(t, act, comment, note) {
     const id = encodeURIComponent(t.id);
     const calls = {
       "dry-run": [`/api/workbench/tickets/${id}/dry-run`, { withoutCapture: false }],
@@ -220,15 +267,23 @@ export class TicketPanel {
       revert: [`/api/workbench/tickets/${id}/revert`, { dryRun: false }],
       approve: [`/api/reviews/${id}/decision`, { approved: true, comment }],
       reject: [`/api/reviews/${id}/decision`, { approved: false, comment }],
+      cancel: [`/api/reviews/${id}/cancel`, { note: comment }],
+      "resolve-applied": [`/api/workbench/tickets/${id}/resolve`, { applied: true, note }],
+      "resolve-not-applied": [`/api/workbench/tickets/${id}/resolve`, { applied: false, note }],
     };
     const [path, body] = calls[act];
-    this.message = { text: act.startsWith("approve") || act === "reject" ? "결정을 기록하는 중..." : "대상 DB에서 처리하는 중..." };
+    const decision = ["approve", "reject", "cancel"].includes(act) || act.startsWith("resolve");
+    this.message = { text: decision ? "기록하는 중..." : "대상 DB에서 처리하는 중..." };
     this.render();
     try {
       const res = await request(path, { method: "POST", body });
-      this.message = res.action
-        ? { text: `${ACTION[res.action] || res.action}: ${(OUTCOME[res.outcome] || [res.outcome])[0]} · ${res.affectedRows ?? 0}행` }
-        : { text: act === "approve" ? "승인했습니다. 이제 실행할 수 있습니다." : "반려했습니다." };
+      if (res.action === "RESOLVE") {
+        this.message = { text: res.detail };
+      } else if (res.action) {
+        this.message = { text: `${ACTION[res.action] || res.action}: ${(OUTCOME[res.outcome] || [res.outcome])[0]} · ${res.affectedRows ?? 0}행` };
+      } else {
+        this.message = { text: { approve: "승인했습니다. 이제 실행할 수 있습니다.", reject: "반려했습니다.", cancel: "티켓을 취소했습니다." }[act] };
+      }
       this.captureHint = false;
     } catch (e) {
       this.message = { error: true, text: e.message };

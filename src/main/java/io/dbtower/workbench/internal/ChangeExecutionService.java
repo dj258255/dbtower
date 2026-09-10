@@ -6,6 +6,8 @@ import io.dbtower.audit.AuditTrail;
 import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.ComparisonService.CompareResult;
 import io.dbtower.insight.SchemaDiffService;
+import io.dbtower.insight.SchemaDiffService.SchemaDiff;
+import io.dbtower.insight.SchemaDiffService.TableDiff;
 import io.dbtower.operator.ChangeCommitUncertainException;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
@@ -68,6 +70,7 @@ public class ChangeExecutionService {
     private static final Logger log = LoggerFactory.getLogger(ChangeExecutionService.class);
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final int DIFF_ROWS_MAX = 200;
+    private static final int RESOLVE_NOTE_MIN = 5;
 
     private final ChangeTicketGate gate;
     private final RegistryService registry;
@@ -115,7 +118,16 @@ public class ChangeExecutionService {
                                 Long affectedRows, boolean rollbackAvailable, String rollbackNote, boolean imagesEncrypted,
                                 LocalDateTime imagesExpireAt, RowChanges rowChanges, Object schemaDiff, Object probe,
                                 Object detail, String statementSha256, String principal,
-                                LocalDateTime startedAt, LocalDateTime finishedAt) {
+                                LocalDateTime startedAt, LocalDateTime finishedAt, InverseProposal inverse) {
+    }
+
+    /**
+     * DDL 실행의 역변경 제안 — 생긴 것(테이블·열·인덱스)만 지우는 문장을 만든다. 실행하지 않는다: 사람이 새 티켓으로 올려
+     * 드라이런·승인을 다시 거친다.
+     *
+     * @param note 삭제·변경된 구조처럼 자동으로 되돌릴 수 없는 부분이 있으면 그 이유(없으면 null)
+     */
+    public record InverseProposal(List<String> statements, String note) {
     }
 
     /** 값은 마스킹 규칙을 거친 뒤다. 바뀌었는지(changed) 판정은 원래 값으로 했다 */
@@ -399,7 +411,57 @@ public class ChangeExecutionService {
         return new ExecutionView(e.getId(), e.getReviewId(), e.getAction().name(), e.getKind(), e.getOutcome().name(),
                 e.getTableName(), e.getAffectedRows(), e.isRollbackAvailable(), e.getRollbackNote(), e.isImagesEncrypted(),
                 e.getImagesExpireAt(), e.getImages() == null ? null : rowChanges(e), readTree(e.getSchemaDiff()),
-                readTree(e.getProbe()), detail, e.getStatementSha256(), e.getPrincipal(), e.getStartedAt(), e.getFinishedAt());
+                readTree(e.getProbe()), detail, e.getStatementSha256(), e.getPrincipal(), e.getStartedAt(), e.getFinishedAt(),
+                inverse(e));
+    }
+
+    private InverseProposal inverse(ChangeExecution e) {
+        if (e.getAction() != Action.EXECUTE || e.getOutcome() != Outcome.COMMITTED || e.getSchemaDiff() == null) {
+            return null;
+        }
+        SchemaDiff diff;
+        try {
+            diff = JSON.readValue(e.getSchemaDiff(), SchemaDiff.class);
+        } catch (JsonProcessingException ex) {
+            return null;
+        }
+        DbmsOperator operator = operators.create(registry.findById(e.getInstanceId()));
+        List<String> statements = new ArrayList<>();
+        diff.addedTables().forEach(t -> statements.add("DROP TABLE " + t.name()));
+        boolean lossy = !diff.removedTables().isEmpty();
+        for (TableDiff t : diff.changedTables()) {
+            t.addedIndexes().forEach(i -> statements.add(operator.dropIndexStatement(t.table(), i.name())));
+            t.addedColumns().forEach(c -> statements.add("ALTER TABLE " + t.table() + " DROP COLUMN " + c.name()));
+            lossy |= !t.removedColumns().isEmpty() || !t.changedColumns().isEmpty()
+                    || !t.removedIndexes().isEmpty() || !t.changedIndexes().isEmpty();
+        }
+        String note = lossy
+                ? "지워지거나 바뀐 구조는 원래 정의와 데이터가 사본에 없어 역변경을 만들지 않았다. 사람이 작성해 새 티켓으로 올린다"
+                : null;
+        return statements.isEmpty() && note == null ? null : new InverseProposal(statements, note);
+    }
+
+    /**
+     * 커밋 여부를 모른 채 실행권에 묶인 티켓을, 사람이 대상 DB를 직접 확인한 결과로 정리한다. 플랫폼이 대상 DB를 다시 봐서
+     * 자동 판정하지 않는다 — 트리거·다른 세션의 같은 변경처럼 행만 봐서는 "반영됐다"를 확정할 수 없는 경우가 있어서, 판단의 근거를
+     * 사람이 적은 확인 메모로 남긴다.
+     */
+    public ExecutionView resolve(Long reviewId, boolean applied, String note) {
+        ChangeTicket ticket = gate.ticket(reviewId);
+        String memo = note == null ? "" : note.strip();
+        if (memo.length() < RESOLVE_NOTE_MIN) {
+            throw new WorkbenchRejection(400, "대상 DB를 무엇으로 확인했는지 " + RESOLVE_NOTE_MIN + "자 이상 적어야 합니다", null);
+        }
+        String next = gate.resolveUncertain(reviewId, applied, principal(), memo);
+        if (next == null) {
+            throw new WorkbenchRejection(409, "실행 중이거나 커밋 여부를 모르는 티켓만 정리합니다(현재 " + ticket.status() + ")", null);
+        }
+        ChangeExecution record = new ChangeExecution(reviewId, ticket.instanceId(), Action.RESOLVE,
+                ChangeStatementParser.parse(ticket.sql()).kind().name(), null, sha256(ticket.sql()), principal());
+        record.finish(applied ? Outcome.COMMITTED : Outcome.ROLLED_BACK, null,
+                "사람 확인: " + (applied ? "반영됨" : "반영 안 됨") + " -> " + next + " · " + memo);
+        audit.record("CHANGE_RESOLVE review=" + reviewId + " applied=" + applied, ticket.instanceId(), 200);
+        return view(executions.save(record));
     }
 
     private RowChanges rowChanges(ChangeExecution e) {
