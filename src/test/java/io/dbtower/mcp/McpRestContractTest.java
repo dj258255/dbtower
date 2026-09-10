@@ -124,12 +124,47 @@ class McpRestContractTest {
             url.append(lit);
             prevEnd = m.end();
         }
+        // 마지막 리터럴 뒤에 값이 붙으면("/api/reviews/" + id) 그것도 경로 변수다. 예전 규칙은 두 리터럴 사이만 보아 끝에 오는
+        // 변수를 떨궜다(131절에서 발견 — 도구가 아니라 추출기의 사각). post(url, body)의 body는 URL 뒤의 값이 아니므로
+        // 첫 인자(최상위 쉼표 앞)만 본다.
+        String first = firstArgument(argument);
+        if (prevEnd >= 0 && prevEnd <= first.length() && url.indexOf("?") < 0 && url.indexOf("&") < 0
+                && !first.substring(prevEnd).replace("+", "").trim().isEmpty()) {
+            url.append("{}");
+        }
         String s = url.toString();
         int cut = s.indexOf('?');
         if (cut < 0) {
             cut = s.indexOf('&');
         }
         return cut >= 0 ? s.substring(0, cut) : s;
+    }
+
+    /** 호출의 첫 인자만 — 문자열 안과 괄호 안의 쉼표(optInt(args, "limit", 50) 등)는 인자 구분이 아니다. */
+    private static String firstArgument(String argument) {
+        int depth = 0;
+        boolean inString = false;
+        for (int i = 0; i < argument.length(); i++) {
+            char c = argument.charAt(i);
+            if (inString) {
+                if (c == '\\') {
+                    i++;
+                } else if (c == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                inString = true;
+            } else if (c == '(') {
+                depth++;
+            } else if (c == ')') {
+                depth--;
+            } else if (c == ',' && depth == 0) {
+                return argument.substring(0, i);
+            }
+        }
+        return argument;
     }
 
     /** {id}·{}·{name} 을 전부 같은 자리표시자로 눕혀 비교 가능하게 만든다. */

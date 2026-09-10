@@ -37,6 +37,19 @@ class McpProtocolHandlerTest {
     }
 
     @Test
+    void 워크벤치_도구는_변경_요청과_조회만_열고_실행_계열은_없다() throws Exception {
+        ObjectNode response = handler.handle(parse("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\"}"));
+
+        List<String> names = new ArrayList<>();
+        response.get("result").get("tools").forEach(t -> names.add(t.get("name").asText()));
+
+        assertTrue(names.containsAll(List.of("change_ticket_submit", "change_ticket_status", "workbench_query")), names.toString());
+        assertTrue(names.stream().noneMatch(n -> n.contains("execute") || n.contains("dry_run") || n.contains("revert")
+                || n.contains("approve") || n.contains("resolve") || n.contains("cancel")),
+                "승인·실행·되돌리기 계열은 에이전트 도구로 열지 않는다: " + names);
+    }
+
+    @Test
     void 알림에는_응답하지_않는다() throws Exception {
         // JSON-RPC 2.0: id가 없는 메시지는 알림 — 응답을 만들면 스펙 위반
         assertNull(handler.handle(parse(
@@ -44,7 +57,7 @@ class McpProtocolHandlerTest {
     }
 
     @Test
-    void 도구_16종이_이름과_입력_스키마를_갖고_노출된다() throws Exception {
+    void 도구_19종이_이름과_입력_스키마를_갖고_노출된다() throws Exception {
         ObjectNode response = handler.handle(parse(
                 "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}"));
 
@@ -63,7 +76,7 @@ class McpProtocolHandlerTest {
         assertTrue(names.contains("partitions"), "파티션 조회는 MCP 도구로 노출한다");
         // 세션 조회(sessions)는 읽기라 노출하지만, 세션 종료(kill)는 위험해 MCP 도구로 만들지 않는다
         assertFalse(names.contains("kill_session"), "kill은 MCP로 노출하지 않는다");
-        assertEquals(16, names.size());   // 15단계 — lakehouse_query·lakehouse_card_create 추가
+        assertEquals(19, names.size());   // 15단계 lakehouse 2종, 워크벤치 요청·상태·조회 3종(131절)
     }
 
     @Test

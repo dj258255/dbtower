@@ -149,6 +149,13 @@ public class ReviewService {
         return get(reviewId);
     }
 
+    /** 단건 조회 — 범위 밖 인스턴스의 티켓이면 RegistryService가 404(원문 SQL 노출 방지). 목록 조회와 같은 경계를 단건에도 건다 */
+    public ReviewRequest getScoped(Long reviewId) {
+        ReviewRequest review = get(reviewId);
+        registryService.findById(review.getInstanceId());
+        return review;
+    }
+
     public List<ReviewRequest> byInstance(Long instanceId) {
         // LBAC 스코프 강제 — 스코프 밖 인스턴스면 findById가 404(리뷰 SQL 노출 방지). 목록 직조회 전에 게이트한다.
         registryService.findById(instanceId);

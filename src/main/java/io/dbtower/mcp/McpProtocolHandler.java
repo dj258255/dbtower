@@ -183,6 +183,36 @@ public final class McpProtocolHandler {
                 args -> get("/api/schema-diff?left=" + args.get("left").asLong()
                         + "&right=" + args.get("right").asLong())));
 
+        // ---------- 워크벤치: 변경 요청과 조회 (승인·실행 계열은 의도적으로 없다) ----------
+        // 에이전트는 변경을 "요청"만 한다. 드라이런·실행·되돌리기·확인 뒤 정리·승인은 도구로 열지 않는다 — 드라이런도 문장을 실제로
+        // 실행한 뒤 롤백하고 락을 잡는다(아래 gh-ost를 도구로 열지 않은 것과 같은 판단). 사람이 웹 워크벤치에서 본다.
+        tools.put("change_ticket_submit", new Tool(
+                "변경 요청(승인 티켓) 올리기 — 실행되지 않는다. PENDING으로 쌓이고 규칙 판정·AI 소견이 붙으며, 사람(ADMIN)이 워크벤치에서 "
+                        + "드라이런·승인·실행한다. SQL 기종은 문장 한 개, MongoDB는 명령 JSON 한 개. verifySql은 변경 전후 실행계획을 잴 읽기 조회.",
+                schema(Map.of("instanceId", intProp("대상 인스턴스 id"), "sql", strProp("변경 문장(한 개)"),
+                        "reason", strProp("요청 사유"), "verifySql", strProp("검증 조회(선택, 기본 없음)"))),
+                args -> post("/api/instances/" + args.get("instanceId").asLong() + "/reviews",
+                        mapper.createObjectNode().put("sql", args.get("sql").asText())
+                                .put("reason", args.path("reason").asText(""))
+                                .put("verifySql", args.hasNonNull("verifySql") ? args.get("verifySql").asText() : null)
+                                .toString())));
+
+        tools.put("change_ticket_status", new Tool(
+                "변경 요청의 상태·규칙 판정·AI 소견과 실행 기록(드라이런·실행·되돌리기, 행 비교는 마스킹된 값). "
+                        + "요청을 올린 뒤 사람이 처리했는지 확인할 때 쓴다.",
+                schema(Map.of("ticketId", intProp("change_ticket_submit이 돌려준 id"))),
+                args -> "{\"ticket\": " + get("/api/reviews/" + args.get("ticketId").asLong())
+                        + ", \"executions\": " + get("/api/workbench/tickets/" + args.get("ticketId").asLong() + "/executions") + "}"));
+
+        tools.put("workbench_query", new Tool(
+                "대상 DB 읽기 조회 — ADMIN이 워크벤치 설정에서 '결과 값 AI 공유'를 켠 인스턴스만 열린다(꺼져 있으면 403). "
+                        + "조회 전용 계정·읽기 전용 트랜잭션·마스킹·실행 기록을 사람의 조회와 똑같이 거치고 최대 50행. 변경 문장은 거부된다.",
+                schema(Map.of("instanceId", intProp("대상 인스턴스 id"), "sql", strProp("읽기 조회(SQL 또는 MongoDB 읽기 명령 JSON)"),
+                        "rowLimit", intProp("최대 행 수 (기본 50, 상한 50)"))),
+                args -> post("/api/workbench/instances/" + args.get("instanceId").asLong() + "/agent-query",
+                        mapper.createObjectNode().put("sql", args.get("sql").asText())
+                                .put("rowLimit", optInt(args, "rowLimit", 50)).toString())));
+
         // 온라인 스키마 변경(gh-ost, B4)은 의도적으로 MCP 도구로 노출하지 않는다.
         // 실제 테이블 구조를 바꾸는 파괴적 행위를 에이전트가 스스로 실행하는 건 위험하기 때문 —
         // 사람(ADMIN)이 웹 콘솔에서 dry-run으로 먼저 확인하고 실행하도록 REST로만 연다.

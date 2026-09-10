@@ -1,6 +1,7 @@
 package io.dbtower.workbench.internal.web;
 
 import io.dbtower.workbench.StatementClassifier.Classification;
+import io.dbtower.workbench.internal.AgentQueryService;
 import io.dbtower.workbench.internal.ChangeExecutionService;
 import io.dbtower.workbench.internal.ChangeExecutionService.ExecutionView;
 import io.dbtower.workbench.internal.ChangeExecutionService.WorkloadView;
@@ -59,13 +60,15 @@ public class WorkbenchController {
     private final WorksheetService worksheets;
     private final WorkbenchAssistant assistant;
     private final ChangeExecutionService changes;
+    private final AgentQueryService agents;
 
     public WorkbenchController(WorkbenchService workbench, WorksheetService worksheets, WorkbenchAssistant assistant,
-                               ChangeExecutionService changes) {
+                               ChangeExecutionService changes, AgentQueryService agents) {
         this.workbench = workbench;
         this.worksheets = worksheets;
         this.assistant = assistant;
         this.changes = changes;
+        this.agents = agents;
     }
 
     /**
@@ -133,6 +136,12 @@ public class WorkbenchController {
         VersionView version = req.worksheetId() == null ? null
                 : worksheets.recordRun(req.worksheetId(), id, req.sql()).orElse(null);
         return new QueryResponse(view, version);
+    }
+
+    /** 외부 AI 에이전트(MCP workbench_query)의 조회 — 인스턴스의 결과 값 AI 공유 설정이 켜진 경우만, 최대 50행 */
+    @PostMapping("/instances/{id}/agent-query")
+    public QueryView agentQuery(@PathVariable Long id, @Valid @RequestBody StatementRequest req) {
+        return agents.query(id, req.sql(), req.rowLimit());
     }
 
     @PostMapping("/instances/{id}/export")

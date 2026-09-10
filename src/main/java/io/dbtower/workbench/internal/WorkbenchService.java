@@ -122,7 +122,12 @@ public class WorkbenchService {
     }
 
     public QueryView run(Long instanceId, String statement, Integer rowLimit) {
-        Execution e = execute(instanceId, statement, rowLimit == null ? defaultRowLimit : rowLimit, "QUERY", null);
+        return runAs(instanceId, statement, rowLimit == null ? defaultRowLimit : rowLimit, "QUERY");
+    }
+
+    /** 같은 조회 경로를 다른 기록 이름으로 — 사람의 조회와 에이전트(MCP)의 조회를 실행 기록에서 구분한다 */
+    QueryView runAs(Long instanceId, String statement, int rowLimit, String action) {
+        Execution e = execute(instanceId, statement, rowLimit, action, null);
         return new QueryView(e.classification(), e.result().columns(), e.masked().rows(), e.result().rowCount(),
                 e.result().truncated(), e.result().elapsedMs(), e.masked().maskedColumns());
     }

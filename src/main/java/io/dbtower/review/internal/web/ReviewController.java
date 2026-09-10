@@ -57,6 +57,12 @@ public class ReviewController {
         return reviewService.byInstance(id).stream().map(ReviewView::of).toList();
     }
 
+    /** 단건 — MCP change_ticket_status가 쓴다. 팀 범위 밖이면 404. */
+    @GetMapping("/reviews/{reviewId}")
+    public ReviewView get(@PathVariable Long reviewId) {
+        return ReviewView.of(reviewService.getScoped(reviewId));
+    }
+
     /** 대기 중 요청 전체 — "리뷰 대기함". */
     @GetMapping("/reviews/pending")
     public List<ReviewView> pending() {

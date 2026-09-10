@@ -71,7 +71,13 @@ public class DiagnosisService {
      */
     static final Set<String> DELIBERATELY_HIDDEN_TOOLS = Set.of(
             // 결과를 Metabase 카드로 생성(POST)한다 — 외부 산출물을 만드는 행위라 사람이 결정한다.
-            "lakehouse_card_create");
+            "lakehouse_card_create",
+            // 변경 요청을 만든다(쓰기) — 진단 에이전트는 관찰만 한다
+            "change_ticket_submit",
+            // ticketId로 찾아서 instanceId 고정 가드(DiagnosisGuard) 밖의 인스턴스 티켓을 볼 수 있다
+            "change_ticket_status",
+            // 대상 DB의 행 값을 모델로 내보낸다 — 진단 루프는 스키마·통계만 본다
+            "workbench_query");
 
     /** 도구 결과를 다음 프롬프트에 넣을 때 상한 — 큰 결과가 컨텍스트를 폭주시키지 않게 자른다. */
     private static final int OBSERVATION_CAP = 6000;
