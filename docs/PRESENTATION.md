@@ -154,7 +154,7 @@ AI는 실행할 때마다 결과가 달라질 수 있다. 그래서 AI에게 판
 수 없다"고 답했다 (VERIFICATION 16-1절). API 키가 없으면 조용히 비활성화되고 규칙 기반 분석만
 남는다. 분석 실패가 알림을 막지 않는다.
 
-![AI 1차 분석 — 판단 기준 문서 위에서만 판정](images/webui/04-ai.png)
+![AI 1차 분석 — 판단 기준 문서 위에서만 판정(142절 재촬영)](images/webui/108-glass-query-ai.jpg)
 
 ## 7. 3단계 — DB팀 문의
 
@@ -191,7 +191,7 @@ schema_diff, metrics 등 진단 도구는 전부 읽기 전용이다. kill은 �
 claude mcp add --transport http dbtower http://localhost:8080/mcp
 ```
 
-![MCP 연동 카드 — 콘솔 세션이 MCP 코어의 tools/list를 받아 그린다(132절 재촬영)](images/webui/06-mcp.png)
+![MCP 연동 카드 — 콘솔 세션이 MCP 코어의 tools/list를 받아 그린다(위쪽 일부, 142절 재촬영)](images/webui/110-glass-mcp.jpg)
 
 ### 8.3 알림에서 진단까지, 채팅 안에서 도는 루프
 
