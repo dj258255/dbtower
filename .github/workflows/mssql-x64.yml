@@ -44,13 +44,16 @@ jobs:
           grep -m1 "model name" /proc/cpuinfo
           free -m | head -2
 
-      - name: Compile (JDBC 드라이버 확보)
-        run: ./gradlew compileTestJava
+      # compileTestJava는 런타임 전용 의존성(mssql-jdbc) jar를 받지 않는다 — 첫 실행에서 JAR이 비어 "No suitable driver found"로
+      # 재시도만 반복했다. bootJar가 런타임 클래스패스를 실제로 받는다.
+      - name: Build (JDBC 드라이버 확보)
+        run: ./gradlew bootJar testClasses
 
       - name: Wait for SQL Server and apply accounts
         shell: bash
         run: |
           JAR=$(find ~/.gradle/caches -name 'mssql-jdbc-*.jre11.jar' | head -1)
+          if [ -z "$JAR" ]; then echo "mssql-jdbc jar를 찾지 못했다"; exit 1; fi
           echo "JAR=$JAR" >> "$GITHUB_ENV"
           for i in $(seq 1 60); do
             if java -cp "$JAR" scripts/ApplySql.java "jdbc:sqlserver://127.0.0.1:11433;encrypt=false;loginTimeout=5" sa docker/mssql-init.sql; then
@@ -94,8 +97,8 @@ jobs:
           {
             echo '### SQL Server 2022 on native x64 runner'
             echo '```'
-            cat env.log load.log 2>/dev/null
-            grep -E "^\s+\[MSSQL" it.log 2>/dev/null
+            cat env.log load.log 2>/dev/null || true
+            grep -E "^\s+\[MSSQL" it.log 2>/dev/null || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
