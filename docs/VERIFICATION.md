@@ -5961,3 +5961,18 @@ EXECUTING 운영자        [resolve-applied, resolve-not-applied] (요청자·�
 
 라이브 뒤 남은 것: 로컬 메타 DB에 검증 계정 `p-viewer`·`p-requester`·`p-approver`·`p-operator`, 티켓 45(ROLLED_BACK)·46·47·48(CANCELLED).
 대상 MySQL의 `customers` id=3은 되돌리기로 원래 값이다.
+
+### main에 합친다 (PR #3)
+
+사용자가 "다 해줘"로 push·병합까지 맡겼다. 134절과 같은 절차로 main에 직접 push하지 않고 PR로 합친다.
+
+- 병합 전 확인: 원격 main 대비 뒤처짐 0·앞섬 2, 브랜치 이력 전체에서 로컬 비밀값(토큰·관리자·검증 계정 비밀번호·암호화 키) 검색 0건, 1MB 넘는 추가 파일 0.
+  `mssql-x64.yml`은 operator 경로 변경에만 걸려 이번 PR에서는 돌지 않고, `release.yml`은 `v*` 태그에서만 게시하므로 병합이 배포를 일으키지 않는다.
+- PR의 CI(`CI`: 규약 검사 + 전체 테스트):
+
+```
+34563800416  CI  ce5537e  success  test 5m0s — "규약 검사 전부 통과", "BUILD SUCCESSFUL in 4m 42s"
+```
+
+CI 로그는 테스트 개수를 찍지 않는다. 781 tests·실패 0·건너뜀 17은 같은 커밋 내용의 로컬 실행 수치다. 병합은 이 기록을 담은 커밋의 CI가 초록인 것을 확인한 뒤
+merge commit으로 한다(브랜치 커밋 이력을 그대로 남긴다).
