@@ -6484,3 +6484,101 @@ node --check app.js, workbench/{main,api,chat}.js           통과
   NetworkTimeoutAfterLoginIT 2, WebhookEmbedLiveFireTest 1, CloudWatchHostDiskMetricsIT 1, OracleRestoreVerifyIT 1
 DBTOWER_E2E=1 ./gradlew test --tests PersonaUiE2ETest       tests 6 skipped 0 failures 0
 ```
+
+## 142. 보여주기 갱신과 정리 — 새 디자인으로 데모 GIF·README 화면을 다시 찍다가 찾은 502 하나 (2026-09-11)
+
+### 무엇을 했나
+
+남은 일 3·4번. 137절 데모 GIF와 README 대표 화면 대부분이 138절(Liquid Glass) 이전 모습이라, 포트폴리오 첫 화면과 실제 화면이 달랐다.
+옛 파일은 그 시점을 기록한 VERIFICATION 절이 참조하므로 덮어쓰지 않고 새 이름으로 찍어 README·PRESENTATION만 새 화면을 가리키게 했다.
+사람이 누르는 대신 Playwright(1회용 `GifFlow.java`·`Refresh.java`·`Retake07.java`·`Retake108.java`, 스크래치)가 역할별 프록시에서 눌렀다.
+
+### 1. 데모 GIF 재촬영 (`docs/images/demo-change-flow-glass.gif`, 7장면, 675KB)
+
+137절과 같은 흐름: 요청자(8802) 인덱스 제안 -> 변경 요청 #53, 승인자(8803) 드라이런·승인, 운영자(8804) 실행 -> 실행 시각 기준 전후 비교.
+
+```
+#53 CREATE INDEX ON payment_events (merchant_id, created_at)
+  드라이런 #83 ROLLED_BACK 10:23:09 (p-approver) · 승인 10:25:42 (p-approver) · 실행 #84 COMMITTED 10:25:44 (p-operator)
+  전후 비교: 기준 18:55~19:25, 대상 19:25~19:27(KST) — 방금 실행한 CREATE INDEX가 대상 구간 load 1위(93.94)
+정리: 역변경 제안을 새 티켓 #54(DROP INDEX)로 올림 -> p-approver 승인 -> p-operator 실행
+payment_events 인덱스: 촬영 전 payment_events_pkey -> 촬영 뒤 payment_events_pkey
+```
+
+DDL은 행 사본으로 되돌리지 않으므로(되돌리기 불가, 역변경은 새 티켓) 정리도 플랫폼 흐름대로 역변경 티켓으로 했다 — 137절(#51 -> #52)과 같다.
+
+촬영이 세 번 멈췄고, 모두 스크립트가 화면 규칙을 잘못 안 것이었다:
+- 1장면: "변경 요청으로 올리기"가 60초 동안 안 나타났다. 실패 시 결과를 찍게 고치니 `미지원 후보 인덱스(columns) 미지정 — 자동 컬럼 추천은 범위 밖입니다`. 어드바이저는 후보 컬럼을 사람이 준다
+- 4장면: 드라이런을 두 번 누르게 했는데 드라이런은 무장(한 번 더 확인) 대상이 아니다(`ARMED`는 실행·되돌리기·승인·취소·정리). 첫 클릭으로 드라이런은 이미 돌아 있었고, 티켓 번호로 이어서 찍었다
+- 관리자가 아닌 관제 프록시로 1장면을 다시 찍으려다 버튼이 없었다 — 변경 요청 능력(CHANGE_REQUEST)이 있어야 그려진다. 설계대로다
+
+프레임 셋(1·6·7)은 처음 찍은 구도가 핵심을 가려 다시 찍었다: 제안 줄이 상단바 밑으로 올라감, 실행 기록(구조 변화·역변경 제안)이 화면 아래, 전후 비교 결과 대신 대시보드 맨 위.
+설명 띠 문구도 실제 화면에 보이는 것으로 고쳤다(4장면은 "구조 변화" 대신 "롤백(흔적 없음), 기록 1건").
+
+### 2. README 화면 새로 찍기
+
+| 새 파일 | 대신하는 옛 파일 | 비고 |
+|---|---|---|
+| `105-glass-login.jpg` | `07-login.png` | 유리 카드 |
+| `106-glass-health-score.jpg` | `10-health-score.png` | |
+| `109-glass-advisors.jpg` | `11-advisors.png` | |
+| `110-glass-mcp.jpg` | `06-mcp.png` | 관제 프록시로 찍었다 — 관리자 화면은 서비스 토큰 명령이 채워진다. 도구 설명이 길어 위쪽 960px만 |
+| `111-glass-workbench-masked.jpg` | `67-workbench-query-masked.png` | email·phone 가림 배지 |
+| `108-glass-query-ai.png` | (새로) | 아래 결함 수정 뒤 |
+
+시점 비교(`02-compare.png`)는 새로 찍지 않았다. 지금 로컬 데이터는 140절 락 시연(`pg_sleep`·`LOCK TABLE`)이 섞여 평균 레이턴시 +6,039,371% 같은 값이 나와,
+설명용 화면으로 옛 급증 시나리오가 낫다. 새 디자인의 시점 비교는 GIF 7장면에 있다. 요소 스크린샷에 떠 있는 유리 상단바가 한가운데 찍히는 문제도 있어,
+요소를 찍는 동안만 상단바를 숨겼다.
+
+### 3. 찾은 결함 — 쿼리 상세 "AI 분석"·"실행계획 보기"가 정규화 텍스트에서 502
+
+화면을 다시 찍던 중 쿼리 상세의 AI 분석이 `실패: 502 ... 대상 데이터베이스 조회에 실패했습니다`였다. 서버 로그(errorId 317467e7):
+
+```
+OperatorException: PostgreSQL EXPLAIN 실패: StatementCallback; SQL [EXPLAIN (FORMAT JSON) SELECT id, ... LIMIT $2];
+ERROR: bind message supplies 0 parameters, but prepared statement "" requires 2
+```
+
+137절에서 인덱스 어드바이저에서 고친 것과 같은 결함이 `explain` 경로에 남아 있었다. 쿼리 상세는 pg_stat_statements 정규화 텍스트($1·$2)를 그대로 넘기고,
+풀 커넥션(extended protocol)은 자리표시를 바인드 파라미터로 파싱한다. 같은 파일에 이미 있던 `explainNormalized`(1회용 simple-protocol 커넥션 + `GENERIC_PLAN`,
+플랜 변경 감지용)로 자리표시가 있을 때만 보내게 했다. "AI 분석"과 "실행계획 보기", MCP explain 도구가 모두 이 메서드를 쓴다.
+
+```
+같은 SQL: SELECT id, amount, created_at FROM payment_events WHERE merchant_id = $1 ORDER BY created_at DESC LIMIT $2 (요청자 프록시)
+수정 전  POST /explain, /ai-analysis   502 (bind message supplies 0 parameters)
+수정 뒤  POST /explain                  200  0.07s  계획 JSON, Total Cost 12578.73, 규칙 지적 1
+         POST /ai-analysis              200  37.81s 계획 + 규칙 지적 1 + AI 1차 분석
+IndexAdviceTest(hasPlaceholders 포함)    tests 5 failures 0
+```
+
+137절에서 어드바이저를 고칠 때 같은 입력을 받는 다른 경로(explain)를 함께 훑지 않았다. 대시보드가 넘기는 SQL은 한 가지 모양인데, 그 모양을 받는 곳을 하나만 고쳤다.
+
+수정한 jar로 화면에서 다시 눌렀다(요청자 프록시, Playwright): AI 분석 클릭부터 분석 문단이 보이기까지 46.525초, 실행계획 결과는 `"Node Type": "Limit"`부터 채워졌다.
+
+![쿼리 상세 AI 분석 — 정규화 SQL의 제네릭 계획(Seq Scan·Sort), 규칙 지적, AI 1차 분석과 판단할 근거가 없는 것](images/webui/108-glass-query-ai.jpg)
+
+### 4. 정리
+
+- 화면 규칙을 AGENTS.md에 모았다(140절 PR에 포함): 유리는 뜨는 계층에만, 대비 계산, `minmax(0, 1fr)`, SVG hidden 속성, 좁은 화면은 Playwright, 서버 허브, 안 보이면 연결 닫기, 흘린 조각은 표시용
+- 135절부터 역할별 화면 확인에 쓴 로컬 검증 계정을 지웠다. 역할 프록시를 먼저 멈추고, 세션·OAuth 토큰 행과 함께 한 트랜잭션으로 지웠다.
+  티켓·실행 기록·감사 기록에 남은 이름(`p-requester` 등)은 이력이라 두었다
+
+```
+프록시 프로세스            5 -> 0
+platform_user (p-*)        4 -> 0      남은 계정: admin(ADMIN), viewer(REQUESTER)
+spring_session (p-*)       6 -> 0
+oauth_token (p-*)          2 -> 0
+```
+
+다시 역할별 화면을 확인하려면 계정을 새로 만든다(사용자 카드 또는 `POST /api/security/users`) — 비밀번호는 환경변수로만 넘긴다.
+
+### 회귀
+
+```
+./scripts/check-conventions.sh                         통과
+./gradlew test --tests IndexAdviceTest                 tests 5 failures 0
+./gradlew test                                         tests 814 skipped 23 failures 0 errors 0   (140·141절과 같은 수 — 이 절은 테스트를 더하지 않았다)
+```
+
+explain 경로 수정에는 새 단위 테스트를 더하지 않았다. 갈림 조건(`hasPlaceholders`)은 IndexAdviceTest가 이미 고정하고, 실제 원인(extended protocol이 자리표시를
+바인드로 파싱)은 대상 PostgreSQL이 있어야 재현되므로 위의 같은 SQL 전후 호출(502 -> 200)을 근거로 둔다.

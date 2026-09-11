@@ -983,6 +983,11 @@ public class PostgresOperator extends AbstractJdbcOperator {
     @Override
     public String explain(String sql) {
         requireSelect(sql);
+        // 대시보드 쿼리 상세는 pg_stat_statements 정규화 텍스트($1·$2)를 그대로 넘긴다. 풀 커넥션(extended protocol)에서는
+        // 자리표시가 바인드 파라미터로 파싱돼 "0개 바인드"로 502가 났다(142절, 137절 어드바이저와 같은 결함) — 값 없이 계획을 뽑는 경로로 보낸다
+        if (hasPlaceholders(sql)) {
+            return explainNormalized(sql);
+        }
         try {
             return jdbc().query("EXPLAIN (FORMAT JSON) " + sql, rs -> {
                 StringBuilder sb = new StringBuilder();

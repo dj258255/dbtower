@@ -29,7 +29,7 @@ DBTower는 이 차이를 인터페이스 뒤로 숨겨, 플랫폼 코드와 사�
 **누가 쓰나.** 관제(지표·리포트), 요청자(워크벤치 조회·변경 요청), 승인자(승인·드라이런), 운영자(실행·백업·세션 종료), 관리자.
 승인자와 운영자는 서로의 일을 하지 못합니다([사람별 입구](#한-플랫폼-사람별-입구)).
 
-![변경 흐름 데모 — 인덱스 제안에서 변경 요청, 승인, 실행, 전후 비교까지 역할을 바꿔 가며](docs/images/demo-change-flow.gif)
+![변경 흐름 데모 — 인덱스 제안에서 변경 요청, 승인, 실행, 전후 비교까지 역할을 바꿔 가며](docs/images/demo-change-flow-glass.gif)
 
 **실측으로 말합니다.**
 
@@ -199,19 +199,19 @@ Seq Scan, Clustered Index Scan, TABLE ACCESS FULL, COLLSCAN 등)으로 비효율
 지적합니다. AI 분석은 [판단 기준 문서](docs/ai-analysis-rules.md)를 시스템 프롬프트로 넣어
 같은 입력에 일관된 판정이 나오게 하고, 근거가 없으면 모른다고 답하게 합니다.
 
-![AI 1차 분석 — 판단 기준 문서 기반 판정](docs/images/webui/04-ai.png)
+![AI 1차 분석 — 정규화 SQL의 제네릭 실행계획, 규칙 지적, 판단 기준 문서 위의 판정과 "모르는 것"](docs/images/webui/108-glass-query-ai.jpg)
 
 ### 자율 진단 — 사람이 보기 전에 플랫폼이 먼저 본다
 
 흩어진 신호(헬스·이상 감지·Advisors·SLO·백업 신선도)를 인스턴스별 0~100점으로 합산해
 나쁜 순으로 정렬합니다 — 대시보드가 아니라 "어디부터 볼지"를 알려주는 분류(triage) 큐입니다.
 
-![통합 헬스 스코어 — 감점 사유 분해, 나쁜 순 정렬](docs/images/webui/10-health-score.png)
+![통합 헬스 스코어 — 감점 사유 분해, 나쁜 순 정렬](docs/images/webui/106-glass-health-score.jpg)
 
 운영 규칙 자동 점검(Advisors)은 operations.md의 실측 규칙을 코드로 옮긴 것입니다.
 기종에 적용 불가한 점검은 "미지원"으로 정직하게 표기합니다.
 
-![Advisors — digest 포화 위험 지적과 권고, 무관 항목은 미지원 표기](docs/images/webui/11-advisors.png)
+![Advisors — 점검 항목별 통과·지적, 기종에 무관한 항목은 미지원 표기](docs/images/webui/109-glass-advisors.jpg)
 
 심층 원인 진단은 EXPLAIN(추정)이 아니라 실제 실행 계획으로 "왜 인덱스를 못 탔나"를 짚습니다 —
 아래는 숫자 리터럴 하나가 암시적 형변환으로 인덱스를 무력화한 사례를 정확히 지목한 화면입니다.
@@ -237,7 +237,7 @@ DBeaver처럼 스키마 트리·탭 편집기·자동완성·결과 그리드로
 "읽기 전용"은 쓰기 권한 계정으로 INSERT를 넣어 3기종에서 따로 증명했습니다 — 같은 JDBC 호출이 Oracle에서는 아무것도 막지 않았고,
 그걸 고쳤습니다([VERIFICATION 128절](docs/VERIFICATION.md), [AX 케이스 스터디](docs/PORTFOLIO-AX.md)).
 
-![워크벤치 — 분류 배지, 마스킹된 email·phone 열](docs/images/webui/67-workbench-query-masked.png)
+![워크벤치 — 분류 배지, 마스킹된 email·phone 열](docs/images/webui/111-glass-workbench-masked.jpg)
 
 **워크시트와 AI 제안** — 사내 AI 화면 생성 도구(TOI Studio)처럼 워크시트마다 대화와 체크포인트(버전) 카드가 쌓입니다.
 AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 서버가 분류(읽기/승인 필요/차단)와 스키마에 없는 테이블을 표시하고,
@@ -295,7 +295,7 @@ SQL Server는 논리 읽기 페이지 등) 오퍼레이터가 알려준 이름�
 claude mcp add --transport http dbtower http://localhost:8080/mcp
 ```
 
-![MCP 연동 카드 — 콘솔 세션이 GET /api/mcp/tools로 받은 MCP 코어의 tools/list 그대로, 19종(132절 재촬영)](docs/images/webui/06-mcp.png)
+![MCP 연동 카드 — 콘솔 세션이 GET /api/mcp/tools로 받은 MCP 코어의 tools/list 그대로(위쪽 일부, 142절 재촬영)](docs/images/webui/110-glass-mcp.jpg)
 
 HTTP 전송은 도구 호출을 서비스 토큰이 아니라 그 요청을 인증한 호출자의 토큰으로 REST에 위임합니다. 서비스 토큰으로 위임하던 때는
 관리자가 MCP로 올린 변경 요청의 요청자가 `api-token`으로 남아, 같은 사람이 화면에서 자기 요청을 승인해도 요청자·승인자 분리가
@@ -335,7 +335,7 @@ DB 접속정보를 다루는 관리 도구라 인증 없이는 운영에 못 들
 
 ![워크벤치 실행 기록에서 넘어온 대시보드 — 실행 시각 앞 30분을 기준, 뒤를 대상으로 시점 비교](docs/images/webui/87-persona-compare-deeplink.png)
 
-![로그인 — 최초 기동 admin 부트스트랩 안내](docs/images/webui/07-login.png)
+![로그인 — 최초 기동 admin 부트스트랩 안내(유리 카드는 뜨는 계층)](docs/images/webui/105-glass-login.jpg)
 
 ## 아키텍처 경계는 빌드가 지킨다 (Spring Modulith)
 
