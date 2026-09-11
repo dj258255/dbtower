@@ -251,7 +251,7 @@ class LiveSessionHubTest {
 
     @Test
     void 대상_조회_실패는_건너뛰지_않고_ERROR_프레임으로_보낸다() {
-        when(operator.activeSessions(anyInt())).thenThrow(new IllegalStateException("connection refused"));
+        when(operator.activeSessions(anyInt())).thenThrow(new IllegalStateException("connection refused host=10.1.2.3"));
         Recorder viewer = new Recorder();
         hub.subscribe(ID, viewer);
 
@@ -259,8 +259,23 @@ class LiveSessionHubTest {
 
         LiveFrame f = viewer.frames.get(0);
         assertThat(f.status()).isEqualTo(LiveSessionHub.ERROR);
-        assertThat(f.error()).contains("connection refused");
+        // 원문(호스트·드라이버 문장)은 구독자와 노드 공유 테이블로 퍼지므로 싣지 않는다(148절 감사) — 실패 종류만
+        assertThat(f.error()).contains("조회하지 못했습니다").contains("IllegalStateException").doesNotContain("10.1.2.3");
         assertThat(f.sessions()).isEmpty();
+    }
+
+    @Test
+    void 저장소가_한_번_실패했다_돌아와도_보내는_번호는_줄지_않는다() {
+        Recorder viewer = new Recorder();
+        hub.subscribe(ID, viewer);
+
+        round(hub);                // 저장소 seq 1
+        store.failNext = true;
+        round(hub);                // 올리기 실패 — 로컬 번호 2
+        round(hub);                // 저장소는 마지막 저장본(1) 다음인 2를 준다
+
+        // 수정 전에는 1, 2, 2 — 같은 번호가 다시 와 화면이 결번·중복을 가리지 못했다(148절 감사)
+        assertThat(viewer.frames).extracting(LiveFrame::seq).containsExactly(1L, 2L, 3L);
     }
 
     @Test
@@ -341,9 +356,14 @@ class LiveSessionHubTest {
         final Map<Long, LiveFrame> frames = new HashMap<>();
         long age;
         int published;
+        boolean failNext;
 
         @Override
         public long publish(LiveFrame frame) {
+            if (failNext) {
+                failNext = false;
+                throw new IllegalStateException("메타 DB 순간 장애");
+            }
             long seq = frames.containsKey(frame.instanceId()) ? frames.get(frame.instanceId()).seq() + 1 : 1;
             frames.put(frame.instanceId(), frame.withSeq(seq));
             published++;

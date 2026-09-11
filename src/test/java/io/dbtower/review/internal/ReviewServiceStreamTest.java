@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -49,7 +50,8 @@ class ReviewServiceStreamTest {
     @BeforeEach
     void setUp() {
         service = new ReviewService(repository, registry, mock(DbmsOperatorFactory.class), ai,
-                new QueryMasker(true, false), events, mock(ChangeTicketGate.class), false);
+                new QueryMasker(true, false), events, mock(ChangeTicketGate.class), false,
+                TransactionOperations.withoutTransaction());
         when(registry.findById(1L)).thenReturn(new DatabaseInstance("mysql", DbmsType.MYSQL, "h", 3306, "sample", "u", "p"));
         // 저장되면 id가 생긴다 — 카드 이벤트가 원시 long id를 받아, id 없는 엔티티를 돌려주면 이벤트 생성에서 NPE가 난다
         when(repository.save(any())).thenAnswer(inv -> {

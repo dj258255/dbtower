@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.util.Optional;
 
@@ -30,7 +31,8 @@ class ReviewServiceCancelTest {
     @BeforeEach
     void setUp() {
         service = new ReviewService(repository, registry, mock(DbmsOperatorFactory.class), mock(AiAnalyzer.class),
-                new QueryMasker(true, false), mock(ApplicationEventPublisher.class), gate, false);
+                new QueryMasker(true, false), mock(ApplicationEventPublisher.class), gate, false,
+                TransactionOperations.withoutTransaction());
         ReviewRequest review = new ReviewRequest(1L, "UPDATE t SET a = 1 WHERE id = 1", "사유", "dev", "", null, 1, false, null);
         ReflectionTestUtils.setField(review, "id", 7L);
         when(repository.findById(7L)).thenReturn(Optional.of(review));

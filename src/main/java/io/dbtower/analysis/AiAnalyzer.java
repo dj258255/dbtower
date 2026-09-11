@@ -21,15 +21,19 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -268,43 +272,103 @@ public class AiAnalyzer {
             throws Exception {
         // stream-json은 --verbose 없이 거부되고, --include-partial-messages가 있어야 글자 단위 조각(text_delta)이 온다.
         // 나머지 손잡이는 callCli와 같다 — 두 경로의 결과가 형식만 다르고 내용 조건은 같아야 짝비교가 된다
-        Process p = new ProcessBuilder("claude", "-p", "--output-format", "stream-json", "--verbose",
+        String[] envelope = {null};
+        runCli(List.of("claude", "-p", "--output-format", "stream-json", "--verbose",
                 "--include-partial-messages", "--effort", effort, "--setting-sources", "",
-                "--append-system-prompt", system)
-                .redirectErrorStream(false).start();
-        // callCli는 출력을 다 읽은 뒤에 시간 초과를 재지만, 스트림은 읽는 동안이 곧 대기라 따로 끊어 줘야 한다
-        CompletableFuture.delayedExecutor(180, TimeUnit.SECONDS).execute(() -> {
-            if (p.isAlive()) {
-                p.destroyForcibly();
+                "--append-system-prompt", system), user, CLI_TIMEOUT_SECONDS, line -> {
+            CliStreamLine parsed = readCliStreamLine(line);
+            if (parsed.text() != null && !parsed.text().isEmpty()) {
+                onText.accept(parsed.text());
+            } else if (parsed.resultEnvelope() != null) {
+                envelope[0] = parsed.resultEnvelope();
             }
         });
-        try (var stdin = p.getOutputStream()) {
-            stdin.write(user.getBytes(StandardCharsets.UTF_8));
+        if (envelope[0] == null) {
+            throw new IllegalStateException("claude CLI가 결과 줄 없이 끝났습니다");
         }
-        String envelope = null;
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                CliStreamLine parsed = readCliStreamLine(line);
-                if (parsed.text() != null && !parsed.text().isEmpty()) {
-                    onText.accept(parsed.text());
-                } else if (parsed.resultEnvelope() != null) {
-                    envelope = parsed.resultEnvelope();
+        return extractCliResult(envelope[0], env -> recordCliUsage(callSite, env));
+    }
+
+    /** CLI 한 번의 상한 — 흘려 받는 경로·한 번에 받는 경로가 같다 */
+    static final long CLI_TIMEOUT_SECONDS = 180;
+    private static final int STDERR_KEEP_BYTES = 8_192;
+
+    /**
+     * CLI 한 번 실행 — stdin으로 입력을 넣고, onLine이 있으면 stdout을 줄마다 넘기고 없으면 전부 모아 돌려준다.
+     * 테스트가 claude 대신 sh로 같은 경로를 돌릴 수 있게 명령을 받는다.
+     *
+     * <p>자식을 지키는 두 가지(148절 감사). 제한 시간은 읽기와 따로 잰다 — 예전 callCli는 stdout을 다 읽은 뒤에 waitFor로 재서
+     * 멈춘 자식 앞에서는 그 검사까지 가지 못했다. stderr는 따로 비운다 — 읽지 않으면 파이프(보통 64KB)가 차는 순간
+     * 자식은 stderr 쓰기에서, 우리는 stdout 읽기에서 서로를 기다린다. 오류 문장은 뒤 8KB만 남긴다.
+     */
+    static String runCli(List<String> command, String input, long timeoutSeconds, Consumer<String> onLine) throws Exception {
+        Process p = new ProcessBuilder(command).redirectErrorStream(false).start();
+        AtomicBoolean timedOut = new AtomicBoolean();
+        CompletableFuture.delayedExecutor(timeoutSeconds, TimeUnit.SECONDS).execute(() -> {
+            if (p.isAlive()) {
+                timedOut.set(true);
+                killTree(p);
+            }
+        });
+        CompletableFuture<String> stderr = new CompletableFuture<>();
+        Thread.ofVirtual().name("claude-cli-stderr").start(() -> stderr.complete(drainTail(p.getErrorStream())));
+        try (var stdin = p.getOutputStream()) {
+            stdin.write(input.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            // 자식이 입력을 다 읽기 전에 끝났다(깨진 파이프) — 결과는 아래 종료 코드로 판정한다
+        }
+        String out = "";
+        if (onLine == null) {
+            out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        } else {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    onLine.accept(line);
                 }
             }
         }
         if (!p.waitFor(10, TimeUnit.SECONDS)) {
-            p.destroyForcibly();
+            killTree(p);
             throw new IllegalStateException("claude CLI 응답 시간 초과");
         }
+        if (timedOut.get()) {
+            throw new IllegalStateException("claude CLI 응답 시간 초과(" + timeoutSeconds + "초)");
+        }
         if (p.exitValue() != 0) {
-            String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+            String err = stderr.completeOnTimeout("", 2, TimeUnit.SECONDS).join();
             throw new IllegalStateException("claude CLI 종료 코드 " + p.exitValue() + ": " + err.trim());
         }
-        if (envelope == null) {
-            throw new IllegalStateException("claude CLI가 결과 줄 없이 끝났습니다");
+        return out;
+    }
+
+    /**
+     * 자손까지 죽인다 — 직접 띄운 프로세스만 죽이면 그것이 띄운 자식(리눅스 sh의 sleep, CLI가 띄운 하위 프로세스)이 살아남아
+     * stdout·stderr 파이프를 쥐고, 읽기가 그 자식이 끝날 때까지 돌아오지 않는다. 1차 CI(리눅스)에서 멈춘 자식 테스트가 이것으로 20초 제한에 걸렸다(148절)
+     */
+    private static void killTree(Process p) {
+        p.descendants().forEach(ProcessHandle::destroyForcibly);
+        p.destroyForcibly();
+    }
+
+    /** 끝까지 읽되 뒤 STDERR_KEEP_BYTES만 남긴다 — 자식을 죽이면 파이프가 닫히며 IOException으로 끝나는데, 모은 만큼 돌려준다 */
+    static String drainTail(InputStream in) {
+        byte[] kept = new byte[0];
+        byte[] buf = new byte[4096];
+        try (in) {
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                int keep = Math.min(STDERR_KEEP_BYTES, kept.length + n);
+                byte[] next = new byte[keep];
+                int fromKept = Math.max(0, keep - n);
+                System.arraycopy(kept, kept.length - fromKept, next, 0, fromKept);
+                System.arraycopy(buf, n - (keep - fromKept), next, fromKept, keep - fromKept);
+                kept = next;
+            }
+        } catch (IOException e) {
+            // 모은 만큼만 돌려준다
         }
-        return extractCliResult(envelope, env -> recordCliUsage(callSite, env));
+        return new String(kept, StandardCharsets.UTF_8);
     }
 
     private void recordCliUsage(CallSite callSite, JsonNode env) {
@@ -439,21 +503,8 @@ public class AiAnalyzer {
         // --output-format json: 본문만이 아니라 usage·stop_reason이 실린 봉투를 받는다 —
         // 구독(CLI) 경로에도 API 경로와 같은 관측점을 두어야 캐시·절단을 짝비교로 잴 수 있다.
         // --effort: API 경로의 outputConfig.effort와 같은 손잡이를 구독 경로에도 둔다(두 경로 동일 설정)
-        Process p = new ProcessBuilder("claude", "-p", "--output-format", "json",
-                "--effort", effort, "--setting-sources", "", "--append-system-prompt", system)
-                .redirectErrorStream(false).start();
-        try (var stdin = p.getOutputStream()) {
-            stdin.write(user.getBytes(StandardCharsets.UTF_8));
-        }
-        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        if (!p.waitFor(180, TimeUnit.SECONDS)) {
-            p.destroyForcibly();
-            throw new IllegalStateException("claude CLI 응답 시간 초과");
-        }
-        if (p.exitValue() != 0) {
-            String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-            throw new IllegalStateException("claude CLI 종료 코드 " + p.exitValue() + ": " + err.trim());
-        }
+        String out = runCli(List.of("claude", "-p", "--output-format", "json",
+                "--effort", effort, "--setting-sources", "", "--append-system-prompt", system), user, CLI_TIMEOUT_SECONDS, null);
         return extractCliResult(out, env -> recordCliUsage(callSite, env));
     }
 
@@ -515,7 +566,8 @@ public class AiAnalyzer {
         if (client == null) {
             synchronized (this) {
                 if (client == null) {
-                    client = AnthropicOkHttpClient.fromEnv();
+                    // CLI와 같은 상한 — SDK 기본값에 맡기면 화면 연결(SSE 240초)이 끊긴 뒤에도 작업 스레드와 스트림 자리를 쥘 수 있다(148절 감사)
+                    client = AnthropicOkHttpClient.builder().fromEnv().timeout(Duration.ofSeconds(CLI_TIMEOUT_SECONDS)).build();
                 }
             }
         }
