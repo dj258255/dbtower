@@ -2426,7 +2426,8 @@ async function loadReviews() {
     const ai = r.aiOpinion ? `<div class="rv-ai"><b>AI 1차 소견:</b> ${esc(r.aiOpinion)}</div>` : "";
     const limited = r.parseLimited ? '<div class="rv-limited">다중 문장·복잡 구문 — 규칙 판정이 불완전할 수 있습니다(사람이 전체 확인).</div>' : "";
     const decided = r.status !== "PENDING"
-      ? `<div class="rv-decided muted">${esc(r.decidedBy || "")} · ${esc((r.decidedAt || "").replace("T", " ").slice(0, 19))}${r.decisionComment ? " · " + esc(r.decisionComment) : ""}</div>` : "";
+      // 서버 시각은 오프셋 없는 UTC라 원문을 자르면 워크벤치(브라우저 시간대)와 9시간 어긋나 보였다(136절) — 슬로우 시각과 같은 변환을 쓴다
+      ? `<div class="rv-decided muted">${esc(r.decidedBy || "")} · ${fmtSlowTime(r.decidedAt)}${r.decisionComment ? " · " + esc(r.decisionComment) : ""}</div>` : "";
     const actions = (r.status === "PENDING" && canDecide)
       ? `<div class="rv-actions">
            <button class="btn btn-small btn-primary" onclick="decideReview(${r.id}, true)">승인</button>

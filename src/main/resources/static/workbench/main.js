@@ -81,10 +81,12 @@ async function init() {
   }
   if (state.me && !can("WORKBENCH")) {
     // 관제만 보는 역할은 대상 DB의 행 값을 보지 않는다. 서버도 워크벤치 API를 403으로 막지만, 실패 문구가 늘어선 빈 화면 대신 갈 곳을 알려준다
-    document.querySelector(".wb-shell").innerHTML = `<div class="wb-note" style="margin:48px auto;max-width:640px">
-      <p>워크벤치는 조회 계정으로 대상 DB의 행 값을 보는 화면이라 요청자(REQUESTER) 이상 역할이 필요합니다.
-        지금 역할(${esc(ROLE_LABEL[state.me.role] || state.me.role)})은 대시보드에서 지표·리포트를 봅니다.</p>
-      <p><a class="btn btn-primary btn-small" href="/">대시보드로</a></p></div>`;
+    // 셸 전체를 바꾼다 — 셸은 좌·중·우 격자라 안쪽에 넣으면 안내가 왼쪽 첫 칸(인스턴스 목록 폭)에 끼어 세로로 늘어진다(136절 화면 확인)
+    document.querySelector(".wb-shell").outerHTML = `<main style="padding:48px 16px">
+      <div class="wb-note" style="margin:0 auto;max-width:640px">
+        <p>워크벤치는 조회 계정으로 대상 DB의 행 값을 보는 화면이라 요청자(REQUESTER) 이상 역할이 필요합니다.
+          지금 역할(${esc(ROLE_LABEL[state.me.role] || state.me.role)})은 대시보드에서 지표·리포트를 봅니다.</p>
+        <p><a class="btn btn-primary btn-small" href="/">대시보드로</a></p></div></main>`;
     return;
   }
   const handoff = takeHandoff(new URLSearchParams(location.search).get("handoff"));

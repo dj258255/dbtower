@@ -290,6 +290,12 @@ DB 접속정보를 다루는 관리 도구라 인증 없이는 운영에 못 들
 화면 사이의 넘김은 세 가지입니다: 대시보드의 쿼리 상세 -> 워크벤치 새 워크시트, 인덱스 제안 -> 워크벤치 변경 요청 창,
 워크벤치의 실행 기록 -> 대시보드의 실행 시각 앞뒤 30분 시점 비교. 로그인 뒤에는 가려던 주소(딥링크·OAuth 인가)가 있으면 그곳이, 없으면 역할의 첫 화면이 열립니다.
 
+같은 승인된 티켓을 승인자와 운영자가 볼 때 — 승인자에게는 실행 버튼이 없고, 운영자에게는 승인 버튼이 없습니다([VERIFICATION 136절](docs/VERIFICATION.md)):
+
+<img src="docs/images/webui/82-persona-approver-approved.png" width="360" alt="승인자가 본 승인된 티켓 — 드라이런·취소만, 실행은 운영자가 한다는 안내"> <img src="docs/images/webui/83-persona-operator-approved.png" width="360" alt="운영자가 본 같은 티켓 — 드라이런·실행·취소">
+
+![워크벤치 실행 기록에서 넘어온 대시보드 — 실행 시각 앞 30분을 기준, 뒤를 대상으로 시점 비교](docs/images/webui/87-persona-compare-deeplink.png)
+
 ![로그인 — 최초 기동 admin 부트스트랩 안내](docs/images/webui/07-login.png)
 
 ## 아키텍처 경계는 빌드가 지킨다 (Spring Modulith)
