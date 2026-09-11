@@ -682,6 +682,11 @@ public class MySqlOperator extends AbstractJdbcOperator {
      */
     private List<TableDetailSupport.ForeignKeyRow> mysqlForeignKeys(String table) {
         String db = instance.getDbName();
+        // table이 null이면 이 데이터베이스의 외래키 전체(구조 스냅샷, 153절)
+        String filter = table == null
+                ? "AND (kcu.TABLE_SCHEMA = ? OR kcu.REFERENCED_TABLE_SCHEMA = ?)"
+                : "AND ((kcu.TABLE_SCHEMA = ? AND kcu.TABLE_NAME = ?) OR (kcu.REFERENCED_TABLE_SCHEMA = ? AND kcu.REFERENCED_TABLE_NAME = ?))";
+        Object[] args = table == null ? new Object[]{db, db} : new Object[]{db, table, db, table};
         return jdbc().query("""
                 SELECT kcu.CONSTRAINT_NAME, kcu.TABLE_SCHEMA, kcu.TABLE_NAME, kcu.COLUMN_NAME,
                        kcu.REFERENCED_TABLE_SCHEMA, kcu.REFERENCED_TABLE_NAME, kcu.REFERENCED_COLUMN_NAME,
@@ -691,15 +696,14 @@ public class MySqlOperator extends AbstractJdbcOperator {
                   ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
                  AND rc.TABLE_NAME = kcu.TABLE_NAME
                 WHERE kcu.REFERENCED_TABLE_NAME IS NOT NULL
-                  AND ((kcu.TABLE_SCHEMA = ? AND kcu.TABLE_NAME = ?)
-                    OR (kcu.REFERENCED_TABLE_SCHEMA = ? AND kcu.REFERENCED_TABLE_NAME = ?))
+                  %s
                 ORDER BY kcu.TABLE_SCHEMA, kcu.TABLE_NAME, kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION
-                """,
+                """.formatted(filter),
                 (rs, i) -> new TableDetailSupport.ForeignKeyRow(rs.getString(1),
                         TableDetailSupport.qualify(db, rs.getString(2), rs.getString(3)), rs.getString(4),
                         TableDetailSupport.qualify(db, rs.getString(5), rs.getString(6)), rs.getString(7),
                         rs.getString(8), rs.getString(9)),
-                db, table, db, table);
+                args);
     }
 
     /** 인덱스 상세 — 복합 인덱스는 SEQ_IN_INDEX 위치별로 CARDINALITY가 누적되므로 마지막(최대)값이 전체 고유값 */
@@ -1001,7 +1005,8 @@ public class MySqlOperator extends AbstractJdbcOperator {
                             "PRIMARY".equals(rs.getString("INDEX_NAME"))),
                     instance.getDbName());
             return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
-                    columns, indexes, kinds, Map.of(), SchemaSupport.DEFAULT_MAX_TABLES);
+                    columns, indexes, kinds, Map.of(),
+                    TableDetailSupport.foreignKeysByTable(mysqlForeignKeys(null)), SchemaSupport.DEFAULT_MAX_TABLES);
         } catch (DataAccessException e) {
             throw new OperatorException("MySQL 스키마 조회 실패: " + e.getMessage(), e);
         }

@@ -916,6 +916,11 @@ public class PostgresOperator extends AbstractJdbcOperator {
      * 파티션 테이블은 파티션마다 부모에게서 물려받은 제약 행이 따로 있어(conparentid), 부모 제약만 세어 같은 키가 겹쳐 보이지 않게 한다.
      */
     private List<TableDetailSupport.ForeignKeyRow> postgresForeignKeys(String tableName) {
+        // tableName이 null이면 현재 스키마의 외래키 전체(구조 스냅샷, 153절)
+        String filter = tableName == null
+                ? "AND (n.nspname = current_schema() OR rn.nspname = current_schema())"
+                : "AND ((c.relname = ? AND n.nspname = current_schema()) OR (rc.relname = ? AND rn.nspname = current_schema()))";
+        Object[] args = tableName == null ? new Object[0] : new Object[]{tableName, tableName};
         return jdbc().query("""
                 SELECT con.conname AS name,
                        CASE WHEN n.nspname = current_schema() THEN c.relname
@@ -936,14 +941,13 @@ public class PostgresOperator extends AbstractJdbcOperator {
                 JOIN pg_attribute ra ON ra.attrelid = con.confrelid AND ra.attnum = k.refnum
                 WHERE con.contype = 'f'
                   AND con.conparentid = 0
-                  AND ((c.relname = ? AND n.nspname = current_schema())
-                    OR (rc.relname = ? AND rn.nspname = current_schema()))
+                  %s
                 ORDER BY table_name, con.conname, k.ord
-                """,
+                """.formatted(filter),
                 (rs, i) -> new TableDetailSupport.ForeignKeyRow(rs.getString("name"), rs.getString("table_name"),
                         rs.getString("column_name"), rs.getString("ref_table"), rs.getString("ref_column"),
                         rs.getString("on_delete"), rs.getString("on_update")),
-                tableName, tableName);
+                args);
     }
 
     /** tableDetail 기본 통계 한 행 — reltuples 기반 추정 행수와 데이터/인덱스 바이트. */
@@ -1506,7 +1510,8 @@ public class PostgresOperator extends AbstractJdbcOperator {
                             rs.getString("table_name"), rs.getString("index_name"),
                             rs.getString("column_name"), rs.getBoolean("is_unique"), rs.getBoolean("is_primary")));
             return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
-                    columns, indexes, kinds, Map.of(), SchemaSupport.DEFAULT_MAX_TABLES);
+                    columns, indexes, kinds, Map.of(),
+                    TableDetailSupport.foreignKeysByTable(postgresForeignKeys(null)), SchemaSupport.DEFAULT_MAX_TABLES);
         } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 스키마 조회 실패: " + e.getMessage(), e);
         }

@@ -7329,7 +7329,7 @@ MySQL의 영향 행 2000은 orders 전체 행 수와 같다. 외래키 추가가
 세 실행 모두 실행 기록의 구조 비교가 `identical: true`였다. 구조 스냅샷(describeSchema -> SchemaDiffService)이 열·인덱스만 담기 때문이다.
 화면은 "구조 차이가 없습니다"라고 적어, 외래키를 추가한 실행이 아무것도 바꾸지 않은 것처럼 읽혔다.
 이번 절에서는 문구를 "열·인덱스 차이가 없습니다 ... 외래키·CHECK 같은 제약조건은 아직 비교하지 않습니다"로 고쳤다.
-제약조건을 구조 스냅샷에 넣어 실제로 비교하는 것은 남은 과제다(5기종 describeSchema와 diff를 함께 바꿔야 한다).
+제약조건을 구조 스냅샷에 넣어 실제로 비교하는 것은 153절에서 닫았다(5기종 describeSchema에 외래키, 실행 기록에 생김·사라짐·참조 동작 변경).
 
 ### 실측 — 라이브 5기종 API
 
@@ -7442,3 +7442,69 @@ node --check                     table-detail.js·grid.js·main.js·tickets.js·
 관제 쿼리 상세의 인덱스 제안(HypoPG) -> 같은 페이지 워크벤치 모드의 변경 요청 -> 요청자 제출(#72) -> 승인자 드라이런·승인 -> 운영자 실행 -> 실행 시각 기준 전후 비교.
 정리는 제품의 역변경 경로로 했다(운영자가 `DROP INDEX`를 티켓 #73으로 올리고, 승인자 승인, 운영자 실행). 3·6번 장면에는 152절 목록 범위가 함께 찍혔다 —
 실행으로 닫힌 티켓을 고르면 범위가 전체로 넓어진다. `docs/images/demo-change-flow-glass.gif` 7프레임 961KB.
+
+## 153. 구조 스냅샷에 외래키 — 실행 기록이 제약조건 변화를 보인다 (2026-09-12)
+
+### 왜
+
+151절에서 데모 외래키를 승인 티켓으로 올려 실행했는데, 세 기종 모두 실행 기록의 구조 비교가 `identical: true`였다.
+구조 스냅샷(describeSchema)이 열과 인덱스만 담아, 외래키만 추가한 변경은 "바뀐 것이 없다"로 남았다. 감사 기록으로서 사실과 다르게 읽히는 결함이라 이번 절에서 닫는다.
+
+옛 화면(151절 jar)에서 티켓 #70(MySQL 외래키 추가)의 실행 기록:
+
+```
+구조 변화  열·인덱스 차이가 없습니다(모니터 계정이 보는 범위 기준). 외래키·CHECK 같은 제약조건은 아직 비교하지 않습니다.
+```
+
+### 바꾼 것
+
+- **모델**: 외래키 레코드를 `TableDetail` 안에서 `operator.model.ForeignKey`로 올려 테이블 상세와 구조 스냅샷이 같은 타입을 쓴다(JSON 필드 이름은 그대로 — 화면 수정 없음).
+  `TableSchema`에 `foreignKeys`(제약을 가진 쪽만). 3인자·5인자 생성자는 빈 목록으로 남겨 기존 호출을 건드리지 않았다
+- **수집**: 151절에서 만든 기종별 외래키 SQL을 테이블 필터만 빼고 그대로 쓴다(`...ForeignKeys(null)`이면 스키마 전체).
+  `TableDetailSupport.foreignKeysByTable`이 제약을 가진 테이블별로 묶고, `SchemaSupport.build`가 붙인다(상한에 잘린 테이블 것은 버린다). MongoDB는 개념이 없어 빈 목록
+- **비교**: `SchemaDiffService.TableDiff`에 `addedForeignKeys`·`removedForeignKeys`·`changedForeignKeys`.
+  이름이 같아도 열·참조 대상·참조 동작(ON DELETE·ON UPDATE)이 다르면 변경이다 — `ON DELETE CASCADE`로 바꾸는 변경이 조용히 지나가지 않게
+- **화면**: 워크벤치 실행 기록(diff.js)과 관제 구조 비교(app.js)가 외래키 줄을 함께 보인다(열 -> 참조 테이블(열), 기본이 아닌 참조 동작만 덧붙임).
+  차이가 없을 때의 문구도 비교 범위에 맞춰 "열·인덱스·외래키 차이가 없습니다. CHECK·트리거 정의는 비교하지 않습니다"로 고쳤다
+
+### 실측 — 승인 티켓 두 건으로 (MySQL, 인스턴스 2)
+
+같은 흐름으로 외래키를 지웠다 다시 만든다. 요청자 제출 -> 승인자 승인 -> 운영자 실행을 두 번 하고, 끝나면 DB는 원래 상태로 돌아온다(`detail151/fk_diff_153.py`).
+
+```
+#74 ALTER TABLE orders DROP FOREIGN KEY fk_orders_customer
+    제출 10.9s PENDING · 규칙 R-LOCK / R-LOCK-OK(약 2,000행) · 승인 APPROVED · 실행 COMMITTED affectedRows 0
+    구조 비교 identical = false
+      orders removedForeignKeys  fk_orders_customer  customer_id -> customers(id)  NO ACTION / NO ACTION
+#75 ALTER TABLE orders ADD CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES customers (id)
+    제출 12.0s PENDING · 승인 APPROVED · 실행 COMMITTED affectedRows 2000
+    구조 비교 identical = false
+      orders addedForeignKeys    fk_orders_customer  customer_id -> customers(id)  NO ACTION / NO ACTION
+끝난 뒤 orders 외래키 = [fk_orders_customer] (원래 상태)
+```
+
+MySQL은 외래키를 지워도 그 열의 인덱스(`idx_orders_customer`)를 남긴다. 그래서 #74는 열·인덱스 비교로는 아무 변화가 없고, 151절까지의 화면이라면 "구조 차이 없음"으로 남았을 실행이다.
+#75의 영향 행 2000은 151절과 같은 이유다 — 외래키 추가가 테이블을 복사하는 방식으로 실행됐다.
+
+### 화면 — 실행 기록의 구조 변화
+
+```
+전(151절 jar, 티켓 #70 외래키 추가)  "열·인덱스 차이가 없습니다(모니터 계정이 보는 범위 기준). 외래키·CHECK 같은 제약조건은 아직 비교하지 않습니다."
+후(이 변경, 티켓 #75 외래키 추가)    "orders 외래키 fk_orders_customer 생김 (customer_id -> customers(id))"
+후(이 변경, 티켓 #74 외래키 삭제)    "orders 외래키 fk_orders_customer 사라짐 (customer_id -> customers(id))"
+```
+
+![전 — 외래키를 추가한 실행인데 "제약조건은 아직 비교하지 않습니다"로 남았다](images/webui/153-exec-fk-before.jpg)
+![후 — 같은 종류의 실행 기록에 외래키가 생겼다는 줄이 남는다](images/webui/154-exec-fk-after.jpg)
+
+### 회귀
+
+```
+./scripts/check-conventions.sh   규약 검사 전부 통과
+./gradlew test                   tests 859 skipped 26 failures 0 errors 0 (152절 856 -> 859)
+  SchemaSupportTest 7            +2: 외래키가 제약을 가진 테이블에만 붙고 가리켜지는 쪽에는 붙지 않음, 상한 밖 테이블의 외래키는 버림,
+                                 외래키를 모르는 예전 호출은 빈 목록
+  SchemaDiffServiceTest 5        +1: 외래키 추가·삭제·참조 동작(ON DELETE) 변경을 각각 잡는다
+  TableDetailSupportTest 11      타입만 ForeignKey로 옮기고 그대로 통과
+node --check                     diff.js·app.js 문법 통과
+```

@@ -2417,6 +2417,8 @@ async function runSchemaDiff() {
   const parts = [];
   const line = (cls, mark, text) => `<div class="schema-line ${cls}">${mark} ${text}</div>`;
   const tableMeta = (t) => `<span class="muted">(${t.columns.length} cols · ${t.indexes.length} idx)</span>`;
+  const fkDiffText = (f) => `${esc((f.columns ?? []).join(", "))} → ${esc(f.refTable)}(${esc((f.refColumns ?? []).join(", "))})`
+    + (f.onDelete && f.onDelete !== "NO ACTION" ? ` ON DELETE ${esc(f.onDelete)}` : "");
 
   if (d.addedTables.length) {
     parts.push('<div class="schema-block"><h4>추가된 테이블 <span class="hint">(right에만)</span></h4>' +
@@ -2436,6 +2438,11 @@ async function runSchemaDiff() {
     t.removedIndexes.forEach((x) => lines.push(line("schema-del", "−", `인덱스 ${esc(x.name)} ${idxText(x)}`)));
     t.changedIndexes.forEach((x) => lines.push(line("schema-chg", "~",
       `인덱스 ${esc(x.name)}: ${idxText(x.left)} → ${idxText(x.right)}`)));
+    // 외래키(153절) — 구조 스냅샷에 제약조건이 들어와 "왜 저 장비만 다르지"에 참조 무결성도 보인다
+    (t.addedForeignKeys ?? []).forEach((f) => lines.push(line("schema-add", "+", `외래키 ${esc(f.name)} ${fkDiffText(f)}`)));
+    (t.removedForeignKeys ?? []).forEach((f) => lines.push(line("schema-del", "−", `외래키 ${esc(f.name)} ${fkDiffText(f)}`)));
+    (t.changedForeignKeys ?? []).forEach((f) => lines.push(line("schema-chg", "~",
+      `외래키 ${esc(f.name)}: ${fkDiffText(f.left)} → ${fkDiffText(f.right)}`)));
     parts.push(`<div class="schema-block"><h4>변경된 테이블: ${esc(t.table)}</h4>${lines.join("")}</div>`);
   });
   box.innerHTML = parts.join("");

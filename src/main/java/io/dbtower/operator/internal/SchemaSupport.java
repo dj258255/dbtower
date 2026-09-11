@@ -1,6 +1,7 @@
 package io.dbtower.operator.internal;
 
 import io.dbtower.operator.model.ColumnSchema;
+import io.dbtower.operator.model.ForeignKey;
 import io.dbtower.operator.model.IndexSchema;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.TableSchema;
@@ -62,6 +63,19 @@ final class SchemaSupport {
                                 List<ColumnRow> columnRows, List<IndexColumnRow> indexRows,
                                 Map<String, String> kinds, Map<String, List<String>> primaryKeys,
                                 int maxTables) {
+        return build(type, database, columnRows, indexRows, kinds, primaryKeys, Map.of(), maxTables);
+    }
+
+    /**
+     * 외래키까지 담는 조립(153절) — 구조 비교가 제약조건 변화를 보려면 스냅샷에 있어야 한다.
+     *
+     * @param foreignKeys 테이블 이름 -> 그 테이블이 가진 외래키. 상한에 잘린 테이블의 것은 버린다
+     */
+    static SchemaSnapshot build(String type, String database,
+                                List<ColumnRow> columnRows, List<IndexColumnRow> indexRows,
+                                Map<String, String> kinds, Map<String, List<String>> primaryKeys,
+                                Map<String, List<ForeignKey>> foreignKeys,
+                                int maxTables) {
         // 등장 순서 보존 + 상한 적용. 상한을 넘은 테이블은 포함 집합에 넣지 않는다.
         Map<String, List<ColumnSchema>> columnsByTable = new LinkedHashMap<>();
         boolean truncated = false;
@@ -106,7 +120,8 @@ final class SchemaSupport {
             List<String> primaryKey = primaryKeys.containsKey(e.getKey())
                     ? primaryKeys.get(e.getKey())
                     : primaryFromIndexes.getOrDefault(e.getKey(), List.of());
-            tables.add(new TableSchema(e.getKey(), List.copyOf(e.getValue()), indexes, kind, List.copyOf(primaryKey)));
+            tables.add(new TableSchema(e.getKey(), List.copyOf(e.getValue()), indexes, kind, List.copyOf(primaryKey),
+                    List.copyOf(foreignKeys.getOrDefault(e.getKey(), List.of()))));
         }
         return new SchemaSnapshot(type, database, tables, truncated, maxTables);
     }

@@ -3,6 +3,7 @@ package io.dbtower.alert.internal;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.model.ColumnSchema;
+import io.dbtower.operator.model.ForeignKey;
 import io.dbtower.operator.model.IndexSchema;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.TableDetail;
@@ -56,8 +57,8 @@ public class ReferencedSchemaService {
      */
     public record RefTable(String name, long rowCountApprox, long dataBytes, long indexBytes,
                            String ddl, String ddlSource, List<RefColumn> columns, List<RefIndex> indexes,
-                           List<String> primaryKey, List<TableDetail.ForeignKey> foreignKeys,
-                           List<TableDetail.ForeignKey> referencedBy) {
+                           List<String> primaryKey, List<ForeignKey> foreignKeys,
+                           List<ForeignKey> referencedBy) {
     }
 
     /** notFound = SQL엔 있으나 스키마에 없던 후보(CTE·별칭·상한 밖·오탈자). truncated = 스키마 상한에 걸림 */

@@ -2,6 +2,7 @@ package io.dbtower.insight;
 
 import io.dbtower.insight.SchemaDiffService;
 import io.dbtower.operator.model.ColumnSchema;
+import io.dbtower.operator.model.ForeignKey;
 import io.dbtower.operator.model.IndexSchema;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.TableSchema;
@@ -78,6 +79,41 @@ class SchemaDiffServiceTest {
         assertEquals("idx_name", ic.name());
         assertFalse(ic.left().unique());
         assertTrue(ic.right().unique());
+    }
+
+    @Test
+    void 외래키_추가_삭제_참조동작_변경을_잡는다() {
+        // 153절: 외래키만 바뀐 변경도 구조 차이로 보여야 한다 — 그러지 못해 실행 기록이 "차이 없음"이었다
+        ForeignKey toCustomers = new ForeignKey("fk_orders_customer", "orders", List.of("customer_id"),
+                "customers", List.of("id"), "NO ACTION", "NO ACTION");
+        ForeignKey toCustomersCascade = new ForeignKey("fk_orders_customer", "orders", List.of("customer_id"),
+                "customers", List.of("id"), "CASCADE", "NO ACTION");
+        ForeignKey toCoupons = new ForeignKey("fk_orders_coupon", "orders", List.of("coupon_id"),
+                "coupons", List.of("id"), "SET NULL", null);
+        TableSchema before = new TableSchema("orders", List.of(col("id", "bigint", false, 1)), List.of(),
+                TableSchema.TABLE, List.of("id"), List.of(toCustomers));
+        TableSchema after = new TableSchema("orders", List.of(col("id", "bigint", false, 1)), List.of(),
+                TableSchema.TABLE, List.of("id"), List.of(toCustomersCascade, toCoupons));
+
+        SchemaDiffService.SchemaDiff diff = service.diff(
+                new SchemaSnapshot("MYSQL", "sample", List.of(before), false, 200),
+                new SchemaSnapshot("MYSQL", "sample", List.of(after), false, 200));
+
+        assertFalse(diff.identical());
+        SchemaDiffService.TableDiff td = diff.changedTables().get(0);
+        assertEquals(List.of("fk_orders_coupon"), td.addedForeignKeys().stream().map(ForeignKey::name).toList());
+        assertTrue(td.removedForeignKeys().isEmpty());
+        assertEquals(1, td.changedForeignKeys().size());
+        assertEquals("NO ACTION", td.changedForeignKeys().get(0).left().onDelete());
+        assertEquals("CASCADE", td.changedForeignKeys().get(0).right().onDelete());
+
+        // 반대 방향: 외래키가 사라진 것도 잡는다
+        SchemaDiffService.SchemaDiff dropped = service.diff(
+                new SchemaSnapshot("MYSQL", "sample", List.of(after), false, 200),
+                new SchemaSnapshot("MYSQL", "sample", List.of(
+                        new TableSchema("orders", List.of(col("id", "bigint", false, 1)), List.of())), false, 200));
+        assertEquals(List.of("fk_orders_customer", "fk_orders_coupon"),
+                dropped.changedTables().get(0).removedForeignKeys().stream().map(ForeignKey::name).toList());
     }
 
     @Test
