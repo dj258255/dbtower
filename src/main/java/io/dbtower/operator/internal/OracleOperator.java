@@ -481,6 +481,10 @@ public class OracleOperator extends AbstractJdbcOperator {
      */
     private List<TableDetailSupport.ForeignKeyRow> oracleForeignKeys(String upperTable) {
         String current = hasAppSchema() ? appSchema : null;
+        // upperTable이 null이면 이 스키마의 외래키 전체(구조 스냅샷, 153절) — user_ 딕셔너리는 이미 접속 계정 범위다
+        String where = upperTable == null
+                ? "WHERE c.constraint_type = 'R'{and:c.owner = ?}"
+                : "WHERE c.constraint_type = 'R' AND (c.table_name = ?{and:c.owner = ?} OR r.table_name = ?{and:r.owner = ?})";
         String sql = dictionary("""
                 SELECT c.constraint_name, c.owner, c.table_name, cc.column_name,
                        r.owner AS ref_owner, r.table_name AS ref_table, rcc.column_name AS ref_column, c.delete_rule
@@ -489,13 +493,17 @@ public class OracleOperator extends AbstractJdbcOperator {
                 JOIN {v}constraints r ON r.constraint_name = c.r_constraint_name{and:r.owner = c.r_owner}
                 JOIN {v}cons_columns rcc ON rcc.constraint_name = r.constraint_name
                      AND rcc.position = cc.position{and:rcc.owner = r.owner}
-                WHERE c.constraint_type = 'R'
-                  AND (c.table_name = ?{and:c.owner = ?} OR r.table_name = ?{and:r.owner = ?})
+                %s
                 ORDER BY c.owner, c.table_name, c.constraint_name, cc.position
-                """);
-        Object[] args = hasAppSchema()
-                ? new Object[]{upperTable, appSchema, upperTable, appSchema}
-                : new Object[]{upperTable, upperTable};
+                """.formatted(where));
+        Object[] args;
+        if (upperTable == null) {
+            args = hasAppSchema() ? new Object[]{appSchema} : new Object[0];
+        } else {
+            args = hasAppSchema()
+                    ? new Object[]{upperTable, appSchema, upperTable, appSchema}
+                    : new Object[]{upperTable, upperTable};
+        }
         return jdbc().query(sql, (rs, i) -> new TableDetailSupport.ForeignKeyRow(rs.getString("constraint_name"),
                 TableDetailSupport.qualify(current, rs.getString("owner"), rs.getString("table_name")),
                 rs.getString("column_name"),
@@ -1159,7 +1167,8 @@ public class OracleOperator extends AbstractJdbcOperator {
             jdbc().query(primaryKeysSql, (RowCallbackHandler) rs -> primaryKeys
                     .computeIfAbsent(rs.getString("table_name"), t -> new ArrayList<>()).add(rs.getString("column_name")), oneOwner);
             return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
-                    columns, indexes, kinds, primaryKeys, SchemaSupport.DEFAULT_MAX_TABLES);
+                    columns, indexes, kinds, primaryKeys,
+                    TableDetailSupport.foreignKeysByTable(oracleForeignKeys(null)), SchemaSupport.DEFAULT_MAX_TABLES);
         } catch (DataAccessException e) {
             throw new OperatorException("Oracle 스키마 조회 실패: " + e.getMessage(), e);
         }

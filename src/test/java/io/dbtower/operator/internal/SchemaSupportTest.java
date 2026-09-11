@@ -1,6 +1,7 @@
 package io.dbtower.operator.internal;
 
 import io.dbtower.operator.model.ColumnSchema;
+import io.dbtower.operator.model.ForeignKey;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.TableSchema;
 import org.junit.jupiter.api.Test;
@@ -81,5 +82,37 @@ class SchemaSupportTest {
         assertThat(s.truncated()).isTrue();
         assertThat(s.tables()).extracting(TableSchema::name).containsExactly("a");
         assertThat(s.tables().get(0).primaryKey()).isEmpty();
+    }
+
+    @Test
+    void 외래키는_제약을_가진_테이블에_붙고_상한_밖_테이블_것은_버린다() {
+        // 153절: 구조 스냅샷이 외래키를 담아야 실행 기록의 구조 비교가 제약조건 변화를 본다
+        ForeignKey ordersToCustomers = new ForeignKey("fk_orders_customer", "orders", List.of("customer_id"),
+                "customers", List.of("id"), "NO ACTION", "NO ACTION");
+        ForeignKey lateToOrders = new ForeignKey("fk_late_order", "late", List.of("order_id"),
+                "orders", List.of("id"), "CASCADE", null);
+
+        SchemaSnapshot s = SchemaSupport.build("MYSQL", "sample",
+                List.of(col("orders", "id", 1), col("orders", "customer_id", 2), col("customers", "id", 1)),
+                List.of(new SchemaSupport.IndexColumnRow("orders", "PRIMARY", "id", true, true)),
+                Map.of(), Map.of(),
+                Map.of("orders", List.of(ordersToCustomers), "late", List.of(lateToOrders)), 2);
+
+        assertThat(s.tables()).extracting(TableSchema::name).containsExactly("orders", "customers");
+        assertThat(s.tables().get(0).foreignKeys()).containsExactly(ordersToCustomers);
+        // 가리켜지는 쪽(customers)에는 넣지 않는다 — 구조 스냅샷은 제약을 가진 테이블만 담는다
+        assertThat(s.tables().get(1).foreignKeys()).isEmpty();
+        // 상한(2) 밖이라 스냅샷에 없는 late의 외래키는 어디에도 붙지 않는다
+        assertThat(s.tables()).allSatisfy(t -> assertThat(t.foreignKeys()).noneMatch(fk -> fk.name().equals("fk_late_order")));
+    }
+
+    @Test
+    void 외래키를_모르는_예전_호출은_빈_목록이다() {
+        SchemaSnapshot s = SchemaSupport.build("MSSQL", "sample",
+                List.of(col("orders", "id", 1)),
+                List.of(new SchemaSupport.IndexColumnRow("orders", "PK_orders", "id", true)), 200);
+
+        assertThat(s.tables().get(0).foreignKeys()).isEmpty();
+        assertThat(new TableSchema("t", List.of(), List.of()).foreignKeys()).isEmpty();
     }
 }

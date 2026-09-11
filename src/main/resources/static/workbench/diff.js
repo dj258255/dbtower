@@ -46,10 +46,15 @@ export function renderDiff(diff, { leftLabel = "전", rightLabel = "후", addedL
     <div class="grid-scroll"><table class="grid df-table"><thead><tr><th>구분</th>${head}</tr></thead><tbody>${body}</tbody></table></div></div>`;
 }
 
+// 외래키 한 줄 — 열 → 참조 테이블(열), 기본이 아닌 참조 동작만 덧붙인다(153절)
+const fkText = (f) => `${(f.columns || []).join(", ")} → ${f.refTable}(${(f.refColumns || []).join(", ")})`
+  + (f.onDelete && f.onDelete !== "NO ACTION" ? ` ON DELETE ${f.onDelete}` : "")
+  + (f.onUpdate && f.onUpdate !== "NO ACTION" ? ` ON UPDATE ${f.onUpdate}` : "");
+
 export function renderSchemaDiff(sd) {
   if (sd.identical) {
-    // 구조 스냅샷은 열·인덱스만 담는다 — 외래키만 추가한 실행도 여기로 온다(151절). "변화 없음"으로 읽히지 않게 비교 범위를 밝힌다
-    return '<div class="df-schema"><div class="df-title">구조 변화</div><div class="muted">열·인덱스 차이가 없습니다(모니터 계정이 보는 범위 기준). 외래키·CHECK 같은 제약조건은 아직 비교하지 않습니다.</div></div>';
+    // 비교 범위를 밝힌다 — 구조 스냅샷은 열·인덱스·외래키까지 담는다(153절). CHECK·트리거는 아직 담지 않는다
+    return '<div class="df-schema"><div class="df-title">구조 변화</div><div class="muted">열·인덱스·외래키 차이가 없습니다(모니터 계정이 보는 범위 기준). CHECK·트리거 정의는 비교하지 않습니다.</div></div>';
   }
   const lines = [];
   (sd.addedTables || []).forEach((t) => lines.push(["add", `테이블 ${t.name} 생김 (열 ${(t.columns || []).length})`]));
@@ -62,6 +67,9 @@ export function renderSchemaDiff(sd) {
     (t.addedIndexes || []).forEach((i) => lines.push(["add", `${t.table} 인덱스 ${i.name} 생김 (${(i.columns || []).join(", ")}${i.unique ? ", UNIQUE" : ""})`]));
     (t.removedIndexes || []).forEach((i) => lines.push(["remove", `${t.table} 인덱스 ${i.name} 사라짐`]));
     (t.changedIndexes || []).forEach((i) => lines.push(["change", `${t.table} 인덱스 ${i.name} 구성 바뀜`]));
+    (t.addedForeignKeys || []).forEach((f) => lines.push(["add", `${t.table} 외래키 ${f.name} 생김 (${fkText(f)})`]));
+    (t.removedForeignKeys || []).forEach((f) => lines.push(["remove", `${t.table} 외래키 ${f.name} 사라짐 (${fkText(f)})`]));
+    (t.changedForeignKeys || []).forEach((f) => lines.push(["change", `${t.table} 외래키 ${f.name}: ${fkText(f.left)} → ${fkText(f.right)}`]));
   });
   return `<div class="df-schema"><div class="df-title">구조 변화</div>
     ${sd.warning ? `<div class="hint">${esc(sd.warning)}</div>` : ""}

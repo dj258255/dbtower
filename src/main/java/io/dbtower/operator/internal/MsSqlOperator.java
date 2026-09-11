@@ -853,7 +853,8 @@ public class MsSqlOperator extends AbstractJdbcOperator {
             jdbc().query(kindsSql, (RowCallbackHandler) rs -> kinds.put(rs.getString("TABLE_NAME"),
                     "VIEW".equalsIgnoreCase(rs.getString("TABLE_TYPE")) ? TableSchema.VIEW : TableSchema.TABLE));
             return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
-                    columns, indexes, kinds, Map.of(), SchemaSupport.DEFAULT_MAX_TABLES);
+                    columns, indexes, kinds, Map.of(),
+                    TableDetailSupport.foreignKeysByTable(mssqlForeignKeys(null)), SchemaSupport.DEFAULT_MAX_TABLES);
         } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 스키마 조회 실패: " + e.getMessage(), e);
         }
@@ -923,25 +924,6 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                   AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
                 ORDER BY kcu.ORDINAL_POSITION
                 """;
-        // 외래키 — 제약을 가진 쪽이든 가리켜지는 쪽이든 이 테이블이면. 열 짝은 constraint_column_id 순서
-        String foreignKeysSql = """
-                SELECT fk.name AS name,
-                       CASE WHEN OBJECT_SCHEMA_NAME(fk.parent_object_id) = SCHEMA_NAME() THEN OBJECT_NAME(fk.parent_object_id)
-                            ELSE OBJECT_SCHEMA_NAME(fk.parent_object_id) + '.' + OBJECT_NAME(fk.parent_object_id) END AS table_name,
-                       pc.name AS column_name,
-                       CASE WHEN OBJECT_SCHEMA_NAME(fk.referenced_object_id) = SCHEMA_NAME() THEN OBJECT_NAME(fk.referenced_object_id)
-                            ELSE OBJECT_SCHEMA_NAME(fk.referenced_object_id) + '.' + OBJECT_NAME(fk.referenced_object_id) END AS ref_table,
-                       rc.name AS ref_column,
-                       fk.delete_referential_action_desc AS on_delete,
-                       fk.update_referential_action_desc AS on_update
-                FROM sys.foreign_keys fk
-                JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
-                JOIN sys.columns pc ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
-                JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
-                WHERE fk.parent_object_id = OBJECT_ID(QUOTENAME(SCHEMA_NAME()) + '.' + QUOTENAME(?))
-                   OR fk.referenced_object_id = OBJECT_ID(QUOTENAME(SCHEMA_NAME()) + '.' + QUOTENAME(?))
-                ORDER BY table_name, fk.name, fkc.constraint_column_id
-                """;
         try {
             BasicStats stats = jdbc().query(statsSql, rs -> {
                 if (!rs.next()) {
@@ -983,11 +965,7 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                             "YES".equalsIgnoreCase(rs.getString("IS_NULLABLE")),
                             rs.getString("COLUMN_DEFAULT")), table);
             List<String> pkColumns = jdbc().queryForList(pkSql, String.class, table);
-            TableDetailSupport.Keys keys = TableDetailSupport.foreignKeys(table, jdbc().query(foreignKeysSql,
-                    (rs, i) -> new TableDetailSupport.ForeignKeyRow(rs.getString("name"), rs.getString("table_name"),
-                            rs.getString("column_name"), rs.getString("ref_table"), rs.getString("ref_column"),
-                            rs.getString("on_delete"), rs.getString("on_update")),
-                    table, table));
+            TableDetailSupport.Keys keys = TableDetailSupport.foreignKeys(table, mssqlForeignKeys(table));
             // 인덱스 정의는 참고용 주석 라인으로만 덧붙인다(재구성 CREATE TABLE 본문 밖).
             List<String> indexDefs = new ArrayList<>();
             for (TableDetail.IndexDetail idx : indexes) {
@@ -1010,6 +988,40 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 테이블 상세 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 외래키 — 제약을 가진 쪽이든 가리켜지는 쪽이든 이 테이블이면. 열 짝은 constraint_column_id 순서.
+     * table이 null이면 접속 스키마의 외래키 전체(구조 스냅샷, 153절).
+     */
+    private List<TableDetailSupport.ForeignKeyRow> mssqlForeignKeys(String table) {
+        String filter = table == null
+                ? "WHERE OBJECT_SCHEMA_NAME(fk.parent_object_id) = SCHEMA_NAME() OR OBJECT_SCHEMA_NAME(fk.referenced_object_id) = SCHEMA_NAME()"
+                : """
+                  WHERE fk.parent_object_id = OBJECT_ID(QUOTENAME(SCHEMA_NAME()) + '.' + QUOTENAME(?))
+                     OR fk.referenced_object_id = OBJECT_ID(QUOTENAME(SCHEMA_NAME()) + '.' + QUOTENAME(?))""";
+        Object[] args = table == null ? new Object[0] : new Object[]{table, table};
+        return jdbc().query("""
+                SELECT fk.name AS name,
+                       CASE WHEN OBJECT_SCHEMA_NAME(fk.parent_object_id) = SCHEMA_NAME() THEN OBJECT_NAME(fk.parent_object_id)
+                            ELSE OBJECT_SCHEMA_NAME(fk.parent_object_id) + '.' + OBJECT_NAME(fk.parent_object_id) END AS table_name,
+                       pc.name AS column_name,
+                       CASE WHEN OBJECT_SCHEMA_NAME(fk.referenced_object_id) = SCHEMA_NAME() THEN OBJECT_NAME(fk.referenced_object_id)
+                            ELSE OBJECT_SCHEMA_NAME(fk.referenced_object_id) + '.' + OBJECT_NAME(fk.referenced_object_id) END AS ref_table,
+                       rc.name AS ref_column,
+                       fk.delete_referential_action_desc AS on_delete,
+                       fk.update_referential_action_desc AS on_update
+                FROM sys.foreign_keys fk
+                JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+                JOIN sys.columns pc ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
+                JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
+                %s
+                ORDER BY table_name, fk.name, fkc.constraint_column_id
+                """.formatted(filter),
+                (rs, i) -> new TableDetailSupport.ForeignKeyRow(rs.getString("name"), rs.getString("table_name"),
+                        rs.getString("column_name"), rs.getString("ref_table"), rs.getString("ref_column"),
+                        rs.getString("on_delete"), rs.getString("on_update")),
+                args);
     }
 
     /** tableDetail 기본 통계 결과 한 줄 — 메서드 로컬 값 객체. */

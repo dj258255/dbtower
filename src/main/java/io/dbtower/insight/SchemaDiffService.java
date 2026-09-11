@@ -1,6 +1,7 @@
 package io.dbtower.insight;
 
 import io.dbtower.operator.model.ColumnSchema;
+import io.dbtower.operator.model.ForeignKey;
 import io.dbtower.operator.model.IndexSchema;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.TableSchema;
@@ -34,12 +35,26 @@ public class SchemaDiffService {
     public record IndexChange(String name, IndexSchema left, IndexSchema right) {
     }
 
+    /** 외래키 변경 — 같은 이름인데 열·참조 대상·참조 동작이 다르다(153절) */
+    public record ForeignKeyChange(String name, ForeignKey left, ForeignKey right) {
+    }
+
     /** 한 테이블 안의 차이 — 양쪽에 존재하는 테이블에 대해서만 채워진다 */
     public record TableDiff(String table,
                             List<ColumnSchema> addedColumns, List<ColumnSchema> removedColumns,
                             List<ColumnChange> changedColumns,
                             List<IndexSchema> addedIndexes, List<IndexSchema> removedIndexes,
-                            List<IndexChange> changedIndexes) {
+                            List<IndexChange> changedIndexes,
+                            List<ForeignKey> addedForeignKeys, List<ForeignKey> removedForeignKeys,
+                            List<ForeignKeyChange> changedForeignKeys) {
+
+        /** 외래키를 다루지 않는 호출(153절 이전에 만든 기록·단위 테스트) — 외래키 목록은 비어 있다 */
+        public TableDiff(String table, List<ColumnSchema> addedColumns, List<ColumnSchema> removedColumns,
+                         List<ColumnChange> changedColumns, List<IndexSchema> addedIndexes,
+                         List<IndexSchema> removedIndexes, List<IndexChange> changedIndexes) {
+            this(table, addedColumns, removedColumns, changedColumns, addedIndexes, removedIndexes, changedIndexes,
+                    List.of(), List.of(), List.of());
+        }
     }
 
     /**
@@ -129,18 +144,49 @@ public class SchemaDiffService {
                 changedIdx.add(new IndexChange(e.getKey(), e.getValue(), r));
             }
         }
+        // 외래키(153절) — 제약 이름 기준. 이것이 없으면 외래키만 추가한 변경의 실행 기록이 "구조 차이 없음"으로 남는다
+        Map<String, ForeignKey> leftFks = foreignKeysByName(left.foreignKeys());
+        Map<String, ForeignKey> rightFks = foreignKeysByName(right.foreignKeys());
+        List<ForeignKey> addedFks = new ArrayList<>();
+        List<ForeignKey> removedFks = new ArrayList<>();
+        List<ForeignKeyChange> changedFks = new ArrayList<>();
+        for (Map.Entry<String, ForeignKey> e : rightFks.entrySet()) {
+            if (!leftFks.containsKey(e.getKey())) {
+                addedFks.add(e.getValue());
+            }
+        }
+        for (Map.Entry<String, ForeignKey> e : leftFks.entrySet()) {
+            ForeignKey r = rightFks.get(e.getKey());
+            if (r == null) {
+                removedFks.add(e.getValue());
+            } else if (!sameForeignKey(e.getValue(), r)) {
+                changedFks.add(new ForeignKeyChange(e.getKey(), e.getValue(), r));
+            }
+        }
+
         return new TableDiff(table, addedCols, removedCols, changedCols,
-                addedIdx, removedIdx, changedIdx);
+                addedIdx, removedIdx, changedIdx, addedFks, removedFks, changedFks);
     }
 
     private static boolean sameIndex(IndexSchema a, IndexSchema b) {
         return a.unique() == b.unique() && Objects.equals(a.columns(), b.columns());
     }
 
+    /** 이름이 같아도 가리키는 대상·열 짝·참조 동작이 달라질 수 있다(ON DELETE CASCADE로 바꾸는 변경 등) */
+    private static boolean sameForeignKey(ForeignKey a, ForeignKey b) {
+        return Objects.equals(a.columns(), b.columns())
+                && Objects.equals(a.refTable(), b.refTable())
+                && Objects.equals(a.refColumns(), b.refColumns())
+                && Objects.equals(a.onDelete(), b.onDelete())
+                && Objects.equals(a.onUpdate(), b.onUpdate());
+    }
+
     private static boolean hasChange(TableDiff td) {
         return !td.addedColumns().isEmpty() || !td.removedColumns().isEmpty()
                 || !td.changedColumns().isEmpty() || !td.addedIndexes().isEmpty()
-                || !td.removedIndexes().isEmpty() || !td.changedIndexes().isEmpty();
+                || !td.removedIndexes().isEmpty() || !td.changedIndexes().isEmpty()
+                || !td.addedForeignKeys().isEmpty() || !td.removedForeignKeys().isEmpty()
+                || !td.changedForeignKeys().isEmpty();
     }
 
     /** 기종 차이·상한 절단은 diff 해석을 왜곡할 수 있어, 있으면 정직하게 경고로 싣는다 */
@@ -171,6 +217,14 @@ public class SchemaDiffService {
     private static Map<String, IndexSchema> indexesByName(List<IndexSchema> indexes) {
         Map<String, IndexSchema> m = new LinkedHashMap<>();
         indexes.forEach(idx -> m.put(idx.name(), idx));
+        return m;
+    }
+
+    private static Map<String, ForeignKey> foreignKeysByName(List<ForeignKey> keys) {
+        Map<String, ForeignKey> m = new LinkedHashMap<>();
+        if (keys != null) {
+            keys.forEach(fk -> m.put(fk.name(), fk));
+        }
         return m;
     }
 }

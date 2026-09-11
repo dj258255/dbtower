@@ -1,6 +1,7 @@
 package io.dbtower.operator.internal;
 
 import io.dbtower.operator.OperatorException;
+import io.dbtower.operator.model.ForeignKey;
 import io.dbtower.operator.model.TableDetail;
 import org.junit.jupiter.api.Test;
 
@@ -26,10 +27,10 @@ class TableDetailSupportTest {
 
         TableDetailSupport.Keys keys = TableDetailSupport.foreignKeys("orders", rows);
 
-        assertThat(keys.outgoing()).containsExactly(new TableDetail.ForeignKey("fk_orders_customer", "orders",
+        assertThat(keys.outgoing()).containsExactly(new ForeignKey("fk_orders_customer", "orders",
                 List.of("customer_id"), "customers", List.of("id"), "NO ACTION", "NO ACTION"));
         // 복합 키는 행 순서대로 열이 짝지어져야 한다 — order_id -> id, order_no -> no
-        assertThat(keys.incoming()).containsExactly(new TableDetail.ForeignKey("fk_lines_order", "order_lines",
+        assertThat(keys.incoming()).containsExactly(new ForeignKey("fk_lines_order", "order_lines",
                 List.of("order_id", "order_no"), "orders", List.of("id", "no"), "CASCADE", "NO ACTION"));
     }
 
@@ -50,7 +51,7 @@ class TableDetailSupportTest {
                 new TableDetailSupport.ForeignKeyRow("fk_customer", "invoices", "customer_id", "customers", "id", null, null),
                 new TableDetailSupport.ForeignKeyRow("fk_customer", "orders", "customer_id", "customers", "id", null, null)));
 
-        assertThat(keys.incoming()).extracting(TableDetail.ForeignKey::table).containsExactly("invoices", "orders");
+        assertThat(keys.incoming()).extracting(ForeignKey::table).containsExactly("invoices", "orders");
         assertThat(keys.incoming()).allSatisfy(fk -> assertThat(fk.columns()).containsExactly("customer_id"));
         assertThat(keys.outgoing()).isEmpty();
     }
@@ -76,10 +77,10 @@ class TableDetailSupportTest {
 
     @Test
     void 재구성_DDL의_외래키_절은_기본_동작을_생략한다() {
-        assertThat(TableDetailSupport.foreignKeyClause(new TableDetail.ForeignKey("fk_a", "orders",
+        assertThat(TableDetailSupport.foreignKeyClause(new ForeignKey("fk_a", "orders",
                 List.of("customer_id"), "customers", List.of("id"), "NO ACTION", "NO ACTION")))
                 .isEqualTo("CONSTRAINT fk_a FOREIGN KEY (customer_id) REFERENCES customers (id)");
-        assertThat(TableDetailSupport.foreignKeyClause(new TableDetail.ForeignKey("fk_b", "lines",
+        assertThat(TableDetailSupport.foreignKeyClause(new ForeignKey("fk_b", "lines",
                 List.of("order_id", "order_no"), "orders", List.of("id", "no"), "CASCADE", null)))
                 .isEqualTo("CONSTRAINT fk_b FOREIGN KEY (order_id, order_no) REFERENCES orders (id, no) ON DELETE CASCADE");
     }

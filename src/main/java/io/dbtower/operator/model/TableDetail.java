@@ -54,18 +54,6 @@ public record TableDetail(String table, String engine, long rowCount, long dataB
     public record IndexDetail(String name, List<String> columns, boolean unique, String type, Long cardinality) {
     }
 
-    /**
-     * 외래키 하나. columns[i]가 refColumns[i]를 가리킨다(복합 키는 키 순서).
-     * 다른 스키마의 테이블은 schema.table로 적는다 — 같은 이름이 현재 스키마에 있다고 오해하지 않게.
-     *
-     * @param table    제약을 가진 쪽(나가는 키면 이 테이블 자신)
-     * @param onDelete 참조되는 행을 지울 때의 동작(NO ACTION·RESTRICT·CASCADE·SET NULL·SET DEFAULT). 기종이 주지 않으면 null
-     * @param onUpdate 참조되는 키를 바꿀 때의 동작. Oracle은 개념이 없어 null
-     */
-    public record ForeignKey(String name, String table, List<String> columns, String refTable, List<String> refColumns,
-                             String onDelete, String onUpdate) {
-    }
-
     public static TableDetail unsupported(String table, String note) {
         return new TableDetail(table, null, -1, -1, -1, -1, null, null, DdlSource.UNSUPPORTED, List.of(), note);
     }
