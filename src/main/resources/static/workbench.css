@@ -254,3 +254,33 @@ tr.df-removed td { background: #fdf1f2; }
   .wb-shell { grid-template-columns: 1fr; }
   .wb-right { min-height: 520px; }
 }
+
+/* ---------- Liquid Glass 계층 (138절) — style.css의 유리 토큰을 쓴다 ----------
+   좌·중·우 작업면은 편집기·결과 그리드를 담는 콘텐츠 계층이라 불투명하게 두고 모서리·그림자만 맞춘다.
+   유리는 떠 있는 것에만 — 자동완성, 실패 오버레이, 모달 대화상자. 모달 뒤는 살짝 흐려 대화상자에 시선을 모은다 */
+.wb-left, .wb-main, .wb-right { border-radius: 16px; border-color: rgba(15, 23, 42, .07); box-shadow: var(--card-shadow); }
+.autocomplete, .wb-overlay, .wb-dialog {
+  background: var(--glass-fill-strong);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-hairline);
+  box-shadow: var(--glass-shine), var(--glass-shadow);
+}
+.autocomplete { border-radius: 12px; }
+.wb-overlay { border-radius: 14px; }
+/* 대화상자는 어둡게 흐린 화면 위에 떠서 .8이면 탁한 회색으로 보였다 — 모달일 때만 더 불투명하게 */
+.wb-dialog { border-radius: 20px; background: rgba(255, 255, 255, .92); }
+.wb-modal { background: rgba(15, 18, 25, .24); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.wb-dialog textarea, .tk-comment, .tk-resolve-note { border-radius: 10px; }
+.wb-composer { border-radius: 14px; }
+.wb-sheets li, .tk-items li { border-radius: 10px; }
+/* 결과·채팅 탭도 대시보드와 같은 알약 세그먼트로 — 밑줄 탭이 섞이면 같은 제품의 두 화면이 달라 보인다 */
+.wb-result-tabs, .wb-right-tabs {
+  background: rgba(243, 244, 248, .9); border: 1px solid var(--glass-hairline); border-radius: 999px;
+  box-shadow: var(--glass-shine); padding: 3px; gap: 2px;
+}
+.wb-right-tabs { margin: 8px 10px 0; width: fit-content; }
+.wb-rtab, .wb-ctab { border-bottom: 0; border-radius: 999px; padding: 4px 12px; }
+.wb-rtab.active, .wb-ctab.active { background: #fff; color: var(--primary); box-shadow: 0 1px 3px rgba(30, 41, 59, .14); }
+@media (prefers-reduced-transparency: reduce) {
+  .wb-modal { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(15, 18, 25, .45); }
+}

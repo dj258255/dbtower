@@ -6152,3 +6152,75 @@ PersonaUiE2ETest 5 (DBTOWER_E2E)   위 3절
 
 CI 로그는 통과한 테스트 이름을 찍지 않아, 이 실행만으로는 E2E가 실제로 돌았는지(환경변수가 빠져 조용히 건너뛰었는지) 구분할 수 없었다. 테스트 단계 뒤에
 `E2E actually ran` 단계를 더해 `TEST-io.dbtower.e2e.PersonaUiE2ETest.xml`의 `tests·skipped` 값을 찍고 건너뜀이 있으면 실패시킨다. 병합은 이 단계가 들어간 실행이 초록인 것을 확인한 뒤 한다.
+
+## 138. 화면 재질 — Liquid Glass를 뜨는 계층에만, 가독성은 계산으로 지킨다 (2026-09-11)
+
+### 무엇을 했나
+
+사용자가 "디자인 레이아웃이라던가 뭐 수정할 거 있으면 해줘, liquid glass 같은 느낌이면 좋겠다, 웹서칭해줘"라고 했다. Apple Liquid Glass의 원칙과 웹 구현의 한계,
+가독성 비판을 먼저 조사하고, 그 결과로 "어디에 유리를 쓰지 않을지"부터 정했다.
+
+### 조사에서 가져온 것
+
+| 출처 | 가져온 결정 |
+|---|---|
+| Apple WWDC25 "Meet Liquid Glass"·HIG 정리 | 유리는 콘텐츠 위에 뜨는 내비게이션·컨트롤 계층에만. 목록·표·스크롤 콘텐츠·전면 배경·유리 위 유리에는 쓰지 않는다 |
+| NN/G "Liquid Glass Is Cracked, and Usability Suffers in iOS 26" | 비판의 핵심은 반투명 위 글자의 대비 저하와 움직임으로 인한 산만함 — 콘텐츠를 불투명하게 두고, 움직이는 효과는 넣지 않는다 |
+| kube.io·LogRocket(CSS·SVG 구현) | 굴절은 SVG `feDisplacementMap`을 `backdrop-filter`로 쓰는데 Chromium에서만 되고, 블러에 더해 표면을 한 번 더 그린다 — 운영 콘솔에는 쓰지 않는다 |
+| MDN·Chrome for Developers `prefers-reduced-transparency` | OS의 "투명도 줄이기"를 CSS에서 받는다(Chrome 118+). 켜면 같은 자리에 불투명 표면 |
+| Infinum·MacRumors·Apple 커뮤니티(iOS 26 반응) | "투명도 줄이기"를 켜도 일부만 나아진다는 사용자 보고 — 기본값부터 대비를 지킨다 |
+
+### 설계
+
+- **유리(뜨는 계층):** 상단바(sticky), 사이드바(sticky), 세그먼트 탭(Top Query·Monitoring 서브내비·워크벤치 결과/채팅 탭), 커스텀 드롭다운, 툴팁(어두운 유리), 워크벤치 자동완성·실패 오버레이·모달 대화상자, 로그인 카드.
+  재질 = 반투명 채움 + `backdrop-filter: blur(22px) saturate(180%)`(Safari용 `-webkit-` 포함) + 가장자리 하이라이트(inset 1px) + 위쪽 광택 한 겹. 배경에는 고정 가상 요소로 옅은 광원 셋.
+- **불투명(콘텐츠 계층):** 패널·모니터링 카드·표·코드블록·편집기·워크벤치 좌/중/우 작업면. 모서리(16px)·그림자만 유리 계층과 맞췄다.
+- **흐림을 넣지 않은 곳:** 세그먼트 탭은 스크롤 영역 안이라 흐림 없이 반투명 트랙 + 흰 렌즈만. 유리 위 드롭다운은 흐림이 부모 안에서만 먹으므로 더 불투명하게(.8).
+- **끄는 길:** `prefers-reduced-transparency: reduce` -> 채움 .97·흐림 없음·광원 끔, `prefers-contrast: more` -> 흰 채움·진한 테두리, `backdrop-filter` 미지원 -> 불투명 채움, `prefers-reduced-motion` -> 버튼 전환 없음.
+
+### 대비 — WCAG AA(작은 글씨 4.5:1)를 계산으로 확인
+
+유리 위 수치는 블러 전 합성 근사로, 광원이 가장 진한 자리(인디고 .20)를 최악으로 잡았다.
+
+```
+옛 보조 글자 #7b8494 on 흰색                 3.77:1   (기존에도 미달)
+새 보조 글자 #667085 on 흰색                 4.97:1
+#667085 on 유리(채움 .56, 최악 광원)          4.27:1   -> 유리 안에서만 #5b6475로: 5.12:1
+본문 #1e232a on 유리                         13.57:1
+흰 글자 on 기본 버튼 처음 그라데이션 위쪽 #6573ff  3.85:1   -> #5462f5(위) 4.73:1 / #4250e6(아래) 5.96:1
+```
+
+처음 넣은 광택 그라데이션과 유리 위 보조 글자가 기준에 못 미쳐 계산 뒤 고쳤다. 채움 알파만 올려서는(.70에서도 4.47:1) 넘지 못해 글자 색을 바꿨다.
+
+### 화면 전후 (같은 로컬 앱, 역할별 프록시 — 136절 방식, 브라우저는 로그인하지 않음)
+
+![로그인 전후](images/webui/92-glass-login-before-after.jpg)
+![대시보드 전후](images/webui/93-glass-dashboard-before-after.jpg)
+![모니터링 탭 전후](images/webui/94-glass-monitor-before-after.jpg)
+![워크벤치 전후](images/webui/95-glass-workbench-before-after.jpg)
+
+실제 적용값을 브라우저에서 읽었다: 사이드바 `backdrop-filter: blur(22px) saturate(1.8)`, 사이드바 안 `--muted: #5b6475`, 기본 버튼 `linear-gradient(rgb(84, 98, 245) 0%, rgb(66, 80, 230) 100%)`,
+워크벤치 대화상자 `blur(22px) saturate(1.8)`·모서리 20px·모달 배경 `blur(6px)`(대화상자는 요청을 올리지 않고 미리보기로만 열었다). 미리보기에서 대화상자가 어둡게 흐린 화면 위에서 탁한 회색으로 보여
+채움을 .92로 올렸다(이 값은 재캡처하지 않았다).
+
+확인 중 헛짚은 것 하나: 서빙된 `workbench.css`에서 새 규칙이 안 보여 빌드 누락을 의심했는데, 공개 경로는 `login.html`·`style.css`뿐이라 비로그인 curl이 로그인 페이지로 302를 받은 것이었다.
+디스크·빌드 리소스·jar·로그인 세션으로 받은 응답에는 모두 들어 있었다.
+
+### 회귀
+
+```
+PersonaUiE2ETest (DBTOWER_E2E=1)   tests 5 failures 0 errors 0 skipped 0 — 역할별 착지, 관제 입구 숨김·안내 폭, 승인자/운영자 버튼 분리, 리뷰 시각 변환, 사용자 카드
+규약 검사                            전부 통과
+```
+
+성능 수치는 주장하지 않는다(흐림은 sticky 상단바·사이드바와 떠 있는 요소에만 두었고, 이번에 프레임 시간을 재지는 않았다).
+
+출처:
+- https://developer.apple.com/videos/play/wwdc2025/219/
+- https://www.createwithswift.com/liquid-glass-redefining-design-through-hierarchy-harmony-and-consistency/
+- https://www.nngroup.com/articles/liquid-glass/
+- https://kube.io/blog/liquid-glass-css-svg/
+- https://blog.logrocket.com/how-create-liquid-glass-effects-css-and-svg/
+- https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/@media/prefers-reduced-transparency
+- https://developer.chrome.com/blog/css-prefers-reduced-transparency
+- https://infinum.com/blog/apples-ios-26-liquid-glass-sleek-shiny-and-questionably-accessible/

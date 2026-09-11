@@ -19,7 +19,7 @@ MySQL / PostgreSQL / SQL Server / Oracle / MongoDB를 하나의 인터페이스(
 
 DBTower는 이 차이를 인터페이스 뒤로 숨겨, 플랫폼 코드와 사용자는 추상화된 정책만 다룹니다.
 
-![대시보드 — 이기종 등록, 통합 헬스 스코어(나쁜 순), 백업 신선도, 활동 그래프](docs/images/webui/01-dashboard.png)
+![대시보드 — 이기종 등록, 통합 헬스 스코어(나쁜 순), 백업 신선도, 활동 그래프(상단바·사이드바·탭은 Liquid Glass 계층, 표·카드는 불투명)](docs/images/webui/96-glass-dashboard.jpg)
 
 ## 3분 요약
 

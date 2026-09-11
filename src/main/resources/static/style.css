@@ -7,7 +7,7 @@
   --panel: #ffffff;
   --line: #e3e6ea;
   --text: #1e232a;
-  --muted: #7b8494;
+  --muted: #667085;         /* 흰 바탕 대비 4.8:1 — 예전 #7b8494(3.9:1)는 작은 글씨 기준(4.5:1)에 못 미쳤다(138절) */
   --primary: #4f5ef7;       /* 조회(파랑) */
   --target: #22a06b;        /* 조회 구간(초록) */
   --base: #f08c2d;          /* 비교 구간(주황) */
@@ -815,3 +815,116 @@ button:focus-visible, input:focus-visible, select:focus-visible,
   border-top: 1px solid var(--line); padding-top: 8px; }
 .ov-sig-k { font-weight: 700; color: var(--muted); margin-right: 4px; }
 .ov-rpo { color: var(--base); font-weight: 600; }
+
+/* ---------- Liquid Glass 계층 (VERIFICATION 138절) ----------
+   유리는 콘텐츠 위에 뜨는 탐색·컨트롤 계층에만 쓴다(Apple HIG) — 상단바·사이드바·세그먼트 탭·드롭다운·툴팁·로그인 카드.
+   표·카드·코드 같은 콘텐츠 계층은 불투명하게 둔다. 운영 콘솔은 읽는 화면이라, NN/G가 짚은 "배경에 섞여 대비가 떨어지는 글자"를 만들지 않는다.
+   굴절(SVG 변위 맵을 backdrop-filter로)은 Chromium에서만 되고 표면 전체를 한 번 더 그리므로 쓰지 않는다 — 반투명·블러·채도·가장자리 하이라이트로 재질감만 낸다. */
+:root {
+  --glass-fill: rgba(255, 255, 255, .56);
+  --glass-fill-strong: rgba(255, 255, 255, .8);
+  --glass-dark: rgba(23, 27, 36, .78);
+  --glass-hairline: rgba(15, 23, 42, .09);
+  --glass-blur: blur(22px) saturate(180%);
+  --glass-shine: inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 -1px 0 rgba(255, 255, 255, .25);
+  --glass-shadow: 0 10px 30px rgba(30, 41, 59, .10), 0 1px 2px rgba(30, 41, 59, .06);
+  --card-shadow: 0 1px 2px rgba(30, 41, 59, .05), 0 6px 18px rgba(30, 41, 59, .05);
+}
+
+/* 유리가 비칠 배경 — 옅은 광원 셋. 고정 가상 요소라 스크롤해도 다시 그리지 않는다 */
+body { background: #eef1f6; }
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(900px 600px at 6% -8%, rgba(99, 102, 241, .20), transparent 62%),
+    radial-gradient(820px 560px at 100% 0%, rgba(20, 184, 166, .15), transparent 60%),
+    radial-gradient(1000px 720px at 55% 112%, rgba(236, 72, 153, .10), transparent 62%);
+}
+
+/* 뜨는 계층 — 유리 */
+.topbar, .sidebar, .cs-panel, .login-box {
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-hairline);
+  box-shadow: var(--glass-shine), var(--glass-shadow);
+}
+.topbar { border-width: 0 0 1px; box-shadow: var(--glass-shine), 0 4px 18px rgba(30, 41, 59, .06); }
+/* 유리 위 보조 글자 — 광원이 가장 진한 자리에서 #667085는 4.27:1로 기준(4.5:1)에 못 미쳐, 유리 안에서만 한 단계 진하게(5.12:1) */
+.topbar, .sidebar, .cs-panel, .login-box { --muted: #5b6475; }
+.sidebar { border-radius: 18px; }
+/* 위쪽에 맺히는 빛 — 재질감은 가장자리 하이라이트와 이 한 겹이 전부다(움직이는 효과는 넣지 않는다) */
+.sidebar, .login-box {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, .5) 0%, rgba(255, 255, 255, .12) 28%, rgba(255, 255, 255, 0) 55%);
+}
+/* 유리 위에 겹치는 유리는 흐림이 부모 안에서만 먹어 흐려진다 — 드롭다운은 더 불투명하게 */
+.cs-panel { background: var(--glass-fill-strong); border-radius: 12px; }
+.cs-opt:hover { background: rgba(79, 94, 247, .07); }
+.cs-btn, .instance-filter input[type="search"] { border-radius: 10px; background: rgba(255, 255, 255, .72); border-color: var(--glass-hairline); }
+.instance-card { border-radius: 12px; background: rgba(255, 255, 255, .7); border-color: var(--glass-hairline); }
+.instance-card:hover { background: rgba(255, 255, 255, .9); border-color: rgba(15, 23, 42, .16); }
+.instance-card.selected { background: #fff; }
+
+/* 세그먼트 컨트롤 — 알약 트랙 위에 떠 있는 흰 렌즈. 흐림은 넣지 않는다(스크롤 영역 안에서 매 프레임 다시 그리게 되므로) */
+.mon-subnav, .tabs {
+  background: rgba(255, 255, 255, .5); border: 1px solid var(--glass-hairline); border-radius: 999px;
+  box-shadow: var(--glass-shine); padding: 4px;
+}
+.tabs { display: flex; width: fit-content; gap: 2px; }
+.mon-tab, .tab { border-radius: 999px; border-bottom: 0; padding: 6px 16px; }
+.mon-tab.active, .tab.active {
+  background: #fff; color: var(--primary);
+  box-shadow: 0 1px 3px rgba(30, 41, 59, .14), inset 0 1px 0 #fff;
+}
+
+/* 콘텐츠 계층 — 불투명, 모서리·그림자만 유리 계층과 맞춘다 */
+.panel, .monitor-card, .overview-card { border-radius: 16px; border-color: rgba(15, 23, 42, .07); box-shadow: var(--card-shadow); }
+.detail { border-radius: 12px; }
+.summary-strip { border-radius: 12px; background: rgba(255, 255, 255, .8); }
+
+/* 버튼 — 기본 버튼은 위쪽 광택 한 줄로 재질감 */
+.btn { border-radius: 10px; transition: box-shadow .15s ease, filter .15s ease; }
+.btn-primary {
+  /* 흰 글자 대비 위 4.73:1·아래 5.96:1 — 처음 쓴 #6573ff 위쪽은 3.85:1이라 기준(4.5:1) 미달이었다 */
+  background: linear-gradient(180deg, #5462f5 0%, #4250e6 100%); border-color: #3d4ad6;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 1px 2px rgba(79, 94, 247, .35);
+}
+.btn-primary:hover { filter: brightness(1.05); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4), 0 4px 14px rgba(79, 94, 247, .32); }
+.user-chip .role-badge { background: rgba(255, 255, 255, .6); border: 1px solid var(--glass-hairline); box-shadow: var(--glass-shine); }
+
+/* 어두운 유리 — 툴팁 */
+.tooltip, .chart-tip {
+  background: var(--glass-dark);
+  -webkit-backdrop-filter: blur(14px) saturate(160%); backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, .08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 10px 28px rgba(15, 20, 30, .28);
+}
+
+/* 로그인 — 배경 광원 위의 유리 카드 */
+.login-body { background: #eef1f6; }
+/* 로그인은 뒤에 콘텐츠가 없어 유리가 비칠 것이 광원뿐이다 — 이 화면에서만 광원을 조금 진하게 */
+.login-body::before {
+  background:
+    radial-gradient(700px 520px at 18% 12%, rgba(99, 102, 241, .30), transparent 62%),
+    radial-gradient(640px 480px at 88% 22%, rgba(20, 184, 166, .22), transparent 60%),
+    radial-gradient(760px 560px at 55% 96%, rgba(236, 72, 153, .16), transparent 62%);
+}
+.login-box { border-radius: 24px; width: 380px; }
+.login-form input { background: rgba(255, 255, 255, .72); border-color: rgba(15, 23, 42, .12); border-radius: 10px; }
+
+/* 접근성·호환 — 유리를 끄면 같은 자리에 불투명 표면이 온다(iOS의 "투명도 줄이기"처럼 더 불투명하게) */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root { --glass-fill: rgba(255, 255, 255, .96); --glass-fill-strong: #fff; --glass-dark: #1f2430; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root { --glass-fill: rgba(255, 255, 255, .97); --glass-fill-strong: #fff; --glass-dark: #1f2430; --glass-blur: none; }
+  body::before { display: none; }
+  .mon-subnav, .tabs, .instance-card, .cs-btn, .summary-strip { background: #fff; }
+  .tooltip, .chart-tip { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  :root { --glass-fill: #fff; --glass-fill-strong: #fff; --glass-hairline: rgba(15, 23, 42, .4); --glass-blur: none; }
+  .mon-subnav, .tabs, .instance-card, .cs-btn { background: #fff; border-color: rgba(15, 23, 42, .4); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition: none; }
+}
