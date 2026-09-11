@@ -217,7 +217,7 @@ GRANT VIEW SERVER PERFORMANCE STATE TO dbtower_monitor;
 | query-stats | `SELECT_CATALOG_ROLE` (V$SQL) | `ORA-00942: 테이블 또는 뷰 "SYS"."V_$SQL"이(가) 존재하지 않습니다` |
 | slow-queries | 동일 (V$SQL) | 동일 |
 | table-stats | 추가 권한 불요 (`user_tables` — 단, 자기 스키마만 보임) | 에러 없이 빈 결과 |
-| table-stats·테이블 상세·스키마 트리(앱 스키마 지정 시) | `SELECT_CATALOG_ROLE` (`dba_tables`·`dba_indexes`·`dba_segments`·`DBMS_METADATA.GET_DDL`의 다른 스키마) | `dbtower.oracle.app-schema` 미지정이면 모니터 자신의 스키마만 봐서 "테이블을 찾을 수 없습니다"(VERIFICATION 132절) |
+| table-stats·테이블 상세·스키마 트리(앱 스키마 지정 시) | `SELECT_CATALOG_ROLE` (`dba_tables`·`dba_indexes`·`dba_segments`·`DBMS_METADATA.GET_DDL`의 다른 스키마) | 인스턴스 `appSchema`와 전역 `dbtower.oracle.app-schema`가 모두 비면 모니터 자신의 스키마만 봐서 "테이블을 찾을 수 없습니다"(VERIFICATION 132·133절) |
 | explain | `EXPLAIN PLAN` 자체는 불요, 대상 테이블 `READ` 필요 | `ORA-00942: 테이블 또는 뷰 "SAMPLE"."USERS"이(가) 존재하지 않습니다` |
 | replication | `SELECT_CATALOG_ROLE` (V$DATABASE) | `ORA-00942: 테이블 또는 뷰 "SYS"."V_$DATABASE"이(가) 존재하지 않습니다` |
 

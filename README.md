@@ -225,11 +225,13 @@ AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 �
 (실행이 아니라 새 티켓으로 올리기), 스키마 트리에서 테이블 상세(행 수·크기·인덱스 카디널리티·DDL)를 엽니다. 변경 실행은 SQL Server
 (Apple Silicon 로컬은 `docker-compose.arm64.yml`의 Azure SQL Edge, Rosetta가 있으면 Rosetta VM의 실제 SQL Server 2022 RTM-CU26)와
 MongoDB(복제셋 트랜잭션 안의 문서 사본)까지 5기종으로 넓혔고, MCP에는 변경 요청·상태·조회 도구만 열었습니다(조회는 인스턴스의 결과 값
-AI 공유 설정이 켜진 경우만). Oracle은 `dbtower.oracle.app-schema`를 주면 모니터 계정이 앱 스키마의 테이블 상세·스키마 트리를 봅니다.
+AI 공유 설정이 켜진 경우만). Oracle은 인스턴스를 등록할 때 `appSchema`를(없으면 전역 `dbtower.oracle.app-schema`를) 주면 모니터 계정이 앱 스키마의 테이블 상세·스키마 트리를 봅니다.
 
 100만 행 표에 pgbench로 같은 부하를 인덱스 티켓 전후에 걸었습니다. 컨테이너 안·합계 한 줄 조회로는 평균 지연 49.634 ms -> 0.029 ms였고,
-호스트에서 포트 포워딩 TCP로 붙어 행 20건을 돌려주는 조회로 다시 재면 46.378 ms -> 0.521 ms입니다(서버 안 실행 시간은 0.0325 ms,
-나머지는 왕복 비용, [VERIFICATION 131·132절](docs/VERIFICATION.md)). 비교 화면의 행 지표는 기종마다 세는 것이 달라(PostgreSQL은 돌려준 행,
+호스트에서 포트 포워딩 TCP로 붙어 행 20건을 돌려주는 조회로 다시 재면 46.378 ms -> 0.521 ms입니다. 서버 안 실행 시간은 0.0325 ms이고
+같은 경로의 `SELECT 1`이 0.539 ms라, 남은 지연은 거의 전부 왕복 비용입니다([VERIFICATION 131~133절](docs/VERIFICATION.md)).
+Apple Silicon에는 SQL Server를 네이티브로 돌릴 경로가 없어(공식 지원은 x86-64 호스트뿐), 같은 Rosetta VM에서 PostgreSQL arm64와 amd64를 맞붙여
+번역 비용(처리량 약 0.7배)을 따로 쟀습니다. 비교 화면의 행 지표는 기종마다 세는 것이 달라(PostgreSQL은 돌려준 행,
 SQL Server는 논리 읽기 페이지 등) 오퍼레이터가 알려준 이름으로 적습니다.
 
 ![테이블 상세 탭](docs/images/webui/76-workbench-table-detail.png)

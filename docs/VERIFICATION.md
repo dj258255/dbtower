@@ -5515,3 +5515,125 @@ RegressionDetectorTest +1 돌려준 행 지표 기종은 "결과 크기 변화"�
 ChangeExecutionIT +1      Oracle 앱 스키마(위 3절), SQL Server 시나리오는 DBTOWER_MSSQL_PORT로 2022에서
 전체                      746 tests, 실패 0, 건너뜀 15(실DB IT 게이트 — 131절 741/14에서 새 테스트 5, 게이트 IT 1), 규약 검사 통과
 ```
+
+## 133. 남은 제약 셋 — 네이티브 x64 SQL Server를 이 Mac에서, Oracle 앱 스키마를 인스턴스별로, 측정 경로를 분해해서 (2026-09-11)
+
+### 무엇이 남아 있었나
+
+132절을 마치며 제약 셋을 적었다. (1) SQL Server 2022는 Rosetta 위의 x64 에뮬레이션이라 µs 수치를 성능 근거로 쓰지 않는다,
+(2) Oracle 앱 스키마 설정이 앱 전역 하나다, (3) pgbench 클라이언트와 DB가 같은 Mac을 나눠 쓴다. 사용자가 "남은 제약도 다 해줘"라고 했고,
+(1)은 "이 Mac에서 방법이 있을 테니 웹서칭을 자세히 해 보라"고 했다.
+
+### 1. 이 Mac(Apple Silicon)에서 네이티브 x64 SQL Server는 가능한가 — 조사
+
+결론부터: **없다.** 네이티브 실행이란 명령어를 번역 없이 CPU가 직접 돌리는 것인데, SQL Server에는 ARM64 빌드가 없고 Apple Silicon은
+x86-64 명령어를 직접 실행하지 못한다. 이 Mac에서 SQL Server를 띄우는 모든 길은 번역(Rosetta 2, Prism)이나 전체 에뮬레이션(QEMU)을 거친다.
+
+| 경로 | 실제로 도는 방식 | 확인한 사실 |
+|---|---|---|
+| Docker Desktop / Colima(`--vz-rosetta`) / OrbStack + `mssql/server` | Linux VM 안에서 Rosetta 2가 x86-64를 번역 | Microsoft 문서: "SQL Server container images are supported only on Linux hosts running on Intel and AMD x86-64 CPUs. Emulation or translation environments (for example, Rosetta 2, Prism, or QEMU) aren't tested or supported." |
+| Apple `container`(macOS 26, 이 Mac은 26.3.1) | 컨테이너마다 경량 VM + Rosetta 2 | amd64 이미지를 Rosetta로 번역한다고 명시 — 같은 번역 계층 |
+| QEMU(UTM 등) x86-64 전체 에뮬레이션 | 명령어 해석 실행 | Rosetta보다 수 배 느리다는 보고. 이 Mac에 `qemu-system-x86_64`가 있지만 네이티브가 아니다 |
+| Parallels + Windows 11 ARM + SQL Server | Windows의 Prism이 x64를 번역 | 설치·실행 사례는 있으나 역시 번역 |
+| Azure SQL Edge(arm64) | 네이티브 arm64 | SQL Server 2022가 아니고 2025-09-30 지원 종료(131절에서 사용) |
+| SQL Server ARM64(Linux·macOS) | — | 없음. vscode-mssql의 ARM 컨테이너 지원 요청(#20337)은 "SQL Server 2025 containers are broken on ARM architectures"로 닫혔고 공식 계획 발표는 찾지 못했다 |
+
+번역 계층의 알려진 차이도 확인했다. SQL Server 2025 RTM은 AVX를 요구해 Docker Desktop의 Rosetta에서
+`assertion failed [x86_avx_state_ptr->xsave_header.xfeatures == kSupportedXFeatureBits]`로 죽었고(macOS 26.2 podman에서도 같은 보고),
+2025 CU1에서 고쳐졌다. macOS 15부터 Rosetta가 AVX2 명령을 번역하지만 CPUID로는 AVX가 없다고 알린다 — 같은 x64 바이너리라도
+네이티브 x64와 다른 코드 경로를 탈 수 있다는 뜻이다. 우리가 쓴 SQL Server 2022 RTM-CU26은 이 문제 없이 떴다(132절).
+
+그래서 "네이티브 x64에서의 SQL Server 수치"를 이 Mac 안에서 만들 방법은 없고, 가능한 길은 둘이다.
+- **다른 x64 하드웨어**: Azure SQL Database 무료 제공(구독당 서버리스 DB 10개, DB마다 월 100,000 vCore초·32GB, 만료 없음) — 엔진은
+  SQL Server 기반 PaaS다. AWS RDS SQL Server Express 무료 티어는 2025-07-15 이전 가입 계정만이고 신규 계정은 2026-07 이후 종료. GitHub Actions의
+  ubuntu x64 러너에서 `mssql/server:2022` 서비스 컨테이너로 IT를 돌리는 방법도 있다. 셋 다 클라우드 계정·결제 수단이나 브랜치 push가 필요해
+  사용자 결정 없이 하지 않았다.
+- **이 Mac 안에서 번역 비용을 재서 수치의 거리를 정한다**: SQL Server는 arm64 빌드가 없어 직접 대조할 수 없으니, arm64와 amd64 빌드가 둘 다
+  있는 DB 엔진(PostgreSQL 16)을 **같은 Rosetta VM에서 같은 부하로** 돌려 번역이 DB 엔진 모양의 작업을 얼마나 느리게 하는지 쟀다(아래 2절).
+
+### 2. 이 Mac에서 잰 번역 비용 — 같은 Rosetta VM, 같은 PostgreSQL 16, arm64 대 amd64
+
+환경: Apple M2 Pro, macOS 26.3.1, Colima 프로필 `mssql2022`(vz, Rosetta 켬, 4 vCPU·6GiB). 공식 `postgres:16` 이미지를
+`--platform linux/arm64`와 `linux/amd64`로 번갈아 띄우고(`uname -m` aarch64 / x86_64로 확인), 컨테이너 안에서 pgbench(scale 20, 200만 행)를 같은 설정으로 돌렸다.
+한 번에 한 컨테이너만 떠 있었고, 앱·빌드는 멈춘 상태였다.
+
+| 부하(4클라이언트·4스레드·60초) | arm64 네이티브 | amd64 Rosetta | Rosetta / 네이티브 |
+|---|---|---|---|
+| 조회 전용(`-S`) tps | 166,915 | 117,841 | 0.71 |
+| 조회 전용 평균 지연 | 0.024 ms | 0.034 ms | 1.42배 |
+| TPC-B 기본(쓰기) tps | 6,175 | 4,222 | 0.68 |
+| TPC-B 평균 지연 | 0.648 ms | 0.947 ms | 1.46배 |
+| 초기 적재(`-i -s 20`) | 2초 | 3초 | (초 단위라 참고만) |
+
+같은 VM·같은 커널·같은 디스크에서 명령어 번역만 달라진 결과다. DB 엔진 모양의 작업에서 Rosetta는 처리량을 약 0.7배로, 지연을 약 1.4~1.5배로 만들었다.
+웹에서 흔히 인용되는 "네이티브의 약 80%"보다 조금 더 무겁다.
+
+이 수치의 쓰임과 한계:
+- 132절 SQL Server 2022 µs 수치를 네이티브 x64로 옮기는 **환산 계수가 아니다.** 번역 비용은 바이너리마다 다르고(SIMD·JIT·명령어 조합),
+  "번역 대상 x86-64"와 "비교 대상 네이티브 x64 서버 CPU"도 같은 CPU가 아니다. 쓸 수 있는 말은 "이 Mac에서 Rosetta 아래 잰 DB 수치는
+  같은 Mac의 네이티브보다 대략 1.4배 느린 쪽으로 치우친다"까지다.
+- 그래서 132절 SQL Server 2022 결과 중 **판정(커밋·롤백·드리프트 충돌·권한 거부·계획 모양 Scan -> Seek)은 번역과 무관한 사실**이고,
+  µs 절대값은 여전히 성능 근거로 쓰지 않는다. 네이티브 x64 수치가 필요하면 1절의 다른 하드웨어 경로가 필요하다.
+
+### 3. 같은 Mac에서 도는 측정의 경로 비용 — `SELECT 1`로 분해
+
+132절의 해석("인덱스 뒤 클라이언트 지연 0.521 ms 중 서버 안 실행은 0.0325 ms, 나머지는 경로")을 추정이 아니라 측정으로 확인했다. 서버가 거의
+일하지 않는 `SELECT 1`을 같은 대상(기본 VM의 `dbtower-postgres`)에 클라이언트 위치만 바꿔 4클라이언트·4스레드·30초씩 보냈다.
+
+| 클라이언트 위치 | 경로 | 평균 지연 | tps |
+|---|---|---|---|
+| DB 컨테이너 안 | 유닉스 소켓 | 0.018 ms | 223,005 |
+| 호스트(macOS) | `127.0.0.1:15432` -> Colima 포트 포워딩 -> VM | 0.539 ms | 7,427 |
+| 다른 VM(`mssql2022`) | VM 네트워크 -> 호스트(`host.lima.internal`=192.168.5.2):15432 -> 포트 포워딩 -> 기본 VM | 0.664 ms | 6,026 |
+
+다른 VM에서는 VM 네트워크 한 구간이 더 붙어 호스트보다 0.125 ms 느렸다(180,689건).
+
+- 호스트 경로의 `SELECT 1` 자체가 0.539 ms다. 132절 인덱스 뒤 조회의 클라이언트 지연 0.521 ms와 같은 크기이므로, 인덱스 뒤 남은 지연은
+  거의 전부 포트 포워딩 왕복이다(0.521 < 0.539는 부하 모양·시점 차이 범위). 컨테이너 안 `SELECT 1`은 0.018 ms라, 131절 컨테이너 안 수치(0.029 ms)가
+  크게 나온 이유도 같은 분해로 설명된다.
+- 첫 시도에서 다른 VM 측정은 `could not read file "/tmp/select1.sql": Is a directory`로 실패했다. 스크래치 경로가 그 VM에 공유되지 않아
+  Docker가 빈 디렉터리를 만들어 붙였다. 조회 파일을 컨테이너 안에서 만들어 다시 쟀다.
+- "클라이언트와 DB가 같은 Mac"이라는 제약 자체는 이 Mac 하나로 없앨 수 없다. 다른 VM은 VM 경계를 넘지만 같은 CPU와 같은 호스트 네트워크 스택이다.
+  물리적으로 다른 호스트의 네트워크 수치는 1절과 같은 이유(다른 하드웨어·계정)로 사용자 결정 없이 만들지 않았다.
+
+### 4. Oracle 앱 스키마를 인스턴스마다
+
+132절에서는 앱 스키마가 앱 전역 설정 하나라, 같은 플랫폼에 앱 스키마가 다른 Oracle을 여럿 두면 담을 수 없었다.
+
+- V39 `database_instance.app_schema`. 등록(POST)·멱등 등록(PUT) 요청의 `appSchema`(선택)로 받고 응답에 싣는다. `ALTER SESSION SET CURRENT_SCHEMA`에
+  들어가는 값이라 요청 검증에서 식별자 모양(`[A-Za-z][A-Za-z0-9_$#]*`)만 받고, 오퍼레이터 생성자에서 한 번 더 막는다.
+- `DbmsOperatorFactory`는 인스턴스 등록값을 먼저, 없을 때만 전역 `dbtower.oracle.app-schema`를 쓴다. 빈 값은 미지정으로 둔다.
+- 멱등 등록이 기존 커넥션 풀을 정리하므로, 앱 스키마를 바꾸거나 빼면 콘솔 세션도 다음 조회부터 새 기본 스키마로 열린다.
+
+라이브(앱은 전역 `dbtower.oracle.app-schema` 없이 기동, 같은 Oracle FREEPDB1을 두 이름으로 등록):
+
+```
+[I1] PUT live-oracle-app appSchema=SAMPLE  HTTP 200 id=7 appSchema=SAMPLE
+[I2] live-oracle      (appSchema 없음)  스키마 트리 []  / 테이블 상세 customers UNSUPPORTED
+                                        콘솔 SELECT id, grade FROM customers -> HTTP 422 ORA-00942 "DBTOWER_READER"."CUSTOMERS"
+     live-oracle-app  (appSchema=SAMPLE) 스키마 트리 [CHANGE_IT, CONSOLE_RO_PROBE, CUSTOMERS, USERS] / 테이블 상세 NATIVE created=2026-09-10 11:12:28 indexes=[SYS_C008721]
+                                        콘솔 SELECT id, grade FROM customers -> [[1,'VIP'], [2,'GOLD'], [3,'SILVER']]
+[I3] appSchema="SAMPLE; DROP USER x"   HTTP 400
+[I4] appSchema를 빼고 재등록            HTTP 200 appSchema=None -> 스키마 트리 [] / 콘솔 ORA-00942 (풀 정리 뒤 새 세션)
+     다시 SAMPLE                         HTTP 200 appSchema=SAMPLE
+```
+
+### 테스트
+
+```
+UpsertRegistrationTest +1          앱 스키마가 재등록에서 갱신되고(" SAMPLE " -> SAMPLE), 빈 값은 미지정
+DbmsOperatorFactoryAppSchemaTest 1 인스턴스 등록값이 전역 설정보다 먼저, 없으면 전역
+전체                               748 tests, 실패 0, 건너뜀 15(실DB IT 게이트), 규약 검사 통과
+```
+
+### 조사 출처 (2026-09-11 확인)
+
+- Microsoft Learn, [Docker: Run Containers for SQL Server on Linux](https://learn.microsoft.com/en-us/sql/linux/install-upgrade/quickstart-install-docker?view=sql-server-ver17) — 지원 CPU·에뮬레이션 미지원 문장
+- [microsoft/vscode-mssql #20337](https://github.com/microsoft/vscode-mssql/issues/20337) — ARM 컨테이너 지원 요청(닫힘)
+- Anthony Nocentino, [SQL Server 2025 RTM on macOS AVX issue](https://www.nocentino.com/posts/2025-11-26-sql-server-2025-docker-desktop-avx-issue/),
+  [CU1 fix](https://www.nocentino.com/posts/2026-02-02-sql-server-2025-cu1-fixes-avx-issue/); [podman #28184](https://github.com/containers/podman/issues/28184)
+- [Stockfish #5707](https://github.com/official-stockfish/Stockfish/issues/5707) — macOS 15 Rosetta의 AVX2 번역과 CPUID 보고 차이
+- [apple/containerization](https://github.com/apple/containerization) — macOS 26 컨테이너의 Rosetta 사용
+- Microsoft Q&A, [Windows 11 ARM in Parallels, which MSSQL works](https://learn.microsoft.com/en-us/answers/questions/1443109/im-running-windows-11-arm-in-a-parallels-vm-i-need)
+- Microsoft Learn, [Azure SQL Database free offer](https://learn.microsoft.com/en-us/azure/azure-sql/database/free-offer?view=azuresql); [Amazon RDS FAQs](https://aws.amazon.com/rds/faqs/)
+- [Apple Silicon Docker amd64 emulation via Rosetta is fast(er)](https://patrickwthomas.net/macos-docker/) — Rosetta 대 QEMU 보고
