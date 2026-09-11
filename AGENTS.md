@@ -97,6 +97,8 @@ scripts/         dbtower-mcp.sh (MCP stdio 실행기)
 - 좁은 화면 확인은 Playwright로 뷰포트를 정확히 맞춰 잰다. Chrome 확장 창 조절(innerWidth 그대로)·iframe(X-Frame-Options)·
   headless `--window-size`(뷰포트가 넓게 잡힘)는 모두 틀린 결과를 냈다
 - 대상 DB를 주기적으로 조회하는 화면은 브라우저가 각자 폴링하지 않고 서버 허브를 거친다(LiveSessionHub) — 폴링은 대상 조회가 보는 사람 수만큼 는다
+- 관제와 워크벤치는 한 페이지(index.html)의 두 모드다 — 모드를 바꾸면 숨긴 쪽의 실시간 연결을 닫고(setMode -> syncLive), 워크벤치 코드는 처음 들어갈 때
+  모듈로 불러온다. `/workbench.html`은 `/?mode=workbench`로 넘기는 페이지로만 남긴다(149절)
 - 실시간 연결은 화면이 안 보이면(탭 숨김·다른 그룹) 닫는다. 안 보는 화면이 구독자로 남으면 대상 조회가 멈추지 않는다
 - AI 응답처럼 긴 대기는 한 번에 받지 않고 흘려 보여준다. 흘린 조각은 표시용이고 저장·분류는 완성본으로 한다
 

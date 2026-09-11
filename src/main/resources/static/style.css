@@ -981,3 +981,65 @@ body::before {
   .instance-filter-row .cs { flex-basis: 100%; }
   .login-box { width: calc(100vw - 32px); padding: 32px 22px; }
 }
+
+/* ---------- 한 셸의 두 모드 (VERIFICATION 149절) ----------
+   b-studio처럼 조작 계층(상단바·모드 전환·인스턴스·AI)은 떠 있는 유리, 오래 읽는 작업면은 불투명.
+   관제 모드는 3칸 — 인스턴스 | 작업면 | AI. AI 칸은 사이드바처럼 상단바 아래에 붙어 스크롤을 따라온다 */
+.topbar { gap: 16px; }
+.mode-switch {
+  display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px;
+  background: rgba(118, 118, 128, .12); box-shadow: inset 0 1px 1px rgba(15, 23, 42, .05);
+}
+.mode-tab {
+  border: 0; background: none; font: inherit; font-size: 13px; font-weight: 700; color: #5b6475;
+  padding: 6px 18px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  transition: background-color .15s ease, color .15s ease;
+}
+.mode-tab:hover { color: var(--text); }
+.mode-tab.active { background: #fff; color: var(--primary); box-shadow: 0 1px 3px rgba(30, 41, 59, .16), inset 0 1px 0 #fff; }
+.mode-tab:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.app-shell { grid-template-columns: 280px minmax(0, 1fr) 340px; }
+.ai-sheet {
+  position: sticky; top: 66px; max-height: calc(100vh - 84px);
+  display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 18px;
+  background-color: var(--glass-fill);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, .5) 0%, rgba(255, 255, 255, .12) 28%, rgba(255, 255, 255, 0) 55%);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-hairline); box-shadow: var(--glass-shine), var(--glass-shadow);
+  --muted: #5b6475;
+}
+.ai-sheet-head { display: flex; align-items: center; gap: 10px; }
+.ai-sheet-titles { display: flex; flex-direction: column; min-width: 0; }
+.ai-sheet-title { font-size: 14px; font-weight: 700; }
+.ai-sheet-sub { font-size: 11.5px; color: var(--muted); }
+.ai-sheet .diagnose-card { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; }
+/* 진단 결과는 읽는 콘텐츠라 유리 위의 불투명에 가까운 흰 카드로 — 보조 글자는 흰 바탕 기준색으로 되돌린다 */
+.ai-sheet .diagnose-result {
+  flex: 1; min-height: 140px; overflow: auto; background: rgba(255, 255, 255, .94);
+  border: 1px solid rgba(15, 23, 42, .06); border-radius: 14px; padding: 10px 12px; --muted: #667085;
+}
+.ai-sheet .diagnose-input { display: flex; gap: 6px; }
+.ai-sheet .diagnose-q { flex: 1; min-width: 0; border-radius: 12px; }
+.ai-sheet-note { margin: 0; font-size: 11px; }
+@media (min-width: 1800px) {
+  .app-shell { grid-template-columns: 340px minmax(0, 1fr) 400px; }
+}
+@media (max-width: 1280px) {
+  /* AI 칸을 작업면 아래 한 줄로 — 세 칸이면 작업면이 표를 담지 못할 만큼 좁아진다 */
+  .app-shell { grid-template-columns: 280px minmax(0, 1fr); }
+  .ai-sheet { grid-column: 1 / -1; position: static; max-height: none; }
+  .ai-sheet .diagnose-result { max-height: 50vh; }
+}
+@media (max-width: 980px) {
+  .app-shell { grid-template-columns: minmax(0, 1fr); }
+}
+/* 좁은 상단바 — 모드 전환이 들어오며 400px에서 로그아웃이 화면 밖(가로 스크롤)으로 밀렸다(149절 사진 확인).
+   Grafana·Prometheus 링크는 비용·인프라 카드에도 있어 먼저 접고, 더 좁으면 브랜드 글자와 사용자 칩을 접는다 */
+@media (max-width: 640px) {
+  .topnav a[target="_blank"] { display: none; }
+  .mode-tab { padding: 6px 12px; }
+}
+@media (max-width: 480px) {
+  .brand-name, .user-chip { display: none; }
+}

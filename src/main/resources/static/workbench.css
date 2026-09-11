@@ -7,7 +7,9 @@
 /* ---------- 배치 (147절) ----------
    좌: 무엇을 보나(인스턴스·스키마·워크시트) / 중: 편집기와 결과·변경 티켓 / 우: AI 어시스턴트.
    전에는 오른쪽 탭 하나에 채팅·스키마·변경 티켓이 있어, 스키마의 테이블을 채팅에 붙이는 데 탭을 오가며 4번 눌렀다 */
-.wb-body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+/* 한 셸의 워크벤치 모드(149절) — 페이지 전체를 화면 높이에 맞추고 스크롤은 칸 안에서만. 관제 모드는 문서 전체가 스크롤된다 */
+body.mode-workbench { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+body.mode-workbench #mode-workbench { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .wb-shell {
   flex: 1; min-height: 0;
   display: grid; grid-template-columns: 264px minmax(0, 1fr) 384px; gap: 14px;
@@ -426,7 +428,7 @@ tr.df-removed td { background: #fdf1f2; }
 
 /* ---------- 좁은 화면 — 한 열로 접는다(139절: 1fr은 nowrap 내용 폭만큼 넓어져 minmax(0, 1fr)) ---------- */
 @media (max-width: 1200px) {
-  .wb-body { height: auto; overflow: auto; }
+  body.mode-workbench { height: auto; overflow: auto; }
   .wb-shell { grid-template-columns: minmax(0, 1fr); }
   .wb-left { overflow: visible; }
   .wb-schema .wb-tree { max-height: 40vh; }

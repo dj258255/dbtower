@@ -30,8 +30,8 @@ class RoleHomeSuccessHandlerTest {
 
     @Test
     void 호스트만_치고_들어온_요청자는_저장된_루트를_버리고_워크벤치로_간다() throws Exception {
-        assertThat(loginAs("ROLE_REQUESTER", sessionWithSavedRequest("/", null))).isEqualTo("/workbench.html");
-        assertThat(loginAs("ROLE_REQUESTER", sessionWithSavedRequest("/index.html", null))).isEqualTo("/workbench.html");
+        assertThat(loginAs("ROLE_REQUESTER", sessionWithSavedRequest("/", null))).isEqualTo("/?mode=workbench");
+        assertThat(loginAs("ROLE_REQUESTER", sessionWithSavedRequest("/index.html", null))).isEqualTo("/?mode=workbench");
     }
 
     @Test
@@ -43,7 +43,7 @@ class RoleHomeSuccessHandlerTest {
 
     @Test
     void 저장된_요청이_없으면_역할의_첫_화면이다() throws Exception {
-        assertThat(loginAs("ROLE_REQUESTER", new MockHttpSession())).isEqualTo("/workbench.html");
+        assertThat(loginAs("ROLE_REQUESTER", new MockHttpSession())).isEqualTo("/?mode=workbench");
         assertThat(loginAs("ROLE_APPROVER", new MockHttpSession())).isEqualTo("/");
     }
 

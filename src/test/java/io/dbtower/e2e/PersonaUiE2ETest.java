@@ -120,7 +120,7 @@ class PersonaUiE2ETest {
 
     @Test
     void 요청자는_워크벤치에_관제는_대시보드에_도착한다() {
-        assertThat(loginAs("e2e-requester").url()).endsWith("/workbench.html");
+        assertThat(loginAs("e2e-requester").url()).endsWith("/?mode=workbench");
         assertThat(loginAs("e2e-viewer").url()).endsWith("/");
     }
 
@@ -131,7 +131,7 @@ class PersonaUiE2ETest {
         page.locator("#review-list .rv-item").first().waitFor();
         assertThat(page.locator("#nav-workbench")).isHidden();
         assertThat(page.locator("#review-submit")).isHidden();
-        assertThat(page.locator("#review-list a[href*='workbench.html']")).hasCount(0);
+        assertThat(page.locator("#review-list a[href*='mode=workbench']")).hasCount(0);
 
         page.navigate(base() + "/workbench.html");
         Locator guard = page.getByText("요청자(REQUESTER) 이상 역할이 필요합니다", new Page.GetByTextOptions().setExact(false));

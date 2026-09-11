@@ -69,24 +69,41 @@ const tickets = new TicketPanel({
   onProposeTicket: (sql, reason) => openTicket(sql, reason),
 });
 
-init();
+// 한 셸의 워크벤치 모드(149절) — 셸(app.js setMode)이 처음 워크벤치로 들어올 때 mount를 부른다. 두 번 불러도 한 번만 시작한다
+let mounted = null;
+
+export function mount() {
+  if (!mounted) mounted = init();
+  return mounted;
+}
+
+/** 이미 붙은 워크벤치가 관제에서 넘김(쿼리 상세·인덱스 제안)을 받는다 — 인스턴스를 맞추고 넘김을 연다 */
+export async function navigate({ instance = null, handoff = null } = {}) {
+  await mount();
+  const select = $("wb-instance");
+  if (instance != null && String(instance) !== select.value && state.instances.some((i) => String(i.id) === String(instance))) {
+    select.value = String(instance);
+    await selectInstance(select.value, null);
+  }
+  const h = takeHandoff(handoff);
+  // 요청한 인스턴스가 실제로 열렸을 때만 받는다 — 팀 범위 밖이라 다른 인스턴스가 열려 있으면 엉뚱한 대상에 SQL이 채워진다
+  if (h && (instance == null || String(instance) === select.value)) await receiveHandoff(h);
+}
+
+/** 관제로 돌아갈 때 같은 인스턴스를 열도록 셸에 알려준다 */
+export function currentInstanceId() {
+  return state.instance ? state.instance.id : null;
+}
 
 async function init() {
   bindChrome();
   try {
     state.me = await request("/api/me");
-    $("user-chip").textContent = `${state.me.username} · ${ROLE_LABEL[state.me.role] || state.me.role}`;
   } catch {
-    // 표시만 생략한다 — 권한 판정은 서버가 한다
+    // 권한 판정은 서버가 한다
   }
   if (state.me && !can("WORKBENCH")) {
-    // 관제만 보는 역할은 대상 DB의 행 값을 보지 않는다. 서버도 워크벤치 API를 403으로 막지만, 실패 문구가 늘어선 빈 화면 대신 갈 곳을 알려준다
-    // 셸 전체를 바꾼다 — 셸은 좌·중·우 격자라 안쪽에 넣으면 안내가 왼쪽 첫 칸(인스턴스 목록 폭)에 끼어 세로로 늘어진다(136절 화면 확인)
-    document.querySelector(".wb-shell").outerHTML = `<main style="padding:48px 16px">
-      <div class="wb-note" style="margin:0 auto;max-width:640px">
-        <p>워크벤치는 조회 계정으로 대상 DB의 행 값을 보는 화면이라 요청자(REQUESTER) 이상 역할이 필요합니다.
-          지금 역할(${esc(ROLE_LABEL[state.me.role] || state.me.role)})은 대시보드에서 지표·리포트를 봅니다.</p>
-        <p><a class="btn btn-primary btn-small" href="/">대시보드로</a></p></div></main>`;
+    // 셸이 먼저 막는다(app.js showWorkbenchGuard). 여기까지 오면 아무것도 시작하지 않는다
     return;
   }
   const handoff = takeHandoff(new URLSearchParams(location.search).get("handoff"));
@@ -141,10 +158,7 @@ async function receiveHandoff(h) {
 }
 
 function bindChrome() {
-  $("logout-btn").addEventListener("click", async () => {
-    await fetch("/logout", { method: "POST", headers: { "X-XSRF-TOKEN": csrfToken() } });
-    location.href = "/login.html";
-  });
+  // 로그아웃·사용자 표시는 셸(app.js loadMe)이 한 번만 건다 — 같은 버튼에 두 번 걸면 로그아웃 요청이 두 번 나간다
   $("wb-run").addEventListener("click", () => run());
   $("wb-export").addEventListener("click", openExport);
   $("wb-modal-cancel").addEventListener("click", () => { $("wb-modal").hidden = true; });
@@ -272,7 +286,8 @@ async function openSheet(id) {
   await flushSave();
   state.sheet = state.sheets.find((s) => s.id === id);
   if (!state.sheet) return;
-  history.replaceState(null, "", `?instance=${encodeURIComponent(state.instance.id)}&sheet=${encodeURIComponent(id)}`);
+  // 모드를 주소에 남긴다 — 새로고침·공유한 주소가 관제가 아니라 이 워크시트로 돌아오게(149절)
+  history.replaceState(null, "", `/?mode=workbench&instance=${encodeURIComponent(state.instance.id)}&sheet=${encodeURIComponent(id)}`);
   $("wb-title").value = state.sheet.title;
   $("wb-version").textContent = state.sheet.latestVersion ? `최신 v${state.sheet.latestVersion}` : "버전 없음";
   editor.value = state.sheet.currentSql || "";
