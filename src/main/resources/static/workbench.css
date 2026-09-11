@@ -284,3 +284,17 @@ tr.df-removed td { background: #fdf1f2; }
 @media (prefers-reduced-transparency: reduce) {
   .wb-modal { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(15, 18, 25, .45); }
 }
+
+/* ---------- 좁은 화면 (139절) — 한 열일 때 1fr이 티켓 SQL(nowrap) 폭만큼 넓어져 선택 상자·버튼이 잘렸고,
+   결과 탭은 제목 옆에서 눌려 "테이블 상세"가 한 글자씩 세로로 섰다 ---------- */
+.wb-rtab, .wb-ctab { white-space: nowrap; }
+@media (max-width: 1200px) {
+  .wb-shell { grid-template-columns: minmax(0, 1fr); }
+  .wb-sheetbar { flex-wrap: wrap; }
+  .wb-title { min-width: 0; flex: 1 1 160px; }
+  .wb-result-tabs, .wb-right-tabs { max-width: 100%; overflow-x: auto; }
+}
+@media (max-width: 640px) {
+  .wb-shell { padding: 10px; }
+  .topbar .brand-tag { display: none; }
+}

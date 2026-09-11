@@ -6224,3 +6224,61 @@ PersonaUiE2ETest (DBTOWER_E2E=1)   tests 5 failures 0 errors 0 skipped 0 — 역
 - https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/@media/prefers-reduced-transparency
 - https://developer.chrome.com/blog/css-prefers-reduced-transparency
 - https://infinum.com/blog/apples-ios-26-liquid-glass-sleek-shiny-and-questionably-accessible/
+
+## 139. 레이아웃 한 번 더 — 빈 차트가 차지하던 자리, 좁은 화면에서 넘치던 열 (2026-09-11)
+
+### 무엇을 했나
+
+138절(Liquid Glass 계층)을 합친 뒤 사용자가 "계속해줘"라고 해서, 138절에서 보지 않은 화면을 둘러봤다: 대시보드 모니터링 다섯 그룹(성능·진단·거버넌스·백업/리포트·비용/인프라)과
+Slow Query 탭을 데스크톱 폭으로, 대시보드·워크벤치·로그인을 좁은 폭(430·768·1024px)으로. 넘침은 눈대중이 아니라 측정으로 가렸다.
+
+### 1. 수집되지 않은 차트가 빈 상자로 자리를 차지했다
+
+모니터링 "성능" 그룹의 Metric 카드는 exporter가 없으면 차트마다 140px(명령별 120px) 빈 상자를 그리고, 안내 문구를 그 아래 위아래 40px 여백으로 따로 띄웠다.
+로컬(exporter 미수집)에서 빈 차트는 6개였다. 비어 있는 동안은 상자를 감추고 안내를 낮은 자리표시(점선 테두리) 한 줄로 보인다.
+
+```
+Metric 카드 높이  1374px -> 638px   (빈 차트 6개, 같은 페이지에서 상자와 옛 안내 여백을 되살려 잰 값 -> 수정 뒤 실측)
+```
+
+**첫 수정이 먹지 않았다.** `svg.hidden = true`로 감췄는데 화면에 상자가 그대로였다. 브라우저에서 읽어 보니 `svg.hidden`은 true인데
+`[id^="cmd-chart-"][hidden]` 요소는 0개였다 — `hidden`은 HTMLElement의 프로퍼티라 SVG 요소에서는 속성을 만들지 않는 일반 JS 값이 된다.
+`toggleAttribute("hidden", ...)`로 속성을 직접 토글하자 CPU 차트 `display: none`, 명령별 차트 4개 모두 `[hidden]`이 됐다. 문법 검사와 테스트는 이 차이를 잡지 못했다.
+
+### 2. 좁은 화면에서 페이지가 옆으로 넘쳤다
+
+측정 도구를 셋 거쳤다.
+- Chrome 확장 창 크기 조절: 창은 줄었다고 했지만 페이지의 `innerWidth`가 2056으로 그대로라 쓸 수 없었다.
+- 같은 출처 iframe(430·1024px): 앱이 `X-Frame-Options`로 프레임을 막아 `contentDocument`가 null — 보안 기본값이 동작한 것이라 그대로 둔다.
+- headless Chrome `--window-size=430,...` 스크린샷: 실제 뷰포트가 더 넓게 잡힌 채 잘려, 넘치지 않는 로그인 카드까지 잘린 것처럼 보였다(오판할 뻔했다).
+
+그래서 Playwright Java(E2E에 이미 있는 1.62.0)로 뷰포트를 정확히 맞춘 1회용 스크립트(`RspCheck.java`, 스크래치)를 썼다. 역할별 프록시로 로그인 없이 열고,
+화면 폭을 넘는 요소 중 가로 스크롤 컨테이너 안(의도된 스크롤)을 빼고 넘치는 뿌리만 센다.
+
+```
+            before(수정 전 jar)                                   after(수정 뒤 jar)
+dash  @430  scrollWidth=784  roots=2 (aside.sidebar, main.workspace)   scrollWidth=430  roots=0
+dash  @768  scrollWidth=788  roots=2 (aside.sidebar, main.workspace)   scrollWidth=768  roots=0
+dash  @1024 scrollWidth=1024 roots=0                                   scrollWidth=1024 roots=0
+wb    @430·768·1024, login @430·768·1024: 수정 전후 모두 넘침 0
+```
+
+넘침 수치로는 안 잡히는 결함은 같은 스크립트의 정확한 폭 스크린샷으로 확인했다: 430px 워크벤치에서 결과 탭이 제목 옆에 눌려 "테이블 상세"·"인스턴스 비교"가
+한 글자씩 세로로 섰고, 대시보드 상단바 설명("이기종 DBMS 운영 관리 플랫폼")이 다섯 줄로 접혔다. 수정 뒤 탭은 한 줄 알약, 상단바는 한 줄(메뉴는 가로 스크롤)이 됐다.
+
+원인과 수정:
+- 한 열 그리드의 `1fr`은 최소 폭이 내용(nowrap 표·드롭다운)의 최소 폭이라 열이 화면 밖으로 밀렸다 — `minmax(0, 1fr)`(대시보드 앱 셸·헬스/백업 줄·워크벤치 셸). 넓은 표는 자기 영역(Top/Slow 탭) 안에서 스크롤
+- 헬스·백업 줄의 `minmax(600px, 1fr)`이 좁은 화면에서도 600px을 요구 — 980px 이하에서는 `minmax(0, 1fr)`
+- 사이드바 인스턴스 카드가 가로로 감쌀 때 버전 문자열(nowrap) 길이까지 늘어 잘렸다 — `max-width: 100%`로 말줄임이 먹게
+- 버튼·탭 글자 `white-space: nowrap`, 차트 도구 줄은 줄바꿈 허용, 640px 이하에서 상단바 설명 숨김·메뉴 한 줄 가로 스크롤, 워크벤치 시트 제목 `min-width: 0`·시트 줄 줄바꿈
+
+![대시보드 430px 전후](images/webui/97-layout-dash-430-before-after.jpg)
+![워크벤치 430px 전후](images/webui/98-layout-workbench-430-before-after.jpg)
+![빈 차트 전후](images/webui/99-layout-metric-empty-before-after.jpg)
+
+### 회귀
+
+```
+PersonaUiE2ETest (DBTOWER_E2E=1)   tests 5 failures 0 errors 0 skipped 0
+node --check app.js, 규약 검사       통과
+```
