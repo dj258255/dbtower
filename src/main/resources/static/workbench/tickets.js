@@ -62,12 +62,18 @@ export class TicketPanel {
   }
 
   async reloadList() {
+    // 응답을 기다리는 동안 다른 인스턴스를 고르면 앞 인스턴스의 목록이 새 목록을 덮었다(148절 감사) — 도착했을 때 같은 인스턴스일 때만 쓴다
+    const instanceId = this.instanceId;
+    let tickets;
     try {
-      this.tickets = await request(`/api/instances/${encodeURIComponent(this.instanceId)}/reviews`);
+      tickets = await request(`/api/instances/${encodeURIComponent(instanceId)}/reviews`);
     } catch (e) {
+      if (this.instanceId !== instanceId) return false;
       this.list.innerHTML = `<div class="muted">티켓을 불러오지 못했습니다: ${esc(e.message)}</div>`;
       return false;
     }
+    if (this.instanceId !== instanceId) return false;
+    this.tickets = tickets;
     const open = this.tickets.filter((t) => OPEN.includes(t.status)).length;
     this.count.textContent = open || "";
     this.list.innerHTML = this.tickets.length ? `<ul class="tk-items">${this.tickets.map((t) => {
@@ -92,15 +98,19 @@ export class TicketPanel {
   }
 
   async refresh() {
-    await this.reloadList();
+    if (!(await this.reloadList())) return;
     const t = this.ticket();
     if (!t) return;
+    let executions;
     try {
-      this.executions = await request(`/api/workbench/tickets/${encodeURIComponent(t.id)}/executions`);
+      executions = await request(`/api/workbench/tickets/${encodeURIComponent(t.id)}/executions`);
     } catch (e) {
-      this.executions = [];
+      executions = [];
       this.message = { error: true, text: `실행 기록을 불러오지 못했습니다: ${e.message}` };
     }
+    // 기다리는 동안 다른 티켓을 골랐으면 늦게 온 실행 기록으로 그 티켓을 그리지 않는다
+    if (this.selected !== t.id) return;
+    this.executions = executions;
     this.render();
   }
 

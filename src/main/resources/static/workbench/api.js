@@ -73,21 +73,28 @@ export async function streamEvents(path, { body, onEvent }) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let cut;
-    while ((cut = buf.indexOf("\n\n")) >= 0) {
-      const block = buf.slice(0, cut);
-      buf = buf.slice(cut + 2);
-      let name = "message";
-      const data = [];
-      for (const line of block.split("\n")) {
-        if (line.startsWith("event:")) name = line.slice(6).trim();
-        else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      // SSE는 줄 끝으로 CRLF·CR도 허용한다. 청크 끝의 CR은 다음 청크의 LF와 짝일 수 있어 남겨 둔다
+      buf = (buf + decoder.decode(value, { stream: true })).replace(/\r\n|\r(?!$)/g, "\n");
+      let cut;
+      while ((cut = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, cut);
+        buf = buf.slice(cut + 2);
+        let name = "message";
+        const data = [];
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event:")) name = line.slice(6).trim();
+          else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+        }
+        if (data.length) onEvent(name, JSON.parse(data.join("\n")));
       }
-      if (data.length) onEvent(name, JSON.parse(data.join("\n")));
     }
+  } catch (e) {
+    // 오류 이벤트로 던지면 응답 본문을 닫고 올린다 — 닫지 않으면 GC될 때까지 연결이 열려 있다(148절 감사)
+    reader.cancel().catch(() => {});
+    throw e;
   }
 }

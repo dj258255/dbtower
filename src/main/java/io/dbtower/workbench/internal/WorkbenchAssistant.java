@@ -21,6 +21,7 @@ import io.dbtower.workbench.internal.persistence.WorkbenchSettingRepository;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -87,10 +88,12 @@ public class WorkbenchAssistant {
     private final ChatMessageRepository chats;
     private final WorkbenchSettingRepository settings;
     private final WorksheetService worksheets;
+    private final TransactionOperations tx;
 
     public WorkbenchAssistant(RegistryService registry, DbmsOperatorFactory operators, AiAnalyzer analyzer,
                               ChatMessageRepository chats, WorkbenchSettingRepository settings,
-                              WorksheetService worksheets) {
+                              WorksheetService worksheets, TransactionOperations tx) {
+        this.tx = tx;
         this.registry = registry;
         this.operators = operators;
         this.analyzer = analyzer;
@@ -134,12 +137,14 @@ public class WorkbenchAssistant {
         }
     }
 
-    @Transactional
     public Reply ask(Long worksheetId, AssistantRequest req) {
         return ask(worksheetId, req, StreamListener.NONE);
     }
 
-    @Transactional
+    /**
+     * 트랜잭션은 AI를 기다리는 동안 열지 않는다 — 전에는 메서드 전체가 @Transactional이라 AI 한 턴(최대 3분) 동안 플랫폼 DB 커넥션을 쥐었다(148절 감사).
+     * 질문 저장은 AI 전에 따로 커밋되고(AI가 실패해도 질문은 남는다), 답 저장과 버전 카드는 AI 뒤 짧은 트랜잭션 하나로 묶는다.
+     */
     public Reply ask(Long worksheetId, AssistantRequest req, StreamListener listener) {
         Worksheet ws = worksheets.requireOwned(worksheetId);
         DatabaseInstance instance = registry.findById(ws.getInstanceId());
@@ -188,17 +193,19 @@ public class WorkbenchAssistant {
         List<String> unknown = sql == null || schema == null ? List.of() : unknownTables(sql, schema);
         String note = decision == null ? "AI가 형식 밖 텍스트를 반환해 설명으로만 보여줍니다." : null;
 
-        ChatMessage answer = chats.save(new ChatMessage(ws.getId(), principal, ws.getInstanceId(), ChatMessage.ASSISTANT,
-                storedContent(explanation, assumptions), sql,
-                classification == null ? null : classification.tier().name(),
-                classification == null ? null : classification.kind(),
-                unknown.isEmpty() ? null : String.join(",", unknown), false));
-        Integer versionNo = null;
-        if (sql != null) {
+        Integer versionNo = tx.execute(status -> {
+            ChatMessage answer = chats.save(new ChatMessage(ws.getId(), principal, ws.getInstanceId(), ChatMessage.ASSISTANT,
+                    storedContent(explanation, assumptions), sql,
+                    classification == null ? null : classification.tier().name(),
+                    classification == null ? null : classification.kind(),
+                    unknown.isEmpty() ? null : String.join(",", unknown), false));
+            if (sql == null) {
+                return null;
+            }
             VersionView version = worksheets.addVersion(ws, sql, WorksheetService.SOURCE_AI,
                     answer == null ? null : answer.getId(), null, title);
-            versionNo = version.versionNo();
-        }
+            return version.versionNo();
+        });
         return new Reply(true, analyzer.backend(), explanation, sql, assumptions, classification, unknown, shareValues,
                 versionNo, elapsedMs, note);
     }

@@ -285,8 +285,9 @@ public class LiveSessionHub {
                     .toList();
             frame = frame(instance.getId(), elapsedMs(start), OK, null, sessions);
         } catch (RuntimeException e) {
-            // 실패도 프레임으로 보낸다 — 조용히 건너뛰면 화면은 "세션 0건"과 "못 쟀다"를 구분하지 못한다
-            frame = frame(instance.getId(), elapsedMs(start), ERROR, truncate(e.getMessage()), List.of());
+            // 실패도 프레임으로 보낸다 — 조용히 건너뛰면 화면은 "세션 0건"과 "못 쟀다"를 구분하지 못한다.
+            // 원문은 싣지 않는다: 드라이버 문장(호스트·스키마)이 구독자 전원과 노드 공유 테이블(live_frame)로 퍼진다(148절 감사, CWE-209)
+            frame = frame(instance.getId(), elapsedMs(start), ERROR, "대상 DB 세션을 조회하지 못했습니다(" + e.getClass().getSimpleName() + ")", List.of());
             log.debug("실시간 세션 조회 실패 instance={} cause={}", instance.getId(), e.getMessage());
         }
         meterRegistry.counter("dbtower.live.polls", "status", frame.status()).increment();
@@ -299,7 +300,9 @@ public class LiveSessionHub {
                 log.debug("실시간 프레임 올리기 실패 instance={} cause={}", instance.getId(), e.getMessage());
             }
         }
-        publishLocally(channel, frame.withSeq(seq));
+        // 올리기에 실패한 틱은 로컬 번호(last+1)로 보낸다. 저장소가 돌아와 그보다 작은 번호를 주면 화면에 번호가 거꾸로 가
+        // 결번 판정이 흔들린다(148절 감사) — 이 노드가 내보내는 번호는 줄지 않게 한다
+        publishLocally(channel, frame.withSeq(Math.max(seq, channel.lastSeq.get() + 1)));
     }
 
     /**
@@ -399,12 +402,6 @@ public class LiveSessionHub {
         return (System.nanoTime() - startNs) / 1_000_000.0;
     }
 
-    private static String truncate(String s) {
-        if (s == null) {
-            return null;
-        }
-        return s.length() <= 300 ? s : s.substring(0, 300);
-    }
 
     @PreDestroy
     void shutdown() {

@@ -6966,3 +6966,84 @@ DBTOWER_E2E=1 PersonaUiE2ETest   7/7 (6 -> 7)
 ```
 
 전후 계측 스크립트를 한 번 더 돌린 결과(모드 인자 실수로 계측이 다시 돌았다)도 클릭 2회·상세 524px·넘침 없음으로 같았다.
+
+## 148. 140~147절 재감사 — AI를 기다리며 쥐던 DB 커넥션, 끝나지 않던 CLI, 화면으로 새던 원문 오류 (2026-09-12)
+
+### 왜 다시 봤나
+
+140~147절에서 실시간 허브, 노드 간 조율, 스트리밍 다섯 곳, 워크벤치 배치까지 새 코드가 많이 들어갔다. 8월 감사에서 "TODO 0건"이 "할 일 없음"이 아니었던
+기록이 있어, 끝났다고 말하기 전에 `git diff ac711f0~1..HEAD`를 세 관점(보안·인가, 동시성·자원·정확성, 화면)으로 나눠 다시 읽혔다.
+감사는 읽기만 했고, 지적은 전부 코드를 직접 읽어 확인한 뒤 고쳤다. 확인해 보니 문제가 아니었던 항목도 아래에 남긴다.
+
+### 찾은 것과 고친 것
+
+| 심각도 | 무엇 | 확인 | 고친 것 |
+|---|---|---|---|
+| 높음 | 변경 요청 제출·워크벤치 AI 보조가 메서드 전체 `@Transactional` 안에서 AI를 기다렸다 — AI 한 턴(최대 3분) 동안 플랫폼 DB 커넥션을 쥔다 | 계측: 흘려 받기 4건 동안 active 4 | 판정·대상 조회·AI는 트랜잭션 밖, 저장+카드 이벤트(리뷰)·답 저장+버전(워크벤치)만 `TransactionOperations` 한 블록 |
+| 높음 | 한 번에 받는 CLI 경로(`callCli`)가 stdout을 다 읽은 뒤에 시간 초과를 쟀다 — 멈춘 자식 앞에서 검사까지 가지 못한다 | 재현: `sleep 60`에 제한 2초 → 20초 넘게 안 끝남 | `runCli` 하나로 모아 제한 시간을 읽기와 따로 잰다(감시 스레드가 죽임) |
+| 높음 | 두 CLI 경로 모두 stderr를 읽지 않았다 — 파이프(보통 64KB)가 차면 자식은 쓰기에서, 앱은 stdout 읽기에서 서로 기다린다 | 재현: stderr 2MB 뒤 stdout → 20초 넘게 안 끝남 | stderr를 가상 스레드로 비우고 뒤 8KB만 사유로 남김 |
+| 중간 | 진단·워크벤치 AI 보조 스트림의 error 이벤트가 `e.getMessage()` 원문을 흘렸다 — 드라이버 문장(호스트·스키마) 노출(CWE-209). 같은 기능의 다른 스트림 셋과 동기 경로는 이미 errorId로 가렸다 | 코드 대조 | 400/409는 사유 그대로, 대상 DB 실패 502·그 밖 500은 errorId만(원문은 서버 로그) |
+| 중간 | API 스트리밍에 앱 쪽 시간 제한이 없었다(SDK 기본값 의존) | SDK 2.34.0 `AnthropicOkHttpClient.Builder.timeout(Duration)` 확인(javap) | CLI와 같은 180초 |
+| 중간 | 자연어 진단 이중 제출 — 100초 넘는 진단 중에 다시 누르면 두 스트림이 한 칸에 번갈아 그렸다 | 코드 대조(다른 스트림 버튼은 막혀 있음) | 진행 중 표시 + 버튼 비활성 |
+| 중간 | 워크벤치에서 인스턴스를 빨리 바꾸면 앞 인스턴스의 스키마·설정·워크시트·티켓 응답이 새 화면을 덮었다 | 코드 대조(실시간 세션은 이미 가드) | 도착했을 때 같은 인스턴스·같은 티켓일 때만 쓴다 |
+| 중간 | AI 답을 흘려 받는 중에 워크시트를 옮기면 남의 말풍선이 붙고 선택 모드·칩이 지워졌다 | 코드 대조 | 진행 중 답은 보낸 워크시트에만 그리고, 칩·선택 모드는 그 워크시트일 때만 정리 |
+| 낮음 | 실시간 세션 ERROR 프레임에 예외 원문 — 구독자 전원과 노드 공유 테이블(live_frame)로 퍼진다 | 코드 대조 | "대상 DB 세션을 조회하지 못했습니다(예외 종류)"만 |
+| 낮음 | 메타 DB가 한 번 실패했다 돌아오면 실시간 프레임 번호가 거꾸로(1, 2, 2) | 테스트로 재현 | 이 노드가 보내는 번호는 줄지 않게(1, 2, 3) |
+| 낮음 | SSE 파서가 CRLF를 줄 끝으로 보지 않았고, 오류 이벤트로 던질 때 응답 본문을 닫지 않았다 | 코드 대조(서버는 LF만 써서 지금 결함은 아님) | CR·CRLF 정규화, 던질 때 `reader.cancel()` |
+| 결함 | 웹훅 카드 딥링크 둘이 아무 데도 안 열렸다 — 인시던트 리포트 `?view=incident`, 월간 점검 `?view=monthly`(인스턴스 없음) | 대시보드 구조 조사에서 처리 코드 없음 확인 | 인시던트는 백업·리포트 그룹의 결과 칸, 월간은 인스턴스가 없으면 함대 헬스 스코어·있으면 월간 칸 |
+
+남긴 것 하나: 실시간 구독 직후의 마지막 프레임과 동시 틱의 새 프레임 순서가 드물게 뒤집힐 수 있다(유실 없음, 한 번 깜빡임). 고치려면 구독 등록과 전달을
+한 잠금 안에 넣어야 하는데 틱 경로 전체가 그 잠금을 기다리게 된다. 비용에 비해 영향이 작아 두었다.
+
+확인해 보니 문제가 아니었던 것: 새 스트림 URL의 인가 matcher(146절에서 막았고 PersonaAccessTest가 고정), AiStreamExecutor의 SecurityContext 전달과
+permit 반환(모든 경로), SSE 완료·타임아웃·오류 콜백의 중복 호출(구독 해제는 CAS로 한 번), TextDeltaBatcher 동기화, 화면 XSS(동적 값은 전부 esc()·textContent).
+
+### 실측
+
+AI를 기다리는 동안의 플랫폼 DB 커넥션 — 흘려 받기 4건을 동시에(AiStreamExecutor 상한), 200ms마다 `/actuator/prometheus`의
+`hikaricp_connections_active{pool="HikariPool-1"}`(최대 10). 규칙 판정·질문 저장이 끝난 뒤부터 첫 결과 전까지를 AI 대기 구간으로 잡았다(`measure_148.py`, 스크래치, claude CLI).
+전은 147절 main jar, 후는 이 변경 jar를 같은 설정으로 띄웠다. 계측으로 만든 티켓 넷씩은 취소, 워크시트는 보관했다.
+
+```
+                     AI 대기 구간        표본  active 최대  active 중앙값  pending 최대  완료(초)
+변경 요청 제출  전   1.05 ~ 12.05초      52    4            4              0            12.05 12.67 13.75 14.77
+                후   1.05 ~ 9.84초       41    0            0              0             9.84  9.90 10.69 11.80
+AI 보조 질문    전   1.16 ~ 8.62초       35    4            4              0             8.62  8.86  8.95  8.96
+                후   1.06 ~ 8.51초       35    0            0              0             8.51  8.74  8.76  9.03
+```
+
+풀이 10이라 넷을 쥐어도 대기(pending)는 0이었다. 흘려 받기 상한(4)에 동기 경로(REST·MCP)의 AI 호출이 더해지면 풀이 비는 구조였고, 이제 AI 대기가 커넥션을 쥐지 않는다.
+
+CLI 자식 프로세스 — 수정 전 순서를 그대로 옮긴 재현기(`cli148/OldCli.java`)와 새 `runCli`(AiAnalyzerCliProcessTest)를 같은 sh 명령으로:
+
+```
+                                    수정 전(OldCli)        수정 후(runCli)
+stderr 2MB 쓴 뒤 stdout "ok"        20초 넘게 안 끝남       0.112초에 "ok"
+sleep 60, 제한 2초                  20초 넘게 안 끝남       2.01초에 시간 초과 예외
+```
+
+수정 후 시간은 JUnit이 적은 테스트 시간이다. 재현기는 20초에 스레드 대기를 끊고 "안 끝남"으로 적었다(자식 sh는 수동으로 정리).
+
+딥링크 — 고친 jar를 띄우고 관리자 프록시로 Playwright(1512x900)가 링크를 그대로 열어, 6초 뒤 목표 칸이 보이고 화면 안에 있는지 확인했다(`shots148/DeepLink148.java`):
+
+```
+/?instance=1&view=incident  -> #incident-result  visible=true inViewport=true top=506 활성 그룹=backup
+/?instance=1&view=monthly   -> #monthly-result   visible=true inViewport=true top=723 활성 그룹=backup
+/?view=monthly              -> #score-summary    visible=true inViewport=true top=119
+```
+
+고치기 전에는 `handleInstanceDeepLink`가 `view`로 `config-drift`·`review`만 처리해, 두 링크 모두 인스턴스만 고른(또는 아무것도 안 고른) 첫 화면에 머물렀다.
+
+### 회귀
+
+```
+./scripts/check-conventions.sh   규약 검사 전부 통과
+./gradlew test                   tests 844 skipped 26 failures 0 errors 0 (147절 834 -> 844)
+  AiAnalyzerCliProcessTest 5     stderr 2MB 뒤 stdout 받기, 멈춘 자식 제한 시간 끊기, 실패 사유는 stderr 뒤쪽, stdin 입력·줄 넘기기, 뒤 8KB만
+  DiagnosisStreamErrorTest 2     대상 DB 실패는 원문 없이 502+errorId, 그 밖은 원문 없이 500+errorId
+  AssistantStreamErrorTest 2     같은 규칙을 워크벤치 AI 보조 스트림에
+  LiveSessionHubTest +1          저장소가 한 번 실패했다 돌아와도 보내는 번호는 1, 2, 3 (수정 전 1, 2, 2)
+  LiveSessionHubTest 수정         ERROR 프레임에 원문(호스트)이 없고 실패 종류만
+  ReviewServiceStreamTest·ReviewServiceCancelTest·WorkbenchAssistantTest  생성자에 TransactionOperations.withoutTransaction()
+DBTOWER_E2E=1 PersonaUiE2ETest   7/7
+```

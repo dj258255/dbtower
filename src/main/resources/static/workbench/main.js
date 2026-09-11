@@ -196,25 +196,33 @@ async function selectInstance(id, sheetId) {
   note.hidden = state.instance.readConfigured;
   note.textContent = "이 인스턴스에는 조회 계정(READ)이 없어 실행이 거부됩니다. ADMIN이 콘솔 계정을 등록해야 합니다.";
 
+  // 응답이 늦게 오는 동안 다른 인스턴스를 고르면 앞 인스턴스의 스키마·설정·워크시트가 새 화면을 덮었다(148절 감사).
+  // 도착했을 때 아직 이 인스턴스가 선택돼 있을 때만 쓴다 — 실시간 세션(onLiveFrame)과 같은 규칙
+  const inst = state.instance;
+  const current = () => state.instance === inst;
+
   state.schema = null;
   state.expanded = new Set();
   $("wb-tree").textContent = "스키마를 불러오는 중...";
   request(`/api/instances/${encodeURIComponent(id)}/schema`)
-    .then((schema) => { state.schema = schema; editor.setSchema(schema); })
-    .catch(() => { state.schema = null; })
+    .then((schema) => { if (current()) { state.schema = schema; editor.setSchema(schema); } })
+    .catch(() => { if (current()) state.schema = null; })
     .finally(() => {
+      if (!current()) return;
       drawTree();
       $("wb-schema-count").textContent = state.schema ? state.schema.tables.length : "";
     });
   request(`/api/workbench/instances/${encodeURIComponent(id)}/settings`)
-    .then((s) => { state.allowValues = s.allowAiResultValues; drawShare(); })
-    .catch(() => { state.allowValues = false; drawShare(); });
+    .then((s) => { if (current()) { state.allowValues = s.allowAiResultValues; drawShare(); } })
+    .catch(() => { if (current()) { state.allowValues = false; drawShare(); } });
   drawCompareTargets();
   const wantedTicket = state.pendingTicket;
   state.pendingTicket = null;
-  tickets.load(id, wantedTicket).then(() => { if (wantedTicket) showPane("tickets"); });
+  tickets.load(id, wantedTicket).then(() => { if (wantedTicket && current()) showPane("tickets"); });
 
-  state.sheets = await request(`/api/workbench/instances/${encodeURIComponent(id)}/worksheets`);
+  const sheets = await request(`/api/workbench/instances/${encodeURIComponent(id)}/worksheets`);
+  if (!current()) return;
+  state.sheets = sheets;
   if (!state.sheets.length) {
     await createSheet();
     return;
@@ -542,7 +550,8 @@ async function loadTimeline() {
 function drawTimeline() {
   renderTimeline($("wb-timeline"), state.timeline, {
     currentVersion: state.sheet ? state.sheet.latestVersion : null,
-    pending: state.pendingQuestion,
+    // 흘려 받는 중인 답은 질문을 보낸 워크시트에만 그린다 — 다른 워크시트를 열면 남의 말풍선이 붙었다(148절 감사)
+    pending: state.pendingQuestion && state.sheet && state.pendingQuestion.sheetId === state.sheet.id ? state.pendingQuestion : null,
     onApply: (sql) => { editor.value = sql; onEdit(); editor.focus(); },
     onPreview: (sql) => previewSql(sql),
     onRestore: async (versionNo) => {
@@ -571,7 +580,9 @@ async function ask() {
     failedError: failure ? failure.error.message : null,
     result: share ? { columns: state.lastView.columns.map((c) => c.name), rows: state.lastView.rows.slice(0, 20) } : null,
   };
-  state.pendingQuestion = { question: message, stage: "질문을 보내는 중입니다" };
+  const sentSheetId = state.sheet.id;
+  const onSentSheet = () => Boolean(state.sheet && state.sheet.id === sentSheetId);
+  state.pendingQuestion = { question: message, stage: "질문을 보내는 중입니다", sheetId: sentSheetId };
   $("wb-ask").value = "";
   $("wb-send").disabled = true;
   drawTimeline();
@@ -594,22 +605,25 @@ async function ask() {
         } else if (name === "error") {
           throw new ApiError(data.status, { error: data.message });
         }
-        updatePending($("wb-timeline"), pending);
+        if (onSentSheet()) updatePending($("wb-timeline"), pending);
       },
     });
     if (!reply) throw new Error("AI 응답이 끝까지 오지 않았습니다(연결 끊김)");
     const first = pending.firstPartialMs ? ` · 첫 글자 ${Math.round(pending.firstPartialMs / 100) / 10}초` : "";
     $("wb-backend").textContent = reply.aiEnabled ? `${reply.backend} · ${Math.round(reply.elapsedMs / 100) / 10}초${first}` : "AI 꺼짐";
     if (reply.note) $("wb-share-note").textContent = reply.note;
-    state.chips = [];
-    state.lastFailure = null;
-    drawChips();
+    // 기다리는 동안 다른 워크시트로 옮겼으면 그 워크시트에서 붙인 칩·실패 문맥을 지우지 않는다
+    if (onSentSheet()) {
+      state.chips = [];
+      state.lastFailure = null;
+      drawChips();
+    }
   } catch (e) {
     $("wb-share-note").textContent = `AI 요청 실패: ${e.message}`;
   } finally {
     state.pendingQuestion = null;
     $("wb-send").disabled = false;
-    setPicking(false);
+    if (onSentSheet()) setPicking(false);
     await reloadSheets();
     loadTimeline();
   }

@@ -1,6 +1,7 @@
 package io.dbtower.workbench.internal.web;
 
 import io.dbtower.AiStreamExecutor;
+import io.dbtower.operator.OperatorException;
 import io.dbtower.workbench.StatementClassifier.Classification;
 import io.dbtower.workbench.internal.AgentQueryService;
 import io.dbtower.workbench.internal.ChangeExecutionService;
@@ -28,6 +29,8 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -50,6 +53,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 거버넌스 SQL 워크벤치 API. 마스킹 규칙 변경·인스턴스 설정 변경은 ADMIN(SecurityConfig), 나머지는 로그인 사용자 + 팀 범위.
@@ -58,6 +62,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/workbench")
 public class WorkbenchController {
+
+    private static final Logger log = LoggerFactory.getLogger(WorkbenchController.class);
 
     private final WorkbenchService workbench;
     private final WorksheetService worksheets;
@@ -233,8 +239,19 @@ public class WorkbenchController {
                 send(emitter, "reply", reply);
             } catch (WorkbenchRejection e) {
                 send(emitter, "error", Map.of("status", e.status(), "message", e.getMessage()));
+            } catch (IllegalArgumentException e) {
+                send(emitter, "error", Map.of("status", 400, "message", String.valueOf(e.getMessage())));
+            } catch (IllegalStateException e) {
+                send(emitter, "error", Map.of("status", 409, "message", String.valueOf(e.getMessage())));
+            } catch (OperatorException e) {
+                // 스키마 조회 실패 등 대상 DB 원문 오류는 화면에 흘리지 않는다(CWE-209, 148절 감사) — 한 번에 받는 경로와 같은 502 + errorId
+                String errorId = UUID.randomUUID().toString();
+                log.warn("AI 보조 스트림 대상 조회 실패 errorId={}", errorId, e);
+                send(emitter, "error", Map.of("status", 502, "message", "대상 데이터베이스 조회에 실패했습니다. errorId=" + errorId));
             } catch (RuntimeException e) {
-                send(emitter, "error", Map.of("status", 500, "message", String.valueOf(e.getMessage())));
+                String errorId = UUID.randomUUID().toString();
+                log.warn("AI 보조 스트림 실패 errorId={}", errorId, e);
+                send(emitter, "error", Map.of("status", 500, "message", "AI 답을 만들지 못했습니다. errorId=" + errorId));
             } finally {
                 emitter.complete();
             }

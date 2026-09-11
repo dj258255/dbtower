@@ -4,9 +4,12 @@ import io.dbtower.AiStreamExecutor;
 import io.dbtower.mcp.internal.DiagnosisService;
 import io.dbtower.mcp.internal.DiagnosisService.DiagnosisListener;
 import io.dbtower.mcp.internal.DiagnosisService.ToolCallTrace;
+import io.dbtower.operator.OperatorException;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
 import jakarta.validation.constraints.NotBlank;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -20,6 +23,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 자연어 근본원인 진단 REST (Phase D3).
@@ -32,6 +36,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/instances/{id}")
 public class DiagnosisController {
+
+    private static final Logger log = LoggerFactory.getLogger(DiagnosisController.class);
 
     /** 스텝 5회 + 최종 종합 1회가 각각 수십 초까지 걸린다. 연결이 먼저 끊기면 진단은 끝나는데 화면만 실패로 보인다 */
     private static final long STREAM_TIMEOUT_MS = 600_000;
@@ -83,8 +89,20 @@ public class DiagnosisController {
                             }
                         });
                 send(emitter, "result", result);
+            } catch (IllegalArgumentException e) {
+                send(emitter, "error", Map.of("status", 400, "message", String.valueOf(e.getMessage())));
+            } catch (IllegalStateException e) {
+                send(emitter, "error", Map.of("status", 409, "message", String.valueOf(e.getMessage())));
+            } catch (OperatorException e) {
+                // 대상 DB 원문 오류에는 호스트·스키마·드라이버 문장이 섞인다(CWE-209) — 한 번에 받는 경로(GlobalExceptionHandler)처럼
+                // 원문은 서버 로그에만 남기고 화면에는 errorId만. 전에는 e.getMessage()를 그대로 흘렸다(148절 감사)
+                String errorId = UUID.randomUUID().toString();
+                log.warn("진단 스트림 대상 조회 실패 errorId={}", errorId, e);
+                send(emitter, "error", Map.of("status", 502, "message", "대상 데이터베이스 조회에 실패했습니다. errorId=" + errorId));
             } catch (RuntimeException e) {
-                send(emitter, "error", Map.of("message", String.valueOf(e.getMessage())));
+                String errorId = UUID.randomUUID().toString();
+                log.warn("진단 스트림 실패 errorId={}", errorId, e);
+                send(emitter, "error", Map.of("status", 500, "message", "진단을 끝내지 못했습니다. errorId=" + errorId));
             } finally {
                 emitter.complete();
             }

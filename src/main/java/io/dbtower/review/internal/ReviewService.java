@@ -27,6 +27,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -61,11 +62,14 @@ public class ReviewService {
     private final ApplicationEventPublisher events;
     private final boolean requireSeparateApprover;
     private final ChangeTicketGate ticketGate;
+    private final TransactionOperations tx;
 
     public ReviewService(ReviewRequestRepository repository, RegistryService registryService,
                          DbmsOperatorFactory operatorFactory, AiAnalyzer aiAnalyzer,
                          QueryMasker queryMasker, ApplicationEventPublisher events, ChangeTicketGate ticketGate,
-                         @Value("${dbtower.review.require-separate-approver:false}") boolean requireSeparateApprover) {
+                         @Value("${dbtower.review.require-separate-approver:false}") boolean requireSeparateApprover,
+                         TransactionOperations tx) {
+        this.tx = tx;
         this.ticketGate = ticketGate;
         this.repository = repository;
         this.registryService = registryService;
@@ -98,16 +102,15 @@ public class ReviewService {
     }
 
     /** 제출 — 규칙 판정 + 락 위험 확인 + AI 소견을 굳혀 PENDING 저장, 리뷰 카드 이벤트 발행. */
-    @Transactional
     public ReviewRequest submit(Long instanceId, SubmitRequest req, String requester) {
         return submit(instanceId, req, requester, SubmitListener.NONE);
     }
 
     /**
-     * 흘려 받는 쪽도 같은 트랜잭션 경계를 쓴다. 저장과 카드 이벤트를 한 트랜잭션에 묶은 동기 경로의 의미를 흘리는 경로만 바꾸면
-     * 같은 요청이 경로에 따라 다르게 실패한다. AI를 기다리는 동안 커넥션을 쥐는 것은 동기와 같고, 흘리는 경로는 동시 스트림 상한(AiStreamExecutor)에 묶인다.
+     * 판정·대상 조회·AI 소견은 트랜잭션 밖에서 하고, 저장과 리뷰 카드 이벤트만 짧은 트랜잭션 하나에 묶는다.
+     * 전에는 메서드 전체가 @Transactional이라 AI를 기다리는 수십 초~3분 동안 플랫폼 DB 커넥션 하나를 쥐었다 —
+     * 흘리는 제출 넷이 겹치면 커넥션 넷이 AI를 기다린다(148절 감사). 저장과 이벤트를 한 트랜잭션에 묶는 의미는 동기·흘리는 경로가 같다.
      */
-    @Transactional
     public ReviewRequest submit(Long instanceId, SubmitRequest req, String requester, SubmitListener listener) {
         DatabaseInstance instance = registryService.findById(instanceId);
         Verdict verdict = rules.evaluate(req.sql());
@@ -129,14 +132,17 @@ public class ReviewService {
             aiOpinion = aiOpinion(req.sql(), findings, batcher);
             batcher.flush();
         }
-        ReviewRequest saved = repository.save(new ReviewRequest(
-                instanceId, req.sql(), req.reason(), requester,
-                String.join("\n", findings), aiOpinion, ChangeReviewRules.VERSION, verdict.parseLimited(),
-                req.verifySql() == null || req.verifySql().isBlank() ? null : req.verifySql().strip()));
+        String opinion = aiOpinion;
+        return tx.execute(status -> {
+            ReviewRequest saved = repository.save(new ReviewRequest(
+                    instanceId, req.sql(), req.reason(), requester,
+                    String.join("\n", findings), opinion, ChangeReviewRules.VERSION, verdict.parseLimited(),
+                    req.verifySql() == null || req.verifySql().isBlank() ? null : req.verifySql().strip()));
 
-        events.publishEvent(new ReviewSubmittedEvent(saved.getId(), instanceId, requester,
-                queryMasker.apply(req.sql()), findings, aiOpinion, verdict.parseLimited()));
-        return saved;
+            events.publishEvent(new ReviewSubmittedEvent(saved.getId(), instanceId, requester,
+                    queryMasker.apply(req.sql()), findings, opinion, verdict.parseLimited()));
+            return saved;
+        });
     }
 
     /** 승인/반려 — PENDING일 때만 전이(중복 결정 거부). 결과 카드 이벤트 발행. */

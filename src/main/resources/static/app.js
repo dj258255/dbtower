@@ -469,7 +469,11 @@ function enhanceSelect(sel) {
 function handleInstanceDeepLink(list) {
   const params = new URLSearchParams(location.search);
   const target = params.get("instance") ? list.find((i) => String(i.id) === params.get("instance")) : null;
-  if (!target) return;
+  if (!target) {
+    // 월간 점검 요약(MonthlyReportJob)은 인스턴스 없이 함대 전체를 가리킨다 — 전에는 처리하는 곳이 없어 빈 첫 화면만 열렸다(148절 감사)
+    if (params.get("view") === "monthly") $("#score-summary")?.scrollIntoView({ block: "start" });
+    return;
+  }
   state.instance = target;
   renderInstanceMatches();
   const ready = selectInstance(target, $(`#instance-list .instance-card[data-id="${target.id}"]`));
@@ -489,6 +493,9 @@ function handleInstanceDeepLink(list) {
   if (deepQ) { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("perf"); const input = $("#diagnose-question"); input.value = deepQ; input.scrollIntoView({ block: "center" }); input.focus(); }
   if (deepView === "config-drift") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadConfigDrift(); $("#config-drift-result").scrollIntoView({ block: "center" }); }
   if (deepView === "review") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadReviews(); $(".review-gate-card").scrollIntoView({ block: "center" }); }
+  // 인시던트 리포트 웹훅 카드(IncidentController)와 월간 리포트의 입구 — 링크는 있었는데 처리하는 곳이 없었다(148절 감사)
+  if (deepView === "incident") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("backup"); $("#incident-result").scrollIntoView({ block: "center" }); }
+  if (deepView === "monthly") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("backup"); $("#monthly-result").scrollIntoView({ block: "center" }); }
 }
 
 async function selectInstance(instance, card) {
@@ -2792,22 +2799,29 @@ async function streamSse(path, body, onEvent) {
   const reader = r.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let cut;
-    while ((cut = buf.indexOf("\n\n")) >= 0) {
-      const block = buf.slice(0, cut);
-      buf = buf.slice(cut + 2);
-      let name = "message";
-      const data = [];
-      for (const line of block.split("\n")) {
-        if (line.startsWith("event:")) name = line.slice(6).trim();
-        else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      // SSE는 줄 끝으로 CRLF·CR도 허용한다. 청크 끝의 CR은 다음 청크의 LF와 짝일 수 있어 남겨 둔다
+      buf = (buf + decoder.decode(value, { stream: true })).replace(/\r\n|\r(?!$)/g, "\n");
+      let cut;
+      while ((cut = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, cut);
+        buf = buf.slice(cut + 2);
+        let name = "message";
+        const data = [];
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event:")) name = line.slice(6).trim();
+          else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+        }
+        if (data.length) onEvent(name, JSON.parse(data.join("\n")));
       }
-      if (data.length) onEvent(name, JSON.parse(data.join("\n")));
     }
+  } catch (e) {
+    // 오류 이벤트로 던지면 응답 본문을 닫고 올린다 — 닫지 않으면 GC될 때까지 연결이 열려 있다(148절 감사)
+    reader.cancel().catch(() => {});
+    throw e;
   }
 }
 
@@ -2816,6 +2830,12 @@ async function runDiagnose() {
   if (!state.instance) { box.className = "diagnose-result schema-warning"; box.textContent = "인스턴스를 먼저 선택하세요."; return; }
   const question = $("#diagnose-question").value.trim();
   if (!question) { box.className = "diagnose-result schema-warning"; box.textContent = "질문을 입력하세요."; return; }
+
+  // 진단은 100초 넘게 걸리기도 한다. 그동안 다시 누르거나 Enter를 치면 두 스트림이 같은 칸에 번갈아 그렸다(148절 감사)
+  if (state.diagnosing) return;
+  state.diagnosing = true;
+  const diagnoseBtn = $("#btn-diagnose");
+  if (diagnoseBtn) diagnoseBtn.disabled = true;
 
   // 끝날 때까지 한 번에 기다리지 않고 스텝마다 흘려 받는다(141절) — 수십 초 동안 "진단 중"만 보이면 멈춘 것과 구분이 안 된다
   box.className = "diagnose-result";
@@ -2856,6 +2876,8 @@ async function runDiagnose() {
     return;
   } finally {
     clearInterval(ticker);
+    state.diagnosing = false;
+    if (diagnoseBtn) diagnoseBtn.disabled = false;
   }
 
   if (!d.aiEnabled) {

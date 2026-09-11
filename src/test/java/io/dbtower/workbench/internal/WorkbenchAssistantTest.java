@@ -25,6 +25,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -72,7 +73,8 @@ class WorkbenchAssistantTest {
 
     @BeforeEach
     void setUp() {
-        assistant = new WorkbenchAssistant(registry, operators, analyzer, chats, settings, worksheets);
+        assistant = new WorkbenchAssistant(registry, operators, analyzer, chats, settings, worksheets,
+                TransactionOperations.withoutTransaction());
         when(registry.findById(1L)).thenReturn(instance(1, "orders-db"));
         when(registry.findById(2L)).thenReturn(instance(2, "billing-db"));
         worksheet(10, 1);
