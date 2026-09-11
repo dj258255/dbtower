@@ -10,6 +10,7 @@ import io.dbtower.operator.model.DbParameter;
 import io.dbtower.operator.model.DeadlockEvent;
 import io.dbtower.operator.model.IndexUsage;
 import io.dbtower.operator.model.LatencyPercentile;
+import io.dbtower.operator.JdbcConnectOptions;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
@@ -49,6 +50,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -397,8 +399,18 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         // useTls면 encrypt=true + 인증서 체인 검증(trustServerCertificate=false) — Azure SQL 등
         // TLS 강제 환경 대응. 검증을 끄는 우회는 일부러 안 둔다(자가서명이면 truststore에 등록).
         String encrypt = instance.isUseTls() ? "encrypt=true;trustServerCertificate=false" : "encrypt=false";
-        return "jdbc:sqlserver://%s:%d;databaseName=%s;%s;loginTimeout=3"
+        // socketTimeout은 로그인 단계 읽기를 막는 값이다 — 로그인 뒤에는 connectOptions()가 푼다
+        return "jdbc:sqlserver://%s:%d;databaseName=%s;%s;loginTimeout=3;socketTimeout=5000"
                 .formatted(instance.getHost(), instance.getPort(), instance.getDbName(), encrypt);
+    }
+
+    /**
+     * loginTimeout은 prelogin 소켓 읽기를 막지 못한다(mssql-jdbc #1529). 연결만 받고 말이 없는 대상에서 풀 생성이 7분 넘게 매달린 134절 실측이
+     * 근거다. URL의 socketTimeout으로 로그인 단계 읽기를 5초로 막고, 로그인이 끝나면 풀어 BACKUP·RESTORE 같은 긴 서버 작업이 예전처럼 끝까지 기다린다.
+     */
+    @Override
+    protected JdbcConnectOptions connectOptions() {
+        return new JdbcConnectOptions(Map.of(), 0);
     }
 
     @Override

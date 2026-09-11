@@ -8,6 +8,7 @@ import io.dbtower.operator.model.ColumnSchema;
 import io.dbtower.operator.ConnectionPools;
 import io.dbtower.operator.model.DbParameter;
 import io.dbtower.operator.model.IndexUsage;
+import io.dbtower.operator.JdbcConnectOptions;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.RestoreSupport;
@@ -187,6 +188,15 @@ public class OracleOperator extends AbstractJdbcOperator {
         String prefix = instance.isUseTls() ? "tcps://" : "//";
         return "jdbc:oracle:thin:@%s%s:%d/%s"
                 .formatted(prefix, instance.getHost(), instance.getPort(), instance.getDbName());
+    }
+
+    /**
+     * Oracle thin 접속에는 시간 제한이 하나도 없어, 연결만 받고 말이 없는 대상에서 NS 핸드셰이크 읽기가 무기한 매달렸다(134절 재현 테스트).
+     * 연결 수립과 로그인 단계 읽기를 속성으로 막고, 로그인이 끝나면 읽기 제한을 풀어 Data Pump WAIT_FOR_JOB 같은 긴 서버 작업을 끊지 않는다.
+     */
+    @Override
+    protected JdbcConnectOptions connectOptions() {
+        return new JdbcConnectOptions(Map.of("oracle.net.CONNECT_TIMEOUT", "3000", "oracle.jdbc.ReadTimeout", "5000"), 0);
     }
 
     @Override

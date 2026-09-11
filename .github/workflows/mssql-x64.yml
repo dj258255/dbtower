@@ -70,7 +70,7 @@ jobs:
       - name: SQL Server IT (change execution, console read-only)
         shell: bash
         run: |
-          DBTOWER_MSSQL_IT=1 ./gradlew test --tests '*ChangeExecutionIT' --tests '*ConsoleReadOnlyIT' -i > it.log 2>&1
+          DBTOWER_MSSQL_IT=1 ./gradlew test --tests '*ChangeExecutionIT' --tests '*ConsoleReadOnlyIT' --tests '*NetworkTimeoutAfterLoginIT' -i > it.log 2>&1
           # 로그 요약은 판정이 아니다 — 매치 없음·조기 종료로 step이 실패하지 않게 한다(판정은 위 gradle 종료 코드)
           grep -E "^\s+\[MSSQL|^\s+\|--|timings|PASSED|FAILED|SKIPPED|BUILD" it.log | grep -v "Hikari" | head -80 || true
 

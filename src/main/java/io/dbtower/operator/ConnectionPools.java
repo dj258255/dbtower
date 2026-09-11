@@ -9,19 +9,22 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
+import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 
 /**
  * 관리 대상 인스턴스별 커넥션 풀.
@@ -128,14 +131,18 @@ public class ConnectionPools {
     }
 
     public Connection getConnection(DatabaseInstance instance, String jdbcUrl) throws SQLException {
+        return getConnection(instance, jdbcUrl, JdbcConnectOptions.DEFAULT);
+    }
+
+    public Connection getConnection(DatabaseInstance instance, String jdbcUrl, JdbcConnectOptions options) throws SQLException {
         VaultCredentials.Creds creds = credsFor(instance);
         // 등록 전 접속 검증(id 없음)은 풀을 만들지 않고 1회성 연결로 처리한다
         if (instance.getId() == null) {
-            return DriverManager.getConnection(jdbcUrl, creds.username(), creds.password());
+            return new BoundedLoginDataSource(jdbcUrl, creds.username(), creds.password(), options).getConnection();
         }
         lastUsedMs.put(instance.getId(), System.currentTimeMillis());
         rotateIfCredentialsChanged(instance.getId(), creds);
-        HikariDataSource ds = pools.computeIfAbsent(instance.getId(), id -> newPool(instance, jdbcUrl, creds));
+        HikariDataSource ds = pools.computeIfAbsent(instance.getId(), id -> newPool(instance, jdbcUrl, creds, options));
         return ds.getConnection();
     }
 
@@ -161,22 +168,36 @@ public class ConnectionPools {
     /**
      * JdbcTemplate이 쓸 DataSource를 준다 — getConnection과 같은 자원 정책을 그대로 따른다.
      * id!=null이면 인스턴스별 HikariCP 풀(computeIfAbsent로 재사용), id==null(등록 검증)이면
-     * DriverManagerDataSource로 1회용. DriverManagerDataSource는 풀링 없이 매 getConnection마다
-     * 새 물리 커넥션을 열고 닫아, 기존 DriverManager 1회성 연결과 동작이 동일하다.
+     * 풀 없는 1회용 DataSource — 매 getConnection마다 새 물리 커넥션을 열고 닫아, 기존 DriverManager 1회성 연결과 동작이 같다.
      */
     public DataSource getDataSource(DatabaseInstance instance, String jdbcUrl) {
+        return getDataSource(instance, jdbcUrl, JdbcConnectOptions.DEFAULT);
+    }
+
+    public DataSource getDataSource(DatabaseInstance instance, String jdbcUrl, JdbcConnectOptions options) {
         VaultCredentials.Creds creds = credsFor(instance);
         if (instance.getId() == null) {
-            return new DriverManagerDataSource(jdbcUrl, creds.username(), creds.password());
+            return new BoundedLoginDataSource(jdbcUrl, creds.username(), creds.password(), options);
         }
         lastUsedMs.put(instance.getId(), System.currentTimeMillis());
         rotateIfCredentialsChanged(instance.getId(), creds);
-        return pools.computeIfAbsent(instance.getId(), id -> newPool(instance, jdbcUrl, creds));
+        return pools.computeIfAbsent(instance.getId(), id -> newPool(instance, jdbcUrl, creds, options));
     }
 
-    private HikariDataSource newPool(DatabaseInstance instance, String jdbcUrl, VaultCredentials.Creds creds) {
+    /**
+     * 풀을 만들 때 첫 커넥션을 붙잡지 않는다(initializationFailTimeout=-1). 풀 생성은 computeIfAbsent 안에서 일어나는데, Hikari 기본값은
+     * 생성자에서 첫 연결을 동기로 시도한다 — 연결만 받고 말이 없는 대상에서 그 시도가 매달리자 같은 인스턴스를 부르던 폴러와 삭제 API가
+     * 맵 락 뒤에 줄을 섰다(VERIFICATION 134절). 늦춰 두면 연결은 풀의 추가 스레드가 맡고, 호출자는 connectionTimeout만 기다린다.
+     */
+    private static void startLazily(HikariConfig config) {
+        config.setInitializationFailTimeout(-1);
+    }
+
+    private HikariDataSource newPool(DatabaseInstance instance, String jdbcUrl, VaultCredentials.Creds creds,
+                                     JdbcConnectOptions options) {
         HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(jdbcUrl);
+        config.setDataSource(new BoundedLoginDataSource(jdbcUrl, creds.username(), creds.password(), options));
+        startLazily(config);
         config.setUsername(creds.username());
         config.setPassword(creds.password());
         config.setMaximumPoolSize(maxPoolSize);
@@ -227,6 +248,12 @@ public class ConnectionPools {
      */
     public DataSource getConsoleDataSource(DatabaseInstance instance, String jdbcUrl,
                                            CredentialPurpose purpose, ConsoleCredential credential) {
+        return getConsoleDataSource(instance, jdbcUrl, purpose, credential, JdbcConnectOptions.DEFAULT);
+    }
+
+    public DataSource getConsoleDataSource(DatabaseInstance instance, String jdbcUrl,
+                                           CredentialPurpose purpose, ConsoleCredential credential,
+                                           JdbcConnectOptions options) {
         if (instance.getId() == null) {
             throw new IllegalArgumentException("콘솔 풀은 등록된 인스턴스에만 만든다");
         }
@@ -239,13 +266,15 @@ public class ConnectionPools {
             consolePools.remove(key, existing);
             existing.close();
         }
-        return consolePools.computeIfAbsent(key, k -> newConsolePool(instance, jdbcUrl, purpose, credential));
+        return consolePools.computeIfAbsent(key, k -> newConsolePool(instance, jdbcUrl, purpose, credential, options));
     }
 
     private HikariDataSource newConsolePool(DatabaseInstance instance, String jdbcUrl,
-                                            CredentialPurpose purpose, ConsoleCredential credential) {
+                                            CredentialPurpose purpose, ConsoleCredential credential,
+                                            JdbcConnectOptions options) {
         HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(jdbcUrl);
+        config.setDataSource(new BoundedLoginDataSource(jdbcUrl, credential.username(), credential.password(), options));
+        startLazily(config);
         config.setUsername(credential.username());
         config.setPassword(credential.password());
         config.setMaximumPoolSize(CONSOLE_POOL_MAX);
@@ -297,5 +326,91 @@ public class ConnectionPools {
         consolePools.values().forEach(HikariDataSource::close);
         consolePools.clear();
         consoleLastUsedMs.clear();
+    }
+
+    private static final Executor DIRECT = Runnable::run;
+
+    /**
+     * 기종이 준 속성으로 붙고, 기종이 원하면 로그인이 끝난 커넥션의 네트워크 읽기 제한을 되돌리는 DataSource.
+     * SQL Server 드라이버는 loginTimeout을 prelogin 소켓 읽기에 걸지 않았고(mssql-jdbc #1529), Oracle thin URL에는 아무 제한이 없어
+     * 연결만 받고 말이 없는 대상에서 둘 다 무기한 매달렸다(134절). 로그인 뒤까지 짧은 제한을 남기면 서버 사이드 BACKUP·RESTORE·Data Pump가
+     * 끊기므로, 그 기종들은 로그인이 끝나면 예전처럼 제한을 푼다.
+     */
+    private static final class BoundedLoginDataSource implements DataSource {
+
+        private final String url;
+        private final String username;
+        private final String password;
+        private final JdbcConnectOptions options;
+
+        BoundedLoginDataSource(String url, String username, String password, JdbcConnectOptions options) {
+            this.url = url;
+            this.username = username;
+            this.password = password;
+            this.options = options;
+        }
+
+        @Override
+        public Connection getConnection() throws SQLException {
+            return getConnection(username, password);
+        }
+
+        @Override
+        public Connection getConnection(String user, String pass) throws SQLException {
+            Properties props = new Properties();
+            props.putAll(options.loginProperties());
+            if (user != null) {
+                props.setProperty("user", user);
+            }
+            if (pass != null) {
+                props.setProperty("password", pass);
+            }
+            Connection connection = DriverManager.getConnection(url, props);
+            if (options.networkTimeoutAfterLoginMs() != null) {
+                try {
+                    connection.setNetworkTimeout(DIRECT, options.networkTimeoutAfterLoginMs());
+                } catch (SQLException | RuntimeException e) {
+                    connection.close();
+                    throw e;
+                }
+            }
+            return connection;
+        }
+
+        @Override
+        public PrintWriter getLogWriter() {
+            return null;
+        }
+
+        @Override
+        public void setLogWriter(PrintWriter out) {
+        }
+
+        @Override
+        public void setLoginTimeout(int seconds) {
+        }
+
+        @Override
+        public int getLoginTimeout() {
+            return 0;
+        }
+
+        @Override
+        public java.util.logging.Logger getParentLogger() throws SQLFeatureNotSupportedException {
+            throw new SQLFeatureNotSupportedException();
+        }
+
+        @Override
+        public <T> T unwrap(Class<T> iface) throws SQLException {
+            if (iface.isInstance(this)) {
+                return iface.cast(this);
+            }
+            throw new SQLException("래핑한 대상이 아니다: " + iface);
+        }
+
+        @Override
+        public boolean isWrapperFor(Class<?> iface) {
+            return iface.isInstance(this);
+        }
     }
 }

@@ -13,6 +13,7 @@ import java.util.List;
 import io.dbtower.operator.BackupCommands;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.ConnectionPools;
+import io.dbtower.operator.JdbcConnectOptions;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.SqlCanonical;
 import io.dbtower.operator.model.IndexAdvice;
@@ -51,8 +52,13 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
     /** 기종별 버전 조회 쿼리 */
     protected abstract String versionSql();
 
+    /** 기종별 접속 조정 — 로그인 단계 드라이버 속성과 로그인 뒤 네트워크 읽기 제한. 기본은 URL에 건 값 그대로다. */
+    protected JdbcConnectOptions connectOptions() {
+        return JdbcConnectOptions.DEFAULT;
+    }
+
     protected Connection open() throws SQLException {
-        return pools.getConnection(instance, jdbcUrl());
+        return pools.getConnection(instance, jdbcUrl(), connectOptions());
     }
 
     /**
@@ -64,7 +70,7 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
      * 되면 안 된다"는 원칙. 개별 메서드(explainAnalyze 등)가 더 짧게 덮어쓸 수 있다.
      */
     protected JdbcTemplate jdbc() {
-        JdbcTemplate t = new JdbcTemplate(pools.getDataSource(instance, jdbcUrl()));
+        JdbcTemplate t = new JdbcTemplate(pools.getDataSource(instance, jdbcUrl(), connectOptions()));
         t.setQueryTimeout(pools.queryTimeoutSeconds());
         return t;
     }
@@ -86,9 +92,24 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
             //
             // health()의 계약은 "떠 있나 아닌가"다 — 어떤 이유로 실패하든 답은 down이다.
             // 사유는 메시지에 실어 보내므로 원인이 감춰지지도 않는다.
-            String cause = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            return HealthStatus.down(cause);
+            return HealthStatus.down(failureMessage(e));
         }
+    }
+
+    /**
+     * 풀이 첫 연결을 늦게 열면(134절) 호출자가 받는 예외는 "커넥션을 못 얻었다"뿐이고 드라이버가 준 실제 사유는 원인 사슬 끝에 있다 —
+     * 다운 알림이 이유를 잃지 않게 가장 안쪽 사유를 덧붙인다.
+     */
+    static String failureMessage(Throwable e) {
+        String top = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+        Throwable root = e;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        if (root == e || root.getMessage() == null || top.contains(root.getMessage())) {
+            return top;
+        }
+        return top + ": " + root.getMessage();
     }
 
     /**
@@ -242,7 +263,7 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
         }
         int cap = DbmsOperator.clampLimit(rowCap);
         long start = System.nanoTime();
-        try (Connection c = pools.getConsoleDataSource(instance, jdbcUrl(), CredentialPurpose.READ, credential)
+        try (Connection c = pools.getConsoleDataSource(instance, jdbcUrl(), CredentialPurpose.READ, credential, connectOptions())
                 .getConnection()) {
             c.setAutoCommit(false);
             c.setReadOnly(true);
@@ -297,7 +318,7 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
     }
 
     private Connection writeConnection(ConsoleCredential credential) throws SQLException {
-        return pools.getConsoleDataSource(instance, jdbcUrl(), CredentialPurpose.WRITE, credential).getConnection();
+        return pools.getConsoleDataSource(instance, jdbcUrl(), CredentialPurpose.WRITE, credential, connectOptions()).getConnection();
     }
 
     private JdbcChangeRunner changeRunner() {
