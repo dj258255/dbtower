@@ -40,7 +40,16 @@ export class TicketPanel {
     this.message = null;
     this.armed = null;
     this.captureHint = false;
+    // 목록 범위(152절) — 끝난 티켓이 목록 대부분을 차지해, 처리할 건(대기·승인·실행 중)을 먼저 보인다.
+    // null은 아직 고르지 않음: 열린 티켓이 있으면 열린 것만, 없으면 전체(빈 목록으로 기록을 가리지 않게)
+    this.scope = null;
     list.addEventListener("click", (e) => {
+      const scope = e.target.closest("[data-scope]");
+      if (scope) {
+        this.scope = scope.dataset.scope;
+        this.drawList();
+        return;
+      }
       const li = e.target.closest("[data-ticket]");
       if (li) this.select(Number(li.dataset.ticket));
     });
@@ -50,6 +59,7 @@ export class TicketPanel {
   async load(instanceId, selectId) {
     this.instanceId = instanceId;
     this.selected = null;
+    this.scope = null;
     if (!(await this.reloadList())) return;
     const wanted = selectId ? Number(selectId) : null;
     if (wanted && this.tickets.some((t) => t.id === wanted)) {
@@ -74,15 +84,32 @@ export class TicketPanel {
     }
     if (this.instanceId !== instanceId) return false;
     this.tickets = tickets;
-    const open = this.tickets.filter((t) => OPEN.includes(t.status)).length;
-    this.count.textContent = open || "";
-    this.list.innerHTML = this.tickets.length ? `<ul class="tk-items">${this.tickets.map((t) => {
+    this.drawList();
+    return true;
+  }
+
+  drawList() {
+    const open = this.tickets.filter((t) => OPEN.includes(t.status));
+    this.count.textContent = open.length || "";
+    if (!this.tickets.length) {
+      this.list.innerHTML = "";
+      return;
+    }
+    // 고른 티켓이 끝난 것이면 전체로 넓힌다 — 딥링크로 연 티켓이나 방금 실행해 닫힌 티켓이 목록에서 사라져 보이지 않게
+    const selected = this.ticket();
+    let scope = this.scope ?? (open.length ? "open" : "all");
+    if (scope === "open" && selected && !OPEN.includes(selected.status)) scope = this.scope = "all";
+    const shown = scope === "open" ? open : this.tickets;
+    const items = shown.map((t) => {
       const [label, cls] = STATUS[t.status] || [t.status, ""];
       return `<li data-ticket="${esc(t.id)}" class="${t.id === this.selected ? "active" : ""}">
         <span class="tk-id">#${esc(t.id)}</span><span class="tk-st ${cls}">${esc(label)}</span>
         <span class="tk-sql">${esc(t.targetSql.replace(/\s+/g, " ").slice(0, 90))}</span></li>`;
-    }).join("")}</ul>` : "";
-    return true;
+    }).join("");
+    this.list.innerHTML = `<div class="tk-scope" role="group" aria-label="티켓 범위">
+        <button type="button" class="tk-scope-btn" data-scope="open" aria-pressed="${scope === "open"}">열린 것 ${open.length}</button>
+        <button type="button" class="tk-scope-btn" data-scope="all" aria-pressed="${scope === "all"}">전체 ${this.tickets.length}</button></div>
+      ${items ? `<ul class="tk-items">${items}</ul>` : '<div class="muted tk-none">열린 티켓이 없습니다. 끝난 티켓은 "전체"에서 봅니다.</div>'}`;
   }
 
   async select(id) {

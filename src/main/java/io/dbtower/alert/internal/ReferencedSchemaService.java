@@ -55,7 +55,9 @@ public class ReferencedSchemaService {
      * ddlSource(NATIVE/RECONSTRUCTED)로 출처를 함께 실어 렌더 측이 정직하게 라벨링한다.
      */
     public record RefTable(String name, long rowCountApprox, long dataBytes, long indexBytes,
-                           String ddl, String ddlSource, List<RefColumn> columns, List<RefIndex> indexes) {
+                           String ddl, String ddlSource, List<RefColumn> columns, List<RefIndex> indexes,
+                           List<String> primaryKey, List<TableDetail.ForeignKey> foreignKeys,
+                           List<TableDetail.ForeignKey> referencedBy) {
     }
 
     /** notFound = SQL엔 있으나 스키마에 없던 후보(CTE·별칭·상한 밖·오탈자). truncated = 스키마 상한에 걸림 */
@@ -109,13 +111,18 @@ public class ReferencedSchemaService {
         } catch (RuntimeException e) {
             // 상세 실패는 요약 폴백으로 흡수 — 구조 요약만으로도 첨부는 유효하다
         }
+        // 기본키는 요약 경로(describeSchema)에도 있어 상세가 실패해도 잃지 않는다. 외래키는 상세에만 있다
+        List<String> summaryPk = t.primaryKey() == null ? List.of() : t.primaryKey();
         if (detail == null || detail.ddlSource() == DdlSource.UNSUPPORTED) {
-            return new RefTable(t.name(), rows, -1, -1, null, null, columns(t.columns()), indexes(t.indexes()));
+            return new RefTable(t.name(), rows, -1, -1, null, null, columns(t.columns()), indexes(t.indexes()),
+                    summaryPk, List.of(), List.of());
         }
         long detailRows = detail.rowCount() >= 0 ? detail.rowCount() : rows;
         List<RefIndex> idx = detail.indexes().isEmpty() ? indexes(t.indexes()) : fromDetail(detail.indexes());
         return new RefTable(t.name(), detailRows, detail.dataBytes(), detail.indexBytes(),
-                detail.ddl(), detail.ddlSource().name(), columns(t.columns()), idx);
+                detail.ddl(), detail.ddlSource().name(), columns(t.columns()), idx,
+                detail.primaryKey().isEmpty() ? summaryPk : detail.primaryKey(),
+                detail.foreignKeys(), detail.referencedBy());
     }
 
     /** tableStats로 대략 행수 맵 — 없거나 실패하면 빈 맵(행수는 부가 정보라 없어도 구조는 보여준다) */
@@ -158,6 +165,15 @@ public class ReferencedSchemaService {
                 sb.append('\n');
             } else {
                 sb.append("  idx: (없음)\n");
+            }
+            // 조인 조건이 외래키를 따르는지가 계획 진단의 재료다 — 나가는 키만(들어오는 쪽은 이 쿼리의 조인과 무관할 때가 많다)
+            if (!t.foreignKeys().isEmpty()) {
+                sb.append("  fk: ");
+                sb.append(String.join(", ", t.foreignKeys().stream()
+                        .map(fk -> String.join(",", fk.columns()) + " -> " + fk.refTable()
+                                + "(" + String.join(",", fk.refColumns()) + ")")
+                        .toList()));
+                sb.append('\n');
             }
             // 컬럼은 타입 불일치 진단용 — 많으면 앞에서 끊고 나머지 개수 표기
             int shown = Math.min(t.columns().size(), 12);

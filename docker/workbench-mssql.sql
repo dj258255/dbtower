@@ -68,4 +68,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::dbo TO dbtower_writer;
 GRANT SHOWPLAN TO dbtower_writer;
 GRANT ALTER ON dbo.customers TO dbtower_writer;
 GRANT ALTER ON dbo.orders TO dbtower_writer;
+-- 외래키를 거는 ALTER는 가리키는 테이블의 REFERENCES도 요구한다(VERIFICATION 151절: 승인된 외래키 티켓이 이 권한이 없어 실행에서 거부됐다)
+GRANT REFERENCES ON dbo.customers TO dbtower_writer;
+GRANT REFERENCES ON dbo.orders TO dbtower_writer;
 GO

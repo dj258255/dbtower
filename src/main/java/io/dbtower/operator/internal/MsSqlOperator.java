@@ -868,7 +868,7 @@ public class MsSqlOperator extends AbstractJdbcOperator {
      * (권한·부하) 여기서 뽑지 않는다 — 지어내지 않고 미확보(null)로 둔다.
      *
      * <p>DDL은 RECONSTRUCTED: SQL Server에는 SHOW CREATE TABLE이 없어 카탈로그(INFORMATION_SCHEMA)에서
-     * CREATE TABLE을 재구성한다. 현재 컬럼·PK·인덱스까지 담고, 제약조건(FK/CHECK)·트리거·계산열 정의는
+     * CREATE TABLE을 재구성한다. 현재 컬럼·PK·외래키·인덱스까지 담고, CHECK·트리거·계산열 정의는
      * 담지 못한다(원문 위장 없이 note에 밝힌다).
      *
      * <p>테이블명은 sys 뷰/INFORMATION_SCHEMA에 문자열 파라미터로 바인딩한다(주입 방어). 읽기 전용.
@@ -923,6 +923,25 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                   AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
                 ORDER BY kcu.ORDINAL_POSITION
                 """;
+        // 외래키 — 제약을 가진 쪽이든 가리켜지는 쪽이든 이 테이블이면. 열 짝은 constraint_column_id 순서
+        String foreignKeysSql = """
+                SELECT fk.name AS name,
+                       CASE WHEN OBJECT_SCHEMA_NAME(fk.parent_object_id) = SCHEMA_NAME() THEN OBJECT_NAME(fk.parent_object_id)
+                            ELSE OBJECT_SCHEMA_NAME(fk.parent_object_id) + '.' + OBJECT_NAME(fk.parent_object_id) END AS table_name,
+                       pc.name AS column_name,
+                       CASE WHEN OBJECT_SCHEMA_NAME(fk.referenced_object_id) = SCHEMA_NAME() THEN OBJECT_NAME(fk.referenced_object_id)
+                            ELSE OBJECT_SCHEMA_NAME(fk.referenced_object_id) + '.' + OBJECT_NAME(fk.referenced_object_id) END AS ref_table,
+                       rc.name AS ref_column,
+                       fk.delete_referential_action_desc AS on_delete,
+                       fk.update_referential_action_desc AS on_update
+                FROM sys.foreign_keys fk
+                JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+                JOIN sys.columns pc ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
+                JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
+                WHERE fk.parent_object_id = OBJECT_ID(QUOTENAME(SCHEMA_NAME()) + '.' + QUOTENAME(?))
+                   OR fk.referenced_object_id = OBJECT_ID(QUOTENAME(SCHEMA_NAME()) + '.' + QUOTENAME(?))
+                ORDER BY table_name, fk.name, fkc.constraint_column_id
+                """;
         try {
             BasicStats stats = jdbc().query(statsSql, rs -> {
                 if (!rs.next()) {
@@ -964,13 +983,19 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                             "YES".equalsIgnoreCase(rs.getString("IS_NULLABLE")),
                             rs.getString("COLUMN_DEFAULT")), table);
             List<String> pkColumns = jdbc().queryForList(pkSql, String.class, table);
+            TableDetailSupport.Keys keys = TableDetailSupport.foreignKeys(table, jdbc().query(foreignKeysSql,
+                    (rs, i) -> new TableDetailSupport.ForeignKeyRow(rs.getString("name"), rs.getString("table_name"),
+                            rs.getString("column_name"), rs.getString("ref_table"), rs.getString("ref_column"),
+                            rs.getString("on_delete"), rs.getString("on_update")),
+                    table, table));
             // 인덱스 정의는 참고용 주석 라인으로만 덧붙인다(재구성 CREATE TABLE 본문 밖).
             List<String> indexDefs = new ArrayList<>();
             for (TableDetail.IndexDetail idx : indexes) {
                 indexDefs.add("-- index: " + idx.name() + " (" + String.join(", ", idx.columns()) + ")"
                         + (idx.unique() ? " UNIQUE" : "") + " " + idx.type());
             }
-            String ddl = TableDetailSupport.reconstructDdl(table, columns, pkColumns, indexDefs);
+            String ddl = TableDetailSupport.reconstructDdl(table, columns, pkColumns,
+                    keys.outgoing().stream().map(TableDetailSupport::foreignKeyClause).toList(), indexDefs);
 
             String note = "조회 범위는 접속 세션의 기본 스키마(SCHEMA_NAME())다 — 예전에는 스키마 한정이 없어 "
                     + "dbo와 다른 스키마에 같은 이름의 테이블이 있으면 통계는 임의의 하나를, 컬럼·인덱스는 "
@@ -978,9 +1003,10 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                     + "SQL Server는 스토리지 엔진 개념이 없어 engine=null. "
                     + "카디널리티는 SQL Server 기본 노출이 아니라 미확보(DBCC SHOW_STATISTICS는 무거워 조회 안 함). "
                     + "DDL은 단일 CREATE 명령이 없어 카탈로그(INFORMATION_SCHEMA)로 재구성했으며, "
-                    + "제약조건(FK/CHECK)·트리거·계산열 정의는 아직 담지 못함.";
+                    + "외래키는 sys.foreign_keys로 본문에 넣었고, CHECK·트리거·계산열 정의는 아직 담지 못함.";
             return new TableDetail(table, null, stats.rowCount(), stats.dataBytes(), stats.indexBytes(),
-                    avgRowBytes, stats.createdAt(), ddl, DdlSource.RECONSTRUCTED, indexes, note);
+                    avgRowBytes, stats.createdAt(), ddl, DdlSource.RECONSTRUCTED, indexes, note,
+                    List.copyOf(pkColumns), keys.outgoing(), keys.incoming());
         } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 테이블 상세 조회 실패: " + e.getMessage(), e);
         }

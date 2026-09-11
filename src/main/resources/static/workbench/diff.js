@@ -48,7 +48,8 @@ export function renderDiff(diff, { leftLabel = "전", rightLabel = "후", addedL
 
 export function renderSchemaDiff(sd) {
   if (sd.identical) {
-    return '<div class="df-schema"><div class="df-title">구조 변화</div><div class="muted">구조 차이가 없습니다(모니터 계정이 보는 범위 기준).</div></div>';
+    // 구조 스냅샷은 열·인덱스만 담는다 — 외래키만 추가한 실행도 여기로 온다(151절). "변화 없음"으로 읽히지 않게 비교 범위를 밝힌다
+    return '<div class="df-schema"><div class="df-title">구조 변화</div><div class="muted">열·인덱스 차이가 없습니다(모니터 계정이 보는 범위 기준). 외래키·CHECK 같은 제약조건은 아직 비교하지 않습니다.</div></div>';
   }
   const lines = [];
   (sd.addedTables || []).forEach((t) => lines.push(["add", `테이블 ${t.name} 생김 (열 ${(t.columns || []).length})`]));

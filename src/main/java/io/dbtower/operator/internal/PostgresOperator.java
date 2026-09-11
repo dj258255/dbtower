@@ -902,11 +902,48 @@ public class PostgresOperator extends AbstractJdbcOperator {
             if (partitioned) {
                 note.append(" 파티션 테이블 — 행수·데이터·인덱스 크기는 리프 파티션 합산.");
             }
+            TableDetailSupport.Keys keys = TableDetailSupport.foreignKeys(tableName, postgresForeignKeys(tableName));
             return new TableDetail(tableName, null, stats.rowCount(), stats.dataBytes(), stats.indexBytes(),
-                    avgRowBytes, null, ddl, DdlSource.RECONSTRUCTED, indexes, note.toString());
+                    avgRowBytes, null, ddl, DdlSource.RECONSTRUCTED, indexes, note.toString(),
+                    List.copyOf(pkColumns), keys.outgoing(), keys.incoming());
         } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 테이블 상세 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 외래키 — conkey·confkey 두 배열을 같은 위치끼리 함께 펼쳐 열 짝을 키 순서대로 얻는다.
+     * 파티션 테이블은 파티션마다 부모에게서 물려받은 제약 행이 따로 있어(conparentid), 부모 제약만 세어 같은 키가 겹쳐 보이지 않게 한다.
+     */
+    private List<TableDetailSupport.ForeignKeyRow> postgresForeignKeys(String tableName) {
+        return jdbc().query("""
+                SELECT con.conname AS name,
+                       CASE WHEN n.nspname = current_schema() THEN c.relname
+                            ELSE n.nspname || '.' || c.relname END AS table_name,
+                       a.attname AS column_name,
+                       CASE WHEN rn.nspname = current_schema() THEN rc.relname
+                            ELSE rn.nspname || '.' || rc.relname END AS ref_table,
+                       ra.attname AS ref_column,
+                       con.confdeltype::text AS on_delete,
+                       con.confupdtype::text AS on_update
+                FROM pg_constraint con
+                JOIN pg_class c ON c.oid = con.conrelid
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                JOIN pg_class rc ON rc.oid = con.confrelid
+                JOIN pg_namespace rn ON rn.oid = rc.relnamespace
+                JOIN LATERAL unnest(con.conkey, con.confkey) WITH ORDINALITY AS k(attnum, refnum, ord) ON true
+                JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
+                JOIN pg_attribute ra ON ra.attrelid = con.confrelid AND ra.attnum = k.refnum
+                WHERE con.contype = 'f'
+                  AND con.conparentid = 0
+                  AND ((c.relname = ? AND n.nspname = current_schema())
+                    OR (rc.relname = ? AND rn.nspname = current_schema()))
+                ORDER BY table_name, con.conname, k.ord
+                """,
+                (rs, i) -> new TableDetailSupport.ForeignKeyRow(rs.getString("name"), rs.getString("table_name"),
+                        rs.getString("column_name"), rs.getString("ref_table"), rs.getString("ref_column"),
+                        rs.getString("on_delete"), rs.getString("on_update")),
+                tableName, tableName);
     }
 
     /** tableDetail 기본 통계 한 행 — reltuples 기반 추정 행수와 데이터/인덱스 바이트. */

@@ -93,9 +93,12 @@ scripts/         dbtower-mcp.sh (MCP stdio 실행기)
   참고 제품의 탭을 옮길 때는 모양이 아니라 그 칸의 역할을 옮긴다(147절: TOI의 AI 재료 탭을 흉내 내 스키마·티켓을 채팅 탭에 넣었다)
 - 표 셀의 `max-width`는 자동 표 레이아웃에서 무시된다 — 말줄임 열은 `max-width: 0; width: 100%`, 표 셀 안에 끼운 상세는
   `width: 0; min-width: 100%`로 열 폭 계산에서 뺀다(146절: Top Query 표가 1512px에서 옆으로 넘쳤다)
+- 한 열로 접는 기준은 뷰포트가 아니라 담는 칸 폭이다(`@container`) — 같은 렌더러가 넓은 화면의 좁은 칸(워크벤치 가운데 약 775px, 관제 펼침)에 들어간다.
+  두 열로 두니 열 표의 타입이 글자 중간에서 쪼개졌다(151절)
 - SVG 요소는 `el.hidden = true`로 감춰지지 않는다(HTMLElement 전용 프로퍼티) — `toggleAttribute("hidden", ...)`
 - 좁은 화면 확인은 Playwright로 뷰포트를 정확히 맞춰 잰다. Chrome 확장 창 조절(innerWidth 그대로)·iframe(X-Frame-Options)·
   headless `--window-size`(뷰포트가 넓게 잡힘)는 모두 틀린 결과를 냈다
+- 닫힌 `<details>` 안 요소도 Chrome에서는 박스를 가져 `offsetParent`·크기가 잡힌다 — 접힘 효과는 바깥 요소 높이로 잰다(151절 측정에서 틀렸다)
 - 대상 DB를 주기적으로 조회하는 화면은 브라우저가 각자 폴링하지 않고 서버 허브를 거친다(LiveSessionHub) — 폴링은 대상 조회가 보는 사람 수만큼 는다
 - 관제와 워크벤치는 한 페이지(index.html)의 두 모드다 — 모드를 바꾸면 숨긴 쪽의 실시간 연결을 닫고(setMode -> syncLive), 워크벤치 코드는 처음 들어갈 때
   모듈로 불러온다. `/workbench.html`은 `/?mode=workbench`로 넘기는 페이지로만 남긴다(149절)

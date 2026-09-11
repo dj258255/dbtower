@@ -223,15 +223,39 @@ button.tree-group-head { cursor: pointer; }
 .wb-overlay .wb-msg { margin: 0; }
 .wb-overlay-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
 
-.grid-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12.5px; }
+.grid-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12.5px; }
 .grid-filter { padding: 4px 10px; border: 1px solid rgba(15, 23, 42, .1); border-radius: 999px; font: inherit; font-size: 12.5px; width: 200px; }
+.grid-size { padding: 3px 8px; border: 1px solid rgba(15, 23, 42, .12); border-radius: 999px; font: inherit; font-size: 12px; background-color: #fff; }
 .grid-scroll { overflow: auto; border: 1px solid rgba(15, 23, 42, .08); border-radius: 12px; }
 table.grid { border-collapse: collapse; font-size: 12.5px; width: max-content; min-width: 100%; }
 table.grid th, table.grid td { border-bottom: 1px solid #eef0f4; padding: 5px 10px; text-align: left; white-space: nowrap; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
-table.grid th { position: sticky; top: 0; background: #f5f6fa; cursor: pointer; user-select: none; font-weight: 600; }
+table.grid th { position: sticky; top: 0; background: #f5f6fa; cursor: pointer; user-select: none; font-weight: 600; vertical-align: top; }
+table.grid tbody tr { cursor: pointer; }
 table.grid tbody tr:hover td { background: #f8f9ff; }
+table.grid tbody tr.selected td { background: #f3f6ff; box-shadow: inset 0 -1px 0 #c9d4ff; }
 table.grid td.null { color: var(--muted); font-style: italic; }
 table.grid .rownum { color: var(--muted); width: 1%; }
+/* 열 너비 끌기 손잡이 — 머리 칸 오른쪽 끝. 올리거나 끌 때만 색이 보인다 */
+.col-resize { position: absolute; top: 0; right: 0; width: 8px; height: 100%; cursor: col-resize; touch-action: none; }
+.col-resize:hover, .col-resize:active { background: rgba(79, 94, 247, .28); }
+.th-label { display: block; overflow: hidden; text-overflow: ellipsis; }
+.col-filter { display: block; box-sizing: border-box; width: 100%; min-width: 72px; margin-top: 4px; padding: 2px 6px; border: 1px solid rgba(15, 23, 42, .14); border-radius: 6px; font: inherit; font-size: 11.5px; font-weight: 400; background: #fff; }
+.col-filter:disabled { background: #eef0f4; cursor: not-allowed; }
+/* 행 상세 — 결과 옆 불투명 칸(콘텐츠라 유리가 아니다). 결과 칸이 좁으면 아래로 내린다 */
+#wb-grid { container-type: inline-size; }
+.grid-body { display: flex; gap: 10px; align-items: flex-start; }
+.grid-body > .grid-scroll { flex: 1 1 auto; min-width: 0; }
+.grid-detail { flex: 0 0 300px; box-sizing: border-box; max-height: 70vh; overflow: auto; padding: 0 12px 8px; background: #fff; border: 1px solid rgba(15, 23, 42, .1); border-radius: 12px; font-size: 12.5px; }
+.grid-detail-head { position: sticky; top: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 0 6px; background: #fff; border-bottom: 1px solid #eef0f4; }
+.kv { padding: 6px 0; border-bottom: 1px solid #eef0f4; }
+.kv-k { display: flex; align-items: baseline; gap: 6px; font-size: 12px; font-weight: 600; }
+.kv-type { margin-left: auto; font-size: 11px; font-weight: 400; color: #5b6475; }
+.kv-v { margin-top: 2px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+.kv-v.null { color: #5b6475; font-style: italic; font-family: inherit; }
+@container (max-width: 720px) {
+  .grid-body { flex-direction: column; align-items: stretch; }
+  .grid-detail { flex: none; width: 100%; max-height: none; }
+}
 .mask-badge { font-size: 10.5px; background: #fdecee; color: #b42335; border-radius: 4px; padding: 0 4px; margin-left: 4px; }
 body.picking table.grid th:not(.rownum), body.picking .tree-name, body.picking .tree-col { outline: 1px dashed var(--primary); outline-offset: 1px; cursor: crosshair; }
 
@@ -350,6 +374,11 @@ body.picking table.grid th:not(.rownum), body.picking .tree-name, body.picking .
   background: #f7f8fb; border: 1px solid rgba(15, 23, 42, .06); border-radius: 14px; padding: 6px;
 }
 .tk-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+/* 목록 범위(152절) — 열린 것만/전체. 눌린 쪽은 --primary 위 흰 글자(4.91:1) */
+.tk-scope { display: flex; gap: 4px; margin: 0 0 6px; }
+.tk-scope-btn { flex: 1; padding: 3px 8px; border: 1px solid rgba(15, 23, 42, .12); border-radius: 999px; background: #fff; font: inherit; font-size: 12px; color: var(--text); cursor: pointer; white-space: nowrap; }
+.tk-scope-btn[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: #fff; }
+.tk-none { padding: 8px 4px; font-size: 12px; }
 /* 번호·상태 한 줄, SQL 한 줄 — 격자로 두면 긴 SQL 줄 폭만큼 상태 알약이 늘어났다(첫 화면 확인) */
 .tk-items li {
   display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px;
@@ -409,14 +438,45 @@ tr.df-removed td { background: #fdf1f2; }
 .tk-inverse { list-style: none; margin: 4px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .tk-inverse pre { margin: 0 0 4px; }
 
-/* 테이블 상세 */
-.td-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; font-size: 15px; }
-.td-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 10px; }
-.td-stats > div { background: #f7f8fb; border: 1px solid rgba(15, 23, 42, .06); border-radius: 12px; padding: 8px 12px; display: flex; flex-direction: column; gap: 2px; }
-.td-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 14px; }
-.td-col { border: 0; background: none; font: inherit; font-size: 12.5px; color: var(--text); cursor: pointer; padding: 0; }
+/* 테이블 상세(151절) — 워크벤치 탭과 관제 펼침이 같은 렌더러(workbench/table-detail.js). 읽는 콘텐츠라 불투명.
+   담는 칸 폭으로 한 열로 접는다 — 관제 펼침은 화면이 넓어도 칸이 좁다 */
+#wb-table { container-type: inline-size; }
+.td-view { font-size: 12.5px; }
+.td-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.td-title { font-size: 15px; }
+.td-pk { font-size: 12px; }
+.td-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.td-pill { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 12px; background: #f5f6fa; border: 1px solid rgba(15, 23, 42, .06); border-radius: 999px; }
+.td-pill span { font-size: 11.5px; color: #5b6475; }
+.td-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 16px; }
+.td-grid.single { grid-template-columns: minmax(0, 1fr); }
+.td-section { margin-bottom: 14px; }
+.td-section h4 { margin: 0 0 6px; font-size: 12.5px; }
+.td-sub { margin: 8px 0 4px; font-size: 12px; font-weight: 600; color: #3d4452; }
+.td-scroll { overflow-x: auto; }
+.td-table { width: 100%; border-collapse: collapse; }
+.td-table th { padding: 5px 8px; background: #f5f6fa; color: #5b6475; font-size: 11.5px; font-weight: 600; text-align: left; white-space: nowrap; }
+.td-table td { padding: 5px 8px; border-bottom: 1px solid #eef0f4; vertical-align: top; }
+/* 이름·NULL 여부·참조·참조 동작은 줄바꿈하지 않는다 — 좁은 칸에서 NOT NULL·NO ACTION이 두 줄로 갈라졌다.
+   긴 타입만 단어 사이에서 접힌다(anywhere는 character를 글자 중간에서 쪼갰다) */
+.td-name, .td-null, .td-to, .td-rule { white-space: nowrap; }
+.td-type { color: #5b6475; overflow-wrap: break-word; }
+.td-null { font-size: 11.5px; }
+.td-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.td-col { border: 0; background: none; font: inherit; color: var(--text); cursor: pointer; padding: 0; }
 .td-col:hover { color: var(--primary); }
+.td-link { padding: 0; border: 0; background: none; font: inherit; color: #3d4ad6; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.key-badge { display: inline-block; margin-left: 5px; padding: 0 5px; border-radius: 4px; font-size: 10.5px; font-weight: 700; line-height: 16px; vertical-align: 1px; }
+.key-badge.pk { color: #8a4400; background: #fff1e0; }
+.key-badge.fk { color: #1f4fb8; background: #e9f0ff; }
+.key-warn { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 4px; font-size: 11px; color: #9a3412; background: #fff1ea; white-space: nowrap; }
+.td-hint, .td-note { margin-top: 6px; font-size: 11.5px; line-height: 1.5; color: #5b6475; }
+.td-ddl-box summary { padding: 4px 0; font-size: 12.5px; font-weight: 600; cursor: pointer; }
 .td-ddl { max-height: 320px; overflow: auto; }
+/* 워크벤치 가운데 칸은 1512px 화면에서 약 775px — 두 열이면 열 표가 좁아 타입이 쪼개졌다(첫 사진). 넓은 칸에서만 나란히 */
+@container (max-width: 960px) {
+  .td-grid { grid-template-columns: minmax(0, 1fr); }
+}
 
 /* 인스턴스 간 비교 */
 .cmp-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; font-size: 12.5px; }
@@ -466,7 +526,6 @@ tr.df-removed td { background: #fdf1f2; }
   .wb-result-bar { flex-wrap: wrap; }
   .wb-tickets-pane { grid-template-columns: minmax(0, 1fr); }
   .tk-list { position: static; max-height: 240px; }
-  .td-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 640px) {
   .wb-shell { padding: 10px; gap: 10px; }

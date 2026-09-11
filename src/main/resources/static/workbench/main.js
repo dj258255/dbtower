@@ -8,6 +8,7 @@ import { renderGrid } from "./grid.js";
 import { renderTimeline, renderChips, updatePending } from "./chat.js";
 import { renderDiff } from "./diff.js";
 import { TicketPanel } from "./tickets.js";
+import { renderTableDetail } from "./table-detail.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -45,6 +46,7 @@ const state = {
   classifySeq: 0,
   saveTimer: null,
   pendingTicket: null,
+  detailSeq: 0,
 };
 
 // 버튼은 역할 이름이 아니라 능력(/api/me capabilities)으로 가른다 — 표시만이고 인가는 서버가 한다
@@ -350,59 +352,42 @@ function drawTree() {
 
 // ---------- 테이블 상세 ----------
 
-const bytes = (n) => {
-  if (n === null || n === undefined || n < 0) return "미확보";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let v = n;
-  let u = 0;
-  while (v >= 1024 && u < units.length - 1) { v /= 1024; u++; }
-  return `${v.toFixed(u ? 1 : 0)} ${units[u]}`;
-};
-
-// 행 수·크기·인덱스·DDL은 모니터 계정의 카탈로그 조회(기존 테이블 상세 API)로, 열 목록은 이미 받은 스키마 트리로 채운다
+// 행 수·크기·인덱스·키·DDL은 모니터 계정의 카탈로그 조회(테이블 상세 API)로, 열 목록은 이미 받은 스키마 트리로 채운다.
+// 외래키 링크로 테이블을 빠르게 옮겨 다니면 늦게 온 앞 응답이 뒤 화면을 덮을 수 있어 요청 번호로 거른다
 async function openTableDetail(name) {
   if (!state.instance) return;
+  const seq = ++state.detailSeq;
+  const instanceId = state.instance.id;
   showPane("table");
   const box = $("wb-table");
   box.className = "";
   box.innerHTML = `<div class="muted">${esc(name)} 상세를 불러오는 중...</div>`;
-  const table = state.schema ? state.schema.tables.find((t) => t.name === name) : null;
   let d;
   try {
-    d = await request(`/api/instances/${encodeURIComponent(state.instance.id)}/table-detail`, { method: "POST", body: { table: name } });
+    d = await request(`/api/instances/${encodeURIComponent(instanceId)}/table-detail`, { method: "POST", body: { table: name } });
   } catch (e) {
+    if (seq !== state.detailSeq) return;
     box.innerHTML = `<div class="wb-msg error"><strong>상세를 불러오지 못했습니다</strong><p>${esc(e.message)}</p></div>`;
     return;
   }
+  if (seq !== state.detailSeq || !state.instance || state.instance.id !== instanceId) return;
+  const tables = state.schema ? state.schema.tables : [];
+  const table = tables.find((t) => t.name === name);
+  // 참조 테이블은 스키마 트리에 있는 테이블일 때만 누를 수 있다(다른 스키마·상한 밖 테이블과 뷰는 상세 API가 받지 않는다)
+  const known = new Map(tables.filter((t) => t.kind !== "VIEW").map((t) => [t.name.toLowerCase(), t.name]));
   const preview = (PREVIEW[state.instance.type] || PREVIEW.MYSQL)(name);
-  const columns = table ? table.columns.map((c) => `<tr><td><button class="td-col" data-col="${esc(c.name)}" title="채팅에 붙이기">${esc(c.name)}</button></td>
-      <td class="muted">${esc(c.type)}</td><td class="muted">${c.nullable ? "NULL" : "NOT NULL"}</td></tr>`).join("") : "";
-  const indexes = (d.indexes || []).map((i) => `<tr><td>${esc(i.name)}</td><td>${esc((i.columns || []).join(", "))}</td>
-      <td class="muted">${i.unique ? "UNIQUE" : ""}</td><td class="muted">${esc(i.type || "")}</td>
-      <td class="muted">${i.cardinality === null || i.cardinality === undefined ? "미확보" : esc(i.cardinality)}</td></tr>`).join("");
-  box.innerHTML = `
-    <div class="td-head"><strong>${esc(d.table || name)}</strong>${d.engine ? `<span class="muted">${esc(d.engine)}</span>` : ""}
-      <span class="wb-spacer"></span>
-      <button class="btn btn-small" data-td="preview">미리보기 실행</button>
+  box.innerHTML = renderTableDetail(d, {
+    title: d.table || name,
+    columns: table ? table.columns : null,
+    pickColumns: true,
+    canOpen: (t) => known.has(t.toLowerCase()) && t.toLowerCase() !== name.toLowerCase(),
+    actions: `<button class="btn btn-small" data-td="preview">미리보기 실행</button>
       <button class="btn btn-small" data-td="editor">SELECT 편집기로</button>
-      <button class="btn btn-small" data-td="chip">채팅에 붙이기</button></div>
-    <div class="td-stats">
-      <div><span class="wb-label">행 수(추정)</span><b>${d.rowCount >= 0 ? esc(d.rowCount.toLocaleString("ko-KR")) : "미확보"}</b></div>
-      <div><span class="wb-label">데이터</span><b>${esc(bytes(d.dataBytes))}</b></div>
-      <div><span class="wb-label">인덱스</span><b>${esc(bytes(d.indexBytes))}</b></div>
-      <div><span class="wb-label">평균 행</span><b>${esc(bytes(d.avgRowBytes))}</b></div>
-      <div><span class="wb-label">생성</span><b>${esc(d.createdAt || "미확보")}</b></div>
-    </div>
-    ${d.note ? `<div class="hint">${esc(d.note)}</div>` : ""}
-    <div class="td-grid">
-      <section><div class="df-title">열 ${table ? table.columns.length : ""}</div>
-        ${columns ? `<table class="history"><tbody>${columns}</tbody></table>` : '<div class="muted">스키마 트리에 없는 테이블입니다.</div>'}</section>
-      <section><div class="df-title">인덱스 ${(d.indexes || []).length}</div>
-        ${indexes ? `<table class="history"><thead><tr><th>이름</th><th>열</th><th></th><th>타입</th><th>카디널리티</th></tr></thead><tbody>${indexes}</tbody></table>` : '<div class="muted">인덱스가 없거나 확보하지 못했습니다.</div>'}</section>
-    </div>
-    <div class="df-title">DDL <span class="muted">${esc({ NATIVE: "엔진이 준 원문", RECONSTRUCTED: "카탈로그로 재구성한 근사", UNSUPPORTED: "미지원" }[d.ddlSource] || d.ddlSource || "")}</span></div>
-    ${d.ddl ? `<pre class="ai-sql td-ddl"><code>${highlight(d.ddl)}</code></pre>` : '<div class="muted">DDL을 확보하지 못했습니다.</div>'}`;
+      <button class="btn btn-small" data-td="chip">채팅에 붙이기</button>`,
+  });
   box.onclick = (e) => {
+    const open = e.target.closest("[data-open-table]");
+    if (open) { openTableDetail(known.get(open.dataset.openTable.toLowerCase()) || open.dataset.openTable); return; }
     const col = e.target.closest("[data-col]");
     if (col) { addChip({ type: "column", value: `${name}.${col.dataset.col}` }); revealChat(); return; }
     const b = e.target.closest("[data-td]");

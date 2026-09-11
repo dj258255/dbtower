@@ -38,7 +38,8 @@ WHERE NOT EXISTS (SELECT 1 FROM sample.orders);
 CREATE USER IF NOT EXISTS 'dbtower_reader'@'%' IDENTIFIED BY 'dbtower1234';
 GRANT SELECT ON sample.* TO 'dbtower_reader'@'%';
 
--- 변경 계정(승인된 티켓만 실행): DML과 인덱스·열 추가 DDL(ALTER·INDEX). DROP·CREATE TABLE·권한 변경은 주지 않는다 —
+-- 변경 계정(승인된 티켓만 실행): DML과 인덱스·열·외래키 추가 DDL(ALTER·INDEX·REFERENCES). DROP·CREATE TABLE·권한 변경은 주지 않는다 —
 -- 승인된 티켓이라도 계정 권한 밖의 문장은 대상 DB가 거부한다(마지막 방어선). 대형 테이블 DDL은 gh-ost 경로로 보낸다.
+-- 외래키는 자식 테이블 ALTER에 더해 가리키는 테이블의 REFERENCES가 있어야 만들어진다(VERIFICATION 151절: 승인된 외래키 티켓이 이 권한이 없어 실행에서 거부됐다).
 CREATE USER IF NOT EXISTS 'dbtower_writer'@'%' IDENTIFIED BY 'dbtower1234';
-GRANT SELECT, INSERT, UPDATE, DELETE, ALTER, INDEX ON sample.* TO 'dbtower_writer'@'%';
+GRANT SELECT, INSERT, UPDATE, DELETE, ALTER, INDEX, REFERENCES ON sample.* TO 'dbtower_writer'@'%';

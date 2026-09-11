@@ -663,12 +663,43 @@ public class MySqlOperator extends AbstractJdbcOperator {
             // SHOW CREATE TABLE — 식별자는 위에서 검증했고 백틱으로 감싼다(파라미터 바인딩 불가 자리)
             String ddl = jdbc().query("SHOW CREATE TABLE `" + instance.getDbName() + "`.`" + table + "`",
                     rs -> rs.next() ? rs.getString(2) : null);
+            // InnoDB는 기본키 인덱스 이름이 항상 PRIMARY다
+            List<String> primaryKey = indexes.stream().filter(i -> "PRIMARY".equals(i.name()))
+                    .findFirst().map(TableDetail.IndexDetail::columns).orElse(List.of());
+            TableDetailSupport.Keys keys = TableDetailSupport.foreignKeys(table, mysqlForeignKeys(table));
             return new TableDetail(table, (String) head[0], (Long) head[1], (Long) head[2], (Long) head[3],
                     (Long) head[4], (String) head[5], ddl, DdlSource.NATIVE, indexes,
-                    "행수·평균 행 길이는 InnoDB 통계 추정, 카디널리티는 STATISTICS 기준");
+                    "행수·평균 행 길이는 InnoDB 통계 추정, 카디널리티는 STATISTICS 기준",
+                    primaryKey, keys.outgoing(), keys.incoming());
         } catch (DataAccessException e) {
             throw new OperatorException("MySQL 테이블 상세 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 외래키 — KEY_COLUMN_USAGE의 REFERENCED_* 열이 열 짝을, REFERENTIAL_CONSTRAINTS가 참조 동작을 준다.
+     * 이 테이블이 가리키는 것과 가리켜지는 것을 한 번에 받는다(다른 데이터베이스의 테이블은 db.table로).
+     */
+    private List<TableDetailSupport.ForeignKeyRow> mysqlForeignKeys(String table) {
+        String db = instance.getDbName();
+        return jdbc().query("""
+                SELECT kcu.CONSTRAINT_NAME, kcu.TABLE_SCHEMA, kcu.TABLE_NAME, kcu.COLUMN_NAME,
+                       kcu.REFERENCED_TABLE_SCHEMA, kcu.REFERENCED_TABLE_NAME, kcu.REFERENCED_COLUMN_NAME,
+                       rc.DELETE_RULE, rc.UPDATE_RULE
+                FROM information_schema.KEY_COLUMN_USAGE kcu
+                JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
+                  ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+                 AND rc.TABLE_NAME = kcu.TABLE_NAME
+                WHERE kcu.REFERENCED_TABLE_NAME IS NOT NULL
+                  AND ((kcu.TABLE_SCHEMA = ? AND kcu.TABLE_NAME = ?)
+                    OR (kcu.REFERENCED_TABLE_SCHEMA = ? AND kcu.REFERENCED_TABLE_NAME = ?))
+                ORDER BY kcu.TABLE_SCHEMA, kcu.TABLE_NAME, kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION
+                """,
+                (rs, i) -> new TableDetailSupport.ForeignKeyRow(rs.getString(1),
+                        TableDetailSupport.qualify(db, rs.getString(2), rs.getString(3)), rs.getString(4),
+                        TableDetailSupport.qualify(db, rs.getString(5), rs.getString(6)), rs.getString(7),
+                        rs.getString(8), rs.getString(9)),
+                db, table, db, table);
     }
 
     /** 인덱스 상세 — 복합 인덱스는 SEQ_IN_INDEX 위치별로 CARDINALITY가 누적되므로 마지막(최대)값이 전체 고유값 */
