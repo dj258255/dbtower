@@ -433,6 +433,15 @@ public class OracleOperator extends AbstractJdbcOperator {
                 return TableDetail.unsupported(table, "테이블을 찾을 수 없습니다: " + table);
             }
             List<TableDetail.IndexDetail> indexes = oracleIndexes(t);
+            // 인덱스 딕셔너리에는 기본키 표시가 없어 제약조건에서 읽는다(describeSchema와 같은 이유)
+            List<String> primaryKey = jdbc().queryForList(dictionary("""
+                    SELECT cc.column_name
+                    FROM {v}constraints k
+                    JOIN {v}cons_columns cc ON cc.constraint_name = k.constraint_name{and:cc.owner = k.owner}
+                    WHERE k.constraint_type = 'P' AND k.table_name = ?{and:k.owner = ?}
+                    ORDER BY cc.position
+                    """), String.class, withOwner(t));
+            TableDetailSupport.Keys keys = TableDetailSupport.foreignKeys(t, oracleForeignKeys(t));
 
             String baseNote = "Oracle는 테이블별 스토리지 엔진 개념이 없어 engine=null. "
                     + "행수·평균 행 길이는 옵티마이저 통계(DBMS_STATS 수집 후에만 채워짐) 기준 추정, "
@@ -458,10 +467,40 @@ public class OracleOperator extends AbstractJdbcOperator {
                 note = baseNote + ". DDL 원문 조회 실패(DBMS_METADATA 권한 부족 추정): " + e.getMessage();
             }
             return new TableDetail(table, null, (Long) head[0], (Long) head[1], (Long) head[2],
-                    (Long) head[3], (String) head[4], ddl, ddlSource, indexes, note);
+                    (Long) head[3], (String) head[4], ddl, ddlSource, indexes, note,
+                    List.copyOf(primaryKey), keys.outgoing(), keys.incoming());
         } catch (DataAccessException e) {
             throw new OperatorException("Oracle 테이블 상세 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 외래키 — 'R' 제약은 열만 갖고, 가리키는 테이블·열은 r_constraint_name이 가리키는 기본키(또는 유일) 제약에 있다.
+     * 두 제약의 cons_columns를 position으로 짝짓는다. 소유자 조건은 양쪽에 따로 걸어야 해서(다른 스키마가 이 테이블을 가리킬 수 있다)
+     * withOwner 대신 바인딩을 직접 늘어놓는다. Oracle에는 ON UPDATE 동작이 없다.
+     */
+    private List<TableDetailSupport.ForeignKeyRow> oracleForeignKeys(String upperTable) {
+        String current = hasAppSchema() ? appSchema : null;
+        String sql = dictionary("""
+                SELECT c.constraint_name, c.owner, c.table_name, cc.column_name,
+                       r.owner AS ref_owner, r.table_name AS ref_table, rcc.column_name AS ref_column, c.delete_rule
+                FROM {v}constraints c
+                JOIN {v}cons_columns cc ON cc.constraint_name = c.constraint_name{and:cc.owner = c.owner}
+                JOIN {v}constraints r ON r.constraint_name = c.r_constraint_name{and:r.owner = c.r_owner}
+                JOIN {v}cons_columns rcc ON rcc.constraint_name = r.constraint_name
+                     AND rcc.position = cc.position{and:rcc.owner = r.owner}
+                WHERE c.constraint_type = 'R'
+                  AND (c.table_name = ?{and:c.owner = ?} OR r.table_name = ?{and:r.owner = ?})
+                ORDER BY c.owner, c.table_name, c.constraint_name, cc.position
+                """);
+        Object[] args = hasAppSchema()
+                ? new Object[]{upperTable, appSchema, upperTable, appSchema}
+                : new Object[]{upperTable, upperTable};
+        return jdbc().query(sql, (rs, i) -> new TableDetailSupport.ForeignKeyRow(rs.getString("constraint_name"),
+                TableDetailSupport.qualify(current, rs.getString("owner"), rs.getString("table_name")),
+                rs.getString("column_name"),
+                TableDetailSupport.qualify(current, rs.getString("ref_owner"), rs.getString("ref_table")),
+                rs.getString("ref_column"), rs.getString("delete_rule"), null), args);
     }
 
     /**

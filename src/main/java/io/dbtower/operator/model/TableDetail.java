@@ -12,6 +12,8 @@ import java.util.List;
  *   PostgreSQL/MSSQL=카탈로그 재구성(RECONSTRUCTED — 근사), MongoDB=컬렉션·인덱스 JSON.
  * - cardinality: MySQL=STATISTICS.CARDINALITY, Oracle=DISTINCT_KEYS(네이티브),
  *   PostgreSQL=선두 컬럼 n_distinct 추정, MSSQL/Mongo=null(미확보 정직).
+ * - 키(VERIFICATION 151절): 기본키와 외래키를 DDL 문자열이 아니라 구조로 담는다. 외래키는 이 테이블이 가리키는 것(foreignKeys)과
+ *   이 테이블을 가리키는 것(referencedBy)을 함께 — "이 행을 지우면 무엇이 막히거나 같이 지워지나"는 들어오는 쪽을 봐야 답이 나온다.
  *
  * @param table        테이블/컬렉션명
  * @param engine       스토리지 엔진(InnoDB 등) — 개념이 없는 기종은 null
@@ -24,12 +26,24 @@ import java.util.List;
  * @param ddlSource    NATIVE(엔진이 준 원문) / RECONSTRUCTED(카탈로그 재구성 근사) / UNSUPPORTED
  * @param indexes      인덱스 상세(타입·카디널리티 포함)
  * @param note         기종별 한계·출처 설명(추정치 라벨 등)
+ * @param primaryKey   기본키 열(키 순서). 없거나 미확보면 빈 목록
+ * @param foreignKeys  이 테이블이 다른 테이블을 가리키는 외래키
+ * @param referencedBy 다른 테이블이 이 테이블을 가리키는 외래키(자기 참조는 양쪽에 함께 나온다)
  */
 public record TableDetail(String table, String engine, long rowCount, long dataBytes, long indexBytes,
                           long avgRowBytes, String createdAt, String ddl, DdlSource ddlSource,
-                          List<IndexDetail> indexes, String note) {
+                          List<IndexDetail> indexes, String note,
+                          List<String> primaryKey, List<ForeignKey> foreignKeys, List<ForeignKey> referencedBy) {
 
     public enum DdlSource { NATIVE, RECONSTRUCTED, UNSUPPORTED }
+
+    /** 키를 모르는 호출(단위 테스트·폴백)용 — 키 목록은 비워 둔다. */
+    public TableDetail(String table, String engine, long rowCount, long dataBytes, long indexBytes,
+                       long avgRowBytes, String createdAt, String ddl, DdlSource ddlSource,
+                       List<IndexDetail> indexes, String note) {
+        this(table, engine, rowCount, dataBytes, indexBytes, avgRowBytes, createdAt, ddl, ddlSource, indexes, note,
+                List.of(), List.of(), List.of());
+    }
 
     /**
      * 인덱스 하나의 상세 — 인덱스 정보 카드의 단위.
@@ -38,6 +52,18 @@ public record TableDetail(String table, String engine, long rowCount, long dataB
      * @param type        BTREE/HASH 등 인덱스 타입(미확보 null)
      */
     public record IndexDetail(String name, List<String> columns, boolean unique, String type, Long cardinality) {
+    }
+
+    /**
+     * 외래키 하나. columns[i]가 refColumns[i]를 가리킨다(복합 키는 키 순서).
+     * 다른 스키마의 테이블은 schema.table로 적는다 — 같은 이름이 현재 스키마에 있다고 오해하지 않게.
+     *
+     * @param table    제약을 가진 쪽(나가는 키면 이 테이블 자신)
+     * @param onDelete 참조되는 행을 지울 때의 동작(NO ACTION·RESTRICT·CASCADE·SET NULL·SET DEFAULT). 기종이 주지 않으면 null
+     * @param onUpdate 참조되는 키를 바꿀 때의 동작. Oracle은 개념이 없어 null
+     */
+    public record ForeignKey(String name, String table, List<String> columns, String refTable, List<String> refColumns,
+                             String onDelete, String onUpdate) {
     }
 
     public static TableDetail unsupported(String table, String note) {

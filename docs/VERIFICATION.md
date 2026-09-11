@@ -7243,3 +7243,195 @@ DBTOWER_E2E=1 PersonaUiE2ETest   7/7
                                  3인자 TableSchema 생성자 그대로 통과(43건)
 DBTOWER_E2E=1 PersonaUiE2ETest   7/7 — 워크벤치 트리 선택자(.tree-name[data-table], [data-toggle])를 쓰는 흐름 포함
 ```
+
+## 151. 테이블 상세에 기본키·외래키, 결과 그리드 조작, 관제 쪽 같은 렌더러 (2026-09-12)
+
+### 왜
+
+150절(스키마 트리 깊이)에 이어 사용자가 고른 나머지 셋이다: 테이블 상세 화면, 데이터 보기(그리드), 관제 대시보드의 테이블 표시.
+
+조사에서 확인한 것:
+
+- 외래키를 구조로 담는 곳이 없었다. PostgreSQL 테이블 상세는 DDL 재구성용 `pg_get_constraintdef` 문자열만, SQL Server는 재구성 DDL에 FK·CHECK가 아예 없었고(note에 "담지 못함"), MySQL·Oracle은 엔진 DDL 원문 안에만 있었다
+- 테이블 상세의 기본키도 PostgreSQL·SQL Server가 DDL 재구성에 쓰고 응답에서는 버렸다
+- 워크벤치 상세는 통계 카드 5장·열 표·인덱스 표·펼친 DDL, 관제 "관련 테이블 구조" 펼침은 두 칸 표·인덱스 카드 나열로 모양이 서로 달랐다
+- 그리드는 받은 행 안 정렬·전체 찾기·50행 페이지뿐이었다. 긴 값은 칸에서 말줄임되고 볼 방법이 title 툴팁뿐이었다
+- 샘플 스키마(MySQL sample·PostgreSQL sample·Oracle SAMPLE)에 외래키가 0개였다(읽기 조회). 사용자가 "승인 티켓으로 데모 외래키 추가"를 골랐다
+
+### 바꾼 것 — 서버
+
+- **모델**: `TableDetail`에 `primaryKey`·`foreignKeys`(이 테이블이 가리키는 것)·`referencedBy`(이 테이블을 가리키는 것). 11인자 생성자는 키 목록을 비워 남겼다.
+  `ForeignKey(name, table, columns, refTable, refColumns, onDelete, onUpdate)` — 다른 스키마의 테이블은 `schema.table`로
+- **접기는 한 곳에서**: 기종 SQL은 "제약·양쪽 테이블·열 한 쌍" 행만 내리고, `TableDetailSupport.foreignKeys`가 제약 단위로 접어 나가는 쪽과 들어오는 쪽으로 나눈다
+  (복합 키 열 짝은 행 순서, 다른 테이블의 같은 이름 제약은 섞지 않음, 테이블 이름 대소문자 무시). 참조 동작 표기는 SQL 문법으로 맞춘다(PostgreSQL 한 글자 `c`·`r`, SQL Server `NO_ACTION`)
+
+| 기종 | 외래키 | 기본키 |
+|---|---|---|
+| MySQL | `KEY_COLUMN_USAGE`(REFERENCED_*) + `REFERENTIAL_CONSTRAINTS`(DELETE_RULE·UPDATE_RULE) | 인덱스 `PRIMARY` |
+| PostgreSQL | `pg_constraint` 'f'의 `unnest(conkey, confkey) WITH ORDINALITY`. 파티션이 물려받은 제약(`conparentid <> 0`)은 뺀다 | `pg_constraint` 'p'(원래 DDL 재구성에 쓰던 것) |
+| SQL Server | `sys.foreign_keys` + `sys.foreign_key_columns`(constraint_column_id 순). 재구성 DDL 본문에도 FK 절을 넣었다 | `TABLE_CONSTRAINTS` PRIMARY KEY(원래 쓰던 것) |
+| Oracle | `{v}constraints` 'R' -> `r_constraint_name`이 가리키는 제약의 `{v}cons_columns`와 position으로 짝. 소유자 조건은 양쪽에 따로 | `{v}constraints` 'P' |
+| MongoDB | 개념 없음(빈 목록) | `_id` |
+
+- **관제 참조 구조**: `RefTable`에 기본키·외래키. 상세가 실패해도 기본키는 요약 경로(150절 describeSchema)에서 살린다. 문의 첨부 텍스트에 `fk: customer_id -> customers(id)` 한 줄
+
+### 바꾼 것 — 화면
+
+- **렌더러 한 벌** `workbench/table-detail.js`: 워크벤치 "테이블 상세" 탭과 관제 펼침이 같이 쓴다(관제는 처음 펼칠 때 모듈을 불러온다).
+  머리(이름·기본키)·통계 알약 줄·열 표(PK·FK 표시, FK 열은 참조 테이블 링크)·인덱스 표·외래키 두 표(가리키는 것·가리켜지는 것, ON DELETE·ON UPDATE)·접힌 DDL
+- **외래키 열에 인덱스 없음 표시**: 외래키 열로 시작하는 인덱스가 없으면 "인덱스 없음". 참조되는 행을 지우거나 키를 바꿀 때 엔진이 자식 테이블을 인덱스 없이 찾는다
+- **링크 이동**: 참조 테이블을 누르면 그 테이블 상세로. 스키마 트리에 있는 테이블만 누를 수 있고(뷰·다른 스키마 제외), 빠르게 옮겨 다닐 때 늦게 온 앞 응답이 덮지 않게 요청 번호로 거른다
+- **그리드**: 열 머리 끝을 끌어 너비 조절(두 번 누르면 원래대로, 끌기를 놓는 click은 정렬로 읽지 않음), 행을 누르면 세로 키-값 상세(이전·다음 행은 지금 보이는 순서대로),
+  열별 거르기(대문자 `NULL`은 빈 값), 페이지 크기 50·100·200·500.
+  가려진 열은 서버(ResultMasker)가 값을 바꿔 보내므로 거르기·찾기 조건에서 뺐다. 가림 문자와만 맞아 "그런 값이 없다"로 잘못 읽힌다
+- **한 열로 접기**: 뷰포트가 아니라 담는 칸 폭으로(`@container`). 관제 펼침은 화면이 넓어도 칸이 좁다
+- **구조 변화 문구**: 실행 기록의 구조 비교가 열·인덱스만 본다는 것을 밝혔다(아래 "찾은 것")
+
+글자 대비(계산): PK #8a4400/#fff1e0 6.50, FK #1f4fb8/#e9f0ff 6.40, 인덱스 없음 #9a3412/#fff1ea 6.62, 알약 이름·표 머리 #5b6475/#f5f6fa 5.52, 링크 #3d4ad6/흰 6.67,
+선택 행 위 행 번호 #667085/#f3f6ff 4.60(처음 고른 #eef3ff는 4.48로 미달이라 바꿨다).
+
+### 데모 외래키 — 제품의 승인 티켓 흐름으로
+
+`ALTER TABLE orders ADD CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES customers (id)`를 세 기종에 요청자 -> 승인자 -> 운영자로 올렸다
+(역할마다 다른 계정 p-requester·p-approver·p-operator — 142절에 지운 검증 계정을 다시 만들었다). Oracle SAMPLE에는 orders가 없어 올리지 않았다.
+
+```
+사전 읽기 조회(고아 주문: customers에 없는 customer_id)   PostgreSQL 0 · MySQL 0 · SQL Server 0
+요청자 제출   #69 PostgreSQL 14.0s · #70 MySQL 21.1s · #71 SQL Server 14.4s, 모두 PENDING
+  규칙        R-LOCK(ALTER TABLE orders) + R-LOCK-OK(orders 약 2,000행 — 임계 100만 미만)
+  AI 1차 소견  세 건 모두 "적용 전 고아 행 확인", "되돌리기 문장(DROP CONSTRAINT, MySQL은 DROP FOREIGN KEY) 준비"
+승인자        승인 직전 고아 주문 재조회 0 -> 승인(코멘트에 재확인 결과·되돌리기 경로)
+운영자 실행   #69 PostgreSQL COMMITTED
+              #70 MySQL      FAILED  REFERENCES command denied to user 'dbtower_writer'... for table 'sample.customers'
+              #71 SQL Server FAILED  The REFERENCES permission was denied on the object 'customers', database 'sample', schema 'dbo'.
+```
+
+변경 계정의 최소 권한이 실제로 막았다. 외래키는 자식 테이블 ALTER에 더해 **가리키는 테이블의 REFERENCES**가 있어야 만들어진다.
+PostgreSQL은 변경 계정이 소유자 역할(`sample_owner`) 멤버라 통과했다. 실패한 실행은 FAILED로 기록되고 티켓은 APPROVED로 남았다(실행권 반환).
+
+실습 환경의 계정 구성을 고쳤다. 티켓 흐름 밖의 권한 변경이라 따로 적는다.
+`docker/workbench-mysql.sql` 변경 계정에 `REFERENCES`, `docker/workbench-mssql.sql`에 `GRANT REFERENCES ON dbo.customers`·`dbo.orders`.
+실행 중인 두 컨테이너에는 관리자 계정으로 같은 GRANT만 적용했다(비밀번호는 컨테이너 환경변수에서 — MySQL은 MYSQL_PWD, SQL Server는 `scripts/ApplySql.java`의 DB_PASSWORD).
+
+```
+MySQL SHOW GRANTS  GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES, INDEX, ALTER ON `sample`.* TO `dbtower_writer`@`%`
+같은 승인 티켓을 운영자가 다시 실행
+  #70 MySQL      COMMITTED affectedRows 2000
+  #71 SQL Server COMMITTED affectedRows 0
+실행 기록(티켓별)  EXECUTE FAILED p-operator -> EXECUTE COMMITTED p-operator
+최종  세 티켓 모두 EXECUTED, requester p-requester · decidedBy p-approver · executedBy p-operator
+```
+
+MySQL의 영향 행 2000은 orders 전체 행 수와 같다. 외래키 추가가 테이블을 복사하는 방식으로 실행됐다는 뜻이다. 2,000행이라 짧았지만 큰 테이블이면 규칙이 말한 락 위험이 그대로 온다.
+
+### 찾은 것 — 실행 기록의 구조 비교가 외래키를 못 본다
+
+세 실행 모두 실행 기록의 구조 비교가 `identical: true`였다. 구조 스냅샷(describeSchema -> SchemaDiffService)이 열·인덱스만 담기 때문이다.
+화면은 "구조 차이가 없습니다"라고 적어, 외래키를 추가한 실행이 아무것도 바꾸지 않은 것처럼 읽혔다.
+이번 절에서는 문구를 "열·인덱스 차이가 없습니다 ... 외래키·CHECK 같은 제약조건은 아직 비교하지 않습니다"로 고쳤다.
+제약조건을 구조 스냅샷에 넣어 실제로 비교하는 것은 남은 과제다(5기종 describeSchema와 diff를 함께 바꿔야 한다).
+
+### 실측 — 라이브 5기종 API
+
+`POST /api/instances/{id}/table-detail`. 전(150절 main jar) 응답에는 `primaryKey`·`foreignKeys`·`referencedBy` 필드가 없었다.
+
+```
+후
+1 PostgreSQL  orders    pk [id]  가리키는 것 fk_orders_customer: orders(customer_id) -> customers(id) NO ACTION / NO ACTION
+              customers pk [id]  가리켜지는 것 fk_orders_customer
+2 MySQL       orders·customers 같은 모양 (인덱스 idx_orders_customer, PRIMARY)
+5 SQL Server  orders    pk [id]  가리키는 것 fk_orders_customer, 재구성 DDL 본문에 CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES customers (id)
+              customers pk [id]  가리켜지는 것 fk_orders_customer
+4 Oracle      CUSTOMERS pk [ID]  외래키 0 (SAMPLE에 외래키가 없다 — dba_ 딕셔너리 경로의 외래키 조회가 오류 없이 0행)
+3 MongoDB     customers pk [_id] 외래키 개념 없음 (이 샘플에는 orders 컬렉션이 없어 UNSUPPORTED)
+POST /api/instances/1/referenced-schema (orders JOIN customers)
+              orders pk [id] foreignKeys [fk_orders_customer] · customers pk [id] referencedBy [fk_orders_customer]
+```
+
+Oracle의 외래키 짝짓기는 실제 외래키가 없어 단위 테스트(자기 참조·대문자 이름)까지만 확인했다. 검증용 외래키를 Oracle에 만들지는 않았다.
+
+### 화면 — 같은 스크립트로 전후
+
+`detail151/DetailShot151.java`(관리자 프록시, 1512x1600, 옛 jar 150절 main -> 새 jar). 외래키 세 개는 전 측정 전에 이미 있었다. 옛 화면이 있는 외래키를 보여 주지 못한 것을 잰다.
+
+```
+워크벤치 테이블 상세                전                                  후
+PostgreSQL orders        키 표시 0, 외래키 절 없음              PK 2(열·인덱스) · FK 1 · 참조 링크 2 · 가리키는 외래키 1
+                         NOT NULL 칸 5개 중 두 줄로 접힘 5       접힘 0
+                         상세 높이 691px(DDL 펼침)              654px(DDL 접힘, 열 표는 한 열 전체 폭)
+MySQL customers          키 표시 0                            PK 2 · 가리켜지는 외래키 1(orders.customer_id)
+SQL Server orders        키 표시 0                            PK 2 · FK 1 · "인덱스 없음" 1 (customer_id에 인덱스가 실제로 없다)
+링크 orders -> customers  없음                                customers 상세로 넘어가 가리켜지는 외래키 1
+
+결과 그리드 (orders 미리보기, 50행 5열)
+너비 끌기 손잡이           0                                  5 — 열 1을 +120px 끌어 152 -> 272px, 끌기 뒤 정렬되지 않음
+행 상세                   없음                                "행 3" 5항목(300px), 다음 행 -> "행 4"
+열별 거르기                없음                                열 0에 "7" -> 5 / 50행, 치던 칸에 커서 유지
+페이지 크기                50 고정                             50·100·200·500
+
+관제 관련 테이블 구조 (PostgreSQL, orders JOIN customers)
+열 줄의 PK·FK 표시         0                                  PK 2 · FK 1, fk 줄 있음
+펼친 상세                  옛 블록 3                           워크벤치와 같은 렌더러, 외래키 1
+
+폭별 넘침(1512·1100·400px, 상세 / 그리드+행 상세)  전후 모두 0. 행 상세는 1512·1100px에서 결과 옆, 400px에서 결과 아래
+화면 오류(pageerror·console.error)                 전후 0
+```
+
+측정에서 틀린 것 하나: DDL이 차지하는 높이를 `offsetParent`·`getBoundingClientRect`로 쟀더니 접은 뒤에도 218px이 나왔다. 닫힌 `<details>` 안 요소도 Chrome에서는 박스를 가진다.
+접힘 효과는 상세 전체 높이로만 적었다(AGENTS.md에 규칙으로 남김).
+
+첫 사진에서 찾은 것 둘: 1512x900으로 찍은 새 화면에서 두 열 배치의 열 표가 좁아 타입이 "charac / ter varying"처럼 글자 중간에서 쪼개졌고, 외래키 표의 "NO ACTION"이 두 줄이 됐다.
+워크벤치 가운데 칸은 1512px 화면에서 약 775px이다. 한 열로 접는 칸 폭 기준을 760 -> 960px로, 타입은 단어 사이에서만 접히게, 참조 동작 칸은 줄바꿈하지 않게 고친 뒤 전후를 다시 찍었다.
+
+### 화면 사진
+
+![전 — 키 표시 없음, NOT NULL이 두 줄, DDL이 펼쳐져 아래를 민다](images/webui/147-table-detail-before.jpg)
+![후 — 기본키·외래키 표시와 참조 링크, 가리키는 외래키와 ON DELETE, 접힌 DDL](images/webui/148-table-detail-after.jpg)
+![후 — SQL Server orders: customer_id에 인덱스가 없어 "인덱스 없음"](images/webui/151-table-detail-unindexed-fk.jpg)
+![후 — 결과 그리드: 열 1을 끌어 넓히고 행 3의 세로 키-값 상세](images/webui/149-grid-row-detail.jpg)
+![후 — 관제 관련 테이블 구조: 열 줄의 PK·FK와 fk 줄, 워크벤치와 같은 상세](images/webui/150-monitor-refschema-after.jpg)
+
+## 152. 변경 티켓 목록 — 열린 것만/전체 (2026-09-12)
+
+### 왜
+
+워크벤치 가운데 "변경 티켓" 탭의 목록은 인스턴스의 티켓 전부를 최신순으로 보였다. 옛 화면에서 잰 수(관리자 프록시):
+인스턴스 1(PostgreSQL)은 22건 중 열린 티켓(대기·승인·실행 중·되돌리는 중)이 2건이고 첫 열린 티켓이 15번째였다. 더 최근의 끝난 티켓 14건이 위에 쌓여 처리할 건이 아래로 밀렸다.
+인스턴스 2(MySQL) 28건·인스턴스 5(SQL Server) 7건은 열린 티켓이 0이다.
+
+### 바꾼 것
+
+- 목록 머리에 [열린 것 n | 전체 m](`aria-pressed`). 탭 옆 숫자(열린 티켓 수)는 그대로
+- 고르기 전 기본은 열린 티켓이 있으면 열린 것, 없으면 전체. 열린 것이 0일 때 빈 목록으로 기록을 가리지 않게
+- 고른 티켓이 끝난 것이면(닫힌 티켓 딥링크, 방금 실행해 닫힌 티켓) 전체로 넓혀 목록에서 사라지지 않게. 인스턴스를 바꾸면 기본으로 돌아간다
+
+### 실측 — 같은 스크립트로 전후
+
+`detail151/TicketList152.java`(관리자 프록시, 1512x900).
+
+```
+                          전                              후 기본                              후 전체
+인스턴스 1 PostgreSQL      22건 · 열린 2 · 첫 열린 15번째     2건 · 첫 열린 1번째 [열린 것 2 선택]    22건 · 15번째
+인스턴스 2 MySQL           28건 · 열린 0                    28건 [전체 28 선택]
+인스턴스 5 SQL Server      7건 · 열린 0                     7건 [전체 7 선택]
+닫힌 티켓 45 딥링크         목록에서 보임                      전체로 넓혀 목록에서 보임
+화면 오류                  0                               0
+```
+
+글자 대비(계산): 눌린 범위 버튼 흰 글자 / --primary #4f5ef7 4.91:1.
+
+![후 — 인스턴스 1: 열린 것 2(선택) · 전체 22, 승인된 티켓 둘이 맨 위](images/webui/152-tickets-scope-after.jpg)
+
+### 회귀 (151·152절 공통)
+
+```
+./scripts/check-conventions.sh   규약 검사 전부 통과
+./gradlew test                   tests 856 skipped 26 failures 0 errors 0 (150절 849 -> 856)
+  TableDetailSupportTest 11      +7: 외래키 행을 제약별로 접어 가리키는/가리켜지는 쪽으로 나눔(복합 키 열 짝), 자기 참조는 양쪽·테이블 이름 대소문자 무시,
+                                 다른 테이블의 같은 이름 제약은 섞지 않음, 참조 동작 표기(NO_ACTION·한 글자 코드), 스키마 한정, 재구성 DDL의 외래키 절,
+                                 키를 모르는 생성자는 빈 목록
+DBTOWER_E2E=1 PersonaUiE2ETest   7/7 (63초)
+node --check                     table-detail.js·grid.js·main.js·tickets.js·app.js 문법 통과
+```
+
+전체 테스트 뒤에 바뀐 것은 화면(CSS·JS)과 문서뿐이다(타입 줄바꿈·접는 칸 폭·참조 동작 칸, 티켓 범위 기본값). E2E와 전후 화면 측정은 그 뒤의 소스·jar로 돌렸다.

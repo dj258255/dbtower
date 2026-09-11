@@ -71,7 +71,7 @@ DBA는 같은 질문에 반복해서 답하게 됩니다. 정형화된 운영 �
 | 백업 정책 | 추상 정책을 기종별 실행 방식으로 번역 — (인스턴스, 타입)별 병행 스케줄(FULL 앵커 6시간 + LOG 체인 15분이 정석), 신선도는 앵커 기준(LOG 성공이 FULL 실패를 못 가림) + S3 호환 원격 보관(3-2-1 오프사이트) |
 | 통합 모니터링 | CPU·Connections 그래프 내장(Prometheus exporter 직접 조회, 미수집 사유 정직 표기) + Grafana 연동 + 복제 상태 통합 뷰 |
 | 웹 콘솔 | QPS·CPU 그래프 드래그로 구간 선택 -> 증감 표 -> 클릭 한 번에 EXPLAIN + AI 분석 |
-| 테이블 상세 | CREATE TABLE 전문·크기 통계·인덱스 카디널리티(5기종) — DDL 출처를 NATIVE/재구성으로 정직 구분, PG는 FK·CHECK까지 재조립 |
+| 테이블 상세 | CREATE TABLE 전문·크기 통계·인덱스 카디널리티·기본키·외래키(가리키는 것과 가리켜지는 것, ON DELETE)를 5기종 카탈로그에서 — DDL 출처를 NATIVE/재구성으로 정직 구분 |
 | MCP 서버 | AI 에이전트가 위 기능들을 도구로 직접 사용 (stdio / HTTP) |
 | Wait Event 분석 | 그 시간에 무엇을 기다렸나(CPU/IO/Lock) — 5기종 통합, load%와 짝 |
 | 세션·블로킹 | 활성 세션과 블로킹 트리 조회, 세션 종료(운영자) — PG는 cancel/terminate 구분 |
@@ -249,6 +249,12 @@ DBeaver처럼 스키마 트리·탭 편집기·자동완성·결과 그리드로
 관제 쿼리 상세의 "워크벤치에서 열기"는 새 탭 대신 같은 페이지의 워크벤치 모드로 넘깁니다(탭 2개 -> 1개, 넘길 때 문서 로드 1회 -> 0회, [VERIFICATION 149절](docs/VERIFICATION.md)).
 왼쪽 스키마 트리는 데이터베이스 -> 테이블/뷰 -> 열(기본키 표시)·인덱스까지 펼칩니다. 뷰가 테이블처럼 섞이던 기종(PostgreSQL·SQL Server)을 나누고, 5기종 모두 기본키를 표시합니다([VERIFICATION 150절](docs/VERIFICATION.md)).
 
+테이블 상세는 기본키와 외래키를 DDL 문자열이 아니라 구조로 보여 줍니다. 이 테이블이 가리키는 것과 이 테이블을 가리키는 것(지우면 무엇이 막히거나 함께 지워지나)을
+ON DELETE와 함께 적고, 참조 테이블을 누르면 그 상세로 넘어가며, 외래키 열로 시작하는 인덱스가 없으면 표시합니다. 관제 쿼리 상세의 "관련 테이블 구조"도 같은 렌더러로 펼칩니다.
+결과 그리드에는 열 너비 끌기·행 상세(세로 키-값)·열별 거르기·페이지 크기를 더했고, 변경 티켓 목록은 열린 티켓을 먼저 보입니다(처리할 티켓 위치 15번째 -> 1번째).
+검증용 외래키는 제품의 승인 티켓으로 올렸는데, MySQL·SQL Server에서 변경 계정에 가리키는 테이블의 REFERENCES 권한이 없어 실행이 거부됐습니다.
+최소 권한이 실제로 막은 사례라 계정 구성을 고치고 같은 티켓을 다시 실행했습니다([VERIFICATION 151·152절](docs/VERIFICATION.md)).
+
 ![워크벤치 — 왼쪽 스키마에서 orders를 펼치고 선택 모드로 테이블·열을 질문에 붙인 순간](docs/images/webui/132-workbench-layout-after.jpg)
 
 ![워크벤치 — 분류 배지, 마스킹된 email·phone 열](docs/images/webui/135-workbench-masked.jpg)
@@ -296,7 +302,9 @@ Apple Silicon에는 SQL Server를 네이티브로 돌릴 경로가 없어(공식
 [VERIFICATION 134절](docs/VERIFICATION.md)). 비교 화면의 행 지표는 기종마다 세는 것이 달라(PostgreSQL은 돌려준 행,
 SQL Server는 논리 읽기 페이지 등) 오퍼레이터가 알려준 이름으로 적습니다.
 
-![테이블 상세 탭 — 왼쪽 스키마의 "상세"에서 행 수·데이터·인덱스 크기, 열, 인덱스 카디널리티](docs/images/webui/136-workbench-table-detail.jpg)
+![테이블 상세 탭 — 기본키·외래키 표시와 참조 테이블 링크, 이 테이블이 가리키는 외래키와 ON DELETE, 접힌 DDL](docs/images/webui/148-table-detail-after.jpg)
+
+![결과 그리드 — 열 너비를 끌어 넓히고, 행을 눌러 세로 키-값 상세](docs/images/webui/149-grid-row-detail.jpg)
 
 ![티켓 워크로드 비교 — 실행 전후 60분, 평균 지연 46.64ms -> 0.0037ms, 행 지표 이름, 새 쿼리 목록](docs/images/webui/140-workbench-ticket-workload.jpg)
 

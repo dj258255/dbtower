@@ -744,7 +744,9 @@ public class MongoOperator implements DbmsOperator {
                 return new TableDetail(tableName, engine, rowCount, dataBytes, indexBytes, avgRowBytes,
                         null, // createdAt — MongoDB는 컬렉션 생성 시각을 쉽게 주지 않는다
                         ddl, DdlSource.NATIVE, indexes,
-                        "스키마리스 — 컬렉션 옵션·인덱스 정의(테이블 DDL 아님)");
+                        "스키마리스 — 컬렉션 옵션·인덱스 정의(테이블 DDL 아님)",
+                        // 모든 컬렉션에 _id 고유 인덱스가 있고, 컬렉션 사이 참조 제약은 개념이 없다
+                        List.of("_id"), List.of(), List.of());
             });
         } catch (Exception e) {
             throw new OperatorException("MongoDB 컬렉션 상세 조회 실패: " + e.getMessage(), e);

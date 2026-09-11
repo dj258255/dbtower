@@ -1378,8 +1378,13 @@ async function runReferencedSchema() {
   } finally { btn.classList.remove("loading"); }
 }
 
+// 펼친 상세가 이 목록의 열(타입·NULL)을 다시 쓴다 — 테이블 상세 API는 열 목록을 주지 않는다
+const refSchemaByName = new Map();
+
 function renderReferencedSchema(data) {
   const tables = data.tables ?? [];
+  refSchemaByName.clear();
+  for (const t of tables) refSchemaByName.set(t.name, t);
   if (!tables.length && !(data.notFound ?? []).length) {
     return '<div class="muted">쿼리에서 참조 테이블을 찾지 못했습니다 (FROM/JOIN 확인).</div>';
   }
@@ -1397,11 +1402,22 @@ function renderReferencedSchema(data) {
           return `${esc(i.name)}${i.unique ? "<span class=\"idx-u\">[U]</span>" : ""}(${esc((i.columns ?? []).join(","))})${extra ? ` <span class="muted">${extra}</span>` : ""}`;
         }).join(", "))
       : '<span class="muted">없음</span>';
-    const cols = (t.columns ?? []).map((c) => `${esc(c.name)} <span class="muted">${esc(c.type)}${c.nullable ? "?" : ""}</span>`).join(", ");
+    // 기본키·외래키 열 표시(151절) — 조인 열이 키를 따르는지가 계획 진단의 재료다
+    const pk = new Set((t.primaryKey ?? []).map((c) => c.toLowerCase()));
+    const fkCols = new Set((t.foreignKeys ?? []).flatMap((fk) => fk.columns.map((c) => c.toLowerCase())));
+    const cols = (t.columns ?? []).map((c) => {
+      const key = c.name.toLowerCase();
+      const marks = `${pk.has(key) ? '<span class="key-badge pk">PK</span>' : ""}${fkCols.has(key) ? '<span class="key-badge fk">FK</span>' : ""}`;
+      return `${esc(c.name)}${marks} <span class="muted">${esc(c.type)}${c.nullable ? "?" : ""}</span>`;
+    }).join(", ");
+    const fks = (t.foreignKeys ?? []).length
+      ? `<div class="schema-cols">fk: ${t.foreignKeys.map((fk) => `${esc(fk.columns.join(","))} → ${esc(fk.refTable)}(${esc(fk.refColumns.join(","))})`).join(", ")}</div>`
+      : "";
     html += `<div class="finding-item schema-table"><b>${esc(t.name)}</b>${rows}
       <button class="btn btn-small td-toggle" data-table="${esc(t.name)}">상세 보기</button>
       <div class="schema-idx">idx: ${idx}</div>
       <div class="schema-cols">cols: ${cols}</div>
+      ${fks}
       <div class="td-detail" hidden></div></div>`;
   }
   if ((data.notFound ?? []).length) {
@@ -1416,7 +1432,7 @@ function renderReferencedSchema(data) {
   return html;
 }
 
-// 테이블 상세 정보 — CREATE TABLE·기본 통계·인덱스 카디널리티를 아코디언으로 펼친다.
+// 테이블 상세 정보 — 워크벤치 "테이블 상세" 탭과 같은 렌더러로 펼친다(151절). 모듈이라 처음 펼칠 때 불러온다
 async function toggleTableDetail(btn) {
   const box = btn.parentElement.querySelector(".td-detail");
   if (!box.hidden) { box.hidden = true; btn.textContent = "상세 보기"; return; }
@@ -1424,49 +1440,19 @@ async function toggleTableDetail(btn) {
   if (box.dataset.loaded) return;
   box.innerHTML = '<div class="muted">테이블 상세 조회 중...</div>';
   try {
-    const d = await api(`/api/instances/${state.instance.id}/table-detail`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ table: btn.dataset.table }),
-    });
-    box.innerHTML = renderTableDetail(d);
+    const [d, { renderTableDetail }] = await Promise.all([
+      api(`/api/instances/${state.instance.id}/table-detail`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ table: btn.dataset.table }),
+      }),
+      import("./workbench/table-detail.js"),
+    ]);
+    const ref = refSchemaByName.get(btn.dataset.table);
+    box.innerHTML = renderTableDetail(d, { columns: ref ? ref.columns : null });
     box.dataset.loaded = "1";
   } catch (e) {
     box.innerHTML = `<div class="finding-item">상세 조회 실패: ${esc(e.message)}</div>`;
   }
-}
-
-function renderTableDetail(d) {
-  // 음수(-1)는 미확보를 뜻한다 — 크기 통계는 fmtBytes(null이 아닌 음수) 대신 "—"로 표기
-  const bytesOrDash = (v) => v < 0 ? "—" : fmtBytes(v);
-  const src = { NATIVE: "", RECONSTRUCTED: '<span class="td-badge">카탈로그 재구성</span>', UNSUPPORTED: '<span class="td-badge">미지원</span>' };
-  let html = "";
-  // 스키마 정보 (DDL)
-  if (d.ddl) {
-    html += `<div class="td-block"><div class="td-h">스키마 정보 ${src[d.ddlSource] ?? ""}</div><pre class="codeblock td-ddl">${esc(d.ddl)}</pre></div>`;
-  }
-  // 기본 통계
-  const stat = (k, v) => `<div class="td-stat"><span class="muted">${k}</span><span>${v}</span></div>`;
-  html += `<div class="td-block"><div class="td-h">기본 통계</div>
-    ${d.engine ? stat("엔진", esc(d.engine)) : ""}
-    ${stat("행 수", d.rowCount < 0 ? "—" : d.rowCount.toLocaleString())}
-    ${stat("데이터 크기", bytesOrDash(d.dataBytes))}
-    ${stat("인덱스 크기", bytesOrDash(d.indexBytes))}
-    ${stat("평균 행 길이", bytesOrDash(d.avgRowBytes))}
-    ${d.createdAt ? stat("생성 시각", esc(d.createdAt)) : ""}</div>`;
-  // 인덱스 정보
-  const idxs = d.indexes ?? [];
-  if (idxs.length) {
-    html += '<div class="td-block"><div class="td-h">인덱스 정보</div>';
-    for (const i of idxs) {
-      html += `<div class="td-idx-card"><b>${esc(i.name)}</b>${i.unique ? ' <span class="idx-u">UNIQUE</span>' : ""}
-        <div class="muted">컬럼: ${esc((i.columns ?? []).join(", "))}</div>
-        <div class="muted">타입: ${esc(i.type ?? "—")}</div>
-        <div class="muted">카디널리티: ${i.cardinality != null ? Number(i.cardinality).toLocaleString() : "—"}</div></div>`;
-    }
-    html += "</div>";
-  }
-  if (d.note) html += `<div class="muted td-note">${esc(d.note)}</div>`;
-  return html;
 }
 
 // AI 분석은 흘려 받는다(143절) — 실행계획은 1초 안에 오는데 AI 답은 수십 초 걸린다. 한 번에 받으면 그동안 계획까지 같이 기다렸다.
