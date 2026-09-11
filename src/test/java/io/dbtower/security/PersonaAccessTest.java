@@ -171,7 +171,7 @@ class PersonaAccessTest {
     @Test
     void 요청자는_로그인하면_워크벤치로_운영자는_대시보드로_간다() throws Exception {
         // 저장된 요청이 있을 때의 재생·루트 무시는 RoleHomeSuccessHandlerTest가, 실제 쿠키 세션 흐름은 라이브 검증(135절)이 본다
-        mvc.perform(login("persona-requester")).andExpect(redirectedUrl("/workbench.html"));
+        mvc.perform(login("persona-requester")).andExpect(redirectedUrl("/?mode=workbench"));
         mvc.perform(login("persona-operator")).andExpect(redirectedUrl("/"));
     }
 

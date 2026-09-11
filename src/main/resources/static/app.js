@@ -468,6 +468,8 @@ function enhanceSelect(sel) {
 
 function handleInstanceDeepLink(list) {
   const params = new URLSearchParams(location.search);
+  // 워크벤치 모드로 열렸으면 관제 화면의 대상 조회(로더 18개)를 돌리지 않는다 — 관제로 돌아올 때 그 인스턴스를 연다(setMode)
+  if (params.get("mode") === "workbench") return;
   const target = params.get("instance") ? list.find((i) => String(i.id) === params.get("instance")) : null;
   if (!target) {
     // 월간 점검 요약(MonthlyReportJob)은 인스턴스 없이 함대 전체를 가리킨다 — 전에는 처리하는 곳이 없어 빈 첫 화면만 열렸다(148절 감사)
@@ -490,7 +492,8 @@ function handleInstanceDeepLink(list) {
       runCompare();
     });
   }
-  if (deepQ) { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("perf"); const input = $("#diagnose-question"); input.value = deepQ; input.scrollIntoView({ block: "center" }); input.focus(); }
+  // 진단 입력은 늘 보이는 AI 칸에 있다(149절) — 모니터링 탭을 열 필요 없이 질문을 채운다
+  if (deepQ) { const input = $("#diagnose-question"); input.value = deepQ; input.scrollIntoView({ block: "center" }); input.focus(); }
   if (deepView === "config-drift") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadConfigDrift(); $("#config-drift-result").scrollIntoView({ block: "center" }); }
   if (deepView === "review") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadReviews(); $(".review-gate-card").scrollIntoView({ block: "center" }); }
   // 인시던트 리포트 웹훅 카드(IncidentController)와 월간 리포트의 입구 — 링크는 있었는데 처리하는 곳이 없었다(148절 감사)
@@ -1178,8 +1181,16 @@ async function runQuery() {
   } else {
     sum.hidden = true;
   }
-  const [stats, rowsLabel] = await Promise.all([
-    api(`/api/instances/${state.instance.id}/query-stats?limit=20`), rowsMetricLabel(state.instance.id)]);
+  let stats, rowsLabel;
+  try {
+    [stats, rowsLabel] = await Promise.all([
+      api(`/api/instances/${state.instance.id}/query-stats?limit=20`), rowsMetricLabel(state.instance.id)]);
+  } catch (e) {
+    // 대상 조회가 실패하면(502) 사유를 표 자리에 보인다 — 전에는 잡지 않아 표가 빈 채로 멈추고 콘솔 오류만 남았다(149절 계측 중 발견)
+    $("#top-table thead").innerHTML = "";
+    $("#top-table tbody").innerHTML = `<tr><td class="muted">쿼리 통계를 불러오지 못했습니다: ${esc(e.message)}</td></tr>`;
+    return;
+  }
   const table = $("#top-table");
   // Call/sec는 스냅샷 차분이라 이력 없으면 null → "—". Latency/행 지표는 누적÷호출수(평균).
   // Plan 컬럼은 값이 있는 기종(MongoDB — profiler가 계획 요약을 저장)에서만 그린다.
@@ -1787,7 +1798,8 @@ function handToWorkbench(kind, sql, reason = "") {
     alert("브라우저 저장소를 쓸 수 없어 워크벤치로 넘기지 못했습니다. SQL을 복사해 워크벤치에 붙여 넣으세요.");
     return;
   }
-  window.open(`/workbench.html?instance=${encodeURIComponent(state.instance.id)}&handoff=${id}`, "_blank", "noopener");
+  // 같은 페이지의 워크벤치 모드로 넘긴다(149절) — 전에는 새 탭에 페이지를 한 벌 더 띄웠다
+  setMode("workbench", { instance: state.instance.id, handoff: id });
 }
 
 // 사용자·역할 카드(ADMIN) — 역할은 인증 시 권한에 실리므로 바꾼 역할은 그 사용자의 다음 로그인부터 적용된다
@@ -2574,7 +2586,7 @@ async function loadReviews() {
       : r.status === "CANCELLED" ? '<span class="rv-rejected">취소</span>'
       : '<span class="rv-rejected">반려</span>';
     const workbenchLink = can("WORKBENCH")
-      ? `<a class="muted" href="/workbench.html?instance=${esc(encodeURIComponent(r.instanceId))}&amp;ticket=${esc(encodeURIComponent(r.id))}">워크벤치에서 티켓 열기</a>` : "";
+      ? `<a class="muted" href="/?mode=workbench&amp;instance=${esc(encodeURIComponent(r.instanceId))}&amp;ticket=${esc(encodeURIComponent(r.id))}">워크벤치에서 티켓 열기</a>` : "";
     const findings = (r.findings || []).map((f) => `<li>${esc(f)}</li>`).join("");
     const ai = r.aiOpinion ? `<div class="rv-ai"><b>AI 1차 소견:</b> ${esc(r.aiOpinion)}</div>` : "";
     const limited = r.parseLimited ? '<div class="rv-limited">다중 문장·복잡 구문 — 규칙 판정이 불완전할 수 있습니다(사람이 전체 확인).</div>' : "";
@@ -2977,9 +2989,79 @@ function setupPresets() {
   });
 }
 
+// ---------- 한 셸의 두 모드(149절) — 관제와 워크벤치를 페이지 이동 없이 전환한다 ----------
+// 워크벤치 코드는 처음 워크벤치 모드로 들어갈 때 모듈로 불러온다(관제만 보는 사람은 받지 않는다)
+const shell = { mode: "monitor", workbench: null };
+
+function setupModes() {
+  document.querySelectorAll(".mode-tab").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
+  if (new URLSearchParams(location.search).get("mode") === "workbench") setMode("workbench", { keepUrl: true });
+  window.addEventListener("popstate", () => {
+    const m = new URLSearchParams(location.search).get("mode") === "workbench" ? "workbench" : "monitor";
+    if (m !== shell.mode) setMode(m, { keepUrl: true });
+  });
+}
+
+async function setMode(mode, { instance = null, handoff = null, keepUrl = false } = {}) {
+  const toWorkbench = mode === "workbench";
+  shell.mode = toWorkbench ? "workbench" : "monitor";
+  document.querySelectorAll(".mode-tab").forEach((b) => {
+    const on = b.dataset.mode === shell.mode;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", String(on));
+  });
+  $("#mode-monitor").hidden = toWorkbench;
+  $("#mode-workbench").hidden = !toWorkbench;
+  document.body.classList.toggle("mode-workbench", toWorkbench);
+  // 숨긴 관제 화면의 실시간 연결은 닫는다 — 안 보는 화면이 구독자로 남으면 대상 조회가 멈추지 않는다(AGENTS.md 화면 규칙)
+  syncLive();
+  if (!keepUrl) {
+    const q = new URLSearchParams();
+    const id = instance ?? (toWorkbench ? shell.workbench?.currentInstanceId?.() : null) ?? state.instance?.id;
+    if (toWorkbench) q.set("mode", "workbench");
+    if (id != null) q.set("instance", id);
+    if (handoff) q.set("handoff", handoff);
+    history.pushState(null, "", q.toString() ? `/?${q}` : "/");
+  }
+  if (!toWorkbench) {
+    openMonitorInstance(shell.workbench?.currentInstanceId?.());
+    return;
+  }
+  if (!can("WORKBENCH")) {
+    showWorkbenchGuard();
+    return;
+  }
+  if (!shell.workbench) {
+    shell.workbench = await import("./workbench/main.js");
+    await shell.workbench.mount(); // URL의 instance·sheet·ticket·handoff를 읽어 시작한다
+  } else if (instance != null || handoff) {
+    await shell.workbench.navigate({ instance, handoff });
+  }
+}
+
+// 워크벤치에서 보던 인스턴스를 관제로 돌아와서도 연다 — 모드를 바꿀 때마다 대상을 다시 고르지 않게
+function openMonitorInstance(id) {
+  if (id == null || !state.instances || (state.instance && String(state.instance.id) === String(id))) return;
+  const inst = state.instances.find((i) => String(i.id) === String(id));
+  if (!inst) return;
+  selectInstance(inst, $(`#instance-list .instance-card[data-id="${inst.id}"]`));
+}
+
+// 관제만 보는 역할이 워크벤치 주소로 들어오면 빈 화면 대신 갈 곳을 알려준다 — 서버도 워크벤치 API를 403으로 막는다
+function showWorkbenchGuard() {
+  const view = $("#mode-workbench");
+  view.innerHTML = `<main style="padding:48px 16px">
+    <div class="wb-note" style="margin:0 auto;max-width:640px">
+      <p>워크벤치는 조회 계정으로 대상 DB의 행 값을 보는 화면이라 요청자(REQUESTER) 이상 역할이 필요합니다.
+        지금 역할(${esc(ROLE_LABEL[state.role] || state.role || "")})은 관제 모드에서 지표·리포트를 봅니다.</p>
+      <p><button class="btn btn-primary btn-small" type="button" data-mode-go="monitor">관제로</button></p></div></main>`;
+  view.querySelector("[data-mode-go]").addEventListener("click", () => setMode("monitor"));
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   // 세션 kill 버튼 노출 여부가 역할에 달려 있어, 인스턴스 로딩(→세션 표) 전에 역할을 먼저 확정한다
   await loadMe();
+  setupModes();
   loadMcpCommand();
   loadInstances();
   loadHealthScore();     // 함대 전체 통합 헬스 스코어 (D8) — 나쁜 순 정렬, 대시보드 상단 상시 뷰

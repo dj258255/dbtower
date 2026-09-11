@@ -92,8 +92,11 @@ public final class PlatformRoles {
         return ORDER.stream().filter(roles::contains).findFirst().orElse("?");
     }
 
-    /** 로그인 뒤 첫 화면 — 요청자는 데이터를 들고 오니 워크벤치, 관제·승인·운영·관리는 대시보드 */
+    /**
+     * 로그인 뒤 첫 화면 — 요청자는 데이터를 들고 오니 워크벤치 모드, 관제·승인·운영·관리는 관제 모드.
+     * 두 화면은 한 페이지의 모드다(149절). 예전 주소 /workbench.html은 이 주소로 넘기는 페이지로 남아 있다
+     */
     public static String home(Collection<? extends GrantedAuthority> granted) {
-        return "REQUESTER".equals(primaryRole(granted)) ? "/workbench.html" : "/";
+        return "REQUESTER".equals(primaryRole(granted)) ? "/?mode=workbench" : "/";
     }
 }

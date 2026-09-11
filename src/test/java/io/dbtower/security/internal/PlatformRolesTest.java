@@ -67,7 +67,7 @@ class PlatformRolesTest {
 
     @Test
     void 첫_화면은_요청자만_워크벤치다() {
-        assertThat(PlatformRoles.home(AuthorityUtils.createAuthorityList("ROLE_REQUESTER"))).isEqualTo("/workbench.html");
+        assertThat(PlatformRoles.home(AuthorityUtils.createAuthorityList("ROLE_REQUESTER"))).isEqualTo("/?mode=workbench");
         for (String role : new String[]{"ROLE_VIEWER", "ROLE_APPROVER", "ROLE_OPERATOR", "ROLE_ADMIN"}) {
             assertThat(PlatformRoles.home(AuthorityUtils.createAuthorityList(role))).as(role).isEqualTo("/");
         }
