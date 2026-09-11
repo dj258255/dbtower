@@ -6041,3 +6041,104 @@ merge commit으로 한다(브랜치 커밋 이력을 그대로 남긴다).
 
 - 화면 확인용 티켓: #50은 운영자가 되돌림(`ROLLED_BACK rolledBackBy p-operator`, 대상 `customers` id=3 원래 값), #49는 요청자 본인 취소.
 - 프록시 다섯 개와 로컬 앱은 확인 뒤 내렸다. 검증 계정 `p-*`은 로컬 메타 DB에 남아 있다.
+
+## 137. 보여줄 수 있게 만든다 — HypoPG 데모 이미지, 자리표시 SQL 인덱스 제안 결함, 역할별 화면 E2E, 데모 흐름 (2026-09-11)
+
+### 무엇을 했나
+
+136절 뒤 "이제 뭐 해야 하나"에 세 가지를 추천했고 사용자가 "다해줘"라고 했다.
+
+1. 데모 compose의 PostgreSQL에 HypoPG를 넣는다 — 136절에서 인덱스 제안이 `UNSUPPORTED`라 보내는 쪽 버튼을 대역 응답으로만 확인했다.
+2. 역할별 화면 확인을 CI의 실제 브라우저 테스트로 고정한다 — 136절 결함 둘은 사람이 눌러서야 나왔다.
+3. 보여주기: README 첫 화면 줄이기, 데모 GIF, 한 장 요약, 면접 예상 질문.
+
+### 1. 데모 PostgreSQL = postgres:16 + HypoPG
+
+- `docker/postgres/Dockerfile`: `FROM postgres:16` + `apt-get install postgresql-16-hypopg`(공식 이미지에 PGDG 저장소가 이미 있다). compose의 `postgres`는 `build: ./docker/postgres`, `image: dbtower-postgres:16-hypopg`.
+- `docker/postgres-init.sql`에 `CREATE EXTENSION IF NOT EXISTS hypopg;` — 등록 계정 `dbtower_monitor`는 확장 생성 권한이 없어 슈퍼유저 초기화에서 만든다(어드바이저의 `CREATE EXTENSION IF NOT EXISTS`는 이미 있으면 통과). 새 볼륨에만 돌므로 기존 볼륨은 한 번 수동으로 만들었다.
+- 로컬 전환(이름 있는 볼륨 `dbtower_postgres-data` 유지):
+
+```
+== before: row counts     payment_events 1000000 / platform_user 6
+docker compose build postgres && docker compose up -d postgres
+dbtower-postgres:16-hypopg
+== after: data kept       payment_events 1000000 / platform_user 6
+hypopg|1.4.3              (pg_available_extensions) -> CREATE EXTENSION -> hypopg|1.4.3
+```
+
+- 실제 경로(요청자, 값을 넣은 SQL): `status ADVISED`, `CREATE INDEX ON payment_events (merchant_id, created_at)`, Total Cost 12580.60 -> 84.21(99.3% 감소). 실제 인덱스는 `payment_events_pkey` 하나 그대로.
+
+### 2. 찾은 결함 — 대시보드에서 인덱스 제안을 누르면 502
+
+HypoPG를 넣고 화면에서 같은 흐름을 누르자 `시뮬레이션 실패: 502 대상 데이터베이스 조회에 실패했습니다`. 같은 API를 curl로 부를 때는 됐다. 차이는 SQL이었다: 쿼리 상세는
+pg_stat_statements 정규화 텍스트(`WHERE merchant_id = $1 ... LIMIT $2`)를 그대로 넘기고, curl은 값을 넣었다. 서버 로그:
+
+```
+OperatorException: PostgreSQL 인덱스 어드바이저 실패: ConnectionCallback; ERROR: bind message supplies 0 parameters, but prepared statement "" requires 2
+```
+
+풀 커넥션(pgjdbc 기본 extended protocol)에서 `EXPLAIN ... $1`을 보내면 서버가 `$1`을 바인드 파라미터로 받는다. 같은 파일의 플랜 변경 감지(`explainNormalized`)는 이미
+1회용 simple-protocol 커넥션 + `EXPLAIN (GENERIC_PLAN, FORMAT JSON)`(PostgreSQL 16+)으로 이 함정을 피하고 있었고, 어드바이저만 그 경로를 쓰지 않았다.
+화면에는 "파라미터 자리를 실제 값으로 고쳐서" 안내가 있었지만, 대시보드에서 넘어오는 기본 흐름이 매번 502로 끝나는 것은 제품 결함이다.
+
+수정: SQL에 `$n`이 있으면 1회용 simple-protocol 커넥션을 열어 확장 확보·전 계획·가상 인덱스·후 계획·`hypopg_reset`을 그 한 커넥션에서 `GENERIC_PLAN`으로 한다(가상 인덱스는 같은 커넥션에서만 보인다).
+값이 들어간 SQL은 종전 풀 경로 그대로. 단위 테스트 `IndexAdviceTest`에 자리표시 판별을 더했다.
+
+```
+[= $1 ORDER BY created_at DESC LIMIT $2] status=ADVISED cost=12578.73 -> 8.47 | 가상 인덱스로 Total Cost 12578.73 → 8.47 (99.9% 감소)   (수정 전 502)
+[= 42 ORDER BY created_at DESC LIMIT 20] status=ADVISED cost=12580.6 -> 84.21 | 가상 인덱스로 Total Cost 12580.60 → 84.21 (99.3% 감소)  (종전 경로)
+실제 인덱스: payment_events_pkey
+```
+
+두 비용이 다른 것은 GENERIC_PLAN이 값 없이 제네릭 계획을 뽑기 때문이다(구체 값 42의 계획과 같은 수치가 아니다).
+
+라이브 중 실수 하나: 새 코드를 띄운다며 `build/libs`의 첫 jar를 골라 예전 `dbtower-1.1.0.jar`(7월)를 띄웠다. 역할 변경 전 코드라 바로 내리고 `dbtower-1.2.0.jar`로 다시 띄웠다.
+
+### 3. 역할별 화면 E2E — `PersonaUiE2ETest`
+
+실제 서버(랜덤 포트)에 Playwright Java 1.62.0 Chromium으로 역할마다 로그인한다. 대상 DB 없이 돈다(인스턴스는 닿지 않는 `127.0.0.1:1`, 티켓은 저장소에 직접).
+리뷰 제출 API를 안 쓰는 이유는 AI 소견 호출이 환경(claude CLI 유무)에 따라 달라서다. `DBTOWER_E2E=1`일 때만 돌고, 브라우저는 `./gradlew playwrightInstall`(Linux는 `--with-deps`)이 받는다.
+CI에 설치 단계와 `DBTOWER_E2E: "1"`을 더했다.
+
+```
+tests 5 failures 0 errors 0 skipped 0 time 51.422
+ok   요청자는_워크벤치에_관제는_대시보드에_도착한다()
+ok   사용자_역할_카드는_관리자에게만_있다()
+ok   같은_티켓에서_승인자는_실행하지_못하고_운영자는_승인하지_못한다()
+ok   관제에게는_워크벤치_입구와_변경_요청_입력이_없고_직접_들어오면_안내가_화면_폭으로_뜬다()   (안내 폭 > 400px — 136절 결함 1 회귀 검사)
+ok   리뷰_카드의_승인_시각은_브라우저_시간대로_보이고_UTC_원문은_툴팁에_남는다()           (브라우저 Asia/Seoul — 136절 결함 2 회귀 검사)
+```
+
+### 4. 데모 흐름 — 역할을 바꿔 가며 한 번 끝까지 (로컬 앱, 역할별 프록시)
+
+136절과 같은 방식으로 역할마다 로컬 프록시(127.0.0.1:8801~8805)가 세션을 들고, 브라우저는 로그인하지 않았다. 화면의 버튼을 실제로 눌렀고 대역 응답은 없다.
+
+| 단계 | 역할 | 화면에서 한 일 | 결과 |
+|---|---|---|---|
+| 1 | 요청자 | 대시보드 쿼리 상세(`$1`·`$2` 정규화 텍스트) -> 인덱스 제안 | ADVISED, Total Cost 12578.73 -> 8.47, "워크벤치에서 변경 요청으로 올리기" 버튼(캡처 91) |
+| 2 | 요청자 | 버튼 -> 새 탭 워크벤치 변경 요청 창(DDL·사유 채움) -> 검증 조회 입력 -> 요청 올리기 | 티켓 #51 PENDING, 규칙 지적 없음, AI 1차 소견은 `CONCURRENTLY` 없이 쓰기가 막힐 수 있음과 롤백용 인덱스 이름 |
+| 3 | 승인자 | 드라이런 | `롤백(흔적 없음) 0행 · DDL`, 검증 조회 `Gather Merge -> Index Scan Backward`, 응답시간 중앙값 47.3ms -> 626µs(같은 트랜잭션 3회, 방향만 참고) |
+| 4 | 승인자 | 승인 | #51 APPROVED, 버튼 [드라이런, 티켓 취소] + "실행은 운영자(OPERATOR)가 합니다" |
+| 5 | 운영자 | 실행(두 번 눌러 확인) | `실행 커밋 0행 · DDL · p-operator · 15:03:37`, 인덱스 `payment_events_merchant_id_created_at_idx` 생김, 중앙값 49.0ms -> 419µs, 역변경 제안 `DROP INDEX ...` |
+| 6 | 운영자 | 실행 시각 딥링크 -> 대시보드 시점 비교 | 기준 14:33~15:03, 대상 15:03~(KST) |
+
+실행 시작 `2026-09-11T06:03:37.016671`(UTC). 비교 API는 06:04:49부터 응답했다(`calls%=-94.22 latency%=-11.73`). 이 구간은 부하가 거의 없어 성능 해석에 쓰지 않는다.
+
+정리: 데모 인덱스는 플랫폼의 역변경 경로로 지웠다 — 요청자가 `DROP INDEX payment_events_merchant_id_created_at_idx`를 티켓 #52로 올리고, 승인자 승인, 운영자 실행(`COMMITTED DDL p-operator`).
+실제 인덱스는 다시 `payment_events_pkey` 하나다.
+
+### 5. 보여주기 문서
+
+- README 첫 화면에 "3분 요약"(무엇·누가·데모 GIF·실측 3개·링크)을 두고, 56줄 기능 표는 접었다.
+- `docs/images/demo-change-flow.gif` — 4절 흐름의 실제 화면 7장에 역할·단계 설명 띠를 붙여 합쳤다(1100x609, 7프레임, 690KB). 브라우저 확장의 GIF 내보내기는 파일 다운로드라 쓰지 않고, 저장한 스크린샷을 로컬(Pillow)에서 합쳤다.
+- `docs/PORTFOLIO-ONEPAGER.md` — DBMS 운영 관리 직무에 맞춘 사례 넷(승인된 변경만 실행, 권한 경계는 코드, 대상 하나가 폴러를 멈추지 않게, 사람별 입구)과 실측 표.
+- `docs/INTERVIEW-QA.md` — 설계·변경 안전·AI·검증·장애 대응 질문 13개, 답마다 근거 절.
+
+### 테스트
+
+```
+IndexAdviceTest 5 (+1)             자리표시($1·$2) 판별 — 대시보드 정규화 텍스트는 GENERIC_PLAN 경로로
+PersonaUiE2ETest 5 (DBTOWER_E2E)   위 3절
+전체 (DBTOWER_E2E=1)               787 tests, 실패 0, 건너뜀 17(실DB IT 게이트), 규약 검사 통과 (BUILD SUCCESSFUL in 5m 17s)
+```
+
