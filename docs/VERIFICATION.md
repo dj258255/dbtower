@@ -7508,3 +7508,49 @@ MySQL은 외래키를 지워도 그 열의 인덱스(`idx_orders_customer`)를 �
   TableDetailSupportTest 11      타입만 ForeignKey로 옮기고 그대로 통과
 node --check                     diff.js·app.js 문법 통과
 ```
+
+## 154. 소스에 들어간 원시 NUL 바이트 — 파일이 바이너리로 취급되던 것 (2026-09-12)
+
+### 왜
+
+153절 커밋 통계에서 Java 소스 하나가 `Bin 8425 -> 9147 bytes`로 찍혔다. 줄 단위 diff가 아니라 "바이너리"였다.
+blob을 뜯어 보니 150·151절에 커밋된 두 파일에 **실제 NUL 문자 한 바이트**가 들어 있었다. 맵 키 구분자를 이스케이프(`\u0000`)로 쓰려다 문자 자체가 파일에 들어갔다.
+
+```
+HEAD~1 TableDetailSupport.java  offset 2928 (60행)  byConstraint.computeIfAbsent(r.table() + "<NUL>" + r.name(), ...)
+HEAD   TableDetailSupport.java  NUL 0               153절에서 그 구간을 다시 쓰며 사라졌다
+schema-tree.js                  offset 813 (11행)   const VIEWS_GROUP_KEY = "<NUL>group:views";
+```
+
+동작은 정상이었다(150~153절 테스트 859·E2E 7/7 통과, 화면에서도 뷰 묶음이 그대로 접힌다). 문제는 리뷰 가능성이다.
+git이 파일을 바이너리로 보면 PR에 diff가 나오지 않아 사람이 변경을 읽을 수 없고, `grep "group:views"`도 아무것도 찾지 못한다(실제로 못 찾아서 이 조사를 시작했다).
+
+### 바꾼 것
+
+- `schema-tree.js`의 묶음 키를 이스케이프로 적는다 — 값(NUL로 시작하는 키)은 그대로라 동작은 같고, 파일은 텍스트로 남는다
+- `scripts/check-conventions.sh`에 검사 7) 추가: 추적 파일(이미지·jar 등 제외)에 NUL 바이트가 있으면 실패.
+  규약을 사람의 규율이 아니라 빌드가 강제하게 한다는 이 스크립트의 원칙 그대로다
+
+이 절을 쓰는 동안 같은 일이 한 번 더 일어났다. 문서 초안에 이스케이프 표기를 적었는데 편집 도구가 실제 NUL 문자로 써 넣었고,
+붙이기 전 검사에서 초안 세 개(NUL 1·1·2개)가 걸렸다. 사람의 주의가 아니라 검사가 잡아야 하는 종류라는 것이 이 자리에서 다시 확인됐다.
+
+### 실측 — 가드가 실제로 잡는가
+
+```
+지금 상태            통과: 원시 NUL 바이트 금지 (소스가 바이너리로 취급되지 않게)
+NUL 한 바이트 심기    실패: 원시 NUL 바이트 금지 (소스가 바이너리로 취급되지 않게)
+                         docs/nul-probe.txt: NUL 1개
+탐침 제거 뒤          규약 검사 전부 통과
+추적 파일 전수 검사    NUL 0 (이미지·jar 제외)
+```
+
+### 회귀
+
+```
+./scripts/check-conventions.sh   규약 검사 전부 통과 (검사 7 포함)
+node --check                     schema-tree.js 문법 통과
+DBTOWER_E2E=1 PersonaUiE2ETest   7/7 (63.4초) — 스키마 트리 묶음을 쓰는 흐름 포함
+git ls-files 전수 NUL 검사        0 (이미지·jar 제외)
+```
+
+값은 바뀌지 않는다(묶음 키는 여전히 NUL로 시작한다). 바뀐 것은 소스에 그 문자를 적는 방법뿐이다.

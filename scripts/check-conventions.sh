@@ -87,6 +87,26 @@ for t in $(grep -oE "(performance_schema|sys|mysql)\.[a-z_]+" src/main/java/io/d
 done
 report "MySQL 모니터 권한 기준선 (오퍼레이터가 읽는 테이블 = init 스크립트 GRANT)" "$(echo "$hits" | sed '/^$/d')"
 
+# 7) 소스에 원시 NUL 바이트 금지 — 한 바이트만 들어가도 git이 그 파일을 바이너리로 보고 diff·리뷰·grep에서 사라진다.
+#    150·151절에 맵 키 구분자가 이스케이프가 아니라 실제 NUL 문자로 커밋됐다(동작은 정상, 리뷰는 불가능 — VERIFICATION 154절).
+hits=$(git ls-files | python3 -c '
+import sys
+skip = (".jpg", ".jpeg", ".png", ".gif", ".jar", ".ico", ".woff", ".woff2", ".pdf", ".zip")
+bad = []
+for path in sys.stdin.read().splitlines():
+    if path.lower().endswith(skip):
+        continue
+    try:
+        data = open(path, "rb").read()
+    except OSError:
+        continue
+    n = data.count(b"\x00")
+    if n:
+        bad.append(path + ": NUL " + str(n) + "개")
+print("\n".join(bad))
+')
+report "원시 NUL 바이트 금지 (소스가 바이너리로 취급되지 않게)" "$hits"
+
 echo
 [ "$fail" -eq 0 ] && echo "규약 검사 전부 통과" || echo "규약 검사 실패 — 위 항목을 확인하세요"
 exit $fail
