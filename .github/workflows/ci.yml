@@ -20,7 +20,12 @@ jobs:
       # 기종 분기 기준선·읽기 전용 게이트). 테스트보다 먼저 돌려 빠르게 실패시킨다.
       - name: Convention checks
         run: ./scripts/check-conventions.sh
+      # 역할별 화면 E2E(PersonaUiE2ETest)용 브라우저 — 136절 화면 결함은 사람이 눌러서야 나왔다. CI가 같은 화면을 실제 브라우저로 누른다
+      - name: Install Playwright Chromium
+        run: ./gradlew playwrightInstall
       - name: Test
+        env:
+          DBTOWER_E2E: "1"
         run: ./gradlew test
       - name: Upload test report
         if: failure()

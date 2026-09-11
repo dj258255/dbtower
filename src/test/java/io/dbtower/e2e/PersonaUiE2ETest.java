@@ -1,0 +1,210 @@
+package io.dbtower.e2e;
+
+import com.microsoft.playwright.Browser;
+import com.microsoft.playwright.BrowserContext;
+import com.microsoft.playwright.Locator;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.options.BoundingBox;
+import io.dbtower.registry.DatabaseInstance;
+import io.dbtower.registry.DatabaseInstanceRepository;
+import io.dbtower.registry.DbmsType;
+import io.dbtower.review.internal.domain.ReviewRequest;
+import io.dbtower.review.internal.persistence.ReviewRequestRepository;
+import io.dbtower.security.internal.domain.PlatformUser;
+import io.dbtower.security.internal.persistence.PlatformUserRepository;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.security.crypto.password.PasswordEncoder;
+
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
+
+import static com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * 역할별 화면 E2E — 실제 서버(랜덤 포트)에 실제 브라우저로 역할마다 로그인해 버튼·메뉴·안내를 본다.
+ *
+ * <p>136절에서 결함 둘(관제 역할의 워크벤치 안내가 셸 격자 첫 칸에 끼임, 리뷰 카드 승인 시각이 UTC 원문)은 MockMvc·단위 테스트가 아니라
+ * 사람이 화면을 눌러서야 나왔다. 같은 종류의 회귀를 CI가 잡게 하려는 테스트다. 브라우저가 필요해 DBTOWER_E2E=1일 때만 돈다
+ * (로컬: {@code ./gradlew playwrightInstall && DBTOWER_E2E=1 ./gradlew test --tests '*PersonaUiE2ETest'}).
+ *
+ * <p>대상 DB는 필요 없다 — 인스턴스는 닿지 않는 주소로 등록하고 티켓은 저장소에 직접 넣는다. 화면은 헬스·스키마 조회 실패를 정직 표기할 뿐
+ * 역할 분기는 그대로 그린다. 리뷰 제출 API를 쓰지 않는 이유는 AI 소견 호출이 로컬 환경(claude CLI 유무)에 따라 달라지기 때문이다.
+ */
+@EnabledIfEnvironmentVariable(named = "DBTOWER_E2E", matches = "1")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "dbtower.security.api-token=test-api-token")
+class PersonaUiE2ETest {
+
+    private static final String PASSWORD = "persona-e2e-pass-1234";
+    private static final ZoneId BROWSER_ZONE = ZoneId.of("Asia/Seoul");
+    private static final Map<String, PlatformUser.Role> PERSONAS = Map.of(
+            "e2e-viewer", PlatformUser.Role.VIEWER,
+            "e2e-requester", PlatformUser.Role.REQUESTER,
+            "e2e-approver", PlatformUser.Role.APPROVER,
+            "e2e-operator", PlatformUser.Role.OPERATOR,
+            "e2e-admin", PlatformUser.Role.ADMIN);
+
+    private static Playwright playwright;
+    private static Browser browser;
+
+    @LocalServerPort
+    int port;
+
+    @Autowired
+    PlatformUserRepository users;
+
+    @Autowired
+    PasswordEncoder encoder;
+
+    @Autowired
+    DatabaseInstanceRepository instances;
+
+    @Autowired
+    ReviewRequestRepository reviews;
+
+    private final List<BrowserContext> contexts = new ArrayList<>();
+    private DatabaseInstance instance;
+    private ReviewRequest pending;
+    private ReviewRequest approved;
+
+    @BeforeAll
+    static void launchBrowser() {
+        playwright = Playwright.create();
+        browser = playwright.chromium().launch();
+    }
+
+    @AfterAll
+    static void closeBrowser() {
+        browser.close();
+        playwright.close();
+    }
+
+    @BeforeEach
+    void seed() {
+        PERSONAS.forEach((name, role) -> users.findByUsername(name)
+                .orElseGet(() -> users.save(new PlatformUser(name, encoder.encode(PASSWORD), role))));
+        // 포트 1은 연결 거부가 즉시 돌아온다 — 대상 없이 화면 분기만 본다
+        instance = instances.save(new DatabaseInstance("e2e-mysql", DbmsType.MYSQL, "127.0.0.1", 1, "sample", "u", "p"));
+        pending = reviews.save(new ReviewRequest(instance.getId(), "UPDATE customers SET grade = 'GOLD' WHERE id = 4",
+                "e2e 대기 티켓", "e2e-requester", "", null, 2, false, null));
+        ReviewRequest toApprove = new ReviewRequest(instance.getId(), "UPDATE customers SET grade = 'VIP' WHERE id = 3",
+                "e2e 승인된 티켓", "e2e-requester", "", null, 2, false, null);
+        toApprove.decide(ReviewRequest.Status.APPROVED, "e2e-approver", "e2e 승인");
+        approved = reviews.save(toApprove);
+    }
+
+    @AfterEach
+    void cleanup() {
+        contexts.forEach(BrowserContext::close);
+        reviews.deleteAll(List.of(pending, approved));
+        instances.delete(instance);
+        PERSONAS.keySet().forEach(name -> users.findByUsername(name).ifPresent(users::delete));
+    }
+
+    @Test
+    void 요청자는_워크벤치에_관제는_대시보드에_도착한다() {
+        assertThat(loginAs("e2e-requester").url()).endsWith("/workbench.html");
+        assertThat(loginAs("e2e-viewer").url()).endsWith("/");
+    }
+
+    @Test
+    void 관제에게는_워크벤치_입구와_변경_요청_입력이_없고_직접_들어오면_안내가_화면_폭으로_뜬다() {
+        Page page = loginAs("e2e-viewer");
+        page.navigate(base() + "/?instance=" + instance.getId() + "&view=review");
+        page.locator("#review-list .rv-item").first().waitFor();
+        assertThat(page.locator("#nav-workbench")).isHidden();
+        assertThat(page.locator("#review-submit")).isHidden();
+        assertThat(page.locator("#review-list a[href*='workbench.html']")).hasCount(0);
+
+        page.navigate(base() + "/workbench.html");
+        Locator guard = page.getByText("요청자(REQUESTER) 이상 역할이 필요합니다", new Page.GetByTextOptions().setExact(false));
+        guard.waitFor();
+        BoundingBox box = guard.boundingBox();
+        // 수정 전에는 셸 격자의 첫 칸(인스턴스 목록 폭 약 170px)에 끼어 세로로 늘어졌다(136절 결함 1)
+        assertThat(box.width).as("안내 폭").isGreaterThan(400);
+    }
+
+    @Test
+    void 같은_티켓에서_승인자는_실행하지_못하고_운영자는_승인하지_못한다() {
+        Page approver = loginAs("e2e-approver");
+        assertThat(ticketActions(approver, pending)).contains("dry-run", "approve", "reject").doesNotContain("execute");
+        assertThat(ticketActions(approver, approved)).contains("dry-run").doesNotContain("execute", "approve");
+        assertThat(approver.locator("#wb-ticket")).containsText("실행은 운영자(OPERATOR)가 합니다");
+
+        Page operator = loginAs("e2e-operator");
+        assertThat(ticketActions(operator, pending)).contains("dry-run").doesNotContain("approve", "reject");
+        assertThat(ticketActions(operator, approved)).contains("dry-run", "execute").doesNotContain("approve");
+
+        Page requester = loginAs("e2e-requester");
+        assertThat(ticketActions(requester, pending)).containsExactly("cancel");
+    }
+
+    @Test
+    void 리뷰_카드의_승인_시각은_브라우저_시간대로_보이고_UTC_원문은_툴팁에_남는다() {
+        Page page = loginAs("e2e-viewer");
+        page.navigate(base() + "/?instance=" + instance.getId() + "&view=review");
+        // 수정 전에는 서버의 오프셋 없는 UTC 원문을 잘라 찍어 워크벤치와 9시간 어긋났다(136절 결함 2)
+        Locator time = page.locator("#review-list .rv-decided span[title]").first();
+        time.waitFor();
+        String raw = time.getAttribute("title").replace("UTC 원문: ", "").trim();
+        String expected = LocalDateTime.parse(raw).atOffset(ZoneOffset.UTC).atZoneSameInstant(BROWSER_ZONE)
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        assertThat(time.textContent()).isEqualTo(expected);
+    }
+
+    @Test
+    void 사용자_역할_카드는_관리자에게만_있다() {
+        Page admin = loginAs("e2e-admin");
+        admin.locator("#user-chip .role-badge").waitFor();
+        assertThat(admin.locator("#users-card")).not().hasAttribute("hidden", "");
+        assertThat(admin.locator("#users-table tbody")).containsText("e2e-operator");
+
+        Page operator = loginAs("e2e-operator");
+        operator.locator("#user-chip .role-badge").waitFor();
+        assertThat(operator.locator("#users-card")).hasAttribute("hidden", "");
+    }
+
+    private Page loginAs(String username) {
+        BrowserContext context = browser.newContext(new Browser.NewContextOptions()
+                .setTimezoneId(BROWSER_ZONE.getId()).setViewportSize(1512, 900));
+        context.setDefaultTimeout(20_000);
+        contexts.add(context);
+        Page page = context.newPage();
+        page.navigate(base() + "/login.html");
+        page.fill("#username", username);
+        page.fill("#password", PASSWORD);
+        page.click("button[type=submit]");
+        page.waitForURL(Pattern.compile("^(?!.*/login).*$"));
+        return page;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> ticketActions(Page page, ReviewRequest ticket) {
+        page.navigate(base() + "/workbench.html?instance=" + instance.getId() + "&ticket=" + ticket.getId());
+        Locator buttons = page.locator("#wb-ticket .tk-actions button[data-act]");
+        buttons.first().waitFor();
+        return ((List<String>) page.locator("#wb-ticket .tk-actions button[data-act]")
+                .evaluateAll("els => els.map((e) => e.dataset.act)")).stream()
+                .filter(act -> !"to-editor".equals(act)).toList();
+    }
+
+    private String base() {
+        return "http://localhost:" + port;
+    }
+}

@@ -1196,57 +1196,85 @@ public class PostgresOperator extends AbstractJdbcOperator {
                     "후보 인덱스(columns) 미지정 — 자동 컬럼 추천은 범위 밖입니다. 예: users(category)");
         }
         String ddl = buildCreateIndexDdl(columns); // 형식/식별자 위반이면 IllegalArgumentException(400)
+        if (hasPlaceholders(sql)) {
+            // 대시보드 쿼리 상세는 pg_stat_statements 정규화 텍스트($1·$2)를 그대로 넘긴다. 풀 커넥션(extended protocol)으로 EXPLAIN하면
+            // 서버가 $1을 바인드 파라미터로 파싱해 "bind message supplies 0 parameters"로 실패했다(137절). 플랜 변경 감지(explainNormalized)와
+            // 같은 방식으로 1회용 simple-protocol 커넥션에서 GENERIC_PLAN(PostgreSQL 16+)으로 계획을 뽑는다. 가상 인덱스도 같은 커넥션이어야 보인다
+            try (java.sql.Connection conn = java.sql.DriverManager.getConnection(
+                    jdbcUrl() + "&preferQueryMode=simple", instance.getUsername(), instance.getPassword())) {
+                return adviseOn(conn, sql, ddl, true);
+            } catch (java.sql.SQLException e) {
+                throw new OperatorException("PostgreSQL 인덱스 어드바이저(GENERIC_PLAN) 실패: " + e.getMessage(), e);
+            }
+        }
         try {
-            return jdbc().execute((org.springframework.jdbc.core.ConnectionCallback<IndexAdvice>) conn -> {
-                // HypoPG 확장 확보 — 없거나 설치 권한이 없으면 UNSUPPORTED로 정직하게 내려간다
-                try (java.sql.Statement st = conn.createStatement()) {
-                    st.execute("CREATE EXTENSION IF NOT EXISTS hypopg");
-                } catch (java.sql.SQLException e) {
-                    return IndexAdvice.unsupported(
-                            "HypoPG 확장 필요 — CREATE EXTENSION hypopg 실패(미설치/권한 없음): " + e.getMessage());
-                }
-                String beforePlan = explainJson(conn, sql);
-                double beforeCost = totalCost(beforePlan);
-                // 가상 인덱스 생성은 파라미터 바인딩(?)으로 — ddl은 이미 검증됐지만 이중 방어
-                String afterPlan;
-                try (java.sql.PreparedStatement ps =
-                             conn.prepareStatement("SELECT hypopg_create_index(?)")) {
-                    ps.setString(1, ddl);
-                    ps.execute();
-                    afterPlan = explainJson(conn, sql);
-                } finally {
-                    // 가상 인덱스는 세션 로컬이라 커넥션 반납만으로도 사라지지만, 풀 재사용을 감안해 명시적으로 정리
-                    try (java.sql.Statement st = conn.createStatement()) {
-                        st.execute("SELECT hypopg_reset()");
-                    }
-                }
-                double afterCost = totalCost(afterPlan);
-                double reductionPct = beforeCost <= 0 ? 0 : (beforeCost - afterCost) / beforeCost * 100.0;
-                if (afterCost < beforeCost * COST_IMPROVEMENT_THRESHOLD) {
-                    return IndexAdvice.advised(
-                            "가상 인덱스로 Total Cost %.2f → %.2f (%.1f%% 감소) — 옵티마이저가 이 인덱스를 채택했습니다"
-                                    .formatted(beforeCost, afterCost, reductionPct),
-                            ddl, beforePlan, afterPlan, beforeCost, afterCost);
-                }
-                return IndexAdvice.noBenefit(
-                        "가상 인덱스를 만들어도 Total Cost %.2f → %.2f (유의미한 감소 없음) — 옵티마이저가 채택하지 않았습니다"
-                                .formatted(beforeCost, afterCost),
-                        ddl, beforePlan, afterPlan, beforeCost, afterCost);
-            });
+            return jdbc().execute((org.springframework.jdbc.core.ConnectionCallback<IndexAdvice>) conn -> adviseOn(conn, sql, ddl, false));
         } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 인덱스 어드바이저 실패: " + e.getMessage(), e);
         }
     }
 
-    /** 같은 커넥션에서 EXPLAIN (FORMAT JSON)을 돌려 플랜 JSON 문자열을 얻는다(가상 인덱스가 보이도록). */
-    private static String explainJson(java.sql.Connection conn, String sql) throws java.sql.SQLException {
-        try (java.sql.Statement st = conn.createStatement();
-             java.sql.ResultSet rs = st.executeQuery("EXPLAIN (FORMAT JSON) " + sql)) {
-            StringBuilder sb = new StringBuilder();
-            while (rs.next()) {
-                sb.append(rs.getString(1));
+    /** 가상 인덱스 전후 계획 비교 — 확장 확보부터 hypopg_reset까지 한 커넥션에서 한다(다른 커넥션은 가상 인덱스를 못 본다) */
+    private static IndexAdvice adviseOn(java.sql.Connection conn, String sql, String ddl, boolean generic)
+            throws java.sql.SQLException {
+        // HypoPG 확장 확보 — 없거나 설치 권한이 없으면 UNSUPPORTED로 정직하게 내려간다
+        try (java.sql.Statement st = conn.createStatement()) {
+            st.execute("CREATE EXTENSION IF NOT EXISTS hypopg");
+        } catch (java.sql.SQLException e) {
+            return IndexAdvice.unsupported(
+                    "HypoPG 확장 필요 — CREATE EXTENSION hypopg 실패(미설치/권한 없음): " + e.getMessage());
+        }
+        String beforePlan = explainJson(conn, sql, generic);
+        double beforeCost = totalCost(beforePlan);
+        // 가상 인덱스 생성은 파라미터 바인딩(?)으로 — ddl은 이미 검증됐지만 이중 방어
+        String afterPlan;
+        try (java.sql.PreparedStatement ps =
+                     conn.prepareStatement("SELECT hypopg_create_index(?)")) {
+            ps.setString(1, ddl);
+            ps.execute();
+            afterPlan = explainJson(conn, sql, generic);
+        } finally {
+            // 가상 인덱스는 세션 로컬이라 커넥션 반납만으로도 사라지지만, 풀 재사용을 감안해 명시적으로 정리
+            try (java.sql.Statement st = conn.createStatement()) {
+                st.execute("SELECT hypopg_reset()");
             }
-            return sb.toString();
+        }
+        double afterCost = totalCost(afterPlan);
+        double reductionPct = beforeCost <= 0 ? 0 : (beforeCost - afterCost) / beforeCost * 100.0;
+        if (afterCost < beforeCost * COST_IMPROVEMENT_THRESHOLD) {
+            return IndexAdvice.advised(
+                    "가상 인덱스로 Total Cost %.2f → %.2f (%.1f%% 감소) — 옵티마이저가 이 인덱스를 채택했습니다"
+                            .formatted(beforeCost, afterCost, reductionPct),
+                    ddl, beforePlan, afterPlan, beforeCost, afterCost);
+        }
+        return IndexAdvice.noBenefit(
+                "가상 인덱스를 만들어도 Total Cost %.2f → %.2f (유의미한 감소 없음) — 옵티마이저가 채택하지 않았습니다"
+                        .formatted(beforeCost, afterCost),
+                ddl, beforePlan, afterPlan, beforeCost, afterCost);
+    }
+
+    private static final java.util.regex.Pattern PLACEHOLDER = java.util.regex.Pattern.compile("\\$\\d+");
+
+    /** pg_stat_statements 정규화 텍스트처럼 $1·$2 자리표시가 있는가 — 있으면 값 없이 계획을 뽑는 GENERIC_PLAN 경로로 간다 */
+    static boolean hasPlaceholders(String sql) {
+        return PLACEHOLDER.matcher(sql).find();
+    }
+
+    /** 같은 커넥션에서 EXPLAIN (FORMAT JSON)을 돌려 플랜 JSON 문자열을 얻는다(가상 인덱스가 보이도록). generic이면 자리표시 채로 GENERIC_PLAN */
+    private static String explainJson(java.sql.Connection conn, String sql, boolean generic) throws java.sql.SQLException {
+        try (java.sql.Statement st = conn.createStatement()) {
+            if (generic) {
+                // 1회용 커넥션은 풀의 기본 쿼리 타임아웃을 받지 않는다 — 플랜 변경 감지와 같은 상한을 건다
+                st.setQueryTimeout(10);
+            }
+            try (java.sql.ResultSet rs = st.executeQuery(
+                    (generic ? "EXPLAIN (GENERIC_PLAN, FORMAT JSON) " : "EXPLAIN (FORMAT JSON) ") + sql)) {
+                StringBuilder sb = new StringBuilder();
+                while (rs.next()) {
+                    sb.append(rs.getString(1));
+                }
+                return sb.toString();
+            }
         }
     }
 

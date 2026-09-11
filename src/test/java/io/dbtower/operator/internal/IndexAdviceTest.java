@@ -48,6 +48,15 @@ class IndexAdviceTest {
     }
 
     @Test
+    void 대시보드의_정규화_텍스트는_자리표시로_알아보고_GENERIC_PLAN_경로로_보낸다() {
+        // 쿼리 상세는 pg_stat_statements 텍스트를 그대로 넘긴다 — 풀 커넥션 EXPLAIN은 $1을 바인드 파라미터로 받아 실패했다(137절)
+        assertTrue(PostgresOperator.hasPlaceholders(
+                "SELECT id, amount, created_at FROM payment_events WHERE merchant_id = $1 ORDER BY created_at DESC LIMIT $2"));
+        assertFalse(PostgresOperator.hasPlaceholders(
+                "SELECT id, amount, created_at FROM payment_events WHERE merchant_id = 42 ORDER BY created_at DESC LIMIT 20"));
+    }
+
+    @Test
     void 후보_컬럼이_비면_커넥션_없이_UNSUPPORTED로_정직하게_보고한다() {
         // columns가 blank면 커넥션을 열기 전에 UNSUPPORTED를 돌려주므로 pools 없이 검증 가능
         DatabaseInstance pg = new DatabaseInstance(
