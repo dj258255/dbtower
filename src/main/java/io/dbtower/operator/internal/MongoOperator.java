@@ -1202,13 +1202,19 @@ public class MongoOperator implements DbmsOperator {
             return withClient(client -> {
                 List<TableSchema> tables = new ArrayList<>();
                 boolean truncated = false;
-                for (String name : db(client).listCollectionNames()) {
-                    if (name.startsWith("system.")) {
+                for (Document info : db(client).listCollections()) {
+                    String name = info.getString("name");
+                    if (name == null || name.startsWith("system.")) {
                         continue;
                     }
                     if (tables.size() >= SchemaSupport.DEFAULT_MAX_TABLES) {
                         truncated = true;
                         break;
+                    }
+                    // 뷰는 인덱스가 없어 listIndexes가 실패한다 — 이름 목록만 보던 때는 뷰 하나가 스냅샷 전체를 오류로 만들 수 있었다(150절)
+                    if ("view".equals(info.getString("type"))) {
+                        tables.add(new TableSchema(name, List.of(), List.of(), TableSchema.VIEW, List.of()));
+                        continue;
                     }
                     List<IndexSchema> indexes = new ArrayList<>();
                     for (Document idx : db(client).getCollection(name).listIndexes()) {
@@ -1217,8 +1223,8 @@ public class MongoOperator implements DbmsOperator {
                         indexes.add(new IndexSchema(idx.getString("name"),
                                 new ArrayList<>(key.keySet()), unique));
                     }
-                    // 스키마리스: columns는 빈 리스트(TableSchema 주석 참고)
-                    tables.add(new TableSchema(name, List.of(), indexes));
+                    // 스키마리스: columns는 빈 리스트(TableSchema 주석 참고). 기본키는 모든 컬렉션의 _id
+                    tables.add(new TableSchema(name, List.of(), indexes, TableSchema.TABLE, List.of("_id")));
                 }
                 return new SchemaSnapshot(instance.getType().name(), instance.getDbName(),
                         tables, truncated, SchemaSupport.DEFAULT_MAX_TABLES);

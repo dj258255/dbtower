@@ -33,16 +33,34 @@ final class SchemaSupport {
     record ColumnRow(String table, ColumnSchema column) {
     }
 
-    /** 인덱스-컬럼 한 행 — 복합 인덱스는 컬럼 수만큼 여러 행으로 온다(쿼리 정렬 순서 = 인덱스 내 순서) */
-    record IndexColumnRow(String table, String indexName, String column, boolean unique) {
+    /**
+     * 인덱스-컬럼 한 행 — 복합 인덱스는 컬럼 수만큼 여러 행으로 온다(쿼리 정렬 순서 = 인덱스 내 순서).
+     * primary는 그 인덱스가 기본키인지 — 기본키 인덱스를 가려낼 수 있는 기종은 여기서 기본키 열을 얻는다(150절)
+     */
+    record IndexColumnRow(String table, String indexName, String column, boolean unique, boolean primary) {
+        IndexColumnRow(String table, String indexName, String column, boolean unique) {
+            this(table, indexName, column, unique, false);
+        }
+    }
+
+    /** 종류(TABLE/VIEW)와 기본키를 모르는 기종·호출 — 전부 테이블, 기본키는 인덱스 행의 primary로만 */
+    static SchemaSnapshot build(String type, String database,
+                                List<ColumnRow> columnRows, List<IndexColumnRow> indexRows,
+                                int maxTables) {
+        return build(type, database, columnRows, indexRows, Map.of(), Map.of(), maxTables);
     }
 
     /**
      * 평평한 컬럼/인덱스 행을 테이블 단위로 조립한다. 테이블 순서는 컬럼 행의 등장 순서.
      * maxTables를 넘는 테이블은 버리고 truncated=true로 표시한다(대량 스키마 방어).
+     *
+     * @param kinds        테이블 이름 -> TABLE/VIEW. 없는 이름은 TABLE
+     * @param primaryKeys  테이블 이름 -> 기본키 열. 인덱스로 기본키를 가려낼 수 없는 기종(Oracle 제약조건)이 준다.
+     *                     없으면 primary 표시된 인덱스 행의 열을 쓴다
      */
     static SchemaSnapshot build(String type, String database,
                                 List<ColumnRow> columnRows, List<IndexColumnRow> indexRows,
+                                Map<String, String> kinds, Map<String, List<String>> primaryKeys,
                                 int maxTables) {
         // 등장 순서 보존 + 상한 적용. 상한을 넘은 테이블은 포함 집합에 넣지 않는다.
         Map<String, List<ColumnSchema>> columnsByTable = new LinkedHashMap<>();
@@ -62,6 +80,7 @@ final class SchemaSupport {
 
         // 인덱스: 포함된 테이블만, (테이블 -> 인덱스명) 순서로 묶고 컬럼은 등장 순서대로
         Map<String, Map<String, IndexAccumulator>> indexesByTable = new LinkedHashMap<>();
+        Map<String, List<String>> primaryFromIndexes = new LinkedHashMap<>();
         for (IndexColumnRow row : indexRows) {
             if (!columnsByTable.containsKey(row.table())) {
                 continue; // 상한에 잘린 테이블의 인덱스는 무시
@@ -70,6 +89,9 @@ final class SchemaSupport {
                     .computeIfAbsent(row.table(), t -> new LinkedHashMap<>())
                     .computeIfAbsent(row.indexName(), n -> new IndexAccumulator(row.unique()))
                     .columns.add(row.column());
+            if (row.primary()) {
+                primaryFromIndexes.computeIfAbsent(row.table(), t -> new ArrayList<>()).add(row.column());
+            }
         }
 
         List<TableSchema> tables = new ArrayList<>();
@@ -80,7 +102,11 @@ final class SchemaSupport {
                 perTable.forEach((name, acc) ->
                         indexes.add(new IndexSchema(name, List.copyOf(acc.columns), acc.unique)));
             }
-            tables.add(new TableSchema(e.getKey(), List.copyOf(e.getValue()), indexes));
+            String kind = TableSchema.VIEW.equals(kinds.get(e.getKey())) ? TableSchema.VIEW : TableSchema.TABLE;
+            List<String> primaryKey = primaryKeys.containsKey(e.getKey())
+                    ? primaryKeys.get(e.getKey())
+                    : primaryFromIndexes.getOrDefault(e.getKey(), List.of());
+            tables.add(new TableSchema(e.getKey(), List.copyOf(e.getValue()), indexes, kind, List.copyOf(primaryKey)));
         }
         return new SchemaSnapshot(type, database, tables, truncated, maxTables);
     }

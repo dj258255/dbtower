@@ -5,6 +5,7 @@ import io.dbtower.operator.model.BackupPolicy.BackupType;
 import io.dbtower.operator.model.StatsHealth;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.model.ColumnSchema;
+import io.dbtower.operator.model.TableSchema;
 import io.dbtower.operator.ConnectionPools;
 import io.dbtower.operator.model.DbParameter;
 import io.dbtower.operator.model.IndexAdvice;
@@ -32,6 +33,7 @@ import io.dbtower.registry.DatabaseInstance;
 import org.springframework.dao.DataAccessException;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -1429,15 +1431,18 @@ public class PostgresOperator extends AbstractJdbcOperator {
      */
     @Override
     public SchemaSnapshot describeSchema() {
+        // information_schema.columns에는 뷰 열도 섞여 테이블처럼 보였다(pg_stat_statements 등) — 종류를 붙여 트리가 나눈다(150절)
         String columnsSql = """
-                SELECT table_name, column_name, data_type, is_nullable, ordinal_position
-                FROM information_schema.columns
-                WHERE table_schema = current_schema()
-                ORDER BY table_name, ordinal_position
+                SELECT c.table_name, c.column_name, c.data_type, c.is_nullable, c.ordinal_position, t.table_type
+                FROM information_schema.columns c
+                JOIN information_schema.tables t
+                  ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+                WHERE c.table_schema = current_schema()
+                ORDER BY c.table_name, c.ordinal_position
                 """;
         String indexesSql = """
                 SELECT t.relname AS table_name, i.relname AS index_name,
-                       a.attname AS column_name, ix.indisunique AS is_unique
+                       a.attname AS column_name, ix.indisunique AS is_unique, ix.indisprimary AS is_primary
                 FROM pg_index ix
                 JOIN pg_class i ON i.oid = ix.indexrelid
                 JOIN pg_class t ON t.oid = ix.indrelid
@@ -1449,18 +1454,22 @@ public class PostgresOperator extends AbstractJdbcOperator {
                 ORDER BY t.relname, i.relname, k.ord
                 """;
         try {
+            Map<String, String> kinds = new HashMap<>();
             List<SchemaSupport.ColumnRow> columns = jdbc().query(columnsSql,
-                    (rs, i) -> new SchemaSupport.ColumnRow(
-                            rs.getString("table_name"),
-                            new ColumnSchema(rs.getString("column_name"), rs.getString("data_type"),
-                                    "YES".equalsIgnoreCase(rs.getString("is_nullable")),
-                                    rs.getInt("ordinal_position"))));
+                    (rs, i) -> {
+                        String table = rs.getString("table_name");
+                        kinds.put(table, "VIEW".equalsIgnoreCase(rs.getString("table_type")) ? TableSchema.VIEW : TableSchema.TABLE);
+                        return new SchemaSupport.ColumnRow(table,
+                                new ColumnSchema(rs.getString("column_name"), rs.getString("data_type"),
+                                        "YES".equalsIgnoreCase(rs.getString("is_nullable")),
+                                        rs.getInt("ordinal_position")));
+                    });
             List<SchemaSupport.IndexColumnRow> indexes = jdbc().query(indexesSql,
                     (rs, i) -> new SchemaSupport.IndexColumnRow(
                             rs.getString("table_name"), rs.getString("index_name"),
-                            rs.getString("column_name"), rs.getBoolean("is_unique")));
+                            rs.getString("column_name"), rs.getBoolean("is_unique"), rs.getBoolean("is_primary")));
             return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
-                    columns, indexes, SchemaSupport.DEFAULT_MAX_TABLES);
+                    columns, indexes, kinds, Map.of(), SchemaSupport.DEFAULT_MAX_TABLES);
         } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 스키마 조회 실패: " + e.getMessage(), e);
         }

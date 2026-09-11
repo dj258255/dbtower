@@ -5,6 +5,7 @@ import io.dbtower.operator.model.BackupPolicy;
 import io.dbtower.operator.model.BackupPolicy.BackupType;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.model.ColumnSchema;
+import io.dbtower.operator.model.TableSchema;
 import io.dbtower.operator.ConnectionPools;
 import io.dbtower.operator.model.DbParameter;
 import io.dbtower.operator.model.IndexUsage;
@@ -26,6 +27,7 @@ import io.dbtower.operator.model.WaitEvent;
 
 import io.dbtower.registry.DatabaseInstance;
 import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.ConnectionCallback;
 
 import java.nio.file.Files;
@@ -41,6 +43,8 @@ import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -1070,8 +1074,21 @@ public class OracleOperator extends AbstractJdbcOperator {
                        c.nullable,
                        c.column_id
                 FROM {v}tab_columns c
-                WHERE c.table_name IN (SELECT tt.table_name FROM {v}tables tt WHERE 1 = 1{and:tt.owner = ?}){and:c.owner = ?}
+                WHERE c.table_name IN (SELECT tt.table_name FROM {v}tables tt WHERE 1 = 1{and:tt.owner = ?}
+                                       UNION ALL SELECT vv.view_name FROM {v}views vv WHERE 1 = 1{and:vv.owner = ?}){and:c.owner = ?}
                 ORDER BY c.table_name, c.column_id
+                """);
+        // 뷰는 {v}tab_columns에 열이 있지만 {v}tables에는 없다 — 전에는 테이블 목록으로만 걸러 뷰가 트리에서 빠졌다(150절)
+        String viewsSql = dictionary("""
+                SELECT vv.view_name FROM {v}views vv WHERE 1 = 1{and:vv.owner = ?}
+                """);
+        // 인덱스 딕셔너리에는 기본키 표시가 없어 제약조건에서 읽는다(인덱스 이름과 제약조건 이름이 다를 수 있다)
+        String primaryKeysSql = dictionary("""
+                SELECT cc.table_name, cc.column_name
+                FROM {v}constraints k
+                JOIN {v}cons_columns cc ON cc.constraint_name = k.constraint_name{and:cc.owner = k.owner}
+                WHERE k.constraint_type = 'P'{and:k.owner = ?}
+                ORDER BY cc.table_name, cc.position
                 """);
         String indexesSql = dictionary("""
                 SELECT i.table_name, i.index_name, ic.column_name, i.uniqueness
@@ -1080,8 +1097,10 @@ public class OracleOperator extends AbstractJdbcOperator {
                 WHERE i.table_name IN (SELECT tt.table_name FROM {v}tables tt WHERE 1 = 1{and:tt.owner = ?}){and:i.table_owner = ?}
                 ORDER BY i.table_name, i.index_name, ic.column_position
                 """);
-        // 두 문장 모두 소유자 바인딩이 둘(안쪽 테이블 목록, 바깥 열·인덱스)이다
+        // 소유자 바인딩 수: 열 문장 셋(테이블 목록·뷰 목록·바깥 열), 인덱스 문장 둘(안쪽 테이블 목록·바깥 인덱스), 뷰·기본키 문장 하나
+        Object[] columnOwners = hasAppSchema() ? new Object[]{appSchema, appSchema, appSchema} : new Object[0];
         Object[] owners = hasAppSchema() ? new Object[]{appSchema, appSchema} : new Object[0];
+        Object[] oneOwner = hasAppSchema() ? new Object[]{appSchema} : new Object[0];
         try {
             List<SchemaSupport.ColumnRow> columns = jdbc().query(columnsSql,
                     (rs, i) -> new SchemaSupport.ColumnRow(
@@ -1089,14 +1108,19 @@ public class OracleOperator extends AbstractJdbcOperator {
                             new ColumnSchema(rs.getString("column_name"), rs.getString("column_type"),
                                     "Y".equalsIgnoreCase(rs.getString("nullable")),
                                     rs.getInt("column_id"))),
-                    owners);
+                    columnOwners);
             List<SchemaSupport.IndexColumnRow> indexes = jdbc().query(indexesSql,
                     (rs, i) -> new SchemaSupport.IndexColumnRow(
                             rs.getString("table_name"), rs.getString("index_name"),
                             rs.getString("column_name"), "UNIQUE".equalsIgnoreCase(rs.getString("uniqueness"))),
                     owners);
+            Map<String, String> kinds = new HashMap<>();
+            jdbc().query(viewsSql, (RowCallbackHandler) rs -> kinds.put(rs.getString("view_name"), TableSchema.VIEW), oneOwner);
+            Map<String, List<String>> primaryKeys = new LinkedHashMap<>();
+            jdbc().query(primaryKeysSql, (RowCallbackHandler) rs -> primaryKeys
+                    .computeIfAbsent(rs.getString("table_name"), t -> new ArrayList<>()).add(rs.getString("column_name")), oneOwner);
             return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
-                    columns, indexes, SchemaSupport.DEFAULT_MAX_TABLES);
+                    columns, indexes, kinds, primaryKeys, SchemaSupport.DEFAULT_MAX_TABLES);
         } catch (DataAccessException e) {
             throw new OperatorException("Oracle 스키마 조회 실패: " + e.getMessage(), e);
         }

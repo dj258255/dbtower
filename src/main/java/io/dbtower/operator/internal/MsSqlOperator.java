@@ -5,6 +5,7 @@ import io.dbtower.operator.model.BackupPolicy;
 import io.dbtower.operator.model.BackupPolicy.BackupType;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.model.ColumnSchema;
+import io.dbtower.operator.model.TableSchema;
 import io.dbtower.operator.ConnectionPools;
 import io.dbtower.operator.model.DbParameter;
 import io.dbtower.operator.model.DeadlockEvent;
@@ -31,6 +32,7 @@ import io.dbtower.registry.DatabaseInstance;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.RowCallbackHandler;
 
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.w3c.dom.Document;
@@ -49,6 +51,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -818,9 +821,15 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                 WHERE TABLE_SCHEMA = SCHEMA_NAME()
                 ORDER BY TABLE_NAME, ORDINAL_POSITION
                 """;
+        // INFORMATION_SCHEMA.COLUMNS에는 뷰 열도 섞여 있다 — 종류를 따로 읽어 트리가 테이블과 뷰를 나눈다(150절)
+        String kindsSql = """
+                SELECT TABLE_NAME, TABLE_TYPE
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = SCHEMA_NAME()
+                """;
         String indexesSql = """
                 SELECT t.name AS table_name, ind.name AS index_name,
-                       col.name AS column_name, ind.is_unique
+                       col.name AS column_name, ind.is_unique, ind.is_primary_key
                 FROM sys.indexes ind
                 JOIN sys.tables t ON t.object_id = ind.object_id
                 JOIN sys.index_columns ic ON ic.object_id = ind.object_id AND ic.index_id = ind.index_id
@@ -839,9 +848,12 @@ public class MsSqlOperator extends AbstractJdbcOperator {
             List<SchemaSupport.IndexColumnRow> indexes = jdbc().query(indexesSql,
                     (rs, i) -> new SchemaSupport.IndexColumnRow(
                             rs.getString("table_name"), rs.getString("index_name"),
-                            rs.getString("column_name"), rs.getBoolean("is_unique")));
+                            rs.getString("column_name"), rs.getBoolean("is_unique"), rs.getBoolean("is_primary_key")));
+            Map<String, String> kinds = new HashMap<>();
+            jdbc().query(kindsSql, (RowCallbackHandler) rs -> kinds.put(rs.getString("TABLE_NAME"),
+                    "VIEW".equalsIgnoreCase(rs.getString("TABLE_TYPE")) ? TableSchema.VIEW : TableSchema.TABLE));
             return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
-                    columns, indexes, SchemaSupport.DEFAULT_MAX_TABLES);
+                    columns, indexes, kinds, Map.of(), SchemaSupport.DEFAULT_MAX_TABLES);
         } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 스키마 조회 실패: " + e.getMessage(), e);
         }
