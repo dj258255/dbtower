@@ -415,6 +415,10 @@ input[type="datetime-local"] {
 .live-spark polyline { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
 .live-spark .spark-total { stroke: var(--primary); }
 .live-spark .spark-blocked { stroke: var(--up); }
+
+/* 쿼리 상세 AI 분석 단계 줄(143절) — 계획 도착·쓰는 중·완료 시간을 본문과 떨어뜨려 흐리게 */
+.ai-stage { margin: -4px 0 6px; font-variant-numeric: tabular-nums; }
+.ai-stage:empty { display: none; }
 .btn-danger { border-color: var(--up); color: var(--up); }
 .btn-danger:hover { background: var(--up); color: #fff; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }

@@ -1451,30 +1451,49 @@ function renderTableDetail(d) {
   return html;
 }
 
+// AI 분석은 흘려 받는다(143절) — 실행계획은 1초 안에 오는데 AI 답은 수십 초 걸린다. 한 번에 받으면 그동안 계획까지 같이 기다렸다.
+// 순서: plan(계획·규칙 지적) -> text(쓰이는 대로) -> result(완성본). 화면에 남기고 문의에 첨부하는 것은 완성본이다
 async function runAiAnalysis() {
   const sql = $("#detail-sql").value.trim();
   if (!sql) return;
   const btn = $("#btn-ai");
+  const out = $("#detail-ai"), stage = $("#ai-stage");
   btn.classList.add("loading");
   $("#ai-section").hidden = false;
-  $("#detail-ai").textContent = "분석 중... (실행계획 조회 후 AI 판정)";
+  out.textContent = "";
+  stage.textContent = "실행계획을 조회하는 중";
+  const startedAt = Date.now();
+  let written = "", firstTextAt = null, result = null;
   try {
-    let data;
-    try {
-      data = await api(`/api/instances/${state.instance.id}/ai-analysis`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
-      });
-    } catch (e) { $("#detail-ai").textContent = `실패: ${e.message}`; return; }
-    // 실행계획 섹션도 함께 갱신 (같은 응답에 plan/findings 포함)
-    $("#plan-section").hidden = false;
-    fillPlan($("#detail-plan"), data);
-    $("#detail-findings").innerHTML = (data.findings ?? []).map((f) =>
-      `<div class="finding-item">${esc(f)}</div>`).join("");
-    $("#detail-ai").textContent = stripEmoji(data.aiAnalysis) ||
+    await streamSse(`/api/instances/${state.instance.id}/ai-analysis/stream`, { sql }, (name, data) => {
+      if (name === "plan") {
+        $("#plan-section").hidden = false;
+        fillPlan($("#detail-plan"), data);
+        $("#detail-findings").innerHTML = (data.findings ?? []).map((f) =>
+          `<div class="finding-item">${esc(f)}</div>`).join("");
+        stage.textContent = `실행계획을 받았습니다(${((Date.now() - startedAt) / 1000).toFixed(1)}초). AI가 판단 기준 문서 위에서 분석하는 중`;
+      } else if (name === "text") {
+        if (firstTextAt == null) firstTextAt = Date.now();
+        written += data.delta;
+        out.textContent = stripEmoji(written);
+        stage.textContent = "AI가 답을 쓰는 중";
+      } else if (name === "result") {
+        result = data;
+      } else if (name === "error") {
+        throw new Error(data.message);
+      }
+    });
+    if (!result) throw new Error("분석 결과가 끝까지 오지 않았습니다(연결 끊김)");
+    out.textContent = stripEmoji(result.aiAnalysis) ||
       "AI 분석 비활성화 상태입니다 (ANTHROPIC_API_KEY도 claude CLI도 없음) — 규칙 기반 지적까지만 표시합니다.";
-    state.lastPlan = data.plan;
-    state.lastFindings = data.findings ?? [];
-    state.lastAi = data.aiAnalysis ?? null;
+    const first = firstTextAt ? ` · 첫 글자 ${((firstTextAt - startedAt) / 1000).toFixed(1)}초` : "";
+    stage.textContent = `완료 ${((Date.now() - startedAt) / 1000).toFixed(1)}초${first}`;
+    state.lastPlan = result.plan;
+    state.lastFindings = result.findings ?? [];
+    state.lastAi = result.aiAnalysis ?? null;
+  } catch (e) {
+    out.textContent = `실패: ${e.message}`;
+    stage.textContent = "";
   } finally { btn.classList.remove("loading"); }
 }
 

@@ -6582,3 +6582,170 @@ oauth_token (p-*)          2 -> 0
 
 explain 경로 수정에는 새 단위 테스트를 더하지 않았다. 갈림 조건(`hasPlaceholders`)은 IndexAdviceTest가 이미 고정하고, 실제 원인(extended protocol이 자리표시를
 바인드로 파싱)은 대상 PostgreSQL이 있어야 재현되므로 위의 같은 SQL 전후 호출(502 -> 200)을 근거로 둔다.
+
+## 143. 쿼리 상세 AI 분석도 흘려 받는다 — 실행계획은 AI를 기다리지 않는다 (2026-09-11)
+
+### 무엇을 했나
+
+142절에서 쿼리 상세 AI 분석을 다시 누르자 결과가 오기까지 37~46초 동안 "분석 중..." 한 줄이었다. 141절에서 워크벤치 AI와 자연어 진단은 흘려 받게 했는데
+같은 성격의 호출(대기 수십 초)이 남아 있었다. `POST /ai-analysis`는 EXPLAIN -> 규칙 지적 -> AI를 한 응답으로 묶어, 1초 안에 나오는 실행계획까지 AI를 기다렸다.
+
+### 설계
+
+- `AiAnalysisRunner`(insight/internal)가 한 번에 받는 REST와 흘려 받는 SSE의 순서·프롬프트를 한 곳에서 정한다. 두 경로가 따로 프롬프트를 만들면 화면에서 본 분석과
+  문의에 첨부되는 분석이 다른 입력에서 나온다. REST(`Listener.NONE`)는 스트리밍 호출을 쓰지 않는다 — MCP·스크립트가 쓰는 기존 계약 그대로
+- 순서가 곧 설계다: 실행계획·규칙 지적을 AI 호출 전에 `plan` 이벤트로 먼저 보낸다. 사람이 먼저 봐야 할 근거는 계획이고, AI는 그 위의 1차 분석기다
+- `POST /api/instances/{id}/ai-analysis/stream` 이벤트: `plan {plan, findings}` -> `text {delta}`* -> `result {plan, findings, aiAnalysis}` 또는 `error {status, message}`
+- 답이 평문이라 워크벤치(미완성 JSON에서 값만 뽑아 앞부분 전체를 다시 보냄)와 달리 새로 온 조각만 보낸다. `TextDeltaBatcher`가 80ms 간격으로 묶고, 끝나기 직전 남은 조각을
+  반드시 내보낸다 — 평문은 이어 붙여 보이므로 빠진 조각이 곧 빠진 글자다
+- 범위 확인은 스트림을 열기 전 요청 스레드에서(범위 밖이면 404). EXPLAIN·AI 실패는 작업 스레드에서 판정되므로 error 이벤트로 오되, 상태 번호는 한 번에 받는 경로의
+  GlobalExceptionHandler와 맞췄다: SELECT가 아니면 400, 대상 DB 실패는 502(원문 오류는 로그에만, 화면엔 errorId)
+- 작업 스레드는 141절의 `AiStreamExecutor`(SecurityContext 전달, 자리 없으면 503)를 같이 쓴다
+
+### 실측
+
+같은 정규화 SQL(`SELECT id, amount, created_at FROM payment_events WHERE merchant_id = $1 ORDER BY created_at DESC LIMIT $2`)을 앱에 서비스 토큰으로 직접,
+AI 응답 시간이 호출마다 흔들리므로 stream -> sync -> sync -> stream 순서로(`measure_143.py`, 스크래치, claude CLI 백엔드):
+
+```
+방식          실행계획 보임   첫 AI 글자   완성본    text 이벤트   흘린 조각을 이어 붙인 것 = 완성본
+stream #1       0.05s        13.08s      24.13s       29         true   (745자)
+sync   #1         -             -        38.51s        -          -     (777자, 이때까지 아무것도 안 보임)
+sync   #2         -             -        39.10s        -          -     (858자)
+stream #2       0.02s        28.59s      40.01s       31         true   (1010자)
+```
+
+흘려 받으면 실행계획과 규칙 지적이 요청 직후(0.02~0.05초) 보이고, AI 글은 쓰이는 대로 이어진다. 한 번에 받으면 완성본까지 38~39초 동안 계획도 안 보였다.
+완성 시간 자체(24~40초 vs 38~39초)는 AI 답 길이(745~1010자)와 호출마다의 흔들림이 커서 두 방식의 차이로 해석하지 않는다 — 스트리밍이 생성을 빠르게 하지는 않는다.
+
+### 테스트
+
+```
+TextDeltaBatcherTest       2  간격 안의 조각은 묶이고 flush가 남은 조각을 빠짐없이(이어 붙이면 원문) · 빈 조각·빈 flush는 안 보냄
+AiAnalysisRunnerTest       2  흘려 받으면 계획이 AI 호출보다 먼저, 조각을 이어 붙이면 완성본 · 한 번에 받는 경로는 스트리밍 호출을 안 씀, AI 꺼짐이면 분석만 비움
+AiAnalysisStreamTest       3  (SpringBootTest, 실제 보안 필터) SELECT가 아니면 400 error 이벤트 · 대상 실패는 원문 없이 502와 errorId · 다른 팀 대상은 스트림 전 404
+AiAnalyzerTest             8  기존 그대로 통과(analyzeStreaming은 analyze와 같은 프롬프트로 completeStreaming 위임)
+```
+
+## 144. 앱 노드가 여럿이어도 대상 조회는 한 번 — 실시간 허브를 노드 사이에서 조율하고, 세션 쿼리의 실값을 가린다 (2026-09-11)
+
+### 무엇을 했나
+
+140절에 한계로 적은 두 가지를 닫았다.
+1. 허브가 앱 노드마다 하나라, 같은 대상을 여러 노드에서 보면 대상 조회가 노드 수만큼 늘었다
+2. 실시간 프레임과 `GET /sessions`의 쿼리가 실행 중 원문이라 `WHERE email = '...'` 같은 실값이 그대로 나갔다
+
+### 설계 1 — 대상별 조회권과 프레임 교환
+
+- 틱마다 대상별 조회권(ShedLock `live-sessions-{id}`, 폴러들과 같은 메타 DB 락, DB 시계)을 먼저 잡는다. 잡은 노드만 대상에 묻고, 프레임을 메타 DB `live_frame`에 올린다.
+  못 잡은 노드는 올라온 프레임을 읽어 자기 구독자에게 넘긴다
+- 조회권은 주기의 90%(1.8초)만큼 쥔다(ASH 샘플러와 같은 비율) — 노드마다 틱 위상이 달라도 한 주기에 두 노드가 묻지 못한다. 상한은 3주기(6초): 쥔 노드가 죽으면 그 뒤 이어받는다.
+  락 상한보다 오래된 프레임은 넘기지 않는다(죽은 노드의 굳은 화면을 살아 있는 것처럼 보이지 않게)
+- seq는 upsert 한 문장 안에서 DB가 올린다(`ON CONFLICT DO UPDATE SET seq = live_frame.seq + 1 RETURNING seq`) — 조회권이 노드를 옮겨 다녀도 번호가 이어지고 화면의 결번 판정이 끊기지 않는다.
+  나이는 `now() - produced_at`로 DB 시계에서 잰다(노드 시계 오차와 무관)
+- `live_frame`은 UNLOGGED(V41) — 프레임은 몇 초짜리 일회성 값이라 크래시 뒤 비어도 다음 틱에 채워진다. 틱마다 세션 목록 JSON을 덮어써도 WAL·복제·백업 부피를 만들지 않는다
+- 락이나 저장소가 실패하면 조율 없이 이 노드가 직접 잰다 — 조율 실패가 관제 공백이 되면 안 되고, 그때 늘어나는 조회는 조율 전(노드 수만큼)과 같다.
+  테스트 기본 H2에는 `live_frame`이 없어 이 경로로 돈다(LiveSessionStreamTest·E2E가 통과하는 이유)
+
+### 설계 2 — 쿼리 리터럴 가림
+
+플랫폼에는 이미 규칙이 있다: `QueryMasker.apply`(`dbtower.masking.enabled`, 기본 켬)가 웹훅 알림·DB팀 문의·자연어 진단 도구 인자의 SQL에서 리터럴만 `?`로 가리고 구조는 남긴다.
+세션 쿼리는 실행 중 원문이라 실값이 들어 있고, 이제 프레임이 노드 사이에서 메타 DB에도 머문다. 새 정책을 만들지 않고 같은 규칙을 실시간 프레임과 `GET /sessions`에 적용했다.
+자연어 진단의 `sessions` 도구도 REST를 거치므로 AI가 받는 세션 쿼리도 같이 가려진다(126절에서 "세션 쿼리 텍스트가 AI 입력이 되는 경로"로 짚은 곳). 원문이 필요하면 `dbtower.masking.enabled=false`.
+
+### 실측 — 두 노드(8080·8081), 같은 메타 DB, 노드마다 5명이 30초
+
+140절과 같은 원장(대상 sample DB `pg_stat_statements`의 `pg_blocking_pids` 문장 calls 증분, `measure_144.py`). 변경 전 jar(4f42314)와 변경 뒤 jar를 같은 조건으로:
+
+```
+                                 대상 조회   노드별 조회(앱 계수)   사람당 프레임     두 노드 seq            샘플 쿼리
+변경 전 (노드마다 허브)              30        8080: 15 / 8081: 15      15 / 15         각자 1..15           select pg_sleep(40) where 'hong@example.com' <> ''
+변경 뒤 1차                          15        8080:  9 / 8081:  6      12 / 11         8080 1..15, 8081 2..14   select pg_sleep(?) where ? <> ?
+변경 뒤 2차 (재시도 추가)            15        8080:  8 / 8081:  7      15 / 15         둘 다 36..50         select pg_sleep(?) where ? <> ?
+변경 뒤 한 노드(10명)                15        8080: 15                 15 x10          19..33
+```
+
+두 노드에서 대상 조회가 30 -> 15회로 노드 수와 무관해졌고, 조회는 두 노드가 번갈아 맡았다.
+
+**1차에서 결번이 났다.** 사람당 프레임이 12·11장이었다. 두 노드의 틱이 거의 같은 순간이면 조회권을 못 잡은 노드가, 잡은 노드가 프레임을 올리기 전에 저장소를 읽어
+"새 프레임 없음"으로 지나갔다. 못 받았을 때 주기의 1/4(0.5초) 뒤 한 번만 다시 읽게 고치자 2차에서 두 노드 모두 15장, 같은 seq를 받았다. 앱 계수로 넘긴 프레임
+7·8장 중 재시도로 받은 것이 6·8장이었다 — 같은 순간에 틱이 겹치는 일이 드물지 않았다는 뜻이다(재시도에서 못 받은 경우 0).
+
+조율 비용(메타 DB, 2차 30초 창): `live_frame` 갱신 14회(대상 조회당 한 번), `shedlock` 갱신 32회(두 노드의 모든 락 이름 합). 메타 DB에는 pg_stat_statements가 없어
+문장 수 대신 `pg_stat_user_tables`의 갱신 수로 봤다.
+
+`GET /sessions`(변경 뒤 jar, 서비스 토큰)도 같은 세션을 `select pg_sleep(?) where ? <> ?`로 돌려준다.
+
+부수 관찰: 데모 compose에서는 대상 PostgreSQL과 메타 DB가 한 서버라 샘플 쿼리에 메타 DB의 `UPDATE shedlock SET lock_until = ...`도 보였다(리터럴은 가려짐).
+운영 원칙(플랫폼 저장소와 대상 분리)대로면 나타나지 않는 행이다.
+
+### 테스트
+
+```
+LiveSessionHubTest        9 -> 14  두 노드가 같은 대상을 보면 주기마다 한 노드만 묻고 다른 노드는 같은 seq 프레임을 넘김 ·
+                                   쥔 노드가 올리기 전에 읽어 놓치면 0.5초 뒤 재시도로 받음 · 쥔 노드가 사라지면 굳은 프레임은 안 넘기고 락이 풀리면 이어받음 ·
+                                   락이 실패하면 조율 없이 직접 잰다 · 세션 쿼리의 리터럴은 가려서 싣는다(저장소에도)
+JdbcLiveFrameStoreIT      2        (DBTOWER_META_IT=1, 실제 PostgreSQL) 일회용 스키마에 V41 파일을 그대로 실행 -> 올릴 때마다 seq +1, 프레임 안 seq가 아니라 DB 번호,
+                                   세션까지 같은 프레임, 나이 0~5초, relpersistence='u'(UNLOGGED) · 올린 적 없으면 비어 있음
+```
+
+저장소 테스트는 처음에 SpringBootTest로 썼다가 실패했다. 테스트 기본 설정은 H2(Flyway 끔, Hibernate create-drop)라 엔티티가 아닌 `live_frame`이 없고,
+upsert·RETURNING·UNLOGGED는 H2가 흉내 내지 못한다. 저장소 코드와 마이그레이션 문장을 함께 검증하도록 실제 PostgreSQL IT로 옮겼다.
+
+### 회귀 (143·144절 함께)
+
+```
+./gradlew compileJava, ./scripts/check-conventions.sh, node --check app.js     통과
+DBTOWER_META_IT=1 ./gradlew test --tests JdbcLiveFrameStoreIT                  tests 2 failures 0 (일회용 스키마 정리 확인)
+./gradlew test                                                                 tests 828 skipped 25 failures 0 errors 0
+  814 -> 828: TextDeltaBatcher 2 · AiAnalysisRunner 2 · AiAnalysisStream 3 · LiveSessionHub 9 -> 14 · JdbcLiveFrameStoreIT 2
+  건너뜀 23 -> 25: JdbcLiveFrameStoreIT 2가 게이트(DBTOWER_META_IT)로 더해졌다
+```
+
+## 145. README에 남은 옛 디자인 화면 9장을 새 디자인으로 (2026-09-11)
+
+### 무엇을 했나
+
+142절에서 README 화면 6장만 새로 찍어, 19장 중 9장이 Liquid Glass 이전 모습이었다(시점 비교·심층 진단 둘·워크벤치 넷·역할별 화면 셋). 142절과 같은 방식으로
+역할별 프록시에서 Playwright(`Refresh145.java`, 스크래치)로 다시 찍었다. 옛 파일은 그 시점을 기록한 절이 참조하므로 두고 새 이름으로 더했다.
+
+| 옛 파일 | 새 파일 | 어떻게 |
+|---|---|---|
+| `02-compare.png` | `112-glass-compare.jpg` | 아래 시연 부하: 기준 20:22~20:28(조용), 대상 20:28~20:35(새 쿼리 6분) — 새 쿼리가 NEW 뱃지로 load 99.99·QPS 9,907.81 |
+| `13-deep-diagnose.png` | `113-glass-deep-diagnose.jpg` | MySQL 시연 테이블(아래)에 `WHERE code = 12345` — 암시적 형변환 지목, 추정 2,039행 vs 실제 1행 |
+| `17-deep-before-after.png` | `114-glass-deep-before-after.jpg` | 수정안 원클릭 재진단: "괴리 2,039배 -> 괴리 없음, 근본원인 1건 -> 0건", Table scan -> Index lookup |
+| `70-workbench-ai-checkpoint.png` | `102-workbench-ai-streamed-done.png` | 141절에서 새 디자인으로 찍은 같은 장면을 쓴다 |
+| `74-workbench-ticket-ddl-probe.png` | `115-glass-ticket-ddl-probe.jpg` | 검증 조회가 있는 티켓 #51: 구조 변화, 같은 트랜잭션 안 전후 계획(49.0ms -> 419µs), 역변경 제안 |
+| `76-workbench-table-detail.png` | `117-glass-workbench-table-detail.jpg` | PostgreSQL `orders` 상세: 행 수 2,000·데이터 152KB·인덱스 104KB, 열 5, 인덱스 2(카디널리티), 카탈로그로 재구성한 DDL |
+| `77-workbench-workload-rows-metric.png` | `116-glass-ticket-workload.jpg` | 티켓 #29 실행 전후 60분(132절과 같은 값: 평균 지연 46.64ms -> 0.0037ms, 호출 10,264 -> 8,175,210) |
+| `82-persona-approver-approved.png` | `118-glass-persona-approver-approved.jpg` | 새 티켓 #55(MySQL `UPDATE customers ...`)를 요청자가 올리고 승인자가 승인한 뒤 승인자 화면 |
+| `83-persona-operator-approved.png` | `119-glass-persona-operator-approved.jpg` | 같은 티켓의 운영자 화면(드라이런·실행·취소). 찍은 뒤 운영자가 #55를 취소 |
+| `87-persona-compare-deeplink.png` | `120-glass-compare-deeplink.jpg` | 142절 GIF 7장면(실행 기록에서 넘어온 전후 비교)을 쓴다 |
+
+### 촬영이 멈춘 곳 셋 — 모두 스크립트가 화면을 잘못 안 것
+
+- **심층 진단 재진단 대기**: 비교 줄을 영어 "before"로 기다려 90초를 넘겼다. 실제 화면은 "수정 전 -> 후"로 시작한다(app.js `runDeepDiagnose`). 첫 장도 요소 스크린샷이라
+  카드 문장이 요소 폭을 넘는 오른쪽이 잘렸다 — 섹션으로 스크롤한 화면 전체로 다시 찍었다
+- **워크로드 비교**: 처음엔 #51로 찍었는데 창이 137절 부하가 끝나던 시각이라 "호출 932,010 -> 309"가 나왔다. 사실이지만 인덱스 효과로 오해를 부르는 장면이라,
+  132절 부하 중에 실행한 #29로 바꿨다. 스크롤도 표 중간(플랫폼 수집 쿼리)이라 요약 줄이 안 보여, 비교 상자 맨 위로 맞췄다
+- **테이블 상세**: 두 번 멈췄다. 처음엔 스키마 탭을 가운데 결과 탭(`.wb-rtab`)에서 찾아 90초를 기다렸다 — 스키마는 오른쪽 채팅 영역의 탭(`.wb-ctab[data-cpane="schema"]`)이다.
+  탭을 고친 뒤엔 테이블 옆 "상세" 버튼 클릭이 "element is not visible"로 거부됐다. CSS가 `.tree-detail { visibility: hidden }`이고 행에 포인터를 올릴 때만
+  (`.tree-row:hover .tree-detail`) 보인다. 사람은 행 위에서 누르므로 결함이 아니다 — 트리의 위임 클릭 처리기를 JS 클릭으로 불렀다
+
+### 시연 데이터와 정리
+
+- 시점 비교용: 142절에서 이 화면을 다시 찍지 않은 이유(락 시연으로 오염된 구간)를 피해 구간을 새로 만들었다. 6분을 조용히 둔 뒤, 대상 PostgreSQL에서 6분 동안
+  `PERFORM count(*) FROM orders WHERE status = 'FAILED' AND amount > (n % 500)`를 도는 DO 블록을 실행했다(3,660,873회, `pg_stat_statements.track=all`이라 안쪽 문장이 잡힌다).
+  마지막 1분 스냅샷이 쌓이도록 70초 기다려 찍었다. 요약 줄의 "평균 레이턴시 -100%"는 0.0957ms짜리 새 쿼리가 수백만 번 섞여 전체 평균이 내려간 것이다 — 결함이 아니라
+  구간 전체 평균이라는 지표의 성질이고, 쿼리별 표가 그래서 따로 있다
+- 심층 진단용: 옛 13·17 장면의 테이블은 이미 없어(MySQL sample에 `code` 컬럼 테이블 없음) 시연 테이블을 만들었다 —
+  `deep_diag_demo(id, code VARCHAR(12) 인덱스, amount)` 20,000행, 모니터 계정에 SELECT. 찍은 뒤 권한을 회수하고 지웠다(MySQL은 테이블을 지워도 테이블 단위 권한 행이 남아 회수를 먼저 한다)
+- 역할별 화면용: 142절에서 지운 검증 계정 셋(요청자·승인자·운영자)을 관리자 API(`POST /api/security/users`, 비밀번호는 환경변수)로 잠시 다시 만들었다.
+  촬영에 쓴 티켓 #55는 운영자가 취소했고, 촬영 뒤 역할 프록시를 멈추고 계정을 세션·OAuth 토큰과 함께 한 트랜잭션으로 다시 지웠다
+
+```
+MySQL deep_diag_demo       테이블 1 -> 0, 테이블 단위 권한(mysql.tables_priv) 1 -> 0   (REVOKE 먼저, 그다음 DROP)
+platform_user (p-*)        3 -> 0      남은 계정: admin(ADMIN), viewer(REQUESTER)
+spring_session (p-*)       3 -> 0
+oauth_token (p-*)          0 -> 0
+```

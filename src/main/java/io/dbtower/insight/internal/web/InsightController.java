@@ -15,6 +15,7 @@ import io.dbtower.analysis.DeepAnalyzer;
 import io.dbtower.analysis.DeepDiagnosis;
 import io.dbtower.analysis.RuleBasedAnalyzer;
 import io.dbtower.insight.BaselineService;
+import io.dbtower.insight.internal.AiAnalysisRunner;
 import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.QuerySnapshotRepository;
 import io.dbtower.operator.DbmsOperator;
@@ -53,6 +54,7 @@ public class InsightController {
     private final BaselineService baselineService;
     private final PrometheusClient prometheusClient;
     private final QueryMasker queryMasker;
+    private final AiAnalysisRunner aiAnalysisRunner;
 
     public InsightController(RegistryService registryService, DbmsOperatorFactory operatorFactory,
                              ComparisonService comparisonService, RuleBasedAnalyzer analyzer,
@@ -60,7 +62,9 @@ public class InsightController {
                              QuerySnapshotRepository snapshotRepository,
                              BaselineService baselineService,
                              PrometheusClient prometheusClient,
-                             QueryMasker queryMasker) {
+                             QueryMasker queryMasker,
+                             AiAnalysisRunner aiAnalysisRunner) {
+        this.aiAnalysisRunner = aiAnalysisRunner;
         this.registryService = registryService;
         this.operatorFactory = operatorFactory;
         this.comparisonService = comparisonService;
@@ -177,7 +181,11 @@ public class InsightController {
      */
     @GetMapping("/sessions")
     public List<SessionInfo> sessions(@PathVariable Long id, @RequestParam(defaultValue = "50") int limit) {
-        return operatorFactory.create(registryService.findById(id)).activeSessions(DbmsOperator.clampLimit(limit));
+        // 실행 중 원문이라 실값이 들어 있다 — 실시간 프레임(LiveSessionHub)·AI 진단 도구가 받는 것과 같은 규칙으로 리터럴을 가린다(144절)
+        return operatorFactory.create(registryService.findById(id)).activeSessions(DbmsOperator.clampLimit(limit)).stream()
+                .map(s -> new SessionInfo(s.pid(), s.user(), s.state(), s.waitEvent(), s.blockedByPid(),
+                        queryMasker.apply(s.query()), s.elapsedMs()))
+                .toList();
     }
 
     /** kill 결과 — 어떤 pid를 어떤 방식으로 처리했는지 그대로 돌려준다(감사와 화면 피드백용) */
@@ -464,25 +472,14 @@ public class InsightController {
     }
 
     /**
-     * EXPLAIN + 규칙 지적 + AI 1차 분석을 한 번에 — 웹 UI의 "AI 분석" 버튼용.
+     * EXPLAIN + 규칙 지적 + AI 1차 분석을 한 번에 — MCP·스크립트용. 웹 UI는 같은 분석을 흘려 받는다(AiAnalysisStreamController).
      * AI는 회귀 알림(RegressionDetector)과 동일한 판단 기준 프롬프트(ai-analysis-rules.md)를 쓴다.
      * ANTHROPIC_API_KEY 미설정이면 aiAnalysis=null로 규칙 지적까지만 내려간다.
      */
     @PostMapping("/ai-analysis")
     public AiAnalysisResponse aiAnalysis(@PathVariable Long id, @RequestBody ExplainRequest req) {
         DatabaseInstance instance = registryService.findById(id);
-        String plan = operatorFactory.create(instance).explain(req.sql());
-        List<String> findings = analyzer.analyze(instance.getType(), plan);
-        // AI 프롬프트 마스킹은 mask-ai-prompt(기본 false)로만 켠다 — 리터럴을 가리면
-        // IN절 개수·상수 분포 같은 판정 정확도가 떨어지는 트레이드오프가 있어 명시적 선택.
-        String context = """
-                [%s] 아래 쿼리와 실행계획을 판단 기준에 따라 분석해줘.
-                SQL:
-                %s
-                실행계획:
-                %s
-                규칙 기반 지적: %s""".formatted(instance.getType(), queryMasker.applyForAiPrompt(req.sql()), plan,
-                findings.isEmpty() ? "(없음)" : String.join(" / ", findings));
-        return new AiAnalysisResponse(plan, findings, aiAnalyzer.analyze(CallSite.EXPLAIN, context).orElse(null));
+        AiAnalysisRunner.Result r = aiAnalysisRunner.run(instance, req.sql(), AiAnalysisRunner.Listener.NONE);
+        return new AiAnalysisResponse(r.plan(), r.findings(), r.aiAnalysis());
     }
 }

@@ -163,6 +163,11 @@ public class AiAnalyzer {
         return complete(callSite, SYSTEM_PROMPT + loadRules(), findingContext);
     }
 
+    /** {@link #analyze}와 같은 프롬프트로 흘려 받는다(143절 쿼리 상세 AI 분석). 반환·실패 규칙은 {@link #completeStreaming}과 같다. */
+    public Optional<String> analyzeStreaming(CallSite callSite, String findingContext, Consumer<String> onText) {
+        return completeStreaming(callSite, SYSTEM_PROMPT + loadRules(), findingContext, onText);
+    }
+
     /**
      * 임의의 시스템 프롬프트 + 사용자 메시지로 1회 완성 호출 — 백엔드(API/CLI)를 추상화한다.
      * D3 도구 사용 루프가 한 스텝(다음에 어떤 도구를 부를지 결정)마다 이걸 부른다.

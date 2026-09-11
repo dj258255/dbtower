@@ -178,6 +178,8 @@ DBMS 운영(설치·패치·장애조치·백업/복구·오브젝트·용량)�
 관측이 곧 부하가 되므로, 서버가 대상마다 한 번만 조회해 보는 사람 전원에게 SSE로 나눕니다. 아무도 안 보면 조회도 멈춥니다.
 10명이 30초 볼 때 대상 PostgreSQL이 받은 조회는 브라우저 각자 폴링 150회, 허브 14회였습니다([VERIFICATION 140절](docs/VERIFICATION.md)).
 탭이 숨으면 연결을 닫고, 표 위에 포인터가 있으면 kill 버튼을 잘못 누르지 않게 표 갱신을 미룹니다.
+앱을 여러 대 띄워도 대상마다 한 노드만 조회권(메타 DB 락)을 쥐고 나머지는 올라온 프레임을 넘겨, 두 노드·노드마다 5명일 때 대상 조회가 30회에서 15회가 됐습니다.
+세션 쿼리의 실값(`WHERE email = '...'`)은 알림·AI 도구 인자와 같은 규칙으로 `?`로 가립니다([144절](docs/VERIFICATION.md)).
 
 ![실시간 세션 카드 — 락을 쥔 세션과 그 뒤에 막힌 네 세션, 갱신 시각·수집 시간과 추이](docs/images/webui/100-live-sessions.png)
 
@@ -187,7 +189,7 @@ DBMS 운영(설치·패치·장애조치·백업/복구·오브젝트·용량)�
 튄 것일 수 있고, 새로 유입된 쿼리일 수도 있기 때문입니다. 그래서 두 구간을 쿼리 단위로
 비교합니다 — 누적 카운터 스냅샷의 구간 차분, QPS 정규화, 신규 쿼리 표시.
 
-![시점 비교 — 증감률과 신규 쿼리 NEW 뱃지](docs/images/webui/02-compare.png)
+![시점 비교 — 6분 동안 새로 들어온 쿼리가 NEW 뱃지와 함께 load 1위, 쿼리별 QPS·레이턴시·행 증감](docs/images/webui/112-glass-compare.jpg)
 
 부하 실측: 베이스라인 대비 급증 구간에서 호출량 +461%, 읽은 행수 +852%,
 신규 LIKE 풀스캔 쿼리 1건이 NEW로 잡힙니다.
@@ -198,6 +200,8 @@ DBMS 운영(설치·패치·장애조치·백업/복구·오브젝트·용량)�
 Seq Scan, Clustered Index Scan, TABLE ACCESS FULL, COLLSCAN 등)으로 비효율 신호를
 지적합니다. AI 분석은 [판단 기준 문서](docs/ai-analysis-rules.md)를 시스템 프롬프트로 넣어
 같은 입력에 일관된 판정이 나오게 하고, 근거가 없으면 모른다고 답하게 합니다.
+AI 답은 수십 초 걸리므로 흘려 받습니다. 실행계획과 규칙 지적은 AI를 기다리지 않고 0.02~0.05초에 먼저 보이고, AI 글은 쓰이는 대로 이어집니다
+(한 번에 받을 때는 38~39초 동안 계획도 안 보였습니다 — [143절](docs/VERIFICATION.md)).
 
 ![AI 1차 분석 — 정규화 SQL의 제네릭 실행계획, 규칙 지적, 판단 기준 문서 위의 판정과 "모르는 것"](docs/images/webui/108-glass-query-ai.jpg)
 
@@ -216,12 +220,12 @@ Seq Scan, Clustered Index Scan, TABLE ACCESS FULL, COLLSCAN 등)으로 비효율
 심층 원인 진단은 EXPLAIN(추정)이 아니라 실제 실행 계획으로 "왜 인덱스를 못 탔나"를 짚습니다 —
 아래는 숫자 리터럴 하나가 암시적 형변환으로 인덱스를 무력화한 사례를 정확히 지목한 화면입니다.
 
-![심층 원인 진단 — 추정 300행 vs 실제 1행 괴리, 암시적 형변환 지목과 처방](docs/images/webui/13-deep-diagnose.png)
+![심층 원인 진단 — 문자열 컬럼을 숫자 리터럴과 비교해 인덱스를 못 탐, 암시적 형변환 지목과 처방, 추정 2,039행 vs 실제 1행](docs/images/webui/113-glass-deep-diagnose.jpg)
 
 처방을 말로만 하지 않습니다 — 기계적으로 안전한 수정(숫자 리터럴에 따옴표)이 가능한 경우
 수정안 SQL을 함께 만들어, 버튼 한 번으로 재진단해 before/after를 비교합니다.
 
-![수정안 원클릭 재진단 — 괴리 300배에서 없음으로, 풀스캔에서 Index lookup으로](docs/images/webui/17-deep-before-after.png)
+![수정안 원클릭 재진단 — 괴리 2,039배에서 없음으로, Table scan에서 Index lookup으로](docs/images/webui/114-glass-deep-before-after.jpg)
 
 ### 거버넌스 SQL 워크벤치 — 자유 SQL, 경계는 플랫폼이
 
@@ -248,7 +252,7 @@ AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 �
 
 ![워크벤치 AI 답을 흘려 받는 중 — 단계 문구, 쓰이는 중인 설명, 먼저 완성된 SQL](docs/images/webui/101-workbench-ai-streaming.png)
 
-![AI 답변과 체크포인트 카드](docs/images/webui/70-workbench-ai-checkpoint.png)
+![AI 답변과 체크포인트 카드 — 가정까지 붙은 설명, 읽기 분류, v1 카드](docs/images/webui/102-workbench-ai-streamed-done.png)
 
 **승인 티켓 실행과 전후 비교** — 변경 문장은 워크벤치에서 바로 실행되지 않고 "변경 요청으로 올리기"로 리뷰 게이트에 올라갑니다.
 승인 전에도 드라이런(실제로 실행한 뒤 롤백)으로 바뀔 행과, 커밋 전 인덱스가 반영된 실행계획을 봅니다. 승인된 티켓만 변경 계정으로 실행하고,
@@ -257,7 +261,7 @@ AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 �
 워크로드 비교가 남고, 같은 조회를 두 인스턴스에서 돌려 행 단위로 비교할 수도 있습니다. MySQL·PostgreSQL·Oracle 실DB로 실행·되돌리기·
 드리프트 충돌·불변식 위반을 증명했습니다([VERIFICATION 130절](docs/VERIFICATION.md), [AX 사례 5](docs/PORTFOLIO-AX.md)).
 
-![변경 티켓 — DDL 실행의 구조 변화와 같은 트랜잭션 안 전후 실행계획](docs/images/webui/74-workbench-ticket-ddl-probe.png)
+![변경 티켓 — DDL 실행의 구조 변화, 같은 트랜잭션 안 검증 조회 전후 실행계획(49.0ms -> 419µs), 역변경 제안](docs/images/webui/115-glass-ticket-ddl-probe.jpg)
 
 **티켓의 출구와 5기종 확장** — 승인된 채 실행하지 않을 티켓은 요청자나 승인자·운영자가 취소하고, 커밋 여부를 모른 채 멈춘 티켓은 운영자가
 대상 DB를 무엇으로 확인했는지 근거를 적어 정리합니다. DDL 실행 기록에는 생긴 구조만 지우는 역변경 문장을 기종 문법으로 제안하고
@@ -281,9 +285,9 @@ Apple Silicon에는 SQL Server를 네이티브로 돌릴 경로가 없어(공식
 [VERIFICATION 134절](docs/VERIFICATION.md)). 비교 화면의 행 지표는 기종마다 세는 것이 달라(PostgreSQL은 돌려준 행,
 SQL Server는 논리 읽기 페이지 등) 오퍼레이터가 알려준 이름으로 적습니다.
 
-![테이블 상세 탭](docs/images/webui/76-workbench-table-detail.png)
+![테이블 상세 탭 — 행 수·데이터·인덱스 크기, 열, 인덱스 카디널리티, 카탈로그로 재구성한 DDL](docs/images/webui/117-glass-workbench-table-detail.jpg)
 
-![티켓 워크로드 비교 — 행 지표 이름, 1ms 미만 정밀도, 브라우저 시간대 시각](docs/images/webui/77-workbench-workload-rows-metric.png)
+![티켓 워크로드 비교 — 실행 전후 60분, 평균 지연 46.64ms -> 0.0037ms, 행 지표 이름, 새 쿼리 목록](docs/images/webui/116-glass-ticket-workload.jpg)
 
 ### MCP — AI 에이전트의 채널
 
@@ -331,9 +335,9 @@ DB 접속정보를 다루는 관리 도구라 인증 없이는 운영에 못 들
 
 같은 승인된 티켓을 승인자와 운영자가 볼 때 — 승인자에게는 실행 버튼이 없고, 운영자에게는 승인 버튼이 없습니다([VERIFICATION 136절](docs/VERIFICATION.md)):
 
-<img src="docs/images/webui/82-persona-approver-approved.png" width="360" alt="승인자가 본 승인된 티켓 — 드라이런·취소만, 실행은 운영자가 한다는 안내"> <img src="docs/images/webui/83-persona-operator-approved.png" width="360" alt="운영자가 본 같은 티켓 — 드라이런·실행·취소">
+<img src="docs/images/webui/118-glass-persona-approver-approved.jpg" width="360" alt="승인자가 본 승인된 티켓 — 드라이런·취소만, 실행은 운영자가 한다는 안내"> <img src="docs/images/webui/119-glass-persona-operator-approved.jpg" width="360" alt="운영자가 본 같은 티켓 — 드라이런·실행·취소">
 
-![워크벤치 실행 기록에서 넘어온 대시보드 — 실행 시각 앞 30분을 기준, 뒤를 대상으로 시점 비교](docs/images/webui/87-persona-compare-deeplink.png)
+![워크벤치 실행 기록에서 넘어온 대시보드 — 실행 시각 앞 30분을 기준, 뒤를 대상으로 시점 비교](docs/images/webui/120-glass-compare-deeplink.jpg)
 
 ![로그인 — 최초 기동 admin 부트스트랩 안내(유리 카드는 뜨는 계층)](docs/images/webui/105-glass-login.jpg)
 
