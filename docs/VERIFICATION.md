@@ -5618,6 +5618,8 @@ x86-64 명령어를 직접 실행하지 못한다. 이 Mac에서 SQL Server를 �
      다시 SAMPLE                         HTTP 200 appSchema=SAMPLE
 ```
 
+![인스턴스 카드 — 등록한 앱 스키마 표기](images/webui/78-instances-oracle-app-schema.png)
+
 ### 테스트
 
 ```
@@ -5637,3 +5639,181 @@ DbmsOperatorFactoryAppSchemaTest 1 인스턴스 등록값이 전역 설정보다
 - Microsoft Q&A, [Windows 11 ARM in Parallels, which MSSQL works](https://learn.microsoft.com/en-us/answers/questions/1443109/im-running-windows-11-arm-in-a-parallels-vm-i-need)
 - Microsoft Learn, [Azure SQL Database free offer](https://learn.microsoft.com/en-us/azure/azure-sql/database/free-offer?view=azuresql); [Amazon RDS FAQs](https://aws.amazon.com/rds/faqs/)
 - [Apple Silicon Docker amd64 emulation via Rosetta is fast(er)](https://patrickwthomas.net/macos-docker/) — Rosetta 대 QEMU 보고
+
+## 134. 네이티브 x64에서 SQL Server를 재고, 브랜치를 main에 합친다 (2026-09-11)
+
+### 무엇을 했나
+
+133절에서 "이 Mac에서는 SQL Server를 번역 없이 돌릴 방법이 없다"를 확정하고, 다른 하드웨어 경로(GitHub Actions x64 러너 등)는 push가 필요해
+사용자 결정으로 남겼다. 사용자가 "다 해줘"라고 해서 브랜치를 push하고 PR(#2)을 열어, 같은 IT와 같은 부하 측정기를 GitHub 호스티드
+ubuntu x64 러너의 SQL Server 2022에서 돌렸다. 같은 측정기를 Rosetta VM의 SQL Server 2022에서도 돌려 두 결과를 나란히 둔다.
+
+- `.github/workflows/mssql-x64.yml`: `mcr.microsoft.com/mssql/server:2022-latest` 서비스 컨테이너, 계정·데모 스크립트 적용(`scripts/ApplySql.java`),
+  `DBTOWER_MSSQL_IT=1`로 SQL Server IT 두 개, 이어서 부하 측정.
+- `scripts/MssqlLoad.java`: SQL Server에는 pgbench가 없어 같은 모양(100만 행·가맹점 5만·4클라이언트·60초·무작위 가맹점의 최근 20건)을 JDBC로
+  재현한다. 클라이언트 지연과 서버 평균 실행 시간(`sys.dm_exec_query_stats`, 구간마다 계획 캐시를 비움)을 같이 찍어 경로 비용을 떼어 본다.
+
+### 환경
+
+| | Rosetta VM(이 Mac) | GitHub Actions x64 러너 |
+|---|---|---|
+| SQL Server | 2022 RTM-CU26-GDR 16.0.4275.2 (X64), EngineEdition=3 | 2022 RTM-CU26-GDR 16.0.4275.2 (X64), EngineEdition=3 (같은 빌드) |
+| 실행 방식 | Apple M2 Pro, Colima vz + Rosetta 2 번역, 4 vCPU·SQL 메모리 4,729 MB | GitHub 호스티드 `ubuntu-latest`(ubuntu-24.04 이미지 20260907.300), x86_64 4 vCPU·16GB, 번역 없음. CPU는 실행마다 배정된다: 1회차 AMD EPYC 9V45, 2회차 AMD EPYC 7763 |
+| 클라이언트 | 같은 VM의 arm64 JVM 컨테이너(`--network host`, `127.0.0.1:14330`) | 러너 호스트의 x64 JVM(서비스 컨테이너 포트 `127.0.0.1:11433`) |
+
+### SQL Server IT — 네이티브 x64 러너 (PR #2의 `SQL Server x64` 실행 34546685489)
+
+```
+[MSSQL 드라이런] committed=false affected=2 keys=[id] unavailable=null
+[MSSQL UPDATE 되돌리기] committed=true restored=2
+[MSSQL 드리프트] committed=false conflicts=[Conflict[keyValues=[1], changedColumns=[name], reason=실행 뒤 값이 바뀌었다]]
+[MSSQL INSERT] affected=1 unavailable=null afterRows=1
+[MSSQL 사본 어긋남] 영향 행 수(2)가 변경 전 사본 행 수(1)와 달라 커밋하지 않았다. ...
+[MSSQL dataDefinitionCausesTransactionCommit] false
+[MSSQL DDL 드라이런 전 계획] |--Clustered Index Scan(OBJECT:([sample].[dbo].[change_it_big].[PK__...]), WHERE:(...[status]=...))  timings(us)=[2808, 1306, 1255]
+[MSSQL DDL 드라이런 후 계획] |--Index Seek(OBJECT:([sample].[dbo].[change_it_big].[change_it_big_status_idx]), SEEK:(...) ORDERED FORWARD)  timings(us)=[1051, 352, 291]
+[MSSQL reader UPDATE] MSSQL 콘솔 조회 실패: The UPDATE permission was denied on the object 'customers', database 'sample', schema 'dbo'.
+```
+
+판정은 Azure SQL Edge(131절)·Rosetta 위 SQL Server 2022(132절)와 한 줄도 다르지 않았다. Microsoft가 지원하는 환경(x86-64 Linux 호스트)에서
+같은 IT가 통과한 것이다. 결함 수정 커밋(0ea31d0)의 실행에서는 `NetworkTimeoutAfterLoginIT`도 네이티브 x64에서 통과했다:
+`[MSSQL 로그인 뒤 7초 서버 대기] elapsed_ms=7000 networkTimeout=0`.
+
+첫 실행(34546082036)은 IT에 닿지 못하고 실패했다. `compileTestJava`는 런타임 전용 의존성(`runtimeOnly 'com.microsoft.sqlserver:mssql-jdbc'`)
+jar를 받지 않아 JAR 경로가 비었고, 계정 적용 단계가 `No suitable driver found`로 5분 동안 재시도만 반복했다. 처음엔 Ubuntu 24.04 러너에서 SQL Server
+컨테이너가 죽는 알려진 문제를 의심했는데, 로그를 받아 보니 원인은 우리 워크플로였다. `bootJar`로 런타임 클래스패스를 실제로 받게 하고 JAR이 비면 즉시
+실패하게 고쳤다.
+
+### 부하 전후 — 같은 측정기, 같은 순서(`prepare -> drop-index -> plan -> bench select1 -> bench query -> index -> plan -> bench query -> drop-index`)
+
+100만 행(가맹점 50,000곳), 4클라이언트·60초(앞 5초 워밍업 제외), 조회는
+`SELECT TOP (20) id, amount, created_at FROM dbo.payment_events WHERE merchant_id = ? ORDER BY created_at DESC`.
+
+| 측정 | Rosetta VM 인덱스 전 | Rosetta VM 인덱스 후 | x64 1회차(EPYC 9V45) 인덱스 전 | x64 1회차 인덱스 후 |
+|---|---|---|---|---|
+| 추정 계획 | Sort(TOP 20) <- Clustered Index Scan | Sort(TOP 20) <- Nested Loops(Index Seek + Clustered Index Seek LOOKUP) | Sort(TOP 20) <- Clustered Index Scan | Sort(TOP 20) <- Nested Loops(Index Seek + Clustered Index Seek LOOKUP) |
+| 클라이언트 평균 지연 | 70.956 ms | 0.507 ms | 54.641 ms | 0.289 ms |
+| 처리량 | 56.4 tps (3,382건) | 7,885.6 tps (473,138건) | 73.3 tps (4,395건) | 13,844.2 tps (830,650건) |
+| 서버 평균 실행 시간(dm_exec_query_stats) | 70,858.4 µs | 145.0 µs | 53,051.9 µs | 75.1 µs |
+| 서버 평균 논리 읽기 | 3,973 | 63 | 3,973 | 63 |
+| 같은 경로의 `SELECT 1` | 0.300 ms (13,333 tps) | | 0.162 ms (24,710 tps) | |
+| 준비(100만 행 적재·통계) | 3.6초 | | 4.2초 | |
+
+같은 워크플로가 결함 수정 커밋에서 다시 돌며 부하도 한 번 더 쟀다(다른 CPU가 배정됐다):
+
+| 측정 | x64 2회차(EPYC 7763) 인덱스 전 | x64 2회차 인덱스 후 |
+|---|---|---|
+| 추정 계획 | Sort(TOP 20) <- Clustered Index Scan | Sort(TOP 20) <- Nested Loops(Index Seek + Clustered Index Seek LOOKUP) |
+| 클라이언트 평균 지연 | 126.668 ms | 0.663 ms |
+| 처리량 | 31.6 tps (1,896건) | 6,028.6 tps (361,714건) |
+| 서버 평균 실행 시간 | 122,541.3 µs | 173.0 µs |
+| 서버 평균 논리 읽기 | 3,973 | 63.1 |
+| 같은 경로의 `SELECT 1` | 0.388 ms (10,315 tps) | |
+| 준비 | 3.2초 | |
+
+해석:
+- **엔진이 한 일은 같다.** 두 환경의 서버 평균 논리 읽기가 인덱스 전 3,973, 후 63으로 같고 계획도 같다. 다른 것은 그 일에 걸린 시간뿐이다.
+- **환경 사이의 µs는 비교 근거가 못 된다.** 1회차만 보고는 서버 실행 시간이 Rosetta VM에서 1.34배(인덱스 전)·1.93배(인덱스 후) 느리다고 적었다.
+  2회차는 같은 러너 설정에서 인덱스 전 122,541 µs·후 173.0 µs로 1회차의 2.3배였고, 인덱스 후 값은 Rosetta VM(145.0 µs)보다도 느렸다. 러너 CPU가
+  실행마다 달랐고(EPYC 9V45 대 7763) 공유 VM이다. 두 번의 결과가 한 번의 해석을 뒤집었으므로 그 배율 해석은 거둔다.
+- **흔들리지 않은 것**: 세 실행 모두 계획이 같고 논리 읽기가 3,973 -> 63이다. 인덱스 효과의 배율도 x64 두 번에 서버 실행 약 706배(53,052 -> 75.1)·
+  약 708배(122,541 -> 173.0), 클라이언트 지연 약 189배·191배로 거의 같았다 — 절대값은 흔들려도 같은 실행 안의 전후 배율은 안정적이다.
+  Rosetta VM은 서버 약 489배, 클라이언트 약 140배. 132절 PostgreSQL(46.378 -> 0.521 ms, 약 89배)과 크기가 다른 것은 엔진·계획·경로가 달라서이고,
+  서로 비교할 수치가 아니다.
+- **인덱스 뒤 지연의 구성(네이티브 x64)**: 0.289 ms 중 서버 실행 0.075 ms, 같은 경로의 `SELECT 1`이 0.162 ms, 나머지 약 0.05 ms가 20행 전송·JDBC 처리다.
+  네이티브에서도 인덱스 뒤 클라이언트 지연의 절반 이상은 왕복이다(132절 PostgreSQL 결론과 같다).
+- 그래서 쓰는 말은 "같은 실행 안의 전후 배율"과 "엔진이 한 일(계획·논리 읽기)은 환경과 무관하게 같다"까지로 둔다.
+
+### 정리하다 찾은 결함 — 말 없는 대상 하나가 폴러와 삭제 API를 멈춘다
+
+측정이 끝난 뒤 검증용 등록을 지우는데 `DELETE /api/instances/{id}`(SQL Server 2022 등록)가 2분 넘게 돌아오지 않았다. VM은 이미 지웠는데,
+Colima의 ssh 포트 포워드(삭제된 VM 몫)가 남아 14330에서 **연결만 받고 아무 바이트도 보내지 않는** 상태였다. 앱 스레드 덤프(jstack):
+
+```
+"dbtower-sched-3" RUNNABLE
+    at java.net.Socket$SocketInputStream.read
+    at com.microsoft.sqlserver.jdbc.TDSChannel.read
+    at com.microsoft.sqlserver.jdbc.SQLServerConnection.prelogin      <- loginTimeout=3이 이 읽기를 막지 못함(mssql-jdbc #1529)
+    at com.zaxxer.hikari.pool.HikariPool.createPoolEntry              <- Hikari가 생성자에서 첫 연결을 동기로 시도
+"http-nio-8080-exec-3" BLOCKED  ConcurrentHashMap.replaceNode <- ConnectionPools.close <- RegistryService.delete        (삭제 API)
+"dbtower-sched-1"      BLOCKED  ConcurrentHashMap.computeIfAbsent <- ConnectionPools.getDataSource <- OpsAlertDetector.detectInstanceDown
+"dbtower-sched-2"      BLOCKED  ... <- MsSqlOperator.parameters <- ConfigDriftDetector.collect
+"dbtower-sched-4"      BLOCKED  ... <- ScoreService.probeHealth                                                        (헬스 스코어)
+"http-nio-8080-exec-6" BLOCKED  ... <- ScoreService.probeHealth
+```
+
+풀 생성이 `computeIfAbsent` 안에서 일어나고, 그 안의 첫 연결이 prelogin 읽기에 7분 넘게 매달리자, 같은 인스턴스를 부르는 폴러 셋과 API 둘이
+같은 맵 락 뒤에 줄을 섰다. 폴러는 인스턴스를 차례로 도므로 **대상 하나가 모든 대상의 운영 경보·헬스 스코어·설정 드리프트 수집을 멈춘다.**
+AGENTS.md의 "대상 장애가 플랫폼을 죽이면 안 된다"에 정면으로 걸리는 결함이다. 로컬 앱은 남은 포워드를 끊어 풀었고(DELETE 204), 증거를 남긴 뒤 고쳤다.
+
+재현 테스트(`UnresponsiveTargetTest`) — 연결을 받기만 하고 아무것도 쓰지 않는 로컬 소켓 서버에 기종별 오퍼레이터를 붙인다. 수정 전 코드:
+
+```
+[무응답 대상 MYSQL]      up=false elapsed_ms=3255   (connectTimeout·socketTimeout이 URL에 있다)
+[무응답 대상 POSTGRESQL] up=false elapsed_ms=6024
+MSSQL  헬스체크 -> execution timed out after 25000 ms   (매달림)
+ORACLE 헬스체크 -> execution timed out after 25000 ms   (매달림)
+MSSQL·ORACLE: 매달린 첫 연결 뒤 같은 인스턴스의 두 번째 헬스체크도 25초 초과
+6 tests completed, 4 failed
+```
+
+수정:
+- **풀 생성이 연결을 붙잡지 않게**: 모니터·콘솔 풀 모두 `initializationFailTimeout=-1`. 연결은 Hikari의 추가 스레드가 맡고, 호출자는 `connectionTimeout`만 기다린다.
+- **로그인 단계에만 읽기 제한**: SQL Server는 URL `socketTimeout=5000`, Oracle은 `oracle.net.CONNECT_TIMEOUT=3000`·`oracle.jdbc.ReadTimeout=5000`.
+- **로그인 뒤에는 예전처럼 제한을 푼다**: 두 기종의 서버 사이드 BACKUP·RESTORE·Data Pump가 같은 커넥션 경로를 쓰므로 짧은 제한을 남기면 긴 작업이 끊긴다.
+  `ConnectionPools`가 기종이 준 `JdbcConnectOptions`로 붙은 뒤 `setNetworkTimeout(0)`을 건다(Hikari는 첫 커넥션의 값을 풀 기본으로 기억해 되돌린다).
+  MySQL·PostgreSQL은 URL 설정 그대로다.
+
+수정 뒤 같은 테스트(테스트 풀의 connectionTimeout 2초):
+
+```
+[무응답 대상 MYSQL]      up=false elapsed_ms=2038
+[무응답 대상 POSTGRESQL] up=false elapsed_ms=2005
+[무응답 대상 MSSQL]      up=false elapsed_ms=2002
+[무응답 대상 ORACLE]     up=false elapsed_ms=2004
+[무응답 대상 MONGODB]    up=false elapsed_ms=3085   (원래부터 serverSelectionTimeout·connectTimeout 3초 — 이번에 테스트로만 고정)
+[무응답 대상 MSSQL 동시]  매달린 첫 연결 뒤 두 번째 헬스체크 2001ms, 풀 정리 1ms
+[무응답 대상 ORACLE 동시] 두 번째 헬스체크 2006ms, 풀 정리 1ms
+```
+
+로그인 뒤 제한이 풀리는지는 실DB로 확인했다(`NetworkTimeoutAfterLoginIT`, 풀에서 받은 커넥션으로 서버가 7초 기다리는 문장):
+
+```
+[MSSQL 로그인 뒤 7초 서버 대기]  elapsed_ms=7005 networkTimeout=0   (로컬 Azure SQL Edge, CI x64 러너에서도 같은 IT)
+[Oracle 로그인 뒤 7초 서버 대기] elapsed_ms=7019 networkTimeout=0
+```
+
+같은 로컬 실행에서 `ChangeExecutionIT`·`ConsoleReadOnlyIT` 5기종도 그대로 통과했다(변경 실행·되돌리기·드리프트·읽기 전용 경계).
+
+풀이 첫 연결을 늦게 열면 호출자가 받는 예외는 "Failed to obtain JDBC Connection"뿐이라 다운 알림 사유가 뭉개졌다. 원인 사슬 끝의 드라이버 사유를 덧붙이게
+했고, 재현 테스트가 사유가 그 문구만으로 남지 않는지 단언한다. 테스트 풀처럼 connectionTimeout(2초)이 로그인 제한(5초)보다 짧으면 드라이버가 아직 실패하기
+전이라 덧붙는 사유는 풀의 대기 초과(`Connection is not available, request timed out after 2006ms (total=0, active=0, idle=0, waiting=0)`)다 —
+연결이 하나도 없다는 사실은 남는다.
+
+### 테스트
+
+```
+UnresponsiveTargetTest 7          연결만 받는 소켓 서버에 5기종 헬스체크가 제한 시간 안에 down(사유가 "Failed to obtain JDBC Connection"만으로 남지 않음),
+                                  SQL Server·Oracle에서 매달린 첫 연결 뒤 같은 인스턴스의 두 번째 호출과 풀 정리가 막히지 않음
+NetworkTimeoutAfterLoginIT 2(게이트) 풀 커넥션으로 서버 7초 대기를 끝까지 받음(SQL Server DBTOWER_MSSQL_IT, Oracle DBTOWER_CONSOLE_IT)
+전체                              757 tests, 실패 0, 건너뜀 17(실DB IT 게이트), 규약 검사 통과
+```
+
+### 브랜치를 main에 합친다
+
+사용자가 처음에 "커밋만, push 안 함"으로 정했던 브랜치를 이번에 "다 해줘"로 push·병합까지 맡겼다. main에 직접 push하지 않고 PR(#2)로 합친다.
+
+- 병합 전 확인: 원격 main과 로컬 main이 같고 브랜치가 앞서기만 한다(뒤처짐 0), 브랜치 이력 전체에서 로컬 비밀값(토큰·암호화 키·비밀번호) 검색 0건,
+  1MB 넘는 추가 파일 0, `release.yml`은 `v*` 태그 push에서만 이미지를 게시하므로 병합이 배포를 일으키지 않는다.
+- PR의 CI: `CI`(규약 검사 + 전체 테스트)와 `SQL Server x64`(네이티브 x64 IT + 부하).
+
+```
+34546082036  SQL Server x64  abce4e1  failure  JAR 경로가 비어 계정 적용 재시도만 반복(위 IT 절)
+34546082056  CI              abce4e1  success
+34546685489  SQL Server x64  81cdd28  success  부하 1회차(EPYC 9V45)
+34546685511  CI              81cdd28  success
+34548325111  SQL Server x64  0ea31d0  success  부하 2회차(EPYC 7763), NetworkTimeoutAfterLoginIT 7000ms
+34548325132  CI              0ea31d0  success  (757 tests 기준 커밋)
+```
+
+병합은 이 절을 담은 커밋의 CI가 초록인 것을 확인한 뒤 PR에서 merge commit으로 한다(브랜치의 커밋 이력을 그대로 남긴다).
