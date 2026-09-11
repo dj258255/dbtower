@@ -30,7 +30,9 @@ services:
       - "15433:5432"
 
   postgres:
-    image: postgres:16
+    # 공식 postgres:16 + HypoPG — 인덱스 어드바이저의 전제(docker/postgres/Dockerfile). 데이터 볼륨은 그대로라 이미지만 바꿔도 기존 데이터가 남는다
+    build: ./docker/postgres
+    image: dbtower-postgres:16-hypopg
     container_name: dbtower-postgres
     environment:
       POSTGRES_PASSWORD: dbtower1234

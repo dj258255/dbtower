@@ -66,7 +66,18 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
+	// 역할별 화면 E2E(VERIFICATION 137절) — 사람이 눌러서야 나온 화면 결함(136절)을 CI가 다시 잡게 한다.
+	// DBTOWER_E2E=1일 때만 돌고, 브라우저는 아래 playwrightInstall 태스크로 받는다. Boot BOM 미관리라 버전 명시
+	testImplementation 'com.microsoft.playwright:playwright:1.62.0'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// Playwright 브라우저(Chromium) 설치 — Linux(CI)는 시스템 라이브러리까지(--with-deps), macOS는 브라우저만 받는다
+tasks.register('playwrightInstall', JavaExec) {
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.microsoft.playwright.CLI'
+	args = System.getProperty('os.name').toLowerCase().contains('linux')
+			? ['install', '--with-deps', 'chromium'] : ['install', 'chromium']
 }
 
 tasks.named('test') {
