@@ -84,7 +84,7 @@ Call/sec은 누적 카운터라 단일 스냅샷으로는 낼 수 없어 최근 
 폭증)의 대리 신호로 쓴다. 부하 주입 전후 비교에서 점조회 QPS 증가와 신규 풀스캔 쿼리 감지를
 실측했다 (VERIFICATION 3절).
 
-![시점 비교 — 조회 구간 vs 비교 구간, 증감률과 NEW 뱃지](images/webui/02-compare.png)
+![시점 비교 — 조회 구간 vs 비교 구간, 증감률과 NEW 뱃지(145절 재촬영)](images/webui/112-glass-compare.jpg)
 
 ![시점 비교 — Load 증감 컬럼](images/webui/37-compare-load-col.png)
 

@@ -1,5 +1,6 @@
 package io.dbtower.insight.internal;
 
+import io.dbtower.analysis.QueryMasker;
 import io.dbtower.insight.internal.LiveSessionHub.LiveFrame;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
@@ -7,12 +8,17 @@ import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import net.javacrumbs.shedlock.core.LockConfiguration;
+import net.javacrumbs.shedlock.core.LockProvider;
+import net.javacrumbs.shedlock.core.SimpleLock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -33,39 +39,59 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 실시간 허브의 핵심 약속(VERIFICATION 140절) — 보는 사람이 몇 명이든 대상 조회는 틱당 1회, 아무도 안 보면 0회.
+ * 실시간 허브의 핵심 약속(VERIFICATION 140·144절) — 보는 사람이 몇 명이든, 앱 노드가 몇 대든 대상 조회는 주기당 1회, 아무도 안 보면 0회.
  *
- * <p>스케줄러는 가짜로 두고 틱을 직접 부른다. 시간에 기대는 테스트는 CI에서 흔들리고, 여기서 확인할 것은
- * "몇 번 불렸나"이지 "언제 불렸나"가 아니다.
+ * <p>스케줄러는 가짜로 두고 틱을 직접 부른다. 조회권(ShedLock)은 "한 라운드에 한 번만 준다"는 가짜로 둔다 — 실제 락은 주기의 90% 동안
+ * 쥐고 있어 한 주기 안에서는 두 번째 요청이 거절되는데, 그 성질만 남긴 것이다. 시간에 기대는 테스트는 CI에서 흔들린다.
  */
 class LiveSessionHubTest {
 
     private static final long ID = 7L;
 
     private RegistryService registry;
+    private DbmsOperatorFactory factory;
     private DbmsOperator operator;
     private ScheduledExecutorService executor;
     private ScheduledFuture<?> future;
     private SimpleMeterRegistry meters;
+    private RoundLock lock;
+    private MemoryStore store;
     private LiveSessionHub hub;
 
     @BeforeEach
     void setUp() {
         registry = mock(RegistryService.class);
-        DbmsOperatorFactory factory = mock(DbmsOperatorFactory.class);
+        factory = mock(DbmsOperatorFactory.class);
         operator = mock(DbmsOperator.class);
         DatabaseInstance instance = mock(DatabaseInstance.class);
+        when(instance.getId()).thenReturn(ID);
         when(registry.findOptional(ID)).thenReturn(Optional.of(instance));
         when(factory.create(instance)).thenReturn(operator);
         when(operator.activeSessions(anyInt())).thenReturn(List.of(
                 new SessionInfo(10, "app", "active", null, null, "select 1", 120),
-                new SessionInfo(11, "app", "active", "Lock:transactionid", 10L, "update t set v=1", 3400)));
+                new SessionInfo(11, "app", "active", "Lock:transactionid", 10L,
+                        "update customers set grade = 'VIP' where email = 'hong@x.com'", 3400)));
 
         executor = mock(ScheduledExecutorService.class);
         future = mock(ScheduledFuture.class);
         doReturn(future).when(executor).scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any());
         meters = new SimpleMeterRegistry();
-        hub = new LiveSessionHub(registry, factory, meters, 2000, 50, 3, executor);
+        lock = new RoundLock();
+        store = new MemoryStore();
+        hub = node(meters, 3);
+    }
+
+    private LiveSessionHub node(SimpleMeterRegistry registryForNode, int maxSubscribers) {
+        return new LiveSessionHub(registry, factory, registryForNode, lock, store, new QueryMasker(true, false),
+                2000, 50, maxSubscribers, executor);
+    }
+
+    /** 한 주기 = 락 라운드 하나 + 틱 */
+    private void round(LiveSessionHub... nodes) {
+        lock.nextRound();
+        for (LiveSessionHub n : nodes) {
+            n.tick(ID);
+        }
     }
 
     @Test
@@ -74,7 +100,7 @@ class LiveSessionHubTest {
         viewers.forEach(v -> hub.subscribe(ID, v));
 
         for (int i = 0; i < 5; i++) {
-            hub.tick(ID);
+            round(hub);
         }
 
         verify(executor, times(1)).scheduleWithFixedDelay(any(Runnable.class), eq(0L), eq(2000L), eq(TimeUnit.MILLISECONDS));
@@ -84,10 +110,92 @@ class LiveSessionHubTest {
     }
 
     @Test
+    void 두_노드가_같은_대상을_보면_주기마다_한_노드만_묻고_다른_노드는_같은_프레임을_넘긴다() {
+        SimpleMeterRegistry otherMeters = new SimpleMeterRegistry();
+        LiveSessionHub other = node(otherMeters, 3);
+        Recorder onA = new Recorder();
+        Recorder onB = new Recorder();
+        hub.subscribe(ID, onA);
+        other.subscribe(ID, onB);
+
+        for (int i = 0; i < 4; i++) {
+            round(hub, other);
+        }
+
+        verify(operator, times(4)).activeSessions(50);
+        assertThat(onA.frames).extracting(LiveFrame::seq).containsExactly(1L, 2L, 3L, 4L);
+        assertThat(onB.frames).extracting(LiveFrame::seq).containsExactly(1L, 2L, 3L, 4L);
+        assertThat(otherMeters.counter("dbtower.live.relays").count()).isEqualTo(4.0);
+        assertThat(onB.frames.get(0).sessions()).isEqualTo(onA.frames.get(0).sessions());
+    }
+
+    @Test
+    void 조회권을_쥔_노드가_올리기_전에_읽어_놓치면_잠시_뒤_한_번_더_읽어_받는다() {
+        LiveSessionHub other = node(new SimpleMeterRegistry(), 3);
+        Recorder onB = new Recorder();
+        other.subscribe(ID, onB);
+        lock.nextRound();
+        lock.takenByOtherNode();                 // A가 조회권을 쥐었지만 아직 올리지 않은 순간
+        other.tick(ID);
+
+        assertThat(onB.frames).isEmpty();
+        verify(executor).schedule(any(Runnable.class), eq(500L), eq(TimeUnit.MILLISECONDS));
+
+        store.publish(new LiveFrame(ID, 0, 1L, 2000, 1.0, LiveSessionHub.OK, null,   // A가 이제 올림
+                LiveSessionHub.Summary.of(List.of()), List.of()));
+        other.retryRelay(ID);
+        assertThat(onB.frames).extracting(LiveFrame::seq).containsExactly(1L);
+        verify(operator, never()).activeSessions(anyInt());
+    }
+
+    @Test
+    void 조회권을_쥔_노드가_사라지면_굳은_프레임은_넘기지_않고_락이_풀리면_이어받는다() {
+        LiveSessionHub other = node(new SimpleMeterRegistry(), 3);
+        Recorder onB = new Recorder();
+        other.subscribe(ID, onB);
+        hub.subscribe(ID, new Recorder());
+        round(hub, other);                   // A가 묻고 올림, B는 넘김
+        store.age = 10_000;                  // A가 죽어 프레임이 락 상한(6초)보다 오래됨
+        lock.holdForever();                  // 죽은 A의 락이 아직 안 풀림
+        other.tick(ID);
+
+        assertThat(onB.frames).hasSize(1);   // 굳은 프레임을 또 넘기지 않는다
+        lock.release();
+        round(other);                        // 락 상한이 지나 B가 잡는다
+        assertThat(onB.frames).extracting(LiveFrame::seq).containsExactly(1L, 2L);
+        verify(operator, times(2)).activeSessions(50);
+    }
+
+    @Test
+    void 락이_실패하면_조율_없이_직접_잰다() {
+        lock.fail = true;
+        Recorder viewer = new Recorder();
+        hub.subscribe(ID, viewer);
+
+        hub.tick(ID);
+        hub.tick(ID);
+
+        verify(operator, times(2)).activeSessions(50);
+        assertThat(viewer.frames).extracting(LiveFrame::seq).containsExactly(1L, 2L);
+        assertThat(store.published).isZero();
+    }
+
+    @Test
+    void 세션_쿼리의_리터럴은_가려서_싣는다() {
+        Recorder viewer = new Recorder();
+        hub.subscribe(ID, viewer);
+        round(hub);
+
+        String query = viewer.frames.get(0).sessions().get(1).query();
+        assertThat(query).doesNotContain("hong@x.com").doesNotContain("VIP").contains("email = ?");
+        assertThat(store.frames.get(ID).sessions().get(1).query()).doesNotContain("hong@x.com");
+    }
+
+    @Test
     void 요약은_막힌_세션과_대기_중인_세션과_가장_오래_걸린_시간을_센다() {
         Recorder viewer = new Recorder();
         hub.subscribe(ID, viewer);
-        hub.tick(ID);
+        round(hub);
 
         LiveSessionHub.Summary s = viewer.frames.get(0).summary();
         assertThat(s.total()).isEqualTo(2);
@@ -109,14 +217,14 @@ class LiveSessionHubTest {
         verify(future).cancel(false);
         assertThat(hub.hasChannel(ID)).isFalse();
         assertThat(hub.subscriberCount()).isZero();
-        hub.tick(ID); // 취소 직전에 이미 출발한 틱이 와도 대상에 닿지 않는다
+        round(hub); // 취소 직전에 이미 출발한 틱이 와도 대상에 닿지 않는다
         verify(operator, never()).activeSessions(anyInt());
     }
 
     @Test
     void 늦게_온_사람은_다음_틱을_기다리지_않고_직전_프레임을_바로_받는다() {
         hub.subscribe(ID, new Recorder());
-        hub.tick(ID);
+        round(hub);
 
         Recorder late = new Recorder();
         hub.subscribe(ID, late);
@@ -133,8 +241,8 @@ class LiveSessionHubTest {
         hub.subscribe(ID, gone);
         hub.subscribe(ID, stays);
 
-        hub.tick(ID);
-        hub.tick(ID);
+        round(hub);
+        round(hub);
 
         assertThat(gone.ended).isTrue();
         assertThat(stays.frames).hasSize(2);
@@ -147,7 +255,7 @@ class LiveSessionHubTest {
         Recorder viewer = new Recorder();
         hub.subscribe(ID, viewer);
 
-        hub.tick(ID);
+        round(hub);
 
         LiveFrame f = viewer.frames.get(0);
         assertThat(f.status()).isEqualTo(LiveSessionHub.ERROR);
@@ -161,7 +269,7 @@ class LiveSessionHubTest {
         Recorder viewer = new Recorder();
         hub.subscribe(ID, viewer);
 
-        hub.tick(ID);
+        round(hub);
 
         assertThat(viewer.frames).extracting(LiveFrame::status).containsExactly(LiveSessionHub.GONE);
         assertThat(viewer.ended).isTrue();
@@ -183,11 +291,70 @@ class LiveSessionHubTest {
 
     @Test
     void 주기는_1초_아래로_내려가지_않는다() {
-        LiveSessionHub fast = new LiveSessionHub(registry, mock(DbmsOperatorFactory.class), new SimpleMeterRegistry(),
-                100, 50, 10, executor);
+        LiveSessionHub fast = new LiveSessionHub(registry, factory, new SimpleMeterRegistry(), lock, store,
+                new QueryMasker(true, false), 100, 50, 10, executor);
         fast.subscribe(ID, new Recorder());
 
         verify(executor).scheduleWithFixedDelay(any(Runnable.class), eq(0L), eq(1000L), eq(TimeUnit.MILLISECONDS));
+    }
+
+    /** 한 라운드(= 실제 락의 lockAtLeastFor 한 번)에 조회권을 한 번만 준다 */
+    private static final class RoundLock implements LockProvider {
+        private boolean taken;
+        private boolean forever;
+        boolean fail;
+
+        void nextRound() {
+            if (!forever) {
+                taken = false;
+            }
+        }
+
+        void takenByOtherNode() {
+            taken = true;
+        }
+
+        void holdForever() {
+            taken = true;
+            forever = true;
+        }
+
+        void release() {
+            forever = false;
+            taken = false;
+        }
+
+        @Override
+        public Optional<SimpleLock> lock(LockConfiguration configuration) {
+            if (fail) {
+                throw new IllegalStateException("meta db down");
+            }
+            if (taken) {
+                return Optional.empty();
+            }
+            taken = true;
+            return Optional.of(() -> { });
+        }
+    }
+
+    private static final class MemoryStore implements LiveFrameStore {
+        final Map<Long, LiveFrame> frames = new HashMap<>();
+        long age;
+        int published;
+
+        @Override
+        public long publish(LiveFrame frame) {
+            long seq = frames.containsKey(frame.instanceId()) ? frames.get(frame.instanceId()).seq() + 1 : 1;
+            frames.put(frame.instanceId(), frame.withSeq(seq));
+            published++;
+            age = 0;
+            return seq;
+        }
+
+        @Override
+        public Optional<Stored> latest(long instanceId) {
+            return Optional.ofNullable(frames.get(instanceId)).map(f -> new Stored(f, age));
+        }
     }
 
     private static final class Recorder implements LiveSessionHub.Subscriber {
