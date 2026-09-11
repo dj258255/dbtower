@@ -27,6 +27,12 @@ jobs:
         env:
           DBTOWER_E2E: "1"
         run: ./gradlew test
+      # E2E가 조용히 건너뛰어지면(환경변수 누락 등) 테스트 단계는 초록이다 — 결과 파일로 실제로 돌았는지 확인해 건너뜀이면 실패시킨다
+      - name: E2E actually ran
+        run: |
+          f=build/test-results/test/TEST-io.dbtower.e2e.PersonaUiE2ETest.xml
+          grep -o 'tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*" errors="[0-9]*"' "$f"
+          grep -q 'skipped="0"' "$f"
       - name: Upload test report
         if: failure()
         uses: actions/upload-artifact@v4

@@ -6142,3 +6142,13 @@ PersonaUiE2ETest 5 (DBTOWER_E2E)   위 3절
 전체 (DBTOWER_E2E=1)               787 tests, 실패 0, 건너뜀 17(실DB IT 게이트), 규약 검사 통과 (BUILD SUCCESSFUL in 5m 17s)
 ```
 
+
+### PR #5 CI
+
+```
+34568773583  CI              success  Convention checks -> Install Playwright Chromium(1m 11s) -> Test(DBTOWER_E2E=1, "BUILD SUCCESSFUL in 5m 10s")
+34568773611  SQL Server x64  success  PostgresOperator가 operator 경로라 함께 돌았다 — IT 전 판정 동일, [MSSQL 로그인 뒤 7초 서버 대기] elapsed_ms=7001 networkTimeout=0
+```
+
+CI 로그는 통과한 테스트 이름을 찍지 않아, 이 실행만으로는 E2E가 실제로 돌았는지(환경변수가 빠져 조용히 건너뛰었는지) 구분할 수 없었다. 테스트 단계 뒤에
+`E2E actually ran` 단계를 더해 `TEST-io.dbtower.e2e.PersonaUiE2ETest.xml`의 `tests·skipped` 값을 찍고 건너뜀이 있으면 실패시킨다. 병합은 이 단계가 들어간 실행이 초록인 것을 확인한 뒤 한다.
