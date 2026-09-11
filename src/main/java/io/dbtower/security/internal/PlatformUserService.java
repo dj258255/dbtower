@@ -57,7 +57,10 @@ public class PlatformUserService implements UserDetailsService {
     @Bean
     ApplicationRunner bootstrapUsers(
             @Value("${dbtower.security.admin-password:}") String adminPassword,
-            @Value("${dbtower.security.viewer-password:}") String viewerPassword) {
+            @Value("${dbtower.security.viewer-password:}") String viewerPassword,
+            @Value("${dbtower.security.requester-password:}") String requesterPassword,
+            @Value("${dbtower.security.approver-password:}") String approverPassword,
+            @Value("${dbtower.security.operator-password:}") String operatorPassword) {
         return args -> {
             if (repository.count() > 0) {
                 return;
@@ -70,11 +73,20 @@ public class PlatformUserService implements UserDetailsService {
             } else {
                 log.info("admin 계정을 생성했습니다 (비밀번호는 DBTOWER_ADMIN_PASSWORD)");
             }
-            if (!viewerPassword.isBlank()) {
-                repository.save(new PlatformUser("viewer", encoder.encode(viewerPassword), PlatformUser.Role.VIEWER));
-                log.info("viewer 계정을 생성했습니다 (조회·진단 전용)");
-            }
+            // 역할별 계정은 비밀번호를 준 것만 만든다 — 쓰지 않는 역할의 계정이 빈 비밀번호나 랜덤값으로 남지 않게
+            seedIfSet("viewer", viewerPassword, PlatformUser.Role.VIEWER, "관제 조회 전용");
+            seedIfSet("requester", requesterPassword, PlatformUser.Role.REQUESTER, "워크벤치 조회·변경 요청");
+            seedIfSet("approver", approverPassword, PlatformUser.Role.APPROVER, "변경 승인·반려");
+            seedIfSet("operator", operatorPassword, PlatformUser.Role.OPERATOR, "승인 티켓 실행·대상 DB 운영");
         };
+    }
+
+    private void seedIfSet(String username, String password, PlatformUser.Role role, String purpose) {
+        if (password.isBlank()) {
+            return;
+        }
+        repository.save(new PlatformUser(username, encoder.encode(password), role));
+        log.info("{} 계정을 생성했습니다 ({}, {})", username, role, purpose);
     }
 
     private String randomPassword() {

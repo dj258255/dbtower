@@ -16,7 +16,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * 인가 정책(A1) 회귀 방지 — "누가 무엇을 할 수 있나"를 테스트로 고정한다.
- * 원칙: 진단은 VIEWER부터, 대상 DB를 바꾸는 행위와 토큰 조회는 ADMIN만, 기계는 Bearer 토큰.
+ * 원칙: 관제 조회는 VIEWER부터, 토큰 조회·인스턴스 등록은 ADMIN만, 기계는 Bearer 토큰.
+ * 사람별 역할(요청자·승인자·운영자)의 행렬은 PersonaAccessTest가 본다.
  */
 @SpringBootTest(properties = "dbtower.security.api-token=test-api-token")
 @AutoConfigureMockMvc
@@ -55,7 +56,7 @@ class SecurityConfigTest {
     @Test
     @WithMockUser(roles = "VIEWER")
     void VIEWER는_승인_티켓을_대상_DB에_닿게_할_수_없다() throws Exception {
-        // 드라이런도 문장을 실제로 실행한 뒤 롤백하고 락을 잡으므로 실행·되돌리기와 같은 ADMIN 경계다
+        // 드라이런도 문장을 실제로 실행한 뒤 롤백하고 락을 잡으므로 승인자·운영자 경계다 — 관제는 어느 쪽도 아니다
         for (String path : new String[]{"/api/workbench/tickets/1/dry-run", "/api/workbench/tickets/1/execute",
                 "/api/workbench/tickets/1/revert"}) {
             mvc.perform(post(path).with(csrf()).contentType("application/json").content("{\"dryRun\":true}"))

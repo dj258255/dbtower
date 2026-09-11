@@ -133,15 +133,16 @@ public class ReviewService {
     }
 
     /**
-     * 취소 — 요청자 본인이나 ADMIN. 대기·승인 상태에서만 닫고, 실행권이 잡힌 티켓은 여기서 풀지 않는다(워크벤치의 확인 뒤 정리).
+     * 취소 — 요청자 본인, 또는 남의 티켓을 닫을 책임이 있는 사람(승인자·운영자·관리자, privileged). 대기·승인 상태에서만 닫고,
+     * 실행권이 잡힌 티켓은 여기서 풀지 않는다(워크벤치의 확인 뒤 정리).
      * 승인됐지만 실행하지 않을 티켓이 APPROVED로 영원히 남으면, 나중에 누군가 맥락 없이 실행할 수 있는 열린 권한이 된다.
      */
     @Transactional
-    public ReviewRequest cancel(Long reviewId, String note, String actor, boolean admin) {
+    public ReviewRequest cancel(Long reviewId, String note, String actor, boolean privileged) {
         ReviewRequest review = get(reviewId);
         registryService.findById(review.getInstanceId());
-        if (!admin && !review.getRequester().equals(actor)) {
-            throw new AccessDeniedException("요청자 본인이나 ADMIN만 취소할 수 있습니다");
+        if (!privileged && !review.getRequester().equals(actor)) {
+            throw new AccessDeniedException("요청자 본인이나 승인자·운영자·관리자만 취소할 수 있습니다");
         }
         if (!ticketGate.cancel(reviewId, actor, note == null || note.isBlank() ? null : note.strip())) {
             throw new IllegalStateException("대기·승인 상태에서만 취소할 수 있습니다(현재 " + get(reviewId).getStatus() + ")");

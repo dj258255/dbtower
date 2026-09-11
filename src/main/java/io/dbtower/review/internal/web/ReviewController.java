@@ -8,10 +8,11 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 /**
- * 스키마 변경 리뷰 게이트 API (운영 병목 아크 B2). 제출은 인증 사용자(자기 팀 인스턴스),
- * 승인/반려는 ADMIN(SecurityConfig). POST는 AuditInterceptor가 자동 감사한다(R4).
+ * 스키마 변경 리뷰 게이트 API (운영 병목 아크 B2). 제출은 요청자부터(자기 팀 인스턴스),
+ * 승인/반려는 승인자(SecurityConfig). POST는 AuditInterceptor가 자동 감사한다(R4).
  *
  * 응답은 원문 SQL을 담는다 — 리뷰어가 실제 DDL을 봐야 판단하므로. 조회 자체가 ADMIN 경계는
  * 아니지만(제출자도 자기 요청을 봐야 함), LBAC로 자기 팀 인스턴스만 보이는 것은 인스턴스 접근
@@ -69,7 +70,7 @@ public class ReviewController {
         return reviewService.pending().stream().map(ReviewView::of).toList();
     }
 
-    /** 승인/반려 — ADMIN. */
+    /** 승인/반려 — 승인자(APPROVER, ADMIN 포함). */
     @PostMapping("/reviews/{reviewId}/decision")
     public ReviewView decide(@PathVariable Long reviewId, @RequestBody DecisionRequest req) {
         return ReviewView.of(reviewService.decide(reviewId, req.approved(), req.comment(), principal()));
@@ -78,13 +79,18 @@ public class ReviewController {
     public record DecisionRequest(boolean approved, String comment) {
     }
 
-    /** 취소 — 요청자 본인 또는 ADMIN(서비스가 확인). 대기·승인 상태에서만. */
+    /**
+     * 취소 — 요청자 본인, 또는 남의 티켓을 닫을 책임이 있는 승인자·운영자·관리자(서비스가 확인). 대기·승인 상태에서만.
+     * 사용자는 역할 하나만 가지므로 세 역할을 직접 본다(역할 계층을 따로 풀지 않아도 된다).
+     */
     @PostMapping("/reviews/{reviewId}/cancel")
     public ReviewView cancel(@PathVariable Long reviewId, @RequestBody(required = false) CancelRequest req) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        boolean admin = auth != null && auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
-        return ReviewView.of(reviewService.cancel(reviewId, req == null ? null : req.note(), principal(), admin));
+        boolean privileged = auth != null && auth.getAuthorities().stream().anyMatch(a -> CAN_CANCEL_OTHERS.contains(a.getAuthority()));
+        return ReviewView.of(reviewService.cancel(reviewId, req == null ? null : req.note(), principal(), privileged));
     }
+
+    private static final Set<String> CAN_CANCEL_OTHERS = Set.of("ROLE_APPROVER", "ROLE_OPERATOR", "ROLE_ADMIN");
 
     public record CancelRequest(String note) {
     }

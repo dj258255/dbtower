@@ -14,6 +14,12 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.access.hierarchicalroles.RoleHierarchy;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.web.authentication.SavedRequestAwareAuthenticationSuccessHandler;
+import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
+import org.springframework.security.web.savedrequest.SavedRequest;
+import io.dbtower.security.internal.PlatformRoles;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -32,6 +38,7 @@ import io.dbtower.security.internal.OAuthTokenFilter;
 
 
 import java.io.IOException;
+import java.net.URI;
 
 /**
  * 인증·인가 정책 (Phase A1).
@@ -40,8 +47,9 @@ import java.io.IOException;
  * - 사람: 세션 로그인 (폼) + CSRF 쿠키 (SPA가 쿠키를 읽어 헤더로 되돌려주는 표준 패턴)
  * - 기계(MCP 클라이언트·자동화): Bearer 토큰 — 쿠키가 없으므로 CSRF 대상에서 제외
  *
- * 인가 원칙: 진단(조회·explain)은 VIEWER부터, 대상 DB를 바꾸거나 실행하는 행위
- * (등록/삭제/백업/정책)와 토큰 조회는 ADMIN만.
+ * 인가 원칙(쓰는 사람 기준, 135절): 관제 조회는 VIEWER부터, 대상 DB의 행 값을 보는 워크벤치와 변경 요청은 REQUESTER부터,
+ * 변경 승인은 APPROVER, 대상 DB에 닿는 실행·운영은 OPERATOR, 인스턴스·접속 계정·보안·감사는 ADMIN. 포함 관계는
+ * PlatformRoles의 역할 계층이 정한다(ADMIN ⊃ APPROVER·OPERATOR ⊃ REQUESTER ⊃ VIEWER, 승인자와 실행자는 서로를 포함하지 않는다).
  */
 @Configuration
 @EnableWebSecurity
@@ -62,6 +70,12 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /** 역할 계층 — authorizeHttpRequests의 hasRole이 이 빈을 따른다(ADMIN으로 로그인하면 OPERATOR 경로도 통과) */
+    @Bean
+    static RoleHierarchy roleHierarchy() {
+        return PlatformRoles.hierarchy();
     }
 
     private CookieCsrfTokenRepository csrfCookieRepository() {
@@ -114,7 +128,9 @@ public class SecurityConfig {
                         SessionCreationPolicy.STATELESS))
                 .addFilterBefore(tokenFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(oauthTokenFilter, UsernamePasswordAuthenticationFilter.class)
-                .authorizeHttpRequests(auth -> auth.anyRequest().hasRole("ADMIN"))
+                // 도구 호출은 호출자 자신의 토큰으로 REST에 위임되고(132절) 역할 판정은 REST가 한다 — 채널 입구에서 ADMIN으로 막을 이유가
+                // 사라져, 역할이 있는 사람이면 누구나 자기 역할만큼 에이전트를 쓴다(VIEWER는 관제 도구, REQUESTER부터 워크벤치 도구)
+                .authorizeHttpRequests(auth -> auth.anyRequest().hasRole("VIEWER"))
                 .exceptionHandling(e -> e.authenticationEntryPoint(mcpAuthEntryPoint()));
         return http.build();
     }
@@ -174,31 +190,36 @@ public class SecurityConfig {
                         // 멱등 등록(upsert) — IaC 프로비저닝이 쓰는 경로. 등록/삭제와 같은 ADMIN 경계
                         .requestMatchers(HttpMethod.PUT, "/api/instances").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/instances/*").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.POST, "/api/instances/*/backup").hasRole("ADMIN")
-                        // 세션 종료(kill)는 대상 DB의 실행 세션을 끊는 파괴적 행위 — 백업과 같은 ADMIN 경계
-                        .requestMatchers(HttpMethod.POST, "/api/instances/*/sessions/*/kill").hasRole("ADMIN")
+                        // 아래 운영 경로는 대상 DB에 닿거나 운영 형상을 담는다 — DBA 운영(OPERATOR, ADMIN 포함). 예전엔 전부 ADMIN이라
+                        // 백업을 돌리는 DBA가 인스턴스 등록·보안 설정 권한까지 함께 가져야 했다(135절)
+                        .requestMatchers(HttpMethod.POST, "/api/instances/*/backup").hasRole("OPERATOR")
+                        // 세션 종료(kill)는 대상 DB의 실행 세션을 끊는 파괴적 행위 — 백업과 같은 운영 경계
+                        .requestMatchers(HttpMethod.POST, "/api/instances/*/sessions/*/kill").hasRole("OPERATOR")
                         // 심층 진단(D9)은 explain(추정)과 달리 대상 DB에서 쿼리를 실제로 실행한다(타임아웃은 걸지만
-                        // 워크로드를 돌리는 행위) — "실행하는 행위는 ADMIN" 원칙에 따라 진단이지만 ADMIN 경계에 둔다.
-                        .requestMatchers(HttpMethod.POST, "/api/instances/*/deep-diagnose").hasRole("ADMIN")
-                        // 복원 검증도 대상 DB에 임시 DB를 만들고 지우는 행위라 백업과 같은 ADMIN 경계
-                        .requestMatchers(HttpMethod.POST, "/api/instances/*/backup/verify").hasRole("ADMIN")
-                        // 온라인 스키마 변경(gh-ost, B4)은 실제 테이블 구조를 바꾸는 가장 파괴적 행위 — ADMIN만.
+                        // 워크로드를 돌리는 행위) — 진단이지만 대상에 닿는 운영 경계에 둔다.
+                        .requestMatchers(HttpMethod.POST, "/api/instances/*/deep-diagnose").hasRole("OPERATOR")
+                        // 복원 검증도 대상 DB에 임시 DB를 만들고 지우는 행위라 백업과 같은 운영 경계
+                        .requestMatchers(HttpMethod.POST, "/api/instances/*/backup/verify").hasRole("OPERATOR")
+                        // 온라인 스키마 변경(gh-ost, B4)은 실제 테이블 구조를 바꾸는 가장 파괴적 행위 — 운영 경계.
                         // 기본은 dry-run(noop)이지만 execute=true 실행 경로까지 같은 경계로 묶는다.
-                        .requestMatchers(HttpMethod.POST, "/api/instances/*/online-ddl").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.PUT, "/api/instances/*/backup-policy").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/instances/*/online-ddl").hasRole("OPERATOR")
+                        .requestMatchers(HttpMethod.PUT, "/api/instances/*/backup-policy").hasRole("OPERATOR")
                         // 파라미터 조회·drift(B6)는 읽기지만 값이 인프라 형상·자격증명을 담고, 마스킹이
-                        // 이름 기반 휴리스틱이라 완전하지 않아 ADMIN으로 올린다(ParameterController 주석 참고).
-                        .requestMatchers(HttpMethod.GET, "/api/instances/*/parameters").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.GET, "/api/param-diff").hasRole("ADMIN")
-                        // 설정 드리프트 이력(B1)도 파라미터 값(old→new)을 담아 같은 ADMIN 경계에 둔다.
-                        .requestMatchers(HttpMethod.GET, "/api/instances/*/config-drift", "/api/instances/*/config-drift/around").hasRole("ADMIN")
-                        // 변경 리뷰 승인/반려(B2)는 ADMIN. 대기함(전 인스턴스 횡단 뷰)도 ADMIN 트리아지 —
-                        // 팀 사용자에게 다른 팀 리뷰 SQL이 새지 않게. 인스턴스별 조회·제출은 authenticated(findById가 LBAC 스코프).
-                        .requestMatchers(HttpMethod.POST, "/api/reviews/*/decision").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.GET, "/api/reviews/pending").hasRole("ADMIN")
-                        // 인시던트 리포트(B4)·월간 점검 리포트(B5)는 설정 값·성능을 담아 ADMIN.
-                        .requestMatchers(HttpMethod.POST, "/api/instances/*/incident-report").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.POST, "/api/instances/*/monthly-report").hasRole("ADMIN")
+                        // 이름 기반 휴리스틱이라 완전하지 않아 운영 경계로 올린다(ParameterController 주석 참고).
+                        .requestMatchers(HttpMethod.GET, "/api/instances/*/parameters").hasRole("OPERATOR")
+                        .requestMatchers(HttpMethod.GET, "/api/param-diff").hasRole("OPERATOR")
+                        // 설정 드리프트 이력(B1)도 파라미터 값(old→new)을 담아 같은 운영 경계에 둔다.
+                        .requestMatchers(HttpMethod.GET, "/api/instances/*/config-drift", "/api/instances/*/config-drift/around").hasRole("OPERATOR")
+                        // 변경 리뷰 승인/반려(B2)는 승인자(APPROVER, ADMIN 포함). 대기함(전 인스턴스 횡단 뷰)도 승인자 트리아지 —
+                        // 팀 사용자에게 다른 팀 리뷰 SQL이 새지 않게. 인스턴스별 조회는 authenticated(findById가 LBAC 스코프).
+                        .requestMatchers(HttpMethod.POST, "/api/reviews/*/decision").hasRole("APPROVER")
+                        .requestMatchers(HttpMethod.GET, "/api/reviews/pending").hasRole("APPROVER")
+                        // 변경 요청 제출과 취소는 요청자부터 — 관제만 보는 VIEWER는 대상 DB 변경을 요청하지 않는다
+                        // (남의 티켓을 취소할 수 있는지는 서비스가 요청자 본인·승인자·운영자·관리자로 판단한다)
+                        .requestMatchers(HttpMethod.POST, "/api/instances/*/reviews", "/api/reviews/*/cancel").hasRole("REQUESTER")
+                        // 인시던트 리포트(B4)·월간 점검 리포트(B5)는 설정 값·성능을 담아 운영 경계.
+                        .requestMatchers(HttpMethod.POST, "/api/instances/*/incident-report").hasRole("OPERATOR")
+                        .requestMatchers(HttpMethod.POST, "/api/instances/*/monthly-report").hasRole("OPERATOR")
                         // 워크벤치 콘솔 계정(조회·변경 DB 계정)은 대상 DB 데이터 접근 권한 그 자체라 조회·등록·삭제 전부 ADMIN.
                         .requestMatchers("/api/instances/*/credentials", "/api/instances/*/credentials/*").hasRole("ADMIN")
                         // 마스킹 규칙 변경은 누가 무엇을 볼지 정하는 정책이라 ADMIN. 조회(GET)는 왜 가려졌는지 알 수 있게 연다.
@@ -206,17 +227,20 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, "/api/workbench/masking-rules/*").hasRole("ADMIN")
                         // 조회 결과 값을 외부 LLM에 보낼지는 데이터 반출 결정이라 ADMIN만 바꾼다(기본은 막힘)
                         .requestMatchers(HttpMethod.PUT, "/api/workbench/instances/*/settings").hasRole("ADMIN")
-                        // 승인 티켓을 대상 DB에 닿게 하는 세 경로 — 드라이런도 락을 잡고 문장을 실제로 실행한 뒤 롤백하므로 ADMIN
-                        .requestMatchers(HttpMethod.POST, "/api/workbench/tickets/*/dry-run",
-                                "/api/workbench/tickets/*/execute", "/api/workbench/tickets/*/revert",
-                                "/api/workbench/tickets/*/resolve").hasRole("ADMIN")
+                        // 드라이런은 승인자가 판단 근거로, 운영자가 실행 전에 쓴다 — 락을 잡고 문장을 실제로 실행한 뒤 롤백하므로 대상에 닿는 행위다
+                        .requestMatchers(HttpMethod.POST, "/api/workbench/tickets/*/dry-run").hasAnyRole("APPROVER", "OPERATOR")
+                        // 승인 티켓을 대상 DB에 반영·되돌리고 커밋 불명을 정리하는 경로는 운영자 — 승인한 사람과 실행하는 사람을 나눈다
+                        .requestMatchers(HttpMethod.POST, "/api/workbench/tickets/*/execute", "/api/workbench/tickets/*/revert",
+                                "/api/workbench/tickets/*/resolve").hasRole("OPERATOR")
+                        // 워크벤치(조회 계정으로 대상 DB의 행 값 조회·AI 제안·워크시트)는 요청자부터 — 관제 지표와 달리 데이터를 보는 경로다
+                        .requestMatchers("/api/workbench/**").hasRole("REQUESTER")
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage("/login.html")
                         .loginProcessingUrl("/login")
-                        // alwaysUse=false: 저장된 요청(예: OAuth /oauth/authorize)이 있으면 로그인 후 그곳으로
-                        // 재생하고, 없으면 "/". OAuth 브라우저 로그인 플로우가 이 재생에 의존한다.
-                        .defaultSuccessUrl("/", false)
+                        // 저장된 요청(예: OAuth /oauth/authorize)이 있으면 로그인 후 그곳으로 재생하고(OAuth 브라우저 로그인 플로우가
+                        // 이 재생에 의존한다), 없으면 역할의 첫 화면으로 간다(RoleHomeSuccessHandler).
+                        .successHandler(new RoleHomeSuccessHandler())
                         .failureUrl("/login.html?error")
                         .permitAll())
                 .logout(logout -> logout
@@ -232,6 +256,44 @@ public class SecurityConfig {
                                 new LoginUrlAuthenticationEntryPoint("/login.html"),
                                 request -> true));
         return http.build();
+    }
+
+    /**
+     * 로그인 뒤 첫 화면을 역할로 고른다(요청자는 워크벤치, 나머지는 대시보드). 저장된 요청이 있으면 그곳으로 재생하되,
+     * 저장된 요청이 쿼리 없는 루트("/")면 버린다 — 주소창에 호스트만 치고 들어온 경우까지 모두 대시보드로 가면 역할별 첫 화면이 의미가 없다.
+     */
+    static final class RoleHomeSuccessHandler extends SavedRequestAwareAuthenticationSuccessHandler {
+
+        private final HttpSessionRequestCache requestCache = new HttpSessionRequestCache();
+
+        @Override
+        public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
+                                            Authentication authentication) throws ServletException, IOException {
+            SavedRequest saved = requestCache.getRequest(request, response);
+            if (saved != null && isBareRoot(saved.getRedirectUrl())) {
+                requestCache.removeRequest(request, response);
+            }
+            super.onAuthenticationSuccess(request, response, authentication);
+        }
+
+        @Override
+        protected String determineTargetUrl(HttpServletRequest request, HttpServletResponse response,
+                                            Authentication authentication) {
+            return PlatformRoles.home(authentication.getAuthorities());
+        }
+
+        private static boolean isBareRoot(String url) {
+            try {
+                URI uri = URI.create(url);
+                String path = uri.getPath() == null || uri.getPath().isEmpty() ? "/" : uri.getPath();
+                // Spring Security 6+의 요청 캐시는 저장한 주소에 "continue" 표식을 붙인다 — 표식만 있는 루트도 쿼리 없는 루트로 본다
+                String query = uri.getQuery();
+                boolean noQuery = query == null || query.isEmpty() || "continue".equals(query);
+                return noQuery && ("/".equals(path) || "/index.html".equals(path));
+            } catch (IllegalArgumentException e) {
+                return false;
+            }
+        }
     }
 
     /**
