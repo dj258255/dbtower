@@ -5817,3 +5817,162 @@ NetworkTimeoutAfterLoginIT 2(게이트) 풀 커넥션으로 서버 7초 대기�
 ```
 
 병합은 이 절을 담은 커밋의 CI가 초록인 것을 확인한 뒤 PR에서 merge commit으로 한다(브랜치의 커밋 이력을 그대로 남긴다).
+
+## 135. 한 플랫폼, 사람별 입구 — 관제와 워크벤치를 나누지 않고 쓰는 사람을 나눈다 (2026-09-11)
+
+### 무엇을 했나
+
+사용자가 "거버넌스 SQL 워크벤치와 이기종 DBMS 관제를 섞으면 안 되나, 쓰는 사람을 명확히 해야 할 것 같다"고 물었다. 두 화면은 인스턴스 등록·팀 범위·감사·
+변경 티켓·AI 진단을 공유하고, 한 사람의 흐름(관제에서 이상 발견 -> 워크벤치에서 데이터 확인 -> 변경 요청 -> 실행 뒤 관제에서 전후 확인)이 두 화면을 오간다.
+그래서 제품은 하나로 두고, 사람별로 역할·첫 화면·버튼·넘김을 나누자고 제안했고 사용자가 "다해줘"로 네 단계를 맡겼다.
+
+바꾸기 전(main 2c757c3)의 문제:
+- 역할이 `VIEWER`·`ADMIN` 둘뿐이고 인가 경계 24개가 전부 `hasRole("ADMIN")`이었다. 백업·세션 종료를 맡는 DBA는 인스턴스 등록·접속 계정·보안 설정 권한까지 함께 받아야 했다.
+- 관제만 보면 되는 사람(VIEWER)도 `/api/workbench/**`로 조회 계정을 통해 대상 DB의 행 값을 봤다. 변경 요청 제출도 인증 사용자면 누구나.
+- 승인과 실행이 같은 ADMIN 한 역할이라 "승인한 사람이 곧바로 실행"하는 흐름을 역할이 막지 못했다(자기 승인만 `require-separate-approver`로 이름 비교, 기본 꺼짐).
+- 로그인 뒤는 누구든 `/`(`defaultSuccessUrl("/", false)`), MCP 채널은 입구에서 ADMIN만(`anyRequest().hasRole("ADMIN")`).
+- 화면은 `role === "ADMIN"`으로 버튼을 갈랐다(워크벤치 티켓 패널 3곳, 대시보드 세션 종료·리뷰 승인).
+
+### 역할과 포함 관계
+
+| 역할 | 포함 | 첫 화면 | 능력(`/api/me` capabilities) |
+|---|---|---|---|
+| VIEWER(관제) | — | `/` | OBSERVE |
+| REQUESTER(요청자) | VIEWER | `/workbench.html` | + WORKBENCH, CHANGE_REQUEST |
+| APPROVER(승인자) | REQUESTER | `/` | + CHANGE_APPROVE, CHANGE_DRY_RUN |
+| OPERATOR(운영자) | REQUESTER | `/` | + CHANGE_DRY_RUN, CHANGE_EXECUTE, TARGET_OPERATE |
+| ADMIN(관리자) | APPROVER, OPERATOR | `/` | + PLATFORM_ADMIN (전부) |
+
+- `PlatformRoles`가 Spring Security `RoleHierarchy`와 능력·첫 화면을 함께 정의한다. SecurityConfig의 `hasRole`은 계층 빈을 따르고, `/api/me`는 같은 계층으로 능력을 계산한다.
+- 인가 경계 분포: 바꾸기 전 `hasRole("ADMIN")` 24 -> 바꾼 뒤 ADMIN 9(보안·감사·인스턴스 등록/삭제·접속 계정·마스킹 규칙·AI 공유 설정), OPERATOR 12(백업·복원 검증·세션 종료·심층 진단·온라인 DDL·백업 정책·파라미터·설정 드리프트·리포트 2종·티켓 실행/되돌리기/정리),
+  APPROVER 2(승인·반려, 대기함), `hasAnyRole("APPROVER","OPERATOR")` 1(드라이런), REQUESTER 2(워크벤치 전체, 변경 요청 제출·취소), VIEWER 1(MCP 입구).
+- 남의 티켓 취소는 요청자 본인 또는 승인자·운영자·관리자(`ReviewController`가 세 역할을 직접 본다 — 사용자는 역할 하나만 가진다).
+- V40: `platform_user_role_check`를 5역할로 넓히고 기존 `VIEWER`를 `REQUESTER`로 옮긴다. 기존 VIEWER는 워크벤치와 변경 요청을 써 왔으므로, 역할이 좁아졌다고
+  권한을 조용히 잃지 않게 한다. 새 VIEWER는 관제 전용으로 새로 만든다.
+- 사용자·역할 API(ADMIN): `GET|POST /api/security/users`, `PATCH /api/security/users/{u}/role`. 목록에 비밀번호 해시를 싣지 않고, 마지막 ADMIN을 낮추면 409.
+  부트스트랩은 `DBTOWER_{VIEWER|REQUESTER|APPROVER|OPERATOR}_PASSWORD`를 준 역할만 계정을 만든다(사용자가 하나도 없을 때만).
+- MCP 입구를 VIEWER로 낮췄다. 도구 호출은 호출자 토큰으로 REST에 위임되므로(132절) 무엇까지 되는지는 REST가 가른다. 입구를 ADMIN으로 두면 요청자가 에이전트로 변경 요청을 올릴 수 없다.
+  진단 루프(서비스 토큰으로 도는 쪽)는 원래 읽기 도구 화이트리스트(`READ_ONLY_TOOLS`)와 호출자 범위 가드가 있어 입구를 낮춰도 쓰기·운영 도구에 닿지 않는다.
+
+### 첫 화면과 넘김
+
+- 로그인 성공 처리(`RoleHomeSuccessHandler`): 저장된 요청(알림 딥링크·OAuth 인가)이 있으면 그곳으로 재생하고, 없으면 역할의 첫 화면. 저장된 요청이 쿼리 없는 루트면 버린다 —
+  주소창에 호스트만 치고 들어온 요청자까지 대시보드로 보내면 역할별 첫 화면이 의미가 없다. Spring Security 7의 요청 캐시는 저장 주소에 `continue` 표식을 붙이므로
+  (`Saved request http://localhost/workbench.html?ticket=3&continue to session`, TRACE 로그로 확인) `?continue`만 있는 루트도 쿼리 없는 루트로 본다.
+- 화면: 대시보드·워크벤치 모두 `/api/me`의 capabilities로 버튼을 가른다. 관제에게는 워크벤치 메뉴·변경 요청 입력을 숨기고, 워크벤치에 직접 들어오면 빈 실패 화면 대신 "요청자 이상 필요 + 대시보드로" 안내.
+  hidden 속성이 `.btn { display: inline-block }`에 지던 것을 전역 `[hidden] { display: none !important; }`로 막았다(워크벤치 CSS와 같은 규칙).
+- 넘김 셋:
+  1. 대시보드 쿼리 상세 -> "워크벤치에서 열기": 새 탭 워크벤치의 새 워크시트에 SQL을 채운다. SQL은 URL이 아니라 localStorage에 한 번 쓰고 워크벤치가 읽자마자 지운다 —
+     정규화 쿼리 텍스트가 수 KB면 인코딩 뒤 요청 줄 상한(8KB)을 넘기 때문이다. 10분 지난 넘김은 버리고, 요청한 인스턴스가 실제로 열렸을 때만 받는다(팀 범위 밖이면 다른 인스턴스에 요청이 올라가지 않게).
+  2. 인덱스 제안(HypoPG) -> "워크벤치에서 변경 요청으로 올리기": 제안 DDL과 가상 인덱스 비용(Total Cost 전 -> 후)을 사유로 담아 워크벤치의 변경 요청 창을 연다.
+  3. 워크벤치 실행 기록(커밋된 실행) -> "대시보드에서 전후 Top Query 비교": `/?instance=&compareAt=실행 시각` — 대시보드가 실행 시각 앞 30분을 기준, 뒤 30분(현재까지)을 대상으로 시점 비교를 연다.
+- 사용자·역할 카드(ADMIN, 대시보드 모니터링 탭): 목록·역할 변경·생성.
+
+### 테스트
+
+바꾼 인가를 MockMvc로 먼저 고정했다. 허용 쪽은 없는 id(999999)로 불러 401·403이 아닌지만 본다 — 대상 DB나 실제 티켓에 닿지 않고 "필터가 막았는가"만 가른다.
+
+```
+PersonaAccessTest 11           관제: 지표 200, 워크벤치·요청 제출·취소 403 / 요청자: 워크벤치 200, 요청 제출 통과, 승인·드라이런·실행·세션 종료 403
+                               승인자: 승인·드라이런 통과, 실행·되돌리기·정리·세션 종료·사용자 API 403 / 운영자: 드라이런·실행·되돌리기·세션 종료·백업 통과, 승인·대기함·인스턴스 등록·접속 계정·사용자 API 403
+                               관리자: 양쪽 통과 / 계층 밖 ROLE_USER는 /mcp 403, 관제는 /mcp 입구 통과
+                               /api/me: TEAM_ 권한이 앞에 있어도 대표 역할 APPROVER, 능력에 CHANGE_EXECUTE 없음
+                               로그인(실사용자 저장): 요청자 -> /workbench.html, 운영자 -> /
+                               사용자 API: 생성 201·중복 409·목록에 해시 없음·역할 변경 200 / 운영자는 생성·역할 변경 403
+PlatformRolesTest 7            승인자·운영자가 서로의 능력을 갖지 않음, 관제 = OBSERVE만, 관리자 = 전부, 모든 enum 역할이 계층에 있음, 계층 밖 권한 = 능력 없음, 대표 역할·첫 화면
+RoleHomeSuccessHandlerTest 4   저장된 요청 재생(continue 표식 포함), 쿼리 없는 루트·/index.html은 버리고 역할 첫 화면, 쿼리 있는 루트(딥링크)는 재생, 저장 없음 = 역할 첫 화면
+SecurityControllerRoleTest 2   마지막 ADMIN 낮추기 거부(저장 안 함), ADMIN이 둘이면 허용
+전체                           781 tests, 실패 0, 건너뜀 17(실DB IT 게이트), 규약 검사 통과
+```
+
+처음에는 저장된 요청 재생도 MockMvc로 확인하려 했는데, 미인증 GET에 넘긴 `MockHttpSession`에 저장 속성이 하나도 남지 않아 두 번 실패했다. TRACE 로그를 켜 보니 서버는
+요청을 세션에 저장했고(`Saved request ... to session`) 문제는 테스트가 들고 다닌 세션이 그 세션이 아니라는 데 있었다. 재생 규칙은 프레임워크의 `HttpSessionRequestCache`로
+저장한 세션을 성공 처리기에 직접 넘기는 단위 테스트로 옮기고, 실제 쿠키 세션 흐름은 아래 라이브로 확인했다.
+
+### 라이브 — 로컬 앱(dev 프로필, 메타 DB 15432), `live_135_personas.py`
+
+기동 로그: `Current version of schema "public": 39` -> `Migrating schema "public" to version "40 - platform user personas"` -> `now at version v40 (execution time 00:00.016s)`.
+
+```
+== 1. 사용자·역할 API (admin 세션)
+  기존 사용자(V40 적용 뒤): HTTP 200 [('admin', 'ADMIN'), ('viewer', 'REQUESTER')]      <- 기존 VIEWER가 REQUESTER로 옮겨짐
+  생성 p-viewer VIEWER / p-requester REQUESTER / p-approver APPROVER / p-operator OPERATOR: HTTP 201
+  마지막 ADMIN을 OPERATOR로 낮추기: HTTP 409 마지막 ADMIN의 역할은 낮출 수 없습니다
+  목록 응답에 BCrypt 해시가 있는가: False, 필드=['role', 'teamLabel', 'username']
+
+== 2. 로그인 뒤 첫 화면 + /api/me
+  p-viewer     로그인 302 -> /                role=VIEWER    caps=OBSERVE
+  p-requester  로그인 302 -> /workbench.html  role=REQUESTER caps=OBSERVE,WORKBENCH,CHANGE_REQUEST
+  p-approver   로그인 302 -> /                role=APPROVER  caps=OBSERVE,WORKBENCH,CHANGE_REQUEST,CHANGE_APPROVE,CHANGE_DRY_RUN
+  p-operator   로그인 302 -> /                role=OPERATOR  caps=OBSERVE,WORKBENCH,CHANGE_REQUEST,CHANGE_DRY_RUN,CHANGE_EXECUTE,TARGET_OPERATE
+  admin        로그인 302 -> /                role=ADMIN     caps=(8개 전부)
+
+== 3. 저장된 요청 재생
+  p-operator   미인증 GET /workbench.html?instance=2&ticket=1 -> 302 /login.html | 로그인 -> /workbench.html?instance=2&ticket=1&continue
+  p-requester  미인증 GET /                                  -> 302 /login.html | 로그인 -> /workbench.html
+  p-requester  미인증 GET /?instance=2&view=review           -> 302 /login.html | 로그인 -> /?instance=2&view=review&continue
+
+== 4. 역할 행렬 (없는 id — 403이면 필터가 막음, 400·404는 인가 통과 뒤 업무 검증)
+  p-viewer     GET  /api/instances 200 | GET /api/workbench/instances 403 | POST /api/instances/999999/reviews 403
+  p-requester  GET  /api/workbench/instances 200 | POST /api/reviews/999999/decision 403 | POST .../tickets/999999/dry-run 403
+  p-approver   POST /api/reviews/999999/decision 400 | .../dry-run 400 | .../execute 403 | POST /api/instances/999999/sessions/1/kill 403
+  p-operator   POST /api/reviews/999999/decision 403 | .../execute 400 | .../sessions/1/kill 404 | GET /api/security/users 403 | GET /api/audit 403
+
+== 5. 한 변경의 흐름 (instance 2 = MySQL, UPDATE customers SET grade = 'VIP' WHERE id = 3)
+  요청자 제출: HTTP 200 id=45 status=PENDING requester=p-requester
+  요청자가 승인 시도: HTTP 403
+  승인자 드라이런: HTTP 200 outcome=ROLLED_BACK affected=1 principal=p-approver
+  승인자 승인: HTTP 200 status=APPROVED decidedBy=p-approver
+  승인자가 실행 시도: HTTP 403
+  운영자 실행: HTTP 200 outcome=COMMITTED affected=1 principal=p-operator startedAt=2026-09-11T04:42:53.724879
+  운영자 되돌리기: HTTP 200 outcome=COMMITTED affected=1
+  최종: status=ROLLED_BACK requester=p-requester decidedBy=p-approver executedBy=p-operator rolledBackBy=p-operator
+
+== 6. MCP 채널 (각 사용자로 OAuth PKCE 토큰 발급)
+  p-viewer: tools/list HTTP 200 도구 19종
+  p-viewer: change_ticket_submit isError=True 도구 실행 실패: DBTower API 403 ... "path":"/api/instances/2/reviews"
+  p-requester: tools/list HTTP 200 도구 19종
+  p-requester: change_ticket_submit isError=False {"id":46, ... "requester":"p-requester"}  -> 요청자 본인 취소 HTTP 200 CANCELLED
+```
+
+한 티켓의 기록에 요청·승인·실행·되돌리기가 서로 다른 사람으로 남았고, 승인자가 실행하려 한 시도는 필터에서 403이다. 관제 역할은 MCP에 들어와도(바꾸기 전 입구 403)
+변경 요청 도구가 호출자 토큰의 REST 403으로 실패한다.
+
+### 화면 분기 — 티켓 패널을 역할·상태별로 그려 본 결과
+
+화면 캡처는 이번 절에 넣지 않았다. 역할마다 브라우저에 로그인하려면 비밀번호 입력이나 세션 쿠키 주입이 필요한데, 에이전트가 브라우저에 자격증명을 넣는 일은 하지 않기로
+하고 중단했다(만들어 둔 세션 다섯 개는 서버에서 로그아웃해 무효화, `/api/me` 401 확인). 대신 워크벤치 티켓 패널의 버튼 분기(`TicketPanel.actions`)를 Node에서 능력 집합별로 그렸다.
+
+```
+PENDING   요청자(본인)  [cancel]                          힌트: 승인·반려는 승인자(APPROVER)가 합니다 / 자기 티켓 취소 가능
+PENDING   승인자        [dry-run, approve, reject, cancel]
+PENDING   운영자        [dry-run, cancel]                  힌트: 승인·반려는 승인자(APPROVER)가 합니다
+APPROVED  요청자(본인)  [cancel]                          힌트: 실행은 운영자(OPERATOR)가 합니다
+APPROVED  승인자        [dry-run, cancel]                  힌트: 실행은 운영자(OPERATOR)가 합니다. 승인한 사람과 실행하는 사람을 나눕니다
+APPROVED  운영자        [dry-run, execute, cancel]
+EXECUTED  요청자·승인자 []                                힌트: 되돌리기는 운영자(OPERATOR)가 합니다
+EXECUTED  운영자        [revert-dry-run, revert]
+EXECUTING 운영자        [resolve-applied, resolve-not-applied] (요청자·승인자는 버튼 없음)
+관리자                  승인자·운영자 버튼의 합
+```
+
+대시보드 쪽(워크벤치 메뉴 숨김, 변경 요청 입력 숨김, 세션 종료 버튼, 사용자·역할 카드, 넘김 세 버튼, `compareAt` 딥링크)은 문법 검사(`node --check`)까지만 했고
+브라우저로 눌러 보지 않았다. 사람이 각 역할로 로그인해 확인할 항목으로 남긴다.
+
+라이브 뒤 남은 것: 로컬 메타 DB에 검증 계정 `p-viewer`·`p-requester`·`p-approver`·`p-operator`, 티켓 45(ROLLED_BACK)·46·47·48(CANCELLED).
+대상 MySQL의 `customers` id=3은 되돌리기로 원래 값이다.
+
+### main에 합친다 (PR #3)
+
+사용자가 "다 해줘"로 push·병합까지 맡겼다. 134절과 같은 절차로 main에 직접 push하지 않고 PR로 합친다.
+
+- 병합 전 확인: 원격 main 대비 뒤처짐 0·앞섬 2, 브랜치 이력 전체에서 로컬 비밀값(토큰·관리자·검증 계정 비밀번호·암호화 키) 검색 0건, 1MB 넘는 추가 파일 0.
+  `mssql-x64.yml`은 operator 경로 변경에만 걸려 이번 PR에서는 돌지 않고, `release.yml`은 `v*` 태그에서만 게시하므로 병합이 배포를 일으키지 않는다.
+- PR의 CI(`CI`: 규약 검사 + 전체 테스트):
+
+```
+34563800416  CI  ce5537e  success  test 5m0s — "규약 검사 전부 통과", "BUILD SUCCESSFUL in 4m 42s"
+```
+
+CI 로그는 테스트 개수를 찍지 않는다. 781 tests·실패 0·건너뜀 17은 같은 커밋 내용의 로컬 실행 수치다. 병합은 이 기록을 담은 커밋의 CI가 초록인 것을 확인한 뒤
+merge commit으로 한다(브랜치 커밋 이력을 그대로 남긴다).

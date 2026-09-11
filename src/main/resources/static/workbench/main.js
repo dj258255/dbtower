@@ -47,6 +47,10 @@ const state = {
   pendingTicket: null,
 };
 
+// 버튼은 역할 이름이 아니라 능력(/api/me capabilities)으로 가른다 — 표시만이고 인가는 서버가 한다
+const can = (cap) => Boolean(state.me && (state.me.capabilities || []).includes(cap));
+const ROLE_LABEL = { VIEWER: "관제", REQUESTER: "요청자", APPROVER: "승인자", OPERATOR: "운영자", ADMIN: "관리자" };
+
 const editor = new SqlEditor({
   input: $("wb-input"),
   highlighter: $("wb-highlight"),
@@ -59,7 +63,7 @@ const tickets = new TicketPanel({
   list: $("wb-tickets"),
   detail: $("wb-ticket"),
   count: $("wb-ticket-count"),
-  isAdmin: () => Boolean(state.me && state.me.role === "ADMIN"),
+  can: (cap) => can(cap),
   me: () => (state.me ? state.me.username : null),
   onOpenSql: (sql) => { editor.value = sql; onEdit(); editor.focus(); },
   onProposeTicket: (sql, reason) => openTicket(sql, reason),
@@ -71,10 +75,19 @@ async function init() {
   bindChrome();
   try {
     state.me = await request("/api/me");
-    $("user-chip").textContent = `${state.me.username} · ${state.me.role}`;
+    $("user-chip").textContent = `${state.me.username} · ${ROLE_LABEL[state.me.role] || state.me.role}`;
   } catch {
     // 표시만 생략한다 — 권한 판정은 서버가 한다
   }
+  if (state.me && !can("WORKBENCH")) {
+    // 관제만 보는 역할은 대상 DB의 행 값을 보지 않는다. 서버도 워크벤치 API를 403으로 막지만, 실패 문구가 늘어선 빈 화면 대신 갈 곳을 알려준다
+    document.querySelector(".wb-shell").innerHTML = `<div class="wb-note" style="margin:48px auto;max-width:640px">
+      <p>워크벤치는 조회 계정으로 대상 DB의 행 값을 보는 화면이라 요청자(REQUESTER) 이상 역할이 필요합니다.
+        지금 역할(${esc(ROLE_LABEL[state.me.role] || state.me.role)})은 대시보드에서 지표·리포트를 봅니다.</p>
+      <p><a class="btn btn-primary btn-small" href="/">대시보드로</a></p></div>`;
+    return;
+  }
+  const handoff = takeHandoff(new URLSearchParams(location.search).get("handoff"));
   try {
     state.instances = await request("/api/workbench/instances");
   } catch (e) {
@@ -91,7 +104,38 @@ async function init() {
   if (wanted && state.instances.some((i) => String(i.id) === wanted)) select.value = wanted;
   select.addEventListener("change", () => selectInstance(select.value, null));
   state.pendingTicket = params.get("ticket");
-  if (select.value) selectInstance(select.value, params.get("sheet"));
+  if (!select.value) return;
+  await selectInstance(select.value, params.get("sheet"));
+  // 넘김은 요청한 인스턴스가 실제로 열렸을 때만 받는다 — 팀 범위 밖이라 다른 인스턴스가 열렸는데 SQL을 채우면 엉뚱한 대상에 요청이 올라간다
+  if (handoff && wanted === select.value) await receiveHandoff(handoff);
+}
+
+// 대시보드가 localStorage에 남긴 넘김(app.js handToWorkbench)을 한 번만 읽는다. 10분 지난 넘김은 버린다 —
+// 예전 탭을 새로고침했을 때 오래된 SQL이 다시 채워지지 않게
+function takeHandoff(id) {
+  if (!id || !/^[a-z0-9]{6,24}$/.test(id)) return null;
+  const key = `dbtower.handoff.${id}`;
+  try {
+    const raw = localStorage.getItem(key);
+    localStorage.removeItem(key);
+    const h = raw ? JSON.parse(raw) : null;
+    return h && typeof h.sql === "string" && h.sql.trim() && Date.now() - h.at < 10 * 60000 ? h : null;
+  } catch {
+    return null;
+  }
+}
+
+async function receiveHandoff(h) {
+  if (h.kind === "draft") {
+    // 제안 DDL은 편집기가 아니라 변경 요청 창으로 — 요청자가 사유를 보태 올리면 규칙 판정·승인·드라이런을 거친다
+    openTicket(h.sql, h.reason || "");
+    return;
+  }
+  // 조회 SQL은 새 워크시트에 채운다 — 지금 열린 워크시트의 작업을 덮어쓰지 않게
+  await createSheet("대시보드에서 넘긴 쿼리");
+  editor.value = h.sql;
+  onEdit();
+  editor.focus();
 }
 
 function bindChrome() {
@@ -185,10 +229,11 @@ async function reloadSheets() {
   drawSheets();
 }
 
-async function createSheet() {
-  const sheet = await request(`/api/workbench/instances/${state.instance.id}/worksheets`, { method: "POST", body: { title: "" } });
+async function createSheet(title = "") {
+  const sheet = await request(`/api/workbench/instances/${state.instance.id}/worksheets`, { method: "POST", body: { title } });
   await reloadSheets();
-  openSheet(sheet.id);
+  // 여는 것까지 기다린다 — 넘겨받은 SQL을 채운 뒤에 openSheet가 편집기를 빈 값으로 되돌리지 않게
+  await openSheet(sheet.id);
 }
 
 async function openSheet(id) {

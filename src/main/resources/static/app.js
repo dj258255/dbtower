@@ -34,12 +34,16 @@ const state = {
   lastPlan: null,      // 마지막 EXPLAIN 실행계획 (문의 첨부용)
   lastFindings: [],    // 마지막 규칙 기반 지적
   lastAi: null,        // 마지막 AI 분석
-  role: null,          // 로그인 주체의 역할 (ADMIN이면 세션 kill 버튼 노출)
+  role: null,          // 로그인 주체의 대표 역할(표시용)
+  caps: new Set(),     // 로그인 주체의 능력(/api/me capabilities) — 버튼·메뉴는 역할 이름이 아니라 이것으로 가른다
 };
 
 // ---------- 유틸 ----------
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// 화면 표시만 가른다 — 인가는 서버(SecurityConfig)가 한다. 누를 수 없는 버튼을 보여주지 않으려는 것이다
+const can = (cap) => state.caps.has(cap);
+const ROLE_LABEL = { VIEWER: "관제", REQUESTER: "요청자", APPROVER: "승인자", OPERATOR: "운영자", ADMIN: "관리자" };
 
 // AI 서술 출력에서 이모지만 제거(우리 규칙: 이모지 금지). →·✓ 같은 기술 기호는 보존.
 const stripEmoji = (s) => String(s ?? "").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{26FF}✨️‍]/gu, "");
@@ -468,8 +472,20 @@ function handleInstanceDeepLink(list) {
   if (!target) return;
   state.instance = target;
   renderInstanceMatches();
-  selectInstance(target, $(`#instance-list .instance-card[data-id="${target.id}"]`));
-  const deepQ = params.get("diagnose"), deepView = params.get("view");
+  const ready = selectInstance(target, $(`#instance-list .instance-card[data-id="${target.id}"]`));
+  const deepQ = params.get("diagnose"), deepView = params.get("view"), compareAt = params.get("compareAt");
+  // 워크벤치에서 변경을 실행한 운영자가 넘어오는 입구 — 실행 시각 앞 30분(기준)과 뒤 30분(대상)을 시점 비교로 바로 연다.
+  // 기본 구간 설정과 첫 조회가 끝난 뒤에 덮어써야 selectInstance의 기본값에 지워지지 않는다
+  if (compareAt && !Number.isNaN(parseApiTime(compareAt).getTime())) {
+    ready.then(() => {
+      const at = parseApiTime(compareAt), span = 30 * 60000;
+      $("#base-from").value = toLocalInput(new Date(at.getTime() - span));
+      $("#base-to").value = toLocalInput(at);
+      $("#target-from").value = toLocalInput(at);
+      $("#target-to").value = toLocalInput(new Date(Math.min(at.getTime() + span, Date.now())));
+      runCompare();
+    });
+  }
   if (deepQ) { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("perf"); const input = $("#diagnose-question"); input.value = deepQ; input.scrollIntoView({ block: "center" }); input.focus(); }
   if (deepView === "config-drift") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadConfigDrift(); $("#config-drift-result").scrollIntoView({ block: "center" }); }
   if (deepView === "review") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadReviews(); $(".review-gate-card").scrollIntoView({ block: "center" }); }
@@ -1248,6 +1264,7 @@ function placeDetailUnder(tr) {
 
 function openDetail(query, tr) {
   state.currentQuery = query;
+  $("#btn-to-workbench").hidden = !can("WORKBENCH");
   $("#query-detail").hidden = false;
   if (tr) placeDetailUnder(tr);
   $("#detail-qid").textContent = `SQL ID: ${query.queryId}`;
@@ -1483,7 +1500,9 @@ async function runIndexAdvisor() {
     const meta = ADVISOR_STATUS[data.status] || { cls: "unsupported", label: data.status };
     let html = `<div class="finding-item"><span class="advisor-status ${meta.cls}">${esc(meta.label)}</span>${esc(data.detail)}</div>`;
     if (data.suggestedIndex) {
-      html += `<div class="finding-item">제안 인덱스: <code>${esc(data.suggestedIndex)}</code></div>`;
+      // 제안에서 끝내지 않고 변경 요청으로 잇는다 — 가상 인덱스 결과는 판단 근거로 사유에 싣고, 실제 생성은 승인·드라이런을 거친다
+      html += `<div class="finding-item">제안 인덱스: <code>${esc(data.suggestedIndex)}</code>${can("CHANGE_REQUEST")
+        ? ' <button id="btn-advisor-ticket" class="btn btn-small">워크벤치에서 변경 요청으로 올리기</button>' : ""}</div>`;
     }
     if (data.beforeCost != null && data.afterCost != null) {
       html += `<div class="finding-item">Total Cost: ${esc(data.beforeCost)} → ${esc(data.afterCost)}</div>`;
@@ -1495,11 +1514,16 @@ async function runIndexAdvisor() {
       html += `<h3>가상 인덱스 적용 후 실행계획</h3><pre class="codeblock">${esc(data.afterPlan)}</pre>`;
     }
     result.innerHTML = html;
+    $("#btn-advisor-ticket")?.addEventListener("click", () => {
+      const cost = data.beforeCost != null && data.afterCost != null ? `, 가상 인덱스 Total Cost ${data.beforeCost} → ${data.afterCost}` : "";
+      const qid = state.currentQuery ? ` SQL ID ${state.currentQuery.queryId}` : "";
+      handToWorkbench("draft", data.suggestedIndex, `대시보드 인덱스 제안(HypoPG)${qid}${cost}`);
+    });
   } finally { btn.classList.remove("loading"); }
 }
 
 // 심층 원인 진단 (D9) — 실제 실행 계획으로 카디널리티 괴리·근본원인을 짚는다.
-// explain(추정)과 달리 쿼리를 실제 실행하므로 ADMIN 전용(서버가 인가). 파라미터 자리는 실제 값이어야 한다.
+// explain(추정)과 달리 쿼리를 실제 실행하므로 운영자·관리자 전용(서버가 인가). 파라미터 자리는 실제 값이어야 한다.
 async function runDeepDiagnose() {
   const sql = $("#detail-sql").value.trim();
   if (!sql) return;
@@ -1710,7 +1734,70 @@ async function loadMcpCommand() {
     const { token } = await api("/api/security/mcp-token");
     $("#mcp-cmd-http").textContent =
       `claude mcp add --transport http dbtower http://localhost:8080/mcp --header "Authorization: Bearer ${token}"`;
-  } catch { /* VIEWER — 기본 안내 문구 유지 */ }
+  } catch { /* ADMIN이 아니면 — 헤더 없는 등록(OAuth 브라우저 로그인) 안내를 유지 */ }
+}
+
+// 대시보드에서 워크벤치로 넘기기. SQL은 URL에 싣지 않는다 — 정규화 쿼리 텍스트가 수 KB면 인코딩 후 요청 줄 상한(8KB)을 넘어
+// 400이 난다. 같은 브라우저 localStorage에 한 번 쓰고 워크벤치가 읽자마자 지운다(새 탭에서도 같은 출처라 보인다)
+const HANDOFF_PREFIX = "dbtower.handoff.";
+function handToWorkbench(kind, sql, reason = "") {
+  if (!state.instance || !sql) return;
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  try {
+    // 워크벤치를 열지 않고 버려진 넘김이 쌓이지 않게 10분 지난 것은 지운다
+    Object.keys(localStorage).filter((k) => k.startsWith(HANDOFF_PREFIX)).forEach((k) => {
+      try { if (Date.now() - JSON.parse(localStorage.getItem(k)).at > 10 * 60000) localStorage.removeItem(k); } catch { localStorage.removeItem(k); }
+    });
+    localStorage.setItem(HANDOFF_PREFIX + id, JSON.stringify({ kind, sql, reason, at: Date.now() }));
+  } catch {
+    alert("브라우저 저장소를 쓸 수 없어 워크벤치로 넘기지 못했습니다. SQL을 복사해 워크벤치에 붙여 넣으세요.");
+    return;
+  }
+  window.open(`/workbench.html?instance=${encodeURIComponent(state.instance.id)}&handoff=${id}`, "_blank", "noopener");
+}
+
+// 사용자·역할 카드(ADMIN) — 역할은 인증 시 권한에 실리므로 바꾼 역할은 그 사용자의 다음 로그인부터 적용된다
+async function loadUsers() {
+  const tbody = $("#users-table tbody");
+  let users;
+  try {
+    users = await api("/api/security/users");
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="3" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = users.map((u) => `<tr>
+      <td>${esc(u.username)}</td>
+      <td><select data-user-role="${esc(u.username)}" aria-label="${esc(u.username)} 역할">${Object.keys(ROLE_LABEL).map((r) =>
+        `<option value="${r}"${r === u.role ? " selected" : ""}>${esc(ROLE_LABEL[r])} (${r})</option>`).join("")}</select></td>
+      <td>${esc(u.teamLabel ?? "전역")}</td>
+    </tr>`).join("");
+  tbody.querySelectorAll("[data-user-role]").forEach((sel) => sel.addEventListener("change", async () => {
+    const msg = $("#users-msg");
+    try {
+      await api(`/api/security/users/${encodeURIComponent(sel.dataset.userRole)}/role`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: sel.value }),
+      });
+      msg.textContent = `${sel.dataset.userRole}의 역할을 ${ROLE_LABEL[sel.value]}(으)로 바꿨습니다. 다음 로그인부터 적용됩니다.`;
+    } catch (e) {
+      msg.textContent = `역할을 바꾸지 못했습니다: ${e.message}`;
+    }
+    loadUsers();
+  }));
+}
+
+async function createUser() {
+  const msg = $("#users-msg");
+  const body = { username: $("#user-new-name").value.trim(), password: $("#user-new-password").value, role: $("#user-new-role").value };
+  try {
+    await api("/api/security/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    $("#user-new-name").value = "";
+    $("#user-new-password").value = "";
+    msg.textContent = `${body.username} 계정을 만들었습니다(${ROLE_LABEL[body.role]}).`;
+    loadUsers();
+  } catch (e) {
+    msg.textContent = `만들지 못했습니다: ${e.message}`;
+  }
 }
 
 // 상단 사용자 표시 + 로그아웃
@@ -1718,8 +1805,14 @@ async function loadMe() {
   try {
     const me = await api("/api/me");
     state.role = me.role;
+    state.caps = new Set(me.capabilities || []);
     $("#user-chip").innerHTML =
-      `${esc(me.username)}<span class="role-badge">${esc(me.role)}</span>`;
+      `${esc(me.username)}<span class="role-badge" title="${esc(me.role)}">${esc(ROLE_LABEL[me.role] || me.role)}</span>`;
+    // 역할에 없는 입구는 감춘다. 관제만 보는 사람에게 워크벤치·변경 요청 입력을 보여주면 눌러서 403을 받는 화면이 된다
+    $("#nav-workbench").hidden = !can("WORKBENCH");
+    $("#review-submit").hidden = !can("CHANGE_REQUEST");
+    $("#users-card").hidden = !can("PLATFORM_ADMIN");
+    if (can("PLATFORM_ADMIN")) loadUsers();
   } catch { /* 401이면 api()가 로그인으로 보낸다 */ }
   $("#logout-btn")?.addEventListener("click", async () => {
     await fetch("/logout", { method: "POST", headers: { "X-XSRF-TOKEN": csrfToken() } });
@@ -1903,7 +1996,7 @@ async function loadPlanChanges() {
         <div class="drift-around" id="drift-around-${idx}"></div>
       </div>`).join("");
     // P4 대조 — 각 플랜 플립 무렵(±24h) 설정 변경 수를 붙인다(설정 변경이 플랜을 갈아탄 원인 후보).
-    // ADMIN 아니면 403 — 조용히 생략(플랜 변경 카드 자체는 인증 사용자에게 열려 있다).
+    // 운영자·관리자가 아니면 403 — 조용히 생략(플랜 변경 카드 자체는 인증 사용자에게 열려 있다).
     changes.forEach(async (c, idx) => {
       try {
         const r = await api(`/api/instances/${state.instance.id}/config-drift/around?at=${encodeURIComponent(c.changedAt)}&hours=24`);
@@ -1911,7 +2004,7 @@ async function loadPlanChanges() {
           $(`#drift-around-${idx}`).innerHTML =
             `<a class="drift-hint" href="/?instance=${state.instance.id}&view=config-drift">± ${r.windowHours}h 내 설정 변경 ${r.changeCount}건 — 원인 후보 확인 ↗</a>`;
         }
-      } catch (e) { /* 비ADMIN·미수집 — 생략 */ }
+      } catch (e) { /* 권한 없음·미수집 — 생략 */ }
     });
   } catch (e) {
     box.className = "anomaly-result muted";
@@ -2079,14 +2172,14 @@ async function loadPartitions() {
 }
 
 // 세션 / 블로킹 (B2) — "지금 누가 누구를 막고 있나". blockedByPid가 있으면 행을 강조한다.
-// ADMIN이면 행마다 취소(force=false)/강제종료(force=true) 버튼을 붙인다. VIEWER면 버튼 없음.
+// 세션 종료 능력(운영자·관리자)이 있으면 행마다 취소(force=false)/강제종료(force=true) 버튼을 붙인다. 없으면 버튼 없음.
 async function loadSessions() {
   const table = $("#session-table");
-  const isAdmin = state.role === "ADMIN";
-  const cols = isAdmin ? 8 : 7;
+  const canKill = can("TARGET_OPERATE");
+  const cols = canKill ? 8 : 7;
   table.querySelector("thead").innerHTML = `
     <tr><th class="num">PID</th><th>User</th><th>State</th><th>Wait</th>
-        <th class="num">BlockedBy</th><th class="num">Elapsed(ms)</th><th>Query</th>${isAdmin ? "<th>Action</th>" : ""}</tr>`;
+        <th class="num">BlockedBy</th><th class="num">Elapsed(ms)</th><th>Query</th>${canKill ? "<th>Action</th>" : ""}</tr>`;
   try {
     const rows = await api(`/api/instances/${state.instance.id}/sessions?limit=50`);
     table.querySelector("tbody").innerHTML = rows.length ? rows.map((s) => `
@@ -2098,19 +2191,19 @@ async function loadSessions() {
         <td class="num">${s.blockedByPid != null ? `<span class="blocked-by">${esc(s.blockedByPid)}</span>` : "-"}</td>
         <td class="num">${fmtNum(s.elapsedMs)}</td>
         <td class="qtext" title="${esc(s.query)}">${esc(s.query ?? "-")}</td>
-        ${isAdmin ? `<td class="session-actions">
+        ${canKill ? `<td class="session-actions">
           <button class="btn btn-small" data-kill="${esc(s.pid)}" data-force="false">취소</button>
           <button class="btn btn-small btn-danger" data-kill="${esc(s.pid)}" data-force="true">강제종료</button>
         </td>` : ""}
       </tr>`).join("") : `<tr><td colspan="${cols}" class="muted">활성 세션이 없습니다.</td></tr>`;
-    if (isAdmin) wireKillButtons();
+    if (canKill) wireKillButtons();
   } catch (e) {
     table.querySelector("tbody").innerHTML =
       `<tr><td colspan="${cols}" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
   }
 }
 
-// kill은 confirm 없이 바로 POST한다(장애 시 빠른 처치가 목적) — 대신 버튼 자체가 ADMIN에게만 보인다.
+// kill은 confirm 없이 바로 POST한다(장애 시 빠른 처치가 목적) — 대신 버튼 자체가 운영자·관리자에게만 보인다.
 // 성공하면 목록을 다시 불러 사라졌는지 확인시킨다.
 function wireKillButtons() {
   document.querySelectorAll("#session-table [data-kill]").forEach((btn) => {
@@ -2210,7 +2303,7 @@ async function runParamDiff() {
     d = await api(`/api/param-diff?left=${left}&right=${right}`);
   } catch (e) {
     box.innerHTML = e.message.startsWith("403")
-      ? '<div class="schema-warning">파라미터 드리프트는 ADMIN 역할만 볼 수 있습니다.</div>'
+      ? '<div class="schema-warning">파라미터 드리프트는 운영자·관리자만 볼 수 있습니다.</div>'
       : `<div class="schema-warning">비교 실패: ${esc(e.message)}</div>`;
     return;
   }
@@ -2256,7 +2349,7 @@ async function loadConfigDrift() {
     rows = await api(`/api/instances/${state.instance.id}/config-drift?limit=100`);
   } catch (e) {
     box.innerHTML = e.message.startsWith("403")
-      ? '<div class="schema-warning">설정 변경 이력은 ADMIN 역할만 볼 수 있습니다.</div>'
+      ? '<div class="schema-warning">설정 변경 이력은 운영자·관리자만 볼 수 있습니다.</div>'
       : `<div class="schema-warning">조회 실패: ${esc(e.message)}</div>`;
     return;
   }
@@ -2318,7 +2411,7 @@ async function loadReviews() {
   } catch (e) { box.innerHTML = `<div class="schema-warning">조회 실패: ${esc(e.message)}</div>`; return; }
   box.className = "review-list";
   if (!rows.length) { box.innerHTML = '<div class="muted">아직 리뷰 요청이 없습니다.</div>'; return; }
-  const isAdmin = state.role === "ADMIN";
+  const canDecide = can("CHANGE_APPROVE");
   box.innerHTML = rows.map((r) => {
     const badge = r.status === "PENDING" ? '<span class="rv-pending">대기</span>'
       : r.status === "APPROVED" ? '<span class="rv-approved">승인</span>'
@@ -2327,18 +2420,19 @@ async function loadReviews() {
       : r.status === "EXECUTING" || r.status === "ROLLING_BACK" ? '<span class="rv-pending">실행 중</span>'
       : r.status === "CANCELLED" ? '<span class="rv-rejected">취소</span>'
       : '<span class="rv-rejected">반려</span>';
-    const workbenchLink = `<a class="muted" href="/workbench.html?instance=${esc(encodeURIComponent(r.instanceId))}&amp;ticket=${esc(encodeURIComponent(r.id))}">워크벤치에서 드라이런·실행·되돌리기</a>`;
+    const workbenchLink = can("WORKBENCH")
+      ? `<a class="muted" href="/workbench.html?instance=${esc(encodeURIComponent(r.instanceId))}&amp;ticket=${esc(encodeURIComponent(r.id))}">워크벤치에서 티켓 열기</a>` : "";
     const findings = (r.findings || []).map((f) => `<li>${esc(f)}</li>`).join("");
     const ai = r.aiOpinion ? `<div class="rv-ai"><b>AI 1차 소견:</b> ${esc(r.aiOpinion)}</div>` : "";
     const limited = r.parseLimited ? '<div class="rv-limited">다중 문장·복잡 구문 — 규칙 판정이 불완전할 수 있습니다(사람이 전체 확인).</div>' : "";
     const decided = r.status !== "PENDING"
       ? `<div class="rv-decided muted">${esc(r.decidedBy || "")} · ${esc((r.decidedAt || "").replace("T", " ").slice(0, 19))}${r.decisionComment ? " · " + esc(r.decisionComment) : ""}</div>` : "";
-    const actions = (r.status === "PENDING" && isAdmin)
+    const actions = (r.status === "PENDING" && canDecide)
       ? `<div class="rv-actions">
            <button class="btn btn-small btn-primary" onclick="decideReview(${r.id}, true)">승인</button>
            <button class="btn btn-small btn-danger" onclick="decideReview(${r.id}, false)">반려</button>
          </div>`
-      : (r.status === "PENDING" ? '<div class="hint">승인/반려는 ADMIN만 가능합니다.</div>' : "");
+      : (r.status === "PENDING" ? '<div class="hint">승인/반려는 승인자(APPROVER)·관리자만 합니다.</div>' : "");
     return `<div class="rv-item">
       <div class="rv-head">#${r.id} ${badge} <span class="muted">${esc(r.requester)} · rules v${r.rulesVersion}</span> ${workbenchLink}</div>
       <pre class="rv-sql codeblock">${esc(r.targetSql)}</pre>
@@ -2358,7 +2452,7 @@ async function decideReview(id, approved) {
     });
     await loadReviews();
   } catch (e) {
-    alert(e.message.startsWith("403") ? "승인/반려는 ADMIN만 가능합니다." : `처리 실패: ${e.message}`);
+    alert(e.message.startsWith("403") ? "승인/반려는 승인자(APPROVER)·관리자만 합니다." : `처리 실패: ${e.message}`);
   }
 }
 
@@ -2428,7 +2522,7 @@ async function generateIncident() {
     $("#btn-incident-dl").hidden = false;
   } catch (e) {
     box.className = "incident-result schema-warning";
-    box.textContent = e.message.startsWith("403") ? "인시던트 리포트는 ADMIN 역할만 생성할 수 있습니다." : `생성 실패: ${e.message}`;
+    box.textContent = e.message.startsWith("403") ? "인시던트 리포트는 운영자·관리자만 생성할 수 있습니다." : `생성 실패: ${e.message}`;
   } finally { btn.disabled = false; }
 }
 
@@ -2459,7 +2553,7 @@ async function generateMonthly() {
     $("#btn-monthly-dl").hidden = false;
   } catch (e) {
     box.className = "incident-result schema-warning";
-    box.textContent = e.message.startsWith("403") ? "월간 리포트는 ADMIN 역할만 생성할 수 있습니다." : `생성 실패: ${e.message}`;
+    box.textContent = e.message.startsWith("403") ? "월간 리포트는 운영자·관리자만 생성할 수 있습니다." : `생성 실패: ${e.message}`;
   } finally { btn.disabled = false; }
 }
 
@@ -2654,6 +2748,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // "인덱스 제안" 버튼은 섹션을 펼치고, 섹션 안의 "시뮬레이션" 버튼이 실제 호출한다(후보 컬럼 입력이 필요해서)
   $("#btn-advisor").addEventListener("click", () => { $("#advisor-section").hidden = false; $("#advisor-columns").focus(); });
   $("#btn-advisor-run").addEventListener("click", runIndexAdvisor);
+  // 관제에서 본 쿼리를 요청자가 워크벤치의 새 워크시트로 가져간다(행 값 조회는 워크벤치의 조회 계정·마스킹을 거친다)
+  $("#btn-to-workbench").addEventListener("click", () => handToWorkbench("sql", $("#detail-sql").value.trim()));
+  $("#btn-user-create").addEventListener("click", createUser);
   $("#btn-deep").addEventListener("click", runDeepDiagnose);
   $("#btn-inquiry").addEventListener("click", runInquiry);
   $("#btn-schema-diff").addEventListener("click", runSchemaDiff);

@@ -30,8 +30,8 @@ const OPEN = ["PENDING", "APPROVED", "EXECUTING", "ROLLING_BACK"];
 const time = (t) => localTime(t, { seconds: true });
 
 export class TicketPanel {
-  constructor({ list, detail, count, isAdmin, me, onOpenSql, onProposeTicket }) {
-    Object.assign(this, { list, detail, count, isAdmin, me, onOpenSql, onProposeTicket });
+  constructor({ list, detail, count, can, me, onOpenSql, onProposeTicket }) {
+    Object.assign(this, { list, detail, count, can, me, onOpenSql, onProposeTicket });
     this.instanceId = null;
     this.tickets = [];
     this.executions = [];
@@ -139,32 +139,43 @@ export class TicketPanel {
   actions(t) {
     const button = (act, text, cls = "") =>
       `<button class="btn btn-small ${cls}" data-act="${act}">${esc(this.armed === act ? `${text} 확인(한 번 더)` : text)}</button>`;
-    const admin = this.isAdmin();
+    // 버튼은 능력으로 가른다(/api/me capabilities). 승인자는 승인·반려·드라이런까지, 운영자는 드라이런·실행·되돌리기까지 —
+    // 한 사람이 승인하고 실행까지 하는 흐름을 화면에서도 만들지 않는다(관리자는 둘 다 가진다). 최종 인가는 서버가 한다
+    const approve = this.can("CHANGE_APPROVE");
+    const dryRun = this.can("CHANGE_DRY_RUN");
+    const execute = this.can("CHANGE_EXECUTE");
     const mine = this.me() === t.requester;
+    const closer = mine || approve || execute;
     const list = [];
-    if (admin) {
-      if (t.status === "PENDING") list.push(button("dry-run", "드라이런"), button("approve", "승인", "btn-primary"), button("reject", "반려", "btn-danger"));
-      if (t.status === "APPROVED") list.push(button("dry-run", "드라이런"), button("execute", "실행", "btn-primary"));
-      if (t.status === "EXECUTED") list.push(button("revert-dry-run", "되돌리기 드라이런"), button("revert", "되돌리기", "btn-danger"));
-      if (this.captureHint && t.status === "PENDING") list.push(button("dry-run-raw", "캡처 없이 드라이런"));
-      if (this.captureHint && t.status === "APPROVED") {
-        list.push(button("dry-run-raw", "캡처 없이 드라이런"), button("execute-raw", "캡처 없이 실행(되돌리기 불가)", "btn-danger"));
-      }
+    if (t.status === "PENDING") {
+      if (dryRun) list.push(button("dry-run", "드라이런"));
+      if (approve) list.push(button("approve", "승인", "btn-primary"), button("reject", "반려", "btn-danger"));
+      if (dryRun && this.captureHint) list.push(button("dry-run-raw", "캡처 없이 드라이런"));
     }
-    if ((admin || mine) && ["PENDING", "APPROVED"].includes(t.status)) list.push(button("cancel", "티켓 취소"));
+    if (t.status === "APPROVED") {
+      if (dryRun) list.push(button("dry-run", "드라이런"));
+      if (execute) list.push(button("execute", "실행", "btn-primary"));
+      if (dryRun && this.captureHint) list.push(button("dry-run-raw", "캡처 없이 드라이런"));
+      if (execute && this.captureHint) list.push(button("execute-raw", "캡처 없이 실행(되돌리기 불가)", "btn-danger"));
+    }
+    if (t.status === "EXECUTED" && execute) list.push(button("revert-dry-run", "되돌리기 드라이런"), button("revert", "되돌리기", "btn-danger"));
+    if (closer && ["PENDING", "APPROVED"].includes(t.status)) list.push(button("cancel", "티켓 취소"));
     list.push('<button class="btn btn-small" data-act="to-editor">편집기로</button>');
     const hints = [];
-    if (!admin) hints.push("드라이런·승인·실행·되돌리기는 ADMIN만 합니다. 요청자는 대기·승인 상태의 자기 티켓을 취소할 수 있습니다.");
+    if (t.status === "PENDING" && !approve) hints.push("승인·반려는 승인자(APPROVER)가 합니다.");
+    if (t.status === "APPROVED" && !execute) hints.push("실행은 운영자(OPERATOR)가 합니다. 승인한 사람과 실행하는 사람을 나눕니다.");
+    if (t.status === "EXECUTED" && !execute) hints.push("되돌리기는 운영자(OPERATOR)가 합니다.");
+    if (mine && !approve && !execute && ["PENDING", "APPROVED"].includes(t.status)) hints.push("요청자는 대기·승인 상태의 자기 티켓을 취소할 수 있습니다.");
     let resolve = "";
     if (["EXECUTING", "ROLLING_BACK"].includes(t.status)) {
       hints.push("실행 중이거나 커밋 여부를 확인하지 못한 상태입니다. 같은 변경이 두 번 나가지 않게 막아 두었습니다. "
         + "대상 행을 직접 확인한 뒤, 무엇으로 확인했는지 적고 결과를 고르세요.");
-      if (admin) {
+      if (execute) {
         resolve = `<div class="tk-actions"><input class="tk-resolve-note" placeholder="확인 근거(예: root로 id=3 조회, grade=VIP 확인)">
           ${button("resolve-applied", "반영됨으로 정리")}${button("resolve-not-applied", "반영 안 됨으로 정리")}</div>`;
       }
     }
-    const comment = ["PENDING", "APPROVED"].includes(t.status) && (admin || mine)
+    const comment = ["PENDING", "APPROVED"].includes(t.status) && closer
       ? '<input class="tk-comment" placeholder="코멘트·취소 사유(선택)">' : "";
     return `<div class="tk-actions">${list.join("")}${comment}</div>${resolve}
       ${hints.map((h) => `<div class="hint">${esc(h)}</div>`).join("")}`;
@@ -187,7 +198,10 @@ export class TicketPanel {
       : x.rowChanges.diff ? renderDiff(x.rowChanges.diff, { maskedColumns: x.rowChanges.maskedColumns })
         : `<div class="muted">${esc(x.rowChanges.unavailable)}</div>`;
     const workload = x.action === "EXECUTE" && x.outcome === "COMMITTED"
-      ? `<button class="btn btn-small" data-act="workload" data-exec="${esc(x.id)}">실행 전후 워크로드 비교(60분)</button><div class="tk-workload" data-workload="${esc(x.id)}"></div>` : "";
+      ? `<button class="btn btn-small" data-act="workload" data-exec="${esc(x.id)}">실행 전후 워크로드 비교(60분)</button>`
+        // 운영자가 변경 직후 관제 화면으로 넘어가는 입구 — 대시보드가 실행 시각 앞뒤 30분을 시점 비교로 바로 연다(app.js handleInstanceDeepLink)
+        + `<a class="btn btn-small" href="/?instance=${esc(encodeURIComponent(t.instanceId))}&amp;compareAt=${esc(encodeURIComponent(x.startedAt))}" target="_blank" rel="noopener">대시보드에서 전후 Top Query 비교</a>`
+        + `<div class="tk-workload" data-workload="${esc(x.id)}"></div>` : "";
     return `<details class="tk-exec" ${open ? "open" : ""}>
       <summary><span class="tk-act">${esc(ACTION[x.action] || x.action)}</span><span class="tk-out ${ocls}">${esc(outcome)}</span>
         <span class="muted">${esc(x.affectedRows ?? "-")}행 · ${esc(x.kind)} · ${esc(x.principal)} · ${esc(time(x.startedAt))} · sha ${esc((x.statementSha256 || "").slice(0, 10))}</span></summary>

@@ -21,10 +21,21 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class PlatformUser {
 
+    /**
+     * 플랫폼 역할 — 쓰는 사람 기준(VERIFICATION 135절). 포함 관계는 PlatformRoles가 정한다:
+     * ADMIN은 APPROVER·OPERATOR를, 두 역할은 REQUESTER를, REQUESTER는 VIEWER를 포함한다.
+     * APPROVER와 OPERATOR는 서로를 포함하지 않는다 — 한 사람이 변경을 승인하고 실행까지 겸하지 않게.
+     */
     public enum Role {
-        /** 조회·진단(통계, 시점 비교, explain) — 개발자용 */
+        /** 관제만 본다 — 대시보드·리포트 조회, 추정 실행계획. 대상 DB의 행 값은 보지 않는다 */
         VIEWER,
-        /** + 인스턴스 등록/삭제, 백업 실행, 토큰 조회 — 플랫폼 관리자용 */
+        /** 개발자·데이터 요청자 — 워크벤치 조회(행 값)와 변경 요청 */
+        REQUESTER,
+        /** DBA 리드 — 변경 요청 승인·반려, 승인 전 드라이런 */
+        APPROVER,
+        /** DBA 운영 — 승인 티켓 실행·되돌리기, 백업·세션 종료·심층 진단처럼 대상 DB에 닿는 일 */
+        OPERATOR,
+        /** 플랫폼 관리자 — 위 전부 + 인스턴스·접속 계정·보안·감사 */
         ADMIN
     }
 
@@ -60,5 +71,9 @@ public class PlatformUser {
 
     public void updateTeamLabel(String teamLabel) {
         this.teamLabel = teamLabel;
+    }
+
+    public void updateRole(Role role) {
+        this.role = role;
     }
 }

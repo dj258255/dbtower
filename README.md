@@ -50,9 +50,9 @@ DBA는 같은 질문에 반복해서 답하게 됩니다. 정형화된 운영 �
 | 테이블 상세 | CREATE TABLE 전문·크기 통계·인덱스 카디널리티(5기종) — DDL 출처를 NATIVE/재구성으로 정직 구분, PG는 FK·CHECK까지 재조립 |
 | MCP 서버 | AI 에이전트가 위 기능들을 도구로 직접 사용 (stdio / HTTP) |
 | Wait Event 분석 | 그 시간에 무엇을 기다렸나(CPU/IO/Lock) — 5기종 통합, load%와 짝 |
-| 세션·블로킹 | 활성 세션과 블로킹 트리 조회, 세션 종료(ADMIN) — PG는 cancel/terminate 구분 |
+| 세션·블로킹 | 활성 세션과 블로킹 트리 조회, 세션 종료(운영자) — PG는 cancel/terminate 구분 |
 | 인덱스 어드바이저 | HypoPG 가상 인덱스로 생성 전 비용 비교(PG), 타 기종은 UNSUPPORTED 정직 표기 |
-| 온라인 DDL | gh-ost 연동(MySQL) — 기본 dry-run, 실행은 ADMIN + execute 명시 |
+| 온라인 DDL | gh-ost 연동(MySQL) — 기본 dry-run, 실행은 운영자 + execute 명시 |
 | 드리프트 감지 | 파라미터 diff·Schema Diff — "같아야 할 두 인스턴스가 어디부터 다른가" |
 | 이상 자동 감지 | (요일x시간대) 동적 베이스라인 z-score — 고정 임계 없이 "평소와 다름"을 감지 |
 | Advisors | 운영 모범규칙 자동 점검(백업 없음·복제 미구성·통계 노후 등) — 근거 문서 링크 |
@@ -84,7 +84,7 @@ DBA는 같은 질문에 반복해서 답하게 됩니다. 정형화된 운영 �
 | 감사 로그 검색 | 사용자·action·결과·기간 동적 필터 (Spring Data Specification) |
 | 프로비저닝 연동 | K8s(CloudNativePG)·Terraform·Ansible로 생성한 DB를 멱등 PUT으로 자동 등록 |
 | 설정 변경 이력 | 파라미터 diff의 시간축 — "언제부터 무엇이 바뀌었나"를 주기 수집·변경분만 기록(폭증 방지), 변경 시 웹훅. "누가"는 대상 DB 감사 로그의 몫이라 미표기(정직) |
-| 스키마 변경 리뷰 게이트 | 배포 전 DDL/대량 DML을 규칙으로 자동 판정(락·NOT NULL·DROP·WHERE 없음)+실행수 락 확정+AI 소견 → ADMIN 승인/반려·자동 감사. 실행은 안 함(gh-ost 안내만) |
+| 스키마 변경 리뷰 게이트 | 배포 전 DDL/대량 DML을 규칙으로 자동 판정(락·NOT NULL·DROP·WHERE 없음)+실행수 락 확정+AI 소견 → 승인자 승인/반려·자동 감사. 승인된 티켓의 실행은 워크벤치에서 운영자가(사본·되돌리기와 함께) |
 | 인시던트 리포트 | 장애 구간을 주면 시점 비교·설정 변경·플랜 플립·대기·가용성을 한 장으로 재구성 + AI 요약(재료 내 사실만). 신규 수집 0, 마크다운 발행 |
 | 월간 점검 리포트 | 헬스 스코어·백업 신선도·Advisor·용량 예측·낭비 신호·설정 변경을 한 장으로 매월 자동 발행 + 수동 생성 |
 | 인덱스 사용 이력 | 인덱스 스캔 통계 주기 영속(5기종, Oracle 미지원 정직) — 미사용 인덱스 신호에 "관측 기간" 라벨, 분기 단위 장기 판정(lakehouse)의 원료 |
@@ -104,7 +104,7 @@ DBA는 같은 질문에 반복해서 답하게 됩니다. 정형화된 운영 �
 <details>
 <summary><b>운영 병목 알람 카드</b> (설정 변경·변경 리뷰·인시던트 — Discord embed 실물)</summary>
 
-읽고 판정·기록까지가 몫이고 대상 DB는 바꾸지 않는다. 리뷰 게이트의 승인·반려, 인시던트 리포트의 실행은 전부 사람(ADMIN)이 한다.
+읽고 판정·기록까지가 몫이고 대상 DB는 바꾸지 않는다. 리뷰 게이트의 승인·반려는 승인자가, 인시던트 리포트의 실행은 운영자가 — 전부 사람이 한다.
 
 <img src="docs/card-config-drift.png" width="400" alt="설정 변경 감지 카드 — work_mem 변경, 누가는 대상 DB 감사 로그의 몫이라 미표기">
 
@@ -124,15 +124,15 @@ DBMS 운영(설치·패치·장애조치·백업/복구·오브젝트·용량)�
 |---|---|---|
 | 설치·프로비저닝 | 생성 즉시 멱등 PUT으로 관제 편입 — K8s(CloudNativePG)·Ansible·Terraform 연동 e2e | 생성 자체는 Operator/IaC 몫 — 이미 잘 푼 문제를 다시 풀지 않음 |
 | 패치·업그레이드 | 버전 가시화(health), 패치 전후 검증 — 파라미터 드리프트·Schema Diff로 형상 변화, 시점 비교로 성능 회귀 확인 | 엔진 패치 실행은 범위 밖 — 대상을 바꾸는 행위이자 플랫폼별 도구(Operator 롤링·RDS 유지관리)의 영역 |
-| 장애조치 | 감지(헬스 스코어 down 수렴·이상 감지·웹훅)부터 원인(Wait Event·블로킹 트리·심층 진단)과 수동 개입(세션 kill, ADMIN)까지 | 자동 페일오버는 안 함 — HA 토폴로지 소유자(Operator/managed)의 일. 관제 도구가 개입하면 스플릿 브레인 위험 |
+| 장애조치 | 감지(헬스 스코어 down 수렴·이상 감지·웹훅)부터 원인(Wait Event·블로킹 트리·심층 진단)과 수동 개입(세션 kill, 운영자)까지 | 자동 페일오버는 안 함 — HA 토폴로지 소유자(Operator/managed)의 일. 관제 도구가 개입하면 스플릿 브레인 위험 |
 | 백업·복구 | 추상 정책 → 기종별 실행, 즉시 백업, **복원 검증 3값**(테스트 안 한 백업은 백업이 아니다), S3 호환 원격 보관(오프사이트 — 업로드 실패는 백업 실패가 아니라 별개 사실로 기록), 신선도 감시 — 3-2-1 완성 | — |
 | 오브젝트 관리 | 스키마·파티션·인덱스 사용 통계 조회, Schema Diff, 인덱스 어드바이저(가상 인덱스), 온라인 DDL(gh-ost, 기본 dry-run), 미사용 인덱스 분기 판정(lakehouse 장기 창) | 자동 인덱스 생성·파티션 자동 관리는 범위 밖 — 조회·조언까지가 정체성 |
-| 변경 관리 | 스키마 변경 리뷰 게이트 — DDL/대량 DML을 규칙으로 판정·AI 소견·ADMIN 승인·자동 감사 | 승인된 변경의 실행은 안 함 — 기존 gh-ost 경로 또는 사람. 판정·기록까지가 게이트의 몫 |
+| 변경 관리 | 스키마 변경 리뷰 게이트 — DDL/대량 DML을 규칙으로 판정·AI 소견·승인자 승인, 승인된 티켓만 운영자가 워크벤치에서 실행(변경 전 사본·되돌리기·전후 비교)·자동 감사 | 승인 없는 실행은 안 함, 승인한 사람이 실행까지 겸하지 않음(승인자와 운영자 역할 분리) |
 | 용량 관리 | 테이블/컬렉션 크기 상위, 오버프로비저닝 신호(FinOps), 메타 DB 자체 보존 정책(7일) | OS/디스크 사용률 시계열은 메트릭 층(exporter+Prometheus) 위임 — 아래 "기존 모니터링 스택과의 관계" |
 | 계정·권한 | 기종별 최소 권한 모니터링 계정 실측 가이드, Ansible 플레이북이 계정 생성까지 | 대상 DB 계정 CRUD UI는 안 함 — 대상을 바꾸는 행위 최소화 |
 | 모니터링·튜닝 | 본진 — 쿼리 통계(load%)·시점 비교·Wait Event·실행계획+AI·심층 원인 진단·SLO·자율 감시 | — |
 
-원칙은 하나입니다: **읽고 판단하는 것은 깊게, 대상을 바꾸는 것은 최소한으로(전부 ADMIN 경계),
+원칙은 하나입니다: **읽고 판단하는 것은 깊게, 대상을 바꾸는 것은 최소한으로(승인하는 사람과 실행하는 사람을 나눈 경계),
 바꾸는 주체가 따로 있는 일은 그 주체와 잇는다.**
 
 ### 확장성 증명 — 새 기종 추가 = 구현체 1개
@@ -220,7 +220,7 @@ AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 �
 
 ![변경 티켓 — DDL 실행의 구조 변화와 같은 트랜잭션 안 전후 실행계획](docs/images/webui/74-workbench-ticket-ddl-probe.png)
 
-**티켓의 출구와 5기종 확장** — 승인된 채 실행하지 않을 티켓은 요청자나 ADMIN이 취소하고, 커밋 여부를 모른 채 멈춘 티켓은 ADMIN이
+**티켓의 출구와 5기종 확장** — 승인된 채 실행하지 않을 티켓은 요청자나 승인자·운영자가 취소하고, 커밋 여부를 모른 채 멈춘 티켓은 운영자가
 대상 DB를 무엇으로 확인했는지 근거를 적어 정리합니다. DDL 실행 기록에는 생긴 구조만 지우는 역변경 문장을 기종 문법으로 제안하고
 (실행이 아니라 새 티켓으로 올리기), 스키마 트리에서 테이블 상세(행 수·크기·인덱스 카디널리티·DDL)를 엽니다. 변경 실행은 SQL Server
 (Apple Silicon 로컬은 `docker-compose.arm64.yml`의 Azure SQL Edge, Rosetta가 있으면 Rosetta VM의 실제 SQL Server 2022 RTM-CU26)와
@@ -266,11 +266,29 @@ HTTP 전송은 도구 호출을 서비스 토큰이 아니라 그 요청을 인�
 
 DB 접속정보를 다루는 관리 도구라 인증 없이는 운영에 못 들어갑니다 (Phase A1):
 
-- **사람**: 폼 로그인(BCrypt) + CSRF 쿠키 패턴. 역할 2개 — 진단(조회·EXPLAIN)은 VIEWER부터,
-  대상 DB를 바꾸는 행위(등록/삭제/백업)는 ADMIN만
+- **사람**: 폼 로그인(BCrypt) + CSRF 쿠키 패턴. 역할은 쓰는 사람 기준 5개(아래 표)
 - **기계(MCP·자동화)**: Bearer 서비스 토큰. 미설정 시 기동마다 랜덤 생성(fail-closed) —
-  ADMIN이 로그인하면 MCP 카드가 토큰 포함 등록 명령을 완성해 줍니다
-- 최초 기동 시 admin 계정 자동 생성 — 비밀번호는 `DBTOWER_ADMIN_PASSWORD` 또는 로그의 랜덤값
+  ADMIN이 로그인하면 MCP 카드가 토큰 포함 등록 명령을 완성해 줍니다. 사람은 헤더 없이 등록해 브라우저 로그인(OAuth)으로
+  자기 역할만큼 도구를 씁니다(도구 호출은 호출자 토큰으로 REST에 위임)
+- 최초 기동 시 admin 계정 자동 생성 — 비밀번호는 `DBTOWER_ADMIN_PASSWORD` 또는 로그의 랜덤값. 역할별 계정은
+  `DBTOWER_{VIEWER|REQUESTER|APPROVER|OPERATOR}_PASSWORD`를 준 것만 만들고, 이후는 ADMIN이 대시보드의 사용자·역할 카드에서 만든다
+
+### 한 플랫폼, 사람별 입구
+
+관제 대시보드와 거버넌스 워크벤치는 인스턴스·팀 범위·감사·티켓을 공유하므로 제품을 나누지 않고, 쓰는 사람마다 입구와 버튼을 나눕니다.
+화면은 역할 이름이 아니라 `/api/me`의 능력(capabilities)으로 버튼을 가르고, 최종 인가는 서버가 합니다([VERIFICATION 135절](docs/VERIFICATION.md)).
+
+| 역할 | 누구 | 첫 화면 | 할 수 있는 일 |
+|---|---|---|---|
+| 관제 VIEWER | 온콜·팀장·보안 담당 | 대시보드 | 지표·시점 비교·리포트 조회, 추정 실행계획. 대상 DB의 행 값은 보지 않는다(워크벤치 없음) |
+| 요청자 REQUESTER | 개발자·데이터 요청자 | 워크벤치 | + 워크벤치 조회(조회 계정·마스킹), 변경 요청 제출·자기 요청 취소 |
+| 승인자 APPROVER | DBA 리드 | 대시보드 | + 변경 요청 승인·반려, 승인 전 드라이런 |
+| 운영자 OPERATOR | DBA 운영 | 대시보드 | + 승인 티켓 실행·되돌리기·커밋 불명 정리, 백업·복원 검증·세션 종료·심층 진단·온라인 DDL·파라미터 |
+| 관리자 ADMIN | 플랫폼 관리자 | 대시보드 | 위 전부 + 인스턴스·접속 계정·보안·감사·사용자 역할 |
+
+승인자와 운영자는 서로를 포함하지 않습니다 — 한 사람이 변경을 승인하고 실행까지 하지 않게 역할에서부터 나눕니다.
+화면 사이의 넘김은 세 가지입니다: 대시보드의 쿼리 상세 -> 워크벤치 새 워크시트, 인덱스 제안 -> 워크벤치 변경 요청 창,
+워크벤치의 실행 기록 -> 대시보드의 실행 시각 앞뒤 30분 시점 비교. 로그인 뒤에는 가려던 주소(딥링크·OAuth 인가)가 있으면 그곳이, 없으면 역할의 첫 화면이 열립니다.
 
 ![로그인 — 최초 기동 admin 부트스트랩 안내](docs/images/webui/07-login.png)
 
@@ -416,12 +434,12 @@ GET  {base}/table-stats            테이블/컬렉션 크기          GET  {bas
 GET  {base}/compare                시점 비교 (base vs target)  GET  {base}/wait-events    Wait Event 분해
 GET  {base}/sessions               세션·블로킹 트리            GET  {base}/latency-percentiles  p95/p99
 GET  {base}/partitions             파티션 조회                GET  {base}/schema         스키마 조회
-GET  /api/schema-diff              스키마 비교                GET  /api/param-diff       파라미터 비교(ADMIN)
+GET  /api/schema-diff              스키마 비교                GET  /api/param-diff       파라미터 비교(운영자)
 
 # 분석·진단
 POST {base}/explain                실행계획 + 규칙 지적        POST {base}/ai-analysis    + AI 1차 분석
 POST {base}/index-advisor          가상 인덱스 비용 비교(PG)   POST {base}/diagnose       자연어 진단(AI 도구 연쇄)
-POST {base}/deep-diagnose          심층 원인 진단 — 실제 실행 계획·근본원인 (ADMIN)
+POST {base}/deep-diagnose          심층 원인 진단 — 실제 실행 계획·근본원인 (운영자)
 
 # 자율 진단 신호
 GET  {base}/anomalies              베이스라인 이상 감지        GET  {base}/advisors       운영 규칙 점검
@@ -439,16 +457,20 @@ PUT  {base}/credentials/{READ|WRITE}         콘솔 계정 등록(ADMIN, 저장 
 GET|POST /api/workbench/instances/{id}/worksheets      워크시트 목록·생성    PATCH|DELETE /api/workbench/worksheets/{wid}
 POST /api/workbench/worksheets/{wid}/assistant         AI 제안(실행 안 함)   GET .../timeline  대화+체크포인트
 POST /api/workbench/worksheets/{wid}/versions/{n}/restore  되돌리기(새 버전)  PUT .../instances/{id}/settings  결과 값 AI 공유(ADMIN)
-POST /api/workbench/tickets/{rid}/dry-run    승인 전후 드라이런(실행 후 롤백, ADMIN)   POST .../execute  승인 티켓 실행(ADMIN)
-POST /api/workbench/tickets/{rid}/revert     행 사본으로 되돌리기 {dryRun}(ADMIN)     GET  .../executions  실행 기록·전후 비교
+POST /api/workbench/tickets/{rid}/dry-run    승인 전후 드라이런(실행 후 롤백, 승인자·운영자)   POST .../execute  승인 티켓 실행(운영자)
+POST /api/workbench/tickets/{rid}/revert     행 사본으로 되돌리기 {dryRun}(운영자)     GET  .../executions  실행 기록·전후 비교
 GET  /api/workbench/executions/{eid}/workload  실행 전후 워크로드 비교   POST /api/workbench/compare  인스턴스 간 결과 비교
-POST /api/reviews/{rid}/cancel               티켓 취소(요청자·ADMIN)        POST /api/workbench/tickets/{rid}/resolve  커밋 불명 정리(ADMIN, 근거 필수)
+POST /api/reviews/{rid}/cancel               티켓 취소(요청자 본인·승인자·운영자)   POST /api/workbench/tickets/{rid}/resolve  커밋 불명 정리(운영자, 근거 필수)
 GET  /api/reviews/{rid}                      티켓 단건(팀 범위)             POST /api/workbench/instances/{id}/agent-query  에이전트 조회(AI 공유 설정 필요, 최대 50행)
 
-# 운영 행위 (ADMIN)
+# 운영 행위 (운영자, 감사 로그는 ADMIN)
 POST {base}/backup                 즉시 백업                  POST {base}/backup/verify  복원 검증
 PUT  {base}/backup-policy          백업 정책                  POST {base}/online-ddl     gh-ost (기본 dry-run)
 POST {base}/sessions/{pid}/kill    세션 종료                  GET  /api/audit            감사 로그 검색
+
+# 사람·역할
+GET  /api/me                       로그인 주체·대표 역할·능력(capabilities)·첫 화면
+GET|POST /api/security/users       사용자 목록·생성(ADMIN, 비밀번호 해시 미노출)   PATCH /api/security/users/{u}/role  역할 변경(ADMIN, 마지막 ADMIN은 거부)
 
 POST /mcp                          MCP (Streamable HTTP) — 도구 19종(워크벤치 요청·조회 3종 포함, 실행 도구 없음)
 ```

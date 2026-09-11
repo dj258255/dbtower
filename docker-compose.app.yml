@@ -23,8 +23,11 @@ services:
       DBTOWER_DB_PASSWORD: ${DBTOWER_DB_PASSWORD:?meta DB 비밀번호를 .env 에 설정하세요}
       # 관리자 초기 비밀번호(미설정 시 앱이 랜덤 생성 후 로그로 1회 안내)
       DBTOWER_ADMIN_PASSWORD: ${DBTOWER_ADMIN_PASSWORD:-}
-      # 읽기 전용(VIEWER) 계정 비밀번호(선택)
+      # 역할별 계정 비밀번호(선택) — 비운 역할은 계정을 만들지 않는다
       DBTOWER_VIEWER_PASSWORD: ${DBTOWER_VIEWER_PASSWORD:-}
+      DBTOWER_REQUESTER_PASSWORD: ${DBTOWER_REQUESTER_PASSWORD:-}
+      DBTOWER_APPROVER_PASSWORD: ${DBTOWER_APPROVER_PASSWORD:-}
+      DBTOWER_OPERATOR_PASSWORD: ${DBTOWER_OPERATOR_PASSWORD:-}
       # 기계·자동화용 Bearer API 토큰(선택). IaC 자동 등록(k8s register-job 등)을 쓰려면 필수 —
       # register 쪽 DBTOWER_TOKEN과 같아야 한다. 비우면 Bearer 인증 비활성(사람 세션 로그인만).
       DBTOWER_API_TOKEN: ${DBTOWER_API_TOKEN:-}

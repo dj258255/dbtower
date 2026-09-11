@@ -327,9 +327,13 @@ dbtower:
     # 기계(MCP 클라이언트·자동화)용 서비스 토큰 — 미설정이면 기동마다 랜덤 생성 (fail-closed)
     api-token: ${DBTOWER_API_TOKEN:}
     # 최초 기동 부트스트랩 — admin은 항상 생성(비밀번호 미설정 시 랜덤+로그 안내),
-    # viewer(조회·진단 전용)는 비밀번호를 준 경우에만 생성
+    # 역할별 계정은 비밀번호를 준 것만 생성: viewer(관제 조회), requester(워크벤치·변경 요청),
+    # approver(변경 승인), operator(승인 티켓 실행·대상 DB 운영). 역할 정의는 PlatformRoles.
     admin-password: ${DBTOWER_ADMIN_PASSWORD:}
     viewer-password: ${DBTOWER_VIEWER_PASSWORD:}
+    requester-password: ${DBTOWER_REQUESTER_PASSWORD:}
+    approver-password: ${DBTOWER_APPROVER_PASSWORD:}
+    operator-password: ${DBTOWER_OPERATOR_PASSWORD:}
     # 인스턴스 비밀번호 암호화 키 — base64 인코딩 32바이트 (생성: openssl rand -base64 32).
     # 미설정이면 기동을 거부한다(fail-closed). 예외는 dev/local/test 프로필뿐 —
     # 배포 이름을 뭘로 짓든 자동으로 안전한 쪽에 서게 하려는 것이다(SecretCipher 주석 참고).

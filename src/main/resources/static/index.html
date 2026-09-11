@@ -20,7 +20,7 @@
     <span class="brand-tag">이기종 DBMS 운영 관리 플랫폼</span>
   </div>
   <nav class="topnav">
-    <a href="/workbench.html">워크벤치</a>
+    <a id="nav-workbench" href="/workbench.html">워크벤치</a>
     <a href="http://localhost:3000" target="_blank" rel="noopener">Grafana</a>
     <a href="http://localhost:9090" target="_blank" rel="noopener">Prometheus</a>
     <span id="user-chip" class="user-chip"></span>
@@ -143,6 +143,7 @@
               <button id="btn-ai" class="btn btn-dark btn-small">AI 분석</button>
               <button id="btn-advisor" class="btn btn-small">인덱스 제안</button>
               <button id="btn-deep" class="btn btn-small">심층 진단</button>
+              <button id="btn-to-workbench" class="btn btn-small" hidden>워크벤치에서 열기</button>
               <button id="btn-inquiry" class="btn btn-small">DB팀에 문의</button>
             </span>
           </div>
@@ -175,7 +176,7 @@
             <pre id="detail-ai" class="codeblock ai"></pre>
           </div>
           <div class="detail-section" id="deep-section" hidden>
-            <h3>심층 원인 진단 <span class="hint">(실제 실행 계획으로 "왜 인덱스를 못 타나"를 짚습니다 — 쿼리를 실제 실행하므로 ADMIN·타임아웃 적용. 파라미터 자리는 실제 값으로 채우세요)</span></h3>
+            <h3>심층 원인 진단 <span class="hint">(실제 실행 계획으로 "왜 인덱스를 못 타나"를 짚습니다 — 쿼리를 실제 실행하므로 운영자·관리자, 타임아웃 적용. 파라미터 자리는 실제 값으로 채우세요)</span></h3>
             <div id="deep-result" class="findings"></div>
           </div>
           <div class="detail-section" id="inquiry-section" hidden>
@@ -305,8 +306,8 @@
         <!-- 거버넌스 -->
         <div class="mon-group" data-group="gov" hidden>
           <div class="monitor-card review-gate-card">
-            <h3>스키마 변경 리뷰 게이트 <span class="hint">(배포 전 DDL/대량 DML을 규칙으로 자동 판정 + AI 소견 → ADMIN 승인 · 실행은 안 함, 판정·기록까지)</span></h3>
-            <div class="review-submit">
+            <h3>스키마 변경 리뷰 게이트 <span class="hint">(배포 전 DDL/대량 DML을 규칙으로 자동 판정 + AI 소견 → 승인자가 승인 → 운영자가 워크벤치에서 드라이런·실행)</span></h3>
+            <div class="review-submit" id="review-submit">
               <textarea id="review-sql" class="codeblock sql-edit" rows="4" spellcheck="false" placeholder="리뷰할 변경 SQL — 예: ALTER TABLE orders ADD COLUMN memo VARCHAR(64) NOT NULL"></textarea>
               <div class="review-submit-row">
                 <input type="text" id="review-reason" class="ddl-input" placeholder="사유 (선택) — 왜 이 변경이 필요한가">
@@ -317,7 +318,7 @@
             <div id="review-list" class="review-list muted">이 인스턴스의 리뷰 요청이 여기 표시됩니다.</div>
           </div>
           <div class="monitor-card config-drift-card">
-            <h3>설정 변경 이력 <span class="hint">(시간축 — 이 인스턴스의 파라미터가 언제부터 무엇이 어떻게 바뀌었나 · "누가"는 대상 DB 감사 로그의 몫 · ADMIN 전용)</span></h3>
+            <h3>설정 변경 이력 <span class="hint">(시간축 — 이 인스턴스의 파라미터가 언제부터 무엇이 어떻게 바뀌었나 · "누가"는 대상 DB 감사 로그의 몫 · 운영자·관리자)</span></h3>
             <div class="config-drift-controls">
               <button id="btn-config-drift" class="btn btn-primary btn-small">변경 이력 조회</button>
               <span class="hint">주기 수집이 직전 상태와 diff해 변경분만 기록 · 첫 수집은 기준선(변경 아님)</span>
@@ -343,7 +344,7 @@
               <span class="schema-arrow">→</span>
               <select id="param-right" class="schema-select"></select>
               <button id="btn-param-diff" class="btn btn-primary btn-small">비교</button>
-              <span class="hint">값이 다른 항목 + 한쪽에만 있는 항목만 표시 · ADMIN 전용</span>
+              <span class="hint">값이 다른 항목 + 한쪽에만 있는 항목만 표시 · 운영자·관리자</span>
             </div>
             <div id="param-diff-warning" class="schema-warning" hidden></div>
             <div id="param-diff-result" class="schema-diff-result muted">좌/우 인스턴스를 고르고 비교를 누르세요.</div>
@@ -356,7 +357,7 @@
               <button id="btn-ddl-noop" class="btn btn-primary btn-small">dry-run (noop)</button>
               <button id="btn-ddl-exec" class="btn btn-small btn-danger">실제 실행</button>
             </div>
-            <p class="hint">기본은 dry-run — 실제 테이블은 바뀌지 않습니다. "실제 실행"은 ADMIN 확인 후 적용됩니다.</p>
+            <p class="hint">기본은 dry-run — 실제 테이블은 바뀌지 않습니다. "실제 실행"은 운영자·관리자가 확인 후 적용합니다.</p>
             <div id="ddl-result" class="ddl-result muted">테이블과 ALTER 절을 입력하고 dry-run으로 먼저 검증하세요.</div>
           </div>
           <div class="monitor-card audit-card">
@@ -392,7 +393,7 @@
             </div>
           </div>
           <div class="monitor-card incident-card">
-            <h3>인시던트 리포트 <span class="hint">(장애 구간을 주면 그 시간의 신호를 한 장으로 — 시점 비교·설정 변경·플랜 플립·대기·가용성 + AI 요약 · 신규 수집 0, 기존 신호 재구성 · ADMIN)</span></h3>
+            <h3>인시던트 리포트 <span class="hint">(장애 구간을 주면 그 시간의 신호를 한 장으로 — 시점 비교·설정 변경·플랜 플립·대기·가용성 + AI 요약 · 신규 수집 0, 기존 신호 재구성 · 운영자·관리자)</span></h3>
             <div class="incident-controls">
               <label class="hint">구간 시작 <input type="datetime-local" id="incident-from" class="incident-time"></label>
               <label class="hint">구간 끝 <input type="datetime-local" id="incident-to" class="incident-time"></label>
@@ -403,7 +404,7 @@
             <div id="incident-result" class="incident-result muted">구간을 고르고 리포트 생성을 누르세요.</div>
           </div>
           <div class="monitor-card monthly-card">
-            <h3>월간 점검 리포트 <span class="hint">(기간 전체의 건강을 한 장으로 — 헬스 스코어·백업 신선도·Advisor·용량 예측·낭비 신호·설정 변경 · 매월 자동 발행 + 수동 생성 · ADMIN)</span></h3>
+            <h3>월간 점검 리포트 <span class="hint">(기간 전체의 건강을 한 장으로 — 헬스 스코어·백업 신선도·Advisor·용량 예측·낭비 신호·설정 변경 · 매월 자동 발행 + 수동 생성 · 운영자·관리자)</span></h3>
             <div class="incident-controls">
               <label class="hint">기간(일) <input type="number" id="monthly-days" class="incident-time" value="30" min="1" max="90" style="width:70px"></label>
               <button id="btn-monthly" class="btn btn-primary btn-small">리포트 생성</button>
@@ -449,7 +450,7 @@
             <h3>MCP 연동 — AI 에이전트가 DBTower를 도구로 씁니다</h3>
             <p class="muted">앱이 떠 있으면 준비 완료. 아래 명령 한 줄이면 Claude Code가 시점 비교·실행계획 분석을 직접 수행합니다.</p>
             <div class="mcp-cmd-row">
-              <code id="mcp-cmd-http" class="mcp-cmd">claude mcp add --transport http dbtower http://localhost:8080/mcp   (ADMIN 로그인 시 토큰 포함 명령으로 완성됩니다)</code>
+              <code id="mcp-cmd-http" class="mcp-cmd">claude mcp add --transport http dbtower http://localhost:8080/mcp   (이대로 등록하면 브라우저 로그인(OAuth)으로 내 역할만큼 도구를 씁니다 · ADMIN에게는 서비스 토큰 명령이 채워집니다)</code>
               <button class="btn btn-primary btn-small" data-copy="mcp-cmd-http">복사</button>
             </div>
             <div class="mcp-cmd-row">
@@ -458,6 +459,29 @@
             </div>
             <h3 class="mcp-tools-title">제공 도구 <span class="hint">(이 목록 자체가 MCP 코어의 tools/list 응답입니다)</span></h3>
             <div id="mcp-tools" class="mcp-tools muted">불러오는 중...</div>
+          </div>
+          <div class="monitor-card users-card" id="users-card" hidden>
+            <h3>사용자·역할 <span class="hint">(쓰는 사람 기준 — 관제 · 요청자 · 승인자 · 운영자 · 관리자 · 역할 변경은 다음 로그인부터 · ADMIN)</span></h3>
+            <p class="hint">관제는 지표·리포트만, 요청자는 워크벤치 조회와 변경 요청, 승인자는 승인·반려와 드라이런, 운영자는 승인 티켓 실행·되돌리기와 백업·세션 종료, 관리자는 인스턴스·접속 계정·보안·감사까지. 승인자와 운영자는 서로의 일을 하지 못합니다.</p>
+            <div class="table-scroll">
+              <table class="qtable" id="users-table">
+                <thead><tr><th>사용자</th><th>역할</th><th>팀</th></tr></thead>
+                <tbody><tr><td colspan="3" class="muted">조회 중...</td></tr></tbody>
+              </table>
+            </div>
+            <div class="review-submit-row">
+              <input type="text" id="user-new-name" class="ddl-input" placeholder="사용자 이름(영문·숫자·._- 3~50자)" autocomplete="off">
+              <input type="password" id="user-new-password" class="ddl-input" placeholder="비밀번호(12자 이상)" autocomplete="new-password">
+              <select id="user-new-role" aria-label="역할">
+                <option value="VIEWER">관제 (VIEWER)</option>
+                <option value="REQUESTER" selected>요청자 (REQUESTER)</option>
+                <option value="APPROVER">승인자 (APPROVER)</option>
+                <option value="OPERATOR">운영자 (OPERATOR)</option>
+                <option value="ADMIN">관리자 (ADMIN)</option>
+              </select>
+              <button id="btn-user-create" class="btn btn-primary btn-small">사용자 만들기</button>
+            </div>
+            <div id="users-msg" class="hint"></div>
           </div>
         </div>
       </div>

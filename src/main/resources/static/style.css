@@ -1,4 +1,7 @@
 /* DBTower 웹 콘솔 — 의존성 없는 정적 SPA (라이트 어드민) */
+/* hidden 속성이 display를 지정한 규칙(.btn의 inline-block 등)에 지지 않게 한다 — 역할에 없는 버튼·입구를 hidden으로 감추므로
+   감춘 것이 그대로 보이면 누를 수 없는 버튼이 된다(워크벤치 workbench.css와 같은 규칙) */
+[hidden] { display: none !important; }
 :root {
   --bg: #f5f6f8;
   --panel: #ffffff;
