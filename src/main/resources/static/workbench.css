@@ -135,6 +135,15 @@ body.picking table.grid th:not(.rownum), body.picking .tree-name, body.picking .
 .msg.user .shared { display: block; font-size: 11px; color: #a35200; margin-top: 2px; }
 .msg.ai .ai-text { white-space: pre-wrap; }
 .msg.ai.pending { color: var(--muted); }
+/* 흘러오는 답(141절) — 단계 문구만 흐리게, 쓰이는 중인 설명은 본문 색으로 읽히게 */
+.msg.ai.pending .pending-stage { font-size: 12px; }
+.msg.ai.pending .pending-stage::before {
+  content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%;
+  background: var(--primary, #4f5ef7); vertical-align: middle; animation: wb-pending 1.4s ease-in-out infinite;
+}
+@keyframes wb-pending { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .msg.ai.pending .pending-stage::before { animation: none; } }
+.msg.ai.pending .ai-text { color: var(--text); margin-top: 4px; }
 .ai-sql { margin: 8px 0 4px; padding: 8px 10px; background: #fbfbfd; border: 1px solid var(--line); border-radius: 8px; font-family: "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; }
 .ai-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11.5px; }
 .badge { border-radius: 999px; padding: 1px 8px; font-size: 11px; }

@@ -398,6 +398,23 @@ input[type="datetime-local"] {
 .qtable tbody tr.blocked-row:hover { background: #ffe4e6; }
 .blocked-by { color: var(--up); font-weight: 700; }
 .session-actions { white-space: nowrap; display: flex; gap: 6px; }
+
+/* 실시간 세션 (140절) — 켜짐을 색 하나로만 알리지 않는다: 버튼 글자·점·상태 문장이 함께 바뀐다 */
+.live-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 10px; }
+.live-toggle.on { border-color: var(--target); color: #17734d; }
+.live-toggle.on::before {
+  content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%;
+  background: var(--target); vertical-align: middle; animation: live-pulse 1.6s ease-in-out infinite;
+}
+@keyframes live-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .live-toggle.on::before { animation: none; } }
+.live-status { flex: 1 1 260px; min-width: 0; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.live-status[data-tone="ok"] { color: #17734d; }
+.live-status[data-tone="warn"], .live-status[data-tone="err"] { color: #b42335; }
+.live-spark { width: 240px; max-width: 100%; height: 36px; flex: 0 0 auto; }
+.live-spark polyline { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.live-spark .spark-total { stroke: var(--primary); }
+.live-spark .spark-blocked { stroke: var(--up); }
 .btn-danger { border-color: var(--up); color: var(--up); }
 .btn-danger:hover { background: var(--up); color: #fff; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }

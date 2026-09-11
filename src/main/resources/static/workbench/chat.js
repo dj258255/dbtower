@@ -50,7 +50,7 @@ export function renderTimeline(container, items, { currentVersion, pending, onAp
   };
 
   container.innerHTML = items.map((it) => (it.type === "MESSAGE" ? message(it.message) : `<div class="msg ai">${card(it.version)}</div>`)).join("")
-    + (pending ? `<div class="msg user">${esc(pending)}</div><div class="msg ai pending">AI가 스키마를 읽고 SQL을 작성하는 중입니다...</div>` : "");
+    + (pending ? `<div class="msg user">${esc(pending.question)}</div>${pendingBubble(pending)}` : "");
   container.scrollTop = container.scrollHeight;
 
   container.onclick = (e) => {
@@ -60,6 +60,24 @@ export function renderTimeline(container, items, { currentVersion, pending, onAp
     else if (b.dataset.act === "apply") onApply(sqls[Number(b.dataset.i)]);
     else if (b.dataset.act === "run") onPreview(sqls[Number(b.dataset.i)]);
   };
+}
+
+// 답을 기다리는 말풍선 — 단계 문구, 흘러오는 설명, 흘러오는 SQL. 아직 저장 전이라 분류 배지와 체크포인트는 없다
+function pendingBubble(p) {
+  const text = p.explanation ? `<div class="ai-text">${esc(p.explanation)}</div>` : "";
+  const sql = p.sql ? `<pre class="ai-sql"><code>${highlight(p.sql)}</code></pre>` : "";
+  return `<div class="msg ai pending" aria-live="polite" aria-busy="true">
+    <div class="pending-stage">${esc(p.stage || "AI가 스키마를 읽고 SQL을 작성하는 중입니다...")}</div>${text}${sql}</div>`;
+}
+
+// 조각이 올 때마다 타임라인 전체를 다시 그리면 앞선 카드의 버튼·스크롤이 매번 초기화된다 — 기다리는 말풍선만 바꾼다
+export function updatePending(container, pending) {
+  const node = container.querySelector(".msg.ai.pending");
+  if (!node) return;
+  const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 40;
+  node.outerHTML = pendingBubble(pending);
+  // 사람이 위로 올려 읽는 중이면 끌어내리지 않는다
+  if (nearBottom) container.scrollTop = container.scrollHeight;
 }
 
 export function renderChips(container, chips, onRemove) {

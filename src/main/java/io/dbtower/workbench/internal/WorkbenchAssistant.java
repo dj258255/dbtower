@@ -28,7 +28,9 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -113,8 +115,32 @@ public class WorkbenchAssistant {
     public record SettingView(Long instanceId, boolean allowAiResultValues, String updatedBy, LocalDateTime updatedAt) {
     }
 
+    /** 흘러오는 도중의 설명·SQL 앞부분. 저장 전이라 분류·버전이 없다 — 완성본은 {@link Reply}로 따로 온다. */
+    public record Partial(String explanation, String sql) {
+    }
+
+    /**
+     * 기다리는 동안의 진행 알림(VERIFICATION 141절). 동기 REST는 {@link #NONE}이다.
+     * 알림은 저장되는 답을 바꾸지 않는다 — 저장·분류·버전은 완성본을 다시 파싱해 만든다.
+     */
+    public interface StreamListener {
+        StreamListener NONE = new StreamListener() {
+        };
+
+        default void stage(String text) {
+        }
+
+        default void partial(Partial partial) {
+        }
+    }
+
     @Transactional
     public Reply ask(Long worksheetId, AssistantRequest req) {
+        return ask(worksheetId, req, StreamListener.NONE);
+    }
+
+    @Transactional
+    public Reply ask(Long worksheetId, AssistantRequest req, StreamListener listener) {
         Worksheet ws = worksheets.requireOwned(worksheetId);
         DatabaseInstance instance = registry.findById(ws.getInstanceId());
         if (req.message() == null || req.message().isBlank()) {
@@ -132,13 +158,18 @@ public class WorkbenchAssistant {
         }
 
         String principal = WorksheetService.principal();
+        listener.stage("대상 스키마를 읽는 중입니다");
         SchemaSnapshot schema = describe(instance);
         String userMessage = userMessage(instance, schema, req, history(ws.getId()), ws.getCurrentSql(), shareValues);
         chats.save(new ChatMessage(ws.getId(), principal, ws.getInstanceId(), ChatMessage.USER, req.message().strip(),
                 null, null, null, null, shareValues));
 
+        listener.stage("AI에 질문을 보냈습니다. 답을 쓰기 시작하면 바로 보입니다");
         long start = System.nanoTime();
-        String raw = analyzer.complete(CallSite.WORKBENCH, SYSTEM_PROMPT, userMessage).orElse(null);
+        String raw = (listener == StreamListener.NONE
+                ? analyzer.complete(CallSite.WORKBENCH, SYSTEM_PROMPT, userMessage)
+                : analyzer.completeStreaming(CallSite.WORKBENCH, SYSTEM_PROMPT, userMessage, new PartialRelay(listener)))
+                .orElse(null);
         long elapsedMs = (System.nanoTime() - start) / 1_000_000;
         if (raw == null) {
             String note = "AI가 응답하지 않았습니다(백엔드 오류·시간 초과). 서버 로그의 'AI 호출 실패'를 확인하세요.";
@@ -170,6 +201,48 @@ public class WorkbenchAssistant {
         }
         return new Reply(true, analyzer.backend(), explanation, sql, assumptions, classification, unknown, shareValues,
                 versionNo, elapsedMs, note);
+    }
+
+    /**
+     * 조각을 모아 설명·SQL 앞부분이 바뀌었을 때만 알린다. 조각은 몇 글자 단위라 조각마다 알리면 화면이 글자 수만큼 다시 그려진다.
+     * 간격 안에 온 마지막 조각을 못 보내도 괜찮다 — 곧바로 완성본(Reply)이 온다.
+     */
+    static final class PartialRelay implements Consumer<String> {
+        private final StreamListener listener;
+        private final long minGapNanos;
+        private final StringBuilder buffer = new StringBuilder();
+        private String lastExplanation;
+        private String lastSql;
+        private long lastAt;
+
+        PartialRelay(StreamListener listener) {
+            this(listener, 80_000_000L);
+        }
+
+        PartialRelay(StreamListener listener, long minGapNanos) {
+            this.listener = listener;
+            this.minGapNanos = minGapNanos;
+            this.lastAt = System.nanoTime() - minGapNanos;
+        }
+
+        @Override
+        public void accept(String chunk) {
+            buffer.append(chunk);
+            long now = System.nanoTime();
+            if (now - lastAt < minGapNanos) {
+                return;
+            }
+            String text = buffer.toString();
+            String explanation = PartialJson.stringPrefix(text, "explanation");
+            String sql = PartialJson.stringPrefix(text, "sql");
+            if (Objects.equals(explanation, lastExplanation) && Objects.equals(sql, lastSql)) {
+                return;
+            }
+            lastExplanation = explanation;
+            lastSql = sql;
+            lastAt = now;
+            listener.partial(new Partial(explanation, sql));
+        }
     }
 
     public SettingView setting(Long instanceId) {

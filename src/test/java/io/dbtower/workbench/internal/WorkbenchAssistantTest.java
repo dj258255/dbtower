@@ -27,9 +27,11 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -91,6 +93,59 @@ class WorkbenchAssistantTest {
 
     private static AssistantRequest ask(String message) {
         return new AssistantRequest(message, List.of(), List.of(), null, null, null);
+    }
+
+    @Test
+    void 스트리밍은_단계를_흘리지만_저장되는_답은_완성본에서_만든다() {
+        String json = "{\"title\": \"VIP 고객\", \"sql\": \"SELECT id FROM customers LIMIT 100\", "
+                + "\"explanation\": \"고객 id를 구합니다.\", \"assumptions\": []}";
+        when(analyzer.completeStreaming(eq(CallSite.WORKBENCH), anyString(), anyString(), any())).thenAnswer(inv -> {
+            Consumer<String> onText = inv.getArgument(3);
+            for (int i = 0; i < json.length(); i += 7) {
+                onText.accept(json.substring(i, Math.min(json.length(), i + 7)));
+            }
+            return Optional.of(json);
+        });
+        List<String> stages = new ArrayList<>();
+
+        Reply reply = assistant.ask(10L, ask("VIP 고객 id"), new WorkbenchAssistant.StreamListener() {
+            @Override
+            public void stage(String text) {
+                stages.add(text);
+            }
+        });
+
+        assertEquals(2, stages.size(), "스키마 읽기 → AI 질문 두 단계");
+        assertEquals("SELECT id FROM customers LIMIT 100", reply.sql());
+        assertEquals(Tier.READ, reply.classification().tier());
+        assertEquals(3, reply.versionNo());
+        verify(analyzer, never()).complete(any(), anyString(), anyString());
+    }
+
+    @Test
+    void 동기_요청은_스트리밍_경로를_타지_않는다() {
+        aiReturns("{\"sql\": \"SELECT 1\", \"explanation\": \"하나\", \"assumptions\": []}");
+        assistant.ask(10L, ask("하나"));
+        verify(analyzer, never()).completeStreaming(any(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void 조각_중계는_설명이나_SQL_앞부분이_바뀔_때만_알린다() {
+        List<WorkbenchAssistant.Partial> seen = new ArrayList<>();
+        WorkbenchAssistant.PartialRelay relay = new WorkbenchAssistant.PartialRelay(new WorkbenchAssistant.StreamListener() {
+            @Override
+            public void partial(WorkbenchAssistant.Partial partial) {
+                seen.add(partial);
+            }
+        }, 0);
+
+        relay.accept("{\"title\": \"t\", ");
+        relay.accept("\"sql\": \"SEL");
+        relay.accept("");
+        relay.accept("ECT 1\", \"explanation\": \"하나");
+
+        assertEquals(List.of(new WorkbenchAssistant.Partial(null, "SEL"),
+                new WorkbenchAssistant.Partial("하나", "SELECT 1")), seen);
     }
 
     @Test

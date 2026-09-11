@@ -2,10 +2,13 @@ package io.dbtower.analysis;
 
 import com.anthropic.client.AnthropicClient;
 import com.anthropic.client.okhttp.AnthropicOkHttpClient;
+import com.anthropic.core.http.StreamResponse;
+import com.anthropic.helpers.MessageAccumulator;
 import com.anthropic.models.messages.CacheControlEphemeral;
 import com.anthropic.models.messages.Message;
 import com.anthropic.models.messages.MessageCreateParams;
 import com.anthropic.models.messages.OutputConfig;
+import com.anthropic.models.messages.RawMessageStreamEvent;
 import com.anthropic.models.messages.StopReason;
 import com.anthropic.models.messages.TextBlockParam;
 import com.anthropic.models.messages.ThinkingConfigAdaptive;
@@ -17,12 +20,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -180,6 +186,131 @@ public class AiAnalyzer {
         }
     }
 
+    /**
+     * {@link #complete}와 같은 호출이되, 글자가 만들어지는 대로 {@code onText}에 조각을 넘긴다 — 사람이 기다리는 화면용.
+     *
+     * <p>반환값·실패 규칙은 complete와 같다(완성본을 돌려주고, 실패는 빈 값). 조각은 보여주기용일 뿐이라 호출부는
+     * 완성본으로 저장·검증한다. 토큰 계수와 max_tokens 절단 판정도 완성본에서 complete와 같은 규칙으로 한다 —
+     * 잘린 응답은 조각이 이미 화면에 흘렀어도 완성본으로 올라가지 않는다.
+     */
+    public Optional<String> completeStreaming(CallSite callSite, String systemPrompt, String userMessage,
+                                              Consumer<String> onText) {
+        if (mode == Mode.OFF) {
+            return Optional.empty();
+        }
+        try {
+            String text = switch (mode) {
+                case API -> callApiStreaming(callSite, systemPrompt, userMessage, onText);
+                case CLI -> callCliStreaming(callSite, systemPrompt, userMessage, onText);
+                case OFF -> "";
+            };
+            return text == null || text.isBlank() ? Optional.empty() : Optional.of(text.trim());
+        } catch (Exception e) {
+            log.warn("AI 호출 실패(스트리밍): {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private String callApiStreaming(CallSite callSite, String system, String user, Consumer<String> onText) {
+        // 조각을 흘리면서도 완성본(usage·stop_reason 포함)이 필요하다 — 누적기가 같은 이벤트로 Message를 다시 조립한다
+        MessageAccumulator accumulator = MessageAccumulator.create();
+        try (StreamResponse<RawMessageStreamEvent> stream =
+                     client().messages().createStreaming(buildParams(model, maxTokens, effort, system, user))) {
+            stream.stream().forEach(event -> {
+                accumulator.accumulate(event);
+                event.contentBlockDelta()
+                        .flatMap(delta -> delta.delta().text())
+                        .ifPresent(textDelta -> onText.accept(textDelta.text()));
+            });
+        }
+        return finishApi(callSite, accumulator.message());
+    }
+
+    /** claude CLI의 stream-json 한 줄에서 꺼낸 것 — 글자 조각이거나, 마지막 결과 봉투이거나, 둘 다 아니거나. */
+    record CliStreamLine(String text, String resultEnvelope) {
+        static final CliStreamLine NONE = new CliStreamLine(null, null);
+    }
+
+    /**
+     * stream-json 한 줄 해석. 조각은 최상위 대화의 text_delta만 받는다(도구 하위 에이전트 출력은 사람에게 흘리지 않는다).
+     * 결과 줄은 {@code --output-format json}과 같은 봉투라 {@link #extractCliResult}를 그대로 쓴다. Spring 없이 테스트하려고 static.
+     */
+    static CliStreamLine readCliStreamLine(String line) {
+        JsonNode node;
+        try {
+            node = MAPPER.readTree(line);
+        } catch (Exception e) {
+            return CliStreamLine.NONE;
+        }
+        if (node == null || !node.isObject()) {
+            return CliStreamLine.NONE;
+        }
+        String type = node.path("type").asText("");
+        if ("result".equals(type)) {
+            return new CliStreamLine(null, line);
+        }
+        if ("stream_event".equals(type) && !node.hasNonNull("parent_tool_use_id")) {
+            JsonNode event = node.path("event");
+            if ("content_block_delta".equals(event.path("type").asText(""))
+                    && "text_delta".equals(event.path("delta").path("type").asText(""))) {
+                return new CliStreamLine(event.path("delta").path("text").asText(""), null);
+            }
+        }
+        return CliStreamLine.NONE;
+    }
+
+    private String callCliStreaming(CallSite callSite, String system, String user, Consumer<String> onText)
+            throws Exception {
+        // stream-json은 --verbose 없이 거부되고, --include-partial-messages가 있어야 글자 단위 조각(text_delta)이 온다.
+        // 나머지 손잡이는 callCli와 같다 — 두 경로의 결과가 형식만 다르고 내용 조건은 같아야 짝비교가 된다
+        Process p = new ProcessBuilder("claude", "-p", "--output-format", "stream-json", "--verbose",
+                "--include-partial-messages", "--effort", effort, "--setting-sources", "",
+                "--append-system-prompt", system)
+                .redirectErrorStream(false).start();
+        // callCli는 출력을 다 읽은 뒤에 시간 초과를 재지만, 스트림은 읽는 동안이 곧 대기라 따로 끊어 줘야 한다
+        CompletableFuture.delayedExecutor(180, TimeUnit.SECONDS).execute(() -> {
+            if (p.isAlive()) {
+                p.destroyForcibly();
+            }
+        });
+        try (var stdin = p.getOutputStream()) {
+            stdin.write(user.getBytes(StandardCharsets.UTF_8));
+        }
+        String envelope = null;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                CliStreamLine parsed = readCliStreamLine(line);
+                if (parsed.text() != null && !parsed.text().isEmpty()) {
+                    onText.accept(parsed.text());
+                } else if (parsed.resultEnvelope() != null) {
+                    envelope = parsed.resultEnvelope();
+                }
+            }
+        }
+        if (!p.waitFor(10, TimeUnit.SECONDS)) {
+            p.destroyForcibly();
+            throw new IllegalStateException("claude CLI 응답 시간 초과");
+        }
+        if (p.exitValue() != 0) {
+            String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+            throw new IllegalStateException("claude CLI 종료 코드 " + p.exitValue() + ": " + err.trim());
+        }
+        if (envelope == null) {
+            throw new IllegalStateException("claude CLI가 결과 줄 없이 끝났습니다");
+        }
+        return extractCliResult(envelope, env -> recordCliUsage(callSite, env));
+    }
+
+    private void recordCliUsage(CallSite callSite, JsonNode env) {
+        JsonNode u = env.path("usage");
+        recordTokens(meterRegistry, backend(), callSite,
+                u.path("input_tokens").asLong(),
+                u.path("cache_creation_input_tokens").asLong(),
+                u.path("cache_read_input_tokens").asLong(),
+                u.path("output_tokens").asLong());
+    }
+
     private String loadRules() {
         // 파일 부재를 조용히 빈 문자열로 넘기면 "반드시 아래 판단 기준 문서에 근거해서만 판정하라"는
         // 시스템 프롬프트 뒤가 텅 빈 채로 모델에 나간다 — AI가 판단자가 아니라 1차 분석기라는
@@ -199,7 +330,11 @@ public class AiAnalyzer {
     }
 
     private String callApi(CallSite callSite, String system, String user) {
-        Message message = client().messages().create(buildParams(model, maxTokens, effort, system, user));
+        return finishApi(callSite, client().messages().create(buildParams(model, maxTokens, effort, system, user)));
+    }
+
+    /** 완성본 처리 — 한 번에 받은 응답과 스트림을 누적한 응답이 같은 계수·절단 규칙을 지나게 한 곳에 둔다. */
+    private String finishApi(CallSite callSite, Message message) {
         var usage = message.usage();
         recordTokens(meterRegistry, backend(), callSite,
                 usage.inputTokens(),
@@ -314,14 +449,7 @@ public class AiAnalyzer {
             String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
             throw new IllegalStateException("claude CLI 종료 코드 " + p.exitValue() + ": " + err.trim());
         }
-        return extractCliResult(out, env -> {
-            JsonNode u = env.path("usage");
-            recordTokens(meterRegistry, backend(), callSite,
-                    u.path("input_tokens").asLong(),
-                    u.path("cache_creation_input_tokens").asLong(),
-                    u.path("cache_read_input_tokens").asLong(),
-                    u.path("output_tokens").asLong());
-        });
+        return extractCliResult(out, env -> recordCliUsage(callSite, env));
     }
 
     /** 봉투 파싱만 검증하는 경로(테스트) — 계수는 올리지 않는다. */

@@ -123,6 +123,54 @@ class DiagnosisServiceTest {
         assertTrue(received.get(2).contains("Seq Scan"), "explain 결과가 다음 프롬프트에 실림");
     }
 
+    /** 스트리밍 화면이 받는 순서(VERIFICATION 141절) — 판단 시작 → 그 판단이 부른 도구(거부 포함) → 다음 판단. */
+    private static DiagnosisService.DiagnosisListener recorder(List<String> events) {
+        return new DiagnosisService.DiagnosisListener() {
+            @Override
+            public void thinking(int step, boolean synthesis) {
+                events.add("thinking:" + step + (synthesis ? ":synthesis" : ""));
+            }
+
+            @Override
+            public void toolCall(DiagnosisService.ToolCallTrace trace) {
+                events.add("tool:" + trace.tool() + (trace.rejected() ? ":rejected" : ""));
+            }
+        };
+    }
+
+    @Test
+    void 진행_알림은_판단_시작과_도구_호출을_결과와_같은_순서로_흘린다() {
+        DiagnosisService.AiTurn ai = scripted(new java.util.ArrayList<>(),
+                "{\"action\":\"call_tool\",\"tool\":\"wait_events\",\"arguments\":{\"instanceId\":1},\"reason\":\"IO인지 본다\"}",
+                "{\"action\":\"call_tool\",\"tool\":\"drop_everything\",\"arguments\":{},\"reason\":\"화이트리스트 밖\"}",
+                "{\"action\":\"final\",\"answer\":\"IO 대기\",\"rootCause\":\"IO\",\"confidence\":\"medium\"}");
+        DiagnosisService svc = new DiagnosisService(new McpProtocolHandler(baseUrl), ai, true, "mock",
+                new QueryMasker(true, false), "docs/ai-analysis-rules.md", 5);
+        List<String> events = new java.util.ArrayList<>();
+
+        DiagnosisService.DiagnosisResult r = svc.diagnose(1, "POSTGRESQL", "orders-prod", "왜 느려?", recorder(events));
+
+        assertEquals(List.of("thinking:1", "tool:wait_events", "thinking:2", "tool:drop_everything:rejected", "thinking:3"),
+                events);
+        assertEquals(List.of("wait_events", "drop_everything"),
+                r.toolCalls().stream().map(DiagnosisService.ToolCallTrace::tool).toList(),
+                "알림으로 흘린 도구와 최종 결과의 도구가 같다");
+    }
+
+    @Test
+    void 스텝을_다_쓰면_마지막_판단은_종합으로_알린다() {
+        DiagnosisService.AiTurn ai = scripted(new java.util.ArrayList<>(),
+                "{\"action\":\"call_tool\",\"tool\":\"wait_events\",\"arguments\":{\"instanceId\":1},\"reason\":\"IO인지 본다\"}",
+                "{\"action\":\"final\",\"answer\":\"IO 대기\",\"rootCause\":\"IO\",\"confidence\":\"low\"}");
+        DiagnosisService svc = new DiagnosisService(new McpProtocolHandler(baseUrl), ai, true, "mock",
+                new QueryMasker(true, false), "docs/ai-analysis-rules.md", 1);
+        List<String> events = new java.util.ArrayList<>();
+
+        svc.diagnose(1, "POSTGRESQL", "orders-prod", "왜 느려?", recorder(events));
+
+        assertEquals(List.of("thinking:1", "tool:wait_events", "thinking:2:synthesis"), events);
+    }
+
     @Test
     void 쓰기_도구를_요청하면_실행하지_않고_거부한다() {
         McpProtocolHandler handler = new McpProtocolHandler(baseUrl);

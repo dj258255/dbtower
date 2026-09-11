@@ -5,6 +5,7 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.assertions.LocatorAssertions;
 import com.microsoft.playwright.options.BoundingBox;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DatabaseInstanceRepository;
@@ -166,6 +167,28 @@ class PersonaUiE2ETest {
         String expected = LocalDateTime.parse(raw).atOffset(ZoneOffset.UTC).atZoneSameInstant(BROWSER_ZONE)
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
         assertThat(time.textContent()).isEqualTo(expected);
+    }
+
+    @Test
+    void 실시간을_켜면_실제_서버의_스트림이_붙고_안_보이는_그룹으로_가면_연결을_닫는다() {
+        Page page = loginAs("e2e-viewer");
+        page.navigate(base() + "/?instance=" + instance.getId());
+        page.locator("#result-panel").waitFor();
+        page.locator(".tab[data-tab=\"monitor\"]").click();
+        Locator toggle = page.locator("#live-toggle");
+        Locator status = page.locator("#live-status");
+
+        toggle.click();
+        assertThat(toggle).hasAttribute("aria-pressed", "true");
+        // 대상은 포트 1이라 조회는 실패한다. 실패도 프레임으로 와야 화면이 "세션 0건"과 "못 쟀다"를 구분한다(140절).
+        // MockMvc가 못 보는 경로 — 실제 톰캣의 비동기 디스패치와 보안 필터를 지나 EventSource까지 온 프레임이다
+        assertThat(status).containsText("조회 실패", new LocatorAssertions.ContainsTextOptions().setTimeout(20_000));
+
+        page.locator(".mon-tab[data-mon=\"diag\"]").click();
+        assertThat(status).containsText("일시정지");
+
+        page.locator(".mon-tab[data-mon=\"perf\"]").click();
+        assertThat(status).containsText("LIVE", new LocatorAssertions.ContainsTextOptions().setTimeout(20_000));
     }
 
     @Test
