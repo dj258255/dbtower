@@ -241,7 +241,13 @@ DBeaver처럼 스키마 트리·탭 편집기·자동완성·결과 그리드로
 "읽기 전용"은 쓰기 권한 계정으로 INSERT를 넣어 3기종에서 따로 증명했습니다 — 같은 JDBC 호출이 Oracle에서는 아무것도 막지 않았고,
 그걸 고쳤습니다([VERIFICATION 128절](docs/VERIFICATION.md), [AX 케이스 스터디](docs/PORTFOLIO-AX.md)).
 
-![워크벤치 — 분류 배지, 마스킹된 email·phone 열](docs/images/webui/111-glass-workbench-masked.jpg)
+화면은 세 칸입니다. 왼쪽 유리 사이드바에 인스턴스와 그 스키마 트리·워크시트, 가운데 불투명 작업면에 편집기와 결과·테이블 상세·인스턴스 비교·변경 티켓·실행 기록 탭,
+오른쪽에 늘 보이는 AI 어시스턴트. 처음에는 오른쪽 탭 하나에 채팅·스키마·변경 티켓을 넣어 서로를 가렸고, 스키마의 테이블을 질문에 붙이는 데
+탭을 오가며 4번 눌렀습니다. 칸을 나눈 뒤 같은 스크립트로 2번, 티켓 상세 칸은 398px -> 524px입니다([VERIFICATION 147절](docs/VERIFICATION.md)).
+
+![워크벤치 — 왼쪽 스키마에서 orders를 펼치고 선택 모드로 테이블·열을 질문에 붙인 순간](docs/images/webui/132-workbench-layout-after.jpg)
+
+![워크벤치 — 분류 배지, 마스킹된 email·phone 열](docs/images/webui/135-workbench-masked.jpg)
 
 **워크시트와 AI 제안** — 사내 AI 화면 생성 도구(TOI Studio)처럼 워크시트마다 대화와 체크포인트(버전) 카드가 쌓입니다.
 AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 서버가 분류(읽기/승인 필요/차단)와 스키마에 없는 테이블을 표시하고,
@@ -250,9 +256,9 @@ AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 �
 답은 흘려 받습니다. 설명과 SQL이 쓰이는 대로 보이고(같은 질문 셋에서 첫 설명 4.45·10.01·4.55초, 완성 10.85·19.96·12.10초), 저장·분류·버전은 완성본으로 만듭니다.
 자연어 진단도 도구를 부를 때마다 단계가 먼저 보입니다(첫 도구 6.38초, 결과 108.16초 — [VERIFICATION 141절](docs/VERIFICATION.md)).
 
-![워크벤치 AI 답을 흘려 받는 중 — 단계 문구, 쓰이는 중인 설명, 먼저 완성된 SQL](docs/images/webui/101-workbench-ai-streaming.png)
+![워크벤치 AI 답을 흘려 받는 중 — 단계 문구, 쓰이는 중인 설명, 먼저 완성된 SQL](docs/images/webui/138-workbench-ai-streaming.jpg)
 
-![AI 답변과 체크포인트 카드 — 가정까지 붙은 설명, 읽기 분류, v1 카드](docs/images/webui/102-workbench-ai-streamed-done.png)
+![AI 답변과 체크포인트 카드 — 가정까지 붙은 설명, 읽기 분류, v1 카드, 첫 글자 4.8초](docs/images/webui/139-workbench-ai-done.jpg)
 
 **승인 티켓 실행과 전후 비교** — 변경 문장은 워크벤치에서 바로 실행되지 않고 "변경 요청으로 올리기"로 리뷰 게이트에 올라갑니다.
 올리는 동안 규칙 판정(락 위험·스키마 대조 포함)이 0.01~0.05초에 먼저 보이고 AI 1차 소견은 쓰이는 대로 이어집니다([146절](docs/VERIFICATION.md)).
@@ -262,7 +268,7 @@ AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 �
 워크로드 비교가 남고, 같은 조회를 두 인스턴스에서 돌려 행 단위로 비교할 수도 있습니다. MySQL·PostgreSQL·Oracle 실DB로 실행·되돌리기·
 드리프트 충돌·불변식 위반을 증명했습니다([VERIFICATION 130절](docs/VERIFICATION.md), [AX 사례 5](docs/PORTFOLIO-AX.md)).
 
-![변경 티켓 — DDL 실행의 구조 변화, 같은 트랜잭션 안 검증 조회 전후 실행계획(49.0ms -> 419µs), 역변경 제안](docs/images/webui/115-glass-ticket-ddl-probe.jpg)
+![변경 티켓(가운데 탭) — DDL 실행의 구조 변화, 같은 트랜잭션 안 검증 조회 전후 실행계획(49.0ms -> 419µs)](docs/images/webui/137-workbench-ticket-ddl-probe.jpg)
 
 **티켓의 출구와 5기종 확장** — 승인된 채 실행하지 않을 티켓은 요청자나 승인자·운영자가 취소하고, 커밋 여부를 모른 채 멈춘 티켓은 운영자가
 대상 DB를 무엇으로 확인했는지 근거를 적어 정리합니다. DDL 실행 기록에는 생긴 구조만 지우는 역변경 문장을 기종 문법으로 제안하고
@@ -286,9 +292,9 @@ Apple Silicon에는 SQL Server를 네이티브로 돌릴 경로가 없어(공식
 [VERIFICATION 134절](docs/VERIFICATION.md)). 비교 화면의 행 지표는 기종마다 세는 것이 달라(PostgreSQL은 돌려준 행,
 SQL Server는 논리 읽기 페이지 등) 오퍼레이터가 알려준 이름으로 적습니다.
 
-![테이블 상세 탭 — 행 수·데이터·인덱스 크기, 열, 인덱스 카디널리티, 카탈로그로 재구성한 DDL](docs/images/webui/117-glass-workbench-table-detail.jpg)
+![테이블 상세 탭 — 왼쪽 스키마의 "상세"에서 행 수·데이터·인덱스 크기, 열, 인덱스 카디널리티](docs/images/webui/136-workbench-table-detail.jpg)
 
-![티켓 워크로드 비교 — 실행 전후 60분, 평균 지연 46.64ms -> 0.0037ms, 행 지표 이름, 새 쿼리 목록](docs/images/webui/116-glass-ticket-workload.jpg)
+![티켓 워크로드 비교 — 실행 전후 60분, 평균 지연 46.64ms -> 0.0037ms, 행 지표 이름, 새 쿼리 목록](docs/images/webui/140-workbench-ticket-workload.jpg)
 
 ### MCP — AI 에이전트의 채널
 
