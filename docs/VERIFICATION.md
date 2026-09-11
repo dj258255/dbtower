@@ -7047,3 +7047,19 @@ sleep 60, 제한 2초                  20초 넘게 안 끝남       2.01초에 
   ReviewServiceStreamTest·ReviewServiceCancelTest·WorkbenchAssistantTest  생성자에 TransactionOperations.withoutTransaction()
 DBTOWER_E2E=1 PersonaUiE2ETest   7/7
 ```
+
+### 1차 CI 실패 — 리눅스에서만 드러난 자손 프로세스
+
+PR의 첫 CI(ubuntu)에서 `AiAnalyzerCliProcessTest > 멈춘_자식은_제한_시간에_끊긴다`가 JUnit 20초 제한에 걸렸다(macOS 로컬은 2.01초로 통과).
+리눅스 dash는 `sh -c "sleep 60"`에서 sleep을 자식으로 따로 띄운다. 제한 시간에 sh만 죽이면 살아남은 sleep이 stdout 파이프를 쥐어
+`readAllBytes`가 sleep이 끝날 때까지 돌아오지 않는다. 테스트만의 일이 아니다 — claude CLI가 하위 프로세스를 띄우면 운영에서도 같다.
+
+같은 순서를 옮긴 재현기(`cli148/TreeKill.java`, `sh -c "sleep 30; echo late"`, 제한 2초)를 로컬 eclipse-temurin:25-jdk 컨테이너(리눅스)에서 돌렸다:
+
+```
+직접 프로세스만 죽임     15초 넘게 안 끝남
+자손까지 죽임           2.01초에 시간 초과로 끊김
+```
+
+macOS에서는 두 방식 모두 2초대에 끝나 재현되지 않았다. 고친 것: 시간 초과와 대기 실패에서 `p.descendants()`를 먼저 죽이고 자기를 죽인다(`killTree`).
+테스트 명령은 `sleep 60; true`로 바꿔 어느 운영체제에서나 sh가 자식을 따로 띄우게 했다. 로컬 재실행 5/5(멈춘 자식 2.019초).

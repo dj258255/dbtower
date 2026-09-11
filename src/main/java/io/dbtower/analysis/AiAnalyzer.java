@@ -307,7 +307,7 @@ public class AiAnalyzer {
         CompletableFuture.delayedExecutor(timeoutSeconds, TimeUnit.SECONDS).execute(() -> {
             if (p.isAlive()) {
                 timedOut.set(true);
-                p.destroyForcibly();
+                killTree(p);
             }
         });
         CompletableFuture<String> stderr = new CompletableFuture<>();
@@ -329,7 +329,7 @@ public class AiAnalyzer {
             }
         }
         if (!p.waitFor(10, TimeUnit.SECONDS)) {
-            p.destroyForcibly();
+            killTree(p);
             throw new IllegalStateException("claude CLI 응답 시간 초과");
         }
         if (timedOut.get()) {
@@ -340,6 +340,15 @@ public class AiAnalyzer {
             throw new IllegalStateException("claude CLI 종료 코드 " + p.exitValue() + ": " + err.trim());
         }
         return out;
+    }
+
+    /**
+     * 자손까지 죽인다 — 직접 띄운 프로세스만 죽이면 그것이 띄운 자식(리눅스 sh의 sleep, CLI가 띄운 하위 프로세스)이 살아남아
+     * stdout·stderr 파이프를 쥐고, 읽기가 그 자식이 끝날 때까지 돌아오지 않는다. 1차 CI(리눅스)에서 멈춘 자식 테스트가 이것으로 20초 제한에 걸렸다(148절)
+     */
+    private static void killTree(Process p) {
+        p.descendants().forEach(ProcessHandle::destroyForcibly);
+        p.destroyForcibly();
     }
 
     /** 끝까지 읽되 뒤 STDERR_KEEP_BYTES만 남긴다 — 자식을 죽이면 파이프가 닫히며 IOException으로 끝나는데, 모은 만큼 돌려준다 */

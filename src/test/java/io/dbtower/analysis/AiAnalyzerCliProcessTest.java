@@ -33,7 +33,9 @@ class AiAnalyzerCliProcessTest {
     @Timeout(20)
     void 멈춘_자식은_제한_시간에_끊긴다() {
         long start = System.nanoTime();
-        assertThatThrownBy(() -> AiAnalyzer.runCli(List.of("sh", "-c", "sleep 60"), "", 2, null))
+        // "sleep 60; true" — sh가 sleep을 자식으로 따로 띄운다(리눅스 dash는 "sleep 60"만 줘도 그렇다). sh만 죽이면 살아남은 sleep이
+        // stdout을 쥐어 읽기가 끝나지 않는다 — 1차 CI(리눅스)에서 이 테스트가 20초 제한에 걸렸다(148절)
+        assertThatThrownBy(() -> AiAnalyzer.runCli(List.of("sh", "-c", "sleep 60; true"), "", 2, null))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("시간 초과");
         assertThat((System.nanoTime() - start) / 1_000_000_000.0).isLessThan(10);
