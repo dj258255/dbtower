@@ -971,10 +971,14 @@ function drawSimpleChart(svgSel, emptySel, pts, color, note, unit = "", fixedMax
   if (!pts || pts.length < 2) {
     svg.innerHTML = "";
     svg._chart = null;
+    // 빈 차트 상자(140px)를 남기면 안내 문구가 그 아래 따로 떠 자리만 차지했다(139절) — 비어 있는 동안은 상자를 감추고 안내만 낮은 자리표시로.
+    // SVG 요소에는 hidden 프로퍼티가 없어(HTMLElement 전용) svg.hidden = true는 속성을 만들지 않았다 — 속성을 직접 토글한다
+    svg.toggleAttribute("hidden", true);
     empty.hidden = false;
     empty.textContent = note ?? "이 구간에 수집된 시계열이 없습니다";
     return;
   }
+  svg.toggleAttribute("hidden", false);
   empty.hidden = true;
   const t0 = parseApiTime(pts[0].time).getTime();
   const t1 = parseApiTime(pts[pts.length - 1].time).getTime();

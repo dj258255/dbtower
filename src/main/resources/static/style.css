@@ -690,6 +690,11 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 .metric-chart-box { margin-top: 10px; }
 .metric-chart-box h4 { font-size: 12.5px; margin: 0 0 4px; color: var(--muted); }
 .metric-chart-box svg { display: block; background: #fff; border: 1px solid #eef0f3; border-radius: 6px; cursor: crosshair; }
+/* 수집되지 않은 차트 — 빈 상자 대신 낮은 자리표시 한 줄(cpu-empty·conn-empty·cmd-empty-N). 예전 .center의 위아래 40px 여백은 여기서 쓰지 않는다 */
+.metric-chart-box > [id*="-empty"] {
+  padding: 12px 14px; border: 1px dashed rgba(15, 23, 42, .16); border-radius: 10px;
+  background: rgba(248, 250, 252, .85); font-size: 12.5px; text-align: center;
+}
 
 /* 차트 호버 — 커서에 가장 가까운 점의 정확 수치·시각 (Grafana류 툴팁) */
 .chart-tip {
@@ -927,4 +932,27 @@ body::before {
 }
 @media (prefers-reduced-motion: reduce) {
   .btn { transition: none; }
+}
+
+/* ---------- 좁은 화면 (VERIFICATION 139절) ----------
+   한 열 그리드의 1fr은 최소 폭이 내용(nowrap 표)의 최소 폭이라, 표가 열을 화면 밖으로 밀어 페이지 전체가 옆으로 넘쳤다 — minmax(0, 1fr)로 열이 화면을 넘지 않게 하고
+   넓은 표는 자기 영역 안에서 스크롤한다. 버튼·탭 글자는 줄바꿈하지 않는다(좁을 때 "조회"가 세로로 한 글자씩 쌓였다) */
+.btn, .preset, .mon-tab, .tab { white-space: nowrap; }
+.chart-head { flex-wrap: wrap; gap: 8px; }
+.chart-tools { flex-wrap: wrap; }
+.mon-subnav, .tabs { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+@media (max-width: 980px) {
+  .app-shell { grid-template-columns: minmax(0, 1fr); padding: 0 12px; }
+  /* 카드를 가로로 감쌀 때 카드 폭이 버전 문자열(nowrap) 길이까지 늘어 사이드바 오른쪽에서 잘렸다 — 컨테이너 폭을 넘지 않게 해 말줄임이 먹게 */
+  .instance-card { flex: 1 1 260px; max-width: 100%; }
+  .fleet-row { grid-template-columns: minmax(0, 1fr); }
+  #tab-top, #tab-slow { overflow-x: auto; }
+}
+@media (max-width: 640px) {
+  .topbar { padding: 8px 12px; gap: 10px; }
+  .brand-tag { display: none; }
+  .topnav { display: flex; align-items: center; gap: 12px; min-width: 0; overflow-x: auto; white-space: nowrap; }
+  .topnav a { margin-left: 0; }
+  .instance-filter-row .cs { flex-basis: 100%; }
+  .login-box { width: calc(100vw - 32px); padding: 32px 22px; }
 }
