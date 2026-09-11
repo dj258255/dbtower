@@ -89,6 +89,8 @@ scripts/         dbtower-mcp.sh (MCP stdio 실행기)
   표·카드·코드·편집기는 불투명. 운영 콘솔은 읽는 화면이다
 - 글자 대비는 4.5:1 이상을 눈대중이 아니라 계산으로 확인한다(흰 바탕 보조 글자 #667085, 유리 위 #5b6475)
 - 한 열로 접히는 그리드는 `1fr`이 아니라 `minmax(0, 1fr)` — `1fr`의 최소 폭은 내용(nowrap 표)이라 페이지를 옆으로 민다
+- 표 셀의 `max-width`는 자동 표 레이아웃에서 무시된다 — 말줄임 열은 `max-width: 0; width: 100%`, 표 셀 안에 끼운 상세는
+  `width: 0; min-width: 100%`로 열 폭 계산에서 뺀다(146절: Top Query 표가 1512px에서 옆으로 넘쳤다)
 - SVG 요소는 `el.hidden = true`로 감춰지지 않는다(HTMLElement 전용 프로퍼티) — `toggleAttribute("hidden", ...)`
 - 좁은 화면 확인은 Playwright로 뷰포트를 정확히 맞춰 잰다. Chrome 확장 창 조절(innerWidth 그대로)·iframe(X-Frame-Options)·
   headless `--window-size`(뷰포트가 넓게 잡힘)는 모두 틀린 결과를 냈다

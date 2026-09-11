@@ -6749,3 +6749,122 @@ platform_user (p-*)        3 -> 0      남은 계정: admin(ADMIN), viewer(REQUE
 spring_session (p-*)       3 -> 0
 oauth_token (p-*)          0 -> 0
 ```
+
+## 146. 변경 요청 소견과 인시던트 리포트도 흘려 받는다 — 스스로 적은 규칙을 지키지 않던 두 화면 (2026-09-11)
+
+### 무엇을 했나
+
+145절에서 AGENTS.md에 "AI 응답처럼 긴 대기는 한 번에 받지 않고 흘려 보여준다"를 적어 두고, 사람이 기다리는 AI 호출을 다시 훑어보니 둘이 남아 있었다.
+
+| 화면 | AI 호출 | 그전 |
+|---|---|---|
+| 워크벤치 "변경 요청 올리기" | `ReviewService` AI 1차 소견(CallSite.REVIEW) | 버튼이 "올리는 중(규칙 판정·AI 소견)..."으로 끝날 때까지 멈춤 |
+| 대시보드 인시던트 리포트 | `IncidentReportService` AI 요약(CallSite.INCIDENT) | "리포트 조립 중..." 한 줄로 끝날 때까지 멈춤 |
+
+회귀 알림의 AI 1차 분석(CallSite.REGRESSION)은 사람이 기다리는 화면이 없는 백그라운드 폴러라 그대로 둔다.
+
+같은 절에서 PRESENTATION.md의 옛 디자인 화면 11장도 새로 찍었다. 찍다가 둘을 더 찾아 고쳤다. 인시던트 리포트 본문의 구간에 시간대가 없어 9시간 어긋나 읽혔다.
+Top Query 표가 1512px 노트북 폭에서 옆으로 넘쳐 쿼리 상세 오른쪽이 잘렸다. 원인과 측정은 아래 "화면"(시간대)과 "찍다가 찾은 것 — Top Query 표가 옆으로 넘친다"(표 폭)에 적었다.
+
+### 설계
+
+- **근거가 먼저.** 변경 요청은 규칙 판정·락 위험·스키마 대조(몇 ms)가, 인시던트 리포트는 재료(시점 비교·설정 변경·플랜 플립·대기·가용성)가 AI 전에 이미 끝난다.
+  그것을 먼저 보내고(`findings`·`draft`) AI 글을 흘린다(`text`). 저장되는 티켓 소견과 리포트 마크다운, 웹훅 카드는 완성본으로 만든다
+- **같은 트랜잭션 경계.** 변경 요청 제출은 저장과 리뷰 카드 이벤트가 한 트랜잭션이다. 흘리는 경로만 이 의미를 바꾸면 같은 요청이 경로에 따라 다르게 실패하므로 흘리는 제출도
+  같은 `@Transactional`을 쓴다. AI를 기다리는 동안 커넥션을 쥐는 것은 동기와 같고, 흘리는 경로는 동시 스트림 상한(AiStreamExecutor, 기본 4)에 묶인다
+- **인가는 같은 줄에.** 흘리는 경로는 URL이 다르다(`/reviews/stream`, `/incident-report/stream`). SecurityConfig의 matcher에서 빠지면 `anyRequest().authenticated()`로 떨어져
+  관제(VIEWER)도 변경을 요청할 수 있게 된다 — 기존 줄에 함께 넣고 PersonaAccessTest로 고정했다(관제는 제출 스트림 403, 요청자는 리포트 스트림 403, 운영자 통과)
+- **조각 묶음을 한 곳에.** 143절의 `TextDeltaBatcher`가 `insight.internal`에 있어 review·alert 모듈이 쓸 수 없었다(Modulith 경계). AI 호출과 같은 공개 모듈(`io.dbtower.analysis`)로 옮겼다
+- 이벤트: 변경 요청 `findings {findings, parseLimited}` -> `text {delta}`* -> `created {ReviewView}`, 리포트 `draft {markdown}` -> `text {delta}`* -> `result {IncidentReport}`,
+  둘 다 실패는 `error {status, message}`. 범위 확인은 스트림을 열기 전 요청 스레드에서(범위 밖이면 404)
+
+### 실측
+
+앱에 서비스 토큰(ADMIN — 역할 계층상 요청자·운영자 포함)으로 직접, AI 응답 시간이 흔들리므로 stream -> sync -> sync -> stream 순서로(`measure_146.py`, 스크래치, claude CLI).
+변경 요청은 MySQL `UPDATE customers SET grade = 'VIP' WHERE id = 3`, 인시던트 리포트는 PostgreSQL 한 시간 구간(publish=false).
+
+```
+변경 요청 제출      규칙 판정 보임   첫 AI 글자   티켓 생성   흘린 조각 = 저장된 소견
+  stream #1           0.05s          10.25s      14.65s      true (212자)
+  sync   #1             -               -        10.48s       -   (217자, 이때까지 버튼만 "올리는 중")
+  sync   #2             -               -        10.93s       -   (265자)
+  stream #2           0.01s           6.22s      11.09s      true (267자)
+
+인시던트 리포트    재료(초안) 보임   첫 AI 글자   완성본      완성본에 AI 요약 절
+  stream #1           0.12s           8.38s      17.13s      true
+  sync   #1             -               -        15.12s      true (이때까지 "리포트 조립 중..." 한 줄)
+  sync   #2             -               -        18.50s      true
+  stream #2           0.04s           7.47s      17.44s      true
+
+모든 스트림 이벤트 JSON 파싱 실패 0. 계측으로 만든 변경 티켓 #56~#59는 끝에 모두 취소(대기 상태라 대상 DB에 실행된 것 없음)
+```
+
+흘려 받으면 규칙 판정·재료가 요청 직후(0.01~0.12초) 보이고 AI 글이 6~10초부터 이어진다. 한 번에 받으면 끝날 때까지(10~18초) 근거도 안 보였다.
+완성 시간 자체의 차이는 AI 답 길이와 호출마다의 흔들림이 더 커서 두 방식의 차이로 해석하지 않는다.
+
+### 화면
+
+브라우저 경로(Playwright, 관리자 프록시)로 흘리는 도중을 찍었다. 변경 요청 창에는 규칙 판정이 먼저 있고 AI 1차 소견이 문장 중간까지 와 있다(버튼 "AI 소견 작성 중...").
+찍은 뒤 이 티켓(#60)은 취소했다. 인시던트 리포트는 재료로 만든 리포트 위에 AI 요약 칸이 쓰이는 중이다.
+
+![변경 요청 올리기 — 규칙 판정이 먼저, AI 1차 소견이 쓰이는 중](images/webui/129-ticket-submit-streaming.jpg)
+![인시던트 리포트 — 재료로 만든 리포트가 먼저, AI 요약 칸이 쓰이는 중](images/webui/130-incident-report-streaming.jpg)
+
+**찍다가 찾은 것 — 리포트 구간의 시간대.** 화면에서 20:22~20:36(KST)을 골랐는데 리포트 본문은 "구간: 2026-09-11 11:22 ~ 11:36"이었다. 서버 시각은 UTC이고(DbtowerApplication)
+마크다운에 시간대 표기가 없어, 읽는 사람은 9시간 어긋난 구간으로 읽는다. 132절에서 워크벤치 시각을 브라우저 시간대로 고친 것과 같은 계열이다. 리포트는 웹훅 카드와
+다운로드 파일로도 나가 브라우저 시간대로 바꿔 줄 수 없으므로, 본문과 AI에 넘기는 재료의 구간에 "(UTC)"를 붙였다.
+
+### 발표 자료 화면 교체
+
+PRESENTATION.md에 남아 있던 옛 디자인 화면 11장을 새 디자인으로 바꿨다. Discord 화면 2장(51·52)은 콘솔이 아니라 그대로 둔다.
+
+| 원래 | 바꾼 것 | 비고 |
+|---|---|---|
+| 01 대시보드 | 96-glass-dashboard | 145절 사진 재사용 |
+| 37 시점 비교 | 112-glass-compare | 145절 사진 재사용 |
+| 50 로그인 | 105-glass-login | 145절 사진 재사용 |
+| 32 Top Query | 121-glass-top-query | 새로 찍음 |
+| 33 MySQL Slow Query | 122-glass-slow-mysql | 새로 찍음 |
+| 34 MongoDB Slow Query | 123-glass-slow-mongo | 새로 찍음 |
+| 35 지표 카드 | 124-glass-metric-card | 새로 찍음 |
+| 29 테이블 상세 | 125-glass-table-detail-mysql | 새로 찍음 |
+| 03 실행계획 | 126-glass-explain | 새로 찍음 |
+| 36 CPU 그래프 드래그 | 127-glass-compare-drag | CPU는 이 환경에서 수집되지 않아 QPS 그래프로 찍고 설명도 고쳤다 |
+| 40 진단 딥링크 | 128-glass-diagnose-deeplink | 새로 찍음 |
+
+찍는 데 쓴 데이터는 전부 실제 조회다. MySQL slow_log(기준 0.5초)는 조인 부하로는 기준을 넘지 않아 비어 있었다(114만 행이 맞는 조인도 0.5초 안).
+그래서 `SLEEP`을 섞은 조회를 실제로 실행했다. 화면의 Rows_examined 2,000·3은 그 조회가 실제로 읽은 행 수다.
+실행계획은 통계의 정규화 텍스트(`amount > ?`) 그대로면 대상 DB가 거절한다(502). 화면 안내대로 자리표시자를 값으로 채워 실행한 결과를 찍었다.
+
+### 찍다가 찾은 것 — Top Query 표가 옆으로 넘친다
+
+실행계획 사진의 오른쪽이 잘렸다(버튼 줄·Rows 열). 사진 문제가 아니라 화면 폭 문제였다. Playwright로 폭보다 내용이 넓은 요소를 적어 원인을 찾았다.
+
+- SQL 열의 `max-width: min(46vw, 520px)`는 표 셀에 걸려 있었다. 자동 표 레이아웃은 셀의 max-width를 무시하므로 SQL 셀이 736px로 벌어졌다.
+- 쿼리 상세는 클릭한 행 아래 표 셀 안에 끼워진다. 그래서 상세도 표 폭을 따라가고, 12열 실행계획 표가 표 전체를 더 벌렸다.
+
+고친 것: SQL 셀은 `max-width: 0; width: 100%`(남는 폭을 다 갖고 말줄임), 상세는 `width: 0; min-width: 100%`(열 폭 계산에서 빠짐)로 했다.
+넓은 실행계획은 자기 코드블록 안에서 옆으로 스크롤된다. 상세 머리줄(64자 SQL ID·버튼 7개)은 줄을 바꾼다.
+
+| 폭 / 시점 | 고치기 전 | 고친 뒤 |
+|---|---|---|
+| 1512px, 행 클릭 | 표 1,186px > 상자 1,022px | 넘침 없음 |
+| 1512px, 실행계획 | 표 1,186px > 상자 1,022px | 넘침 없음 |
+| 1280px, 실행계획 | 표 902px > 상자 794px(1차 수정 후에도 남음) | 표 넘침 없음, 실행계획 코드블록만 816px > 736px 스크롤 |
+| 400px, 실행계획 | 표 902px > 상자 326px(1차 수정 후) | 표 373px > 326px(표 자체 스크롤), 실행계획은 코드블록 안 |
+
+400px에서 표가 47px 넘치는 것은 숫자 열(nowrap)의 최소 폭이다. 표는 자기 상자 안에서 스크롤되고 결과 패널·페이지는 넘치지 않는다(패널 366px = 366px).
+"1512px 고치기 전"은 첫 사진(126 1차)을 찍은 jar의 측정이고, 나머지 줄은 CSS 두 번 고친 jar를 차례로 띄워 같은 스크립트로 잰 것이다.
+
+![테이블 상세 — orders DDL·기본 통계·인덱스](images/webui/125-glass-table-detail-mysql.jpg)
+![실행계획 — 자리표시자를 값으로 채워 EXPLAIN, 풀스캔 판정. 표 폭 수정 후](images/webui/126-glass-explain.jpg)
+
+### 회귀
+
+```
+./scripts/check-conventions.sh   규약 검사 전부 통과
+./gradlew test                   tests 833 skipped 25 failures 0 errors 0 (145절 828 -> 833)
+  ReviewServiceStreamTest 2      규칙 판정이 AI보다 먼저, 흘린 조각 = 저장 소견 = created 이벤트 소견, 동기 제출은 스트리밍 호출 안 함
+  IncidentReportIntegrationTest  +1 (draft -> text -> result 순서, 초안에는 AI 요약 절 없음, 완성본에 있음)
+  PersonaAccessTest              +2 (요청자 제출 스트림 통과·리포트 스트림 403, 운영자 리포트 스트림 통과), 관제 제출 스트림 403
+```

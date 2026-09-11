@@ -149,6 +149,7 @@
     <textarea id="wb-ticket-reason" rows="2" placeholder="예: CS-1234 고객 등급 수동 조정"></textarea>
     <label class="wb-label" for="wb-ticket-verify">검증 조회(선택): 변경 전후로 실행계획과 응답시간을 같은 트랜잭션 안에서 잽니다</label>
     <textarea id="wb-ticket-verify" rows="2" placeholder="예: SELECT id FROM orders WHERE status = 'FAIL'"></textarea>
+    <div id="wb-ticket-progress" class="wb-ticket-progress" aria-live="polite" hidden></div>
     <div id="wb-ticket-error" class="wb-note" hidden></div>
     <div class="wb-dialog-actions">
       <button id="wb-ticket-cancel" class="btn btn-small">취소</button>

@@ -70,6 +70,25 @@ class PersonaAccessTest {
         mvc.perform(get("/api/workbench/instances")).andExpect(status().isForbidden());
         mvc.perform(submitReview()).andExpect(status().isForbidden());
         mvc.perform(post("/api/reviews/" + NONE + "/cancel").with(csrf())).andExpect(status().isForbidden());
+        // 흘려 받는 제출도 같은 경계 — URL이 달라 matcher에서 빠지면 authenticated로 떨어진다(146절)
+        mvc.perform(stream("/reviews/stream", "{\"sql\":\"UPDATE t SET v = 1 WHERE id = 1\"}")).andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "REQUESTER")
+    void 흘려_받는_제출은_요청자부터_인시던트_리포트_스트림은_운영자부터() throws Exception {
+        mvc.perform(stream("/reviews/stream", "{\"sql\":\"UPDATE t SET v = 1 WHERE id = 1\"}")).andExpect(passesAuthorization());
+        mvc.perform(stream("/incident-report/stream?from=2026-09-11T00:00&to=2026-09-11T01:00", "")).andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "OPERATOR")
+    void 운영자는_인시던트_리포트를_흘려_받는다() throws Exception {
+        mvc.perform(stream("/incident-report/stream?from=2026-09-11T00:00&to=2026-09-11T01:00", "")).andExpect(passesAuthorization());
+    }
+
+    private static MockHttpServletRequestBuilder stream(String path, String body) {
+        return post("/api/instances/" + NONE + path).with(csrf()).contentType("application/json").content(body);
     }
 
     @Test

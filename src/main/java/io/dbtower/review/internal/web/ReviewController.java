@@ -1,14 +1,25 @@
 package io.dbtower.review.internal.web;
 
+import io.dbtower.AiStreamExecutor;
+import io.dbtower.registry.RegistryService;
 import io.dbtower.review.internal.ReviewService;
 import io.dbtower.review.internal.domain.ReviewRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 스키마 변경 리뷰 게이트 API (운영 병목 아크 B2). 제출은 요청자부터(자기 팀 인스턴스),
@@ -22,10 +33,19 @@ import java.util.Set;
 @RequestMapping("/api")
 public class ReviewController {
 
-    private final ReviewService reviewService;
+    private static final Logger log = LoggerFactory.getLogger(ReviewController.class);
 
-    public ReviewController(ReviewService reviewService) {
+    /** AI 소견 한 턴의 상한(CLI 180초)보다 넉넉히 — 연결이 먼저 끊기면 티켓은 만들어지는데 화면만 실패로 보인다 */
+    private static final long STREAM_TIMEOUT_MS = 240_000;
+
+    private final ReviewService reviewService;
+    private final RegistryService registryService;
+    private final AiStreamExecutor streams;
+
+    public ReviewController(ReviewService reviewService, RegistryService registryService, AiStreamExecutor streams) {
         this.reviewService = reviewService;
+        this.registryService = registryService;
+        this.streams = streams;
     }
 
     public record ReviewView(Long id, Long instanceId, String targetSql, String reason,
@@ -50,6 +70,50 @@ public class ReviewController {
     @PostMapping("/instances/{id}/reviews")
     public ReviewView submit(@PathVariable Long id, @RequestBody ReviewService.SubmitRequest req) {
         return ReviewView.of(reviewService.submit(id, req, principal()));
+    }
+
+    /**
+     * 흘려 받는 제출(VERIFICATION 146절) — 만들어지는 티켓은 {@link #submit}과 같고, 기다리는 동안 규칙 판정을 먼저 보이고 AI 소견을 흘린다.
+     * 이벤트: findings {findings, parseLimited} -> text {delta}* -> created {ReviewView} 또는 error {status, message}.
+     *
+     * <p>범위 확인은 스트림을 열기 전에 요청 스레드에서(범위 밖이면 404). 작업 스레드의 실패는 error 이벤트로 오되,
+     * 상태 번호는 한 번에 받는 경로(GlobalExceptionHandler)와 맞춘다.
+     */
+    @PostMapping("/instances/{id}/reviews/stream")
+    public SseEmitter submitStreaming(@PathVariable Long id, @RequestBody ReviewService.SubmitRequest req) {
+        registryService.findById(id);
+        String requester = principal();
+        SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MS);
+        boolean started = streams.trySubmit(() -> {
+            try {
+                ReviewRequest saved = reviewService.submit(id, req, requester, new ReviewService.SubmitListener() {
+                    @Override
+                    public void findings(List<String> findings, boolean parseLimited) {
+                        send(emitter, "findings", Map.of("findings", findings, "parseLimited", parseLimited));
+                    }
+
+                    @Override
+                    public void text(String delta) {
+                        send(emitter, "text", Map.of("delta", delta));
+                    }
+                });
+                send(emitter, "created", ReviewView.of(saved));
+            } catch (IllegalArgumentException e) {
+                send(emitter, "error", Map.of("status", 400, "message", String.valueOf(e.getMessage())));
+            } catch (IllegalStateException e) {
+                send(emitter, "error", Map.of("status", 409, "message", String.valueOf(e.getMessage())));
+            } catch (RuntimeException e) {
+                String errorId = UUID.randomUUID().toString();
+                log.warn("변경 요청 스트림 실패 errorId={}", errorId, e);
+                send(emitter, "error", Map.of("status", 500, "message", "변경 요청을 올리지 못했습니다. errorId=" + errorId));
+            } finally {
+                emitter.complete();
+            }
+        });
+        if (!started) {
+            throw new StreamBusyException("AI 응답을 받는 자리가 모두 찼습니다. 잠시 뒤 다시 올리세요");
+        }
+        return emitter;
     }
 
     /** 인스턴스별 리뷰 목록(최신순). */
@@ -93,6 +157,26 @@ public class ReviewController {
     private static final Set<String> CAN_CANCEL_OTHERS = Set.of("ROLE_APPROVER", "ROLE_OPERATOR", "ROLE_ADMIN");
 
     public record CancelRequest(String note) {
+    }
+
+    static final class StreamBusyException extends RuntimeException {
+        StreamBusyException(String message) {
+            super(message);
+        }
+    }
+
+    @ExceptionHandler(StreamBusyException.class)
+    public ResponseEntity<Map<String, String>> streamBusy(StreamBusyException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("error", e.getMessage()));
+    }
+
+    private static void send(SseEmitter emitter, String name, Object data) {
+        try {
+            emitter.send(SseEmitter.event().name(name).data(data, MediaType.APPLICATION_JSON));
+        } catch (IOException | IllegalStateException e) {
+            // 브라우저가 떠났다. 티켓은 끝까지 만들어 저장한다 — 다시 열면 티켓 목록에 있다
+        }
     }
 
     private static String principal() {

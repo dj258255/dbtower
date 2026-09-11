@@ -5,6 +5,7 @@ import io.dbtower.alert.internal.persistence.ConfigDriftDao.ParamChangeRow;
 import io.dbtower.alert.internal.persistence.PlanSnapshotRepository;
 import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.AiAnalyzer.CallSite;
+import io.dbtower.analysis.TextDeltaBatcher;
 import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.ComparisonService.CompareResult;
 import io.dbtower.insight.QueryDiff;
@@ -78,10 +79,29 @@ public class IncidentReportService {
     }
 
     /**
+     * 흘려 받는 리포트의 진행 알림(VERIFICATION 146절). 동기 REST는 {@link #NONE}이다.
+     * 재료(시점 비교·설정 변경·플랜 플립·대기·가용성)는 AI 전에 이미 다 모이므로, AI 요약만 빠진 리포트를 먼저 보인다.
+     */
+    public interface Listener {
+        Listener NONE = new Listener() {
+        };
+
+        default void draft(String markdownWithoutAi) {
+        }
+
+        default void text(String delta) {
+        }
+    }
+
+    public IncidentReport generate(Long instanceId, LocalDateTime from, LocalDateTime to) {
+        return generate(instanceId, from, to, Listener.NONE);
+    }
+
+    /**
      * 리포트 생성 — [from, to] 구간. 구간이 상한을 넘으면 to를 상한으로 자르고 그 사실을 노트에 남긴다.
      * 비교 기준(base)은 같은 길이의 직전 구간이다.
      */
-    public IncidentReport generate(Long instanceId, LocalDateTime from, LocalDateTime to) {
+    public IncidentReport generate(Long instanceId, LocalDateTime from, LocalDateTime to, Listener listener) {
         DatabaseInstance instance = registryService.findById(instanceId); // LBAC 게이트
         List<String> notes = new ArrayList<>();
         if (Duration.between(from, to).compareTo(MAX_WINDOW) > 0) {
@@ -98,7 +118,15 @@ public class IncidentReportService {
         List<HealthPoint> health = sloService.healthInWindow(instanceId, from, to);
 
         String facts = renderFacts(instance, from, to, compare, configChanges, planFlips, waits, health);
-        String aiSummary = aiAnalyzer.complete(CallSite.INCIDENT, AI_SYSTEM_PROMPT, facts).orElse(null);
+        String aiSummary;
+        if (listener == Listener.NONE) {
+            aiSummary = aiAnalyzer.complete(CallSite.INCIDENT, AI_SYSTEM_PROMPT, facts).orElse(null);
+        } else {
+            listener.draft(renderMarkdown(instance, from, to, compare, configChanges, planFlips, waits, health, null, notes));
+            TextDeltaBatcher batcher = new TextDeltaBatcher(listener::text);
+            aiSummary = aiAnalyzer.completeStreaming(CallSite.INCIDENT, AI_SYSTEM_PROMPT, facts, batcher).orElse(null);
+            batcher.flush();
+        }
         String markdown = renderMarkdown(instance, from, to, compare, configChanges, planFlips, waits, health, aiSummary, notes);
 
         return new IncidentReport(instanceId, instance.getName(), TS.format(from), TS.format(to), markdown, notes);
@@ -141,7 +169,7 @@ public class IncidentReportService {
                                List<WaitPoint> waits, List<HealthPoint> health) {
         StringBuilder sb = new StringBuilder();
         sb.append("인스턴스: ").append(instance.getName()).append(" (").append(instance.getType()).append(")\n");
-        sb.append("구간: ").append(TS.format(from)).append(" ~ ").append(TS.format(to)).append("\n\n");
+        sb.append("구간: ").append(TS.format(from)).append(" ~ ").append(TS.format(to)).append(" (UTC)\n\n");
         sb.append("[성능 비교: 직전 동일 길이 구간 대비]\n");
         sb.append("총 호출 변화 ").append(pct(compare.totalCallsChangePct()))
                 .append(", 평균 지연 변화 ").append(pct(compare.avgLatencyChangePct()))
@@ -176,7 +204,8 @@ public class IncidentReportService {
                                   List<WaitPoint> waits, List<HealthPoint> health, String aiSummary, List<String> notes) {
         StringBuilder sb = new StringBuilder();
         sb.append("# 인시던트 리포트 — ").append(instance.getName()).append(" (").append(instance.getType()).append(")\n\n");
-        sb.append("- 구간: ").append(TS.format(from)).append(" ~ ").append(TS.format(to)).append("\n");
+        // 서버 시각은 UTC(DbtowerApplication)다. 시간대 없이 적으면 KST 화면에서 고른 20:22가 본문에 11:22로 찍혀 9시간 어긋나 읽힌다(146절)
+        sb.append("- 구간: ").append(TS.format(from)).append(" ~ ").append(TS.format(to)).append(" (UTC)\n");
         sb.append("- 비교 기준: 직전 동일 길이 구간\n\n");
         if (aiSummary != null && !aiSummary.isBlank()) {
             sb.append("## AI 요약\n").append(aiSummary).append("\n\n");

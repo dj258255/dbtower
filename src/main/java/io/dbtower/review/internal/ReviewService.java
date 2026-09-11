@@ -12,6 +12,8 @@ import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.registry.RegistryService;
 import io.dbtower.review.ReviewDecidedEvent;
 import io.dbtower.review.ReviewSubmittedEvent;
+import io.dbtower.analysis.TextDeltaBatcher;
+import java.util.function.Consumer;
 import io.dbtower.review.internal.ChangeReviewRules.ColumnOp;
 import io.dbtower.review.internal.ChangeReviewRules.Verdict;
 import io.dbtower.review.internal.domain.ReviewRequest;
@@ -79,9 +81,34 @@ public class ReviewService {
     public record SubmitRequest(String sql, String reason, String verifySql) {
     }
 
+    /**
+     * 흘려 받는 제출의 진행 알림(VERIFICATION 146절). 동기 REST·MCP는 {@link #NONE}이다.
+     * 알림은 저장되는 티켓을 바꾸지 않는다 — 소견은 완성본으로 저장한다.
+     */
+    public interface SubmitListener {
+        SubmitListener NONE = new SubmitListener() {
+        };
+
+        /** 규칙 판정·락 위험·스키마 대조가 끝났다. 몇 ms면 끝나는 근거라 AI 소견(수십 초)을 기다리지 않고 먼저 보인다 */
+        default void findings(List<String> findings, boolean parseLimited) {
+        }
+
+        default void text(String delta) {
+        }
+    }
+
     /** 제출 — 규칙 판정 + 락 위험 확인 + AI 소견을 굳혀 PENDING 저장, 리뷰 카드 이벤트 발행. */
     @Transactional
     public ReviewRequest submit(Long instanceId, SubmitRequest req, String requester) {
+        return submit(instanceId, req, requester, SubmitListener.NONE);
+    }
+
+    /**
+     * 흘려 받는 쪽도 같은 트랜잭션 경계를 쓴다. 저장과 카드 이벤트를 한 트랜잭션에 묶은 동기 경로의 의미를 흘리는 경로만 바꾸면
+     * 같은 요청이 경로에 따라 다르게 실패한다. AI를 기다리는 동안 커넥션을 쥐는 것은 동기와 같고, 흘리는 경로는 동시 스트림 상한(AiStreamExecutor)에 묶인다.
+     */
+    @Transactional
+    public ReviewRequest submit(Long instanceId, SubmitRequest req, String requester, SubmitListener listener) {
         DatabaseInstance instance = registryService.findById(instanceId);
         Verdict verdict = rules.evaluate(req.sql());
         List<String> findings = new ArrayList<>(verdict.findings());
@@ -92,8 +119,16 @@ public class ReviewService {
 
         // 스키마 대조 — ADD/DROP 컬럼이 실제 스키마와 어긋나는지(이미 있는 컬럼 추가·없는 컬럼 삭제)
         addSchemaMismatches(instance, verdict, findings);
+        listener.findings(List.copyOf(findings), verdict.parseLimited());
 
-        String aiOpinion = aiOpinion(req.sql(), findings);
+        String aiOpinion;
+        if (listener == SubmitListener.NONE) {
+            aiOpinion = aiOpinion(req.sql(), findings, null);
+        } else {
+            TextDeltaBatcher batcher = new TextDeltaBatcher(listener::text);
+            aiOpinion = aiOpinion(req.sql(), findings, batcher);
+            batcher.flush();
+        }
         ReviewRequest saved = repository.save(new ReviewRequest(
                 instanceId, req.sql(), req.reason(), requester,
                 String.join("\n", findings), aiOpinion, ChangeReviewRules.VERSION, verdict.parseLimited(),
@@ -224,11 +259,15 @@ public class ReviewService {
                 .findFirst();
     }
 
-    private String aiOpinion(String sql, List<String> findings) {
+    /** @param onText null이면 한 번에 받고, 아니면 같은 프롬프트로 흘려 받는다 */
+    private String aiOpinion(String sql, List<String> findings, Consumer<String> onText) {
         // AI 프롬프트에도 마스킹본을 쓴다(외부로 나갈 수 있는 경로) — 토글은 QueryMasker가 관장
         String context = "변경 SQL:\n" + queryMasker.applyForAiPrompt(sql)
                 + "\n\n규칙 지적:\n- " + String.join("\n- ", findings);
-        return aiAnalyzer.complete(CallSite.REVIEW, AI_SYSTEM_PROMPT, context).orElse(null);
+        Optional<String> opinion = onText == null
+                ? aiAnalyzer.complete(CallSite.REVIEW, AI_SYSTEM_PROMPT, context)
+                : aiAnalyzer.completeStreaming(CallSite.REVIEW, AI_SYSTEM_PROMPT, context, onText);
+        return opinion.orElse(null);
     }
 
     private static boolean isDdl(String sql) {
