@@ -50,3 +50,44 @@ export async function request(path, { method = "GET", body, raw = false } = {}) 
   if (!res.ok) throw new ApiError(res.status, data);
   return data;
 }
+
+// 서버가 흘려보내는 SSE를 POST로 받는다 — EventSource는 GET만 되고 본문과 CSRF 헤더를 실을 수 없다.
+// 이벤트 하나마다 onEvent(name, data)를 부르고 스트림이 닫히면 돌아온다. 스트림을 열기 전 거절(JSON 오류)은 ApiError로 던진다.
+export async function streamEvents(path, { body, onEvent }) {
+  const res = await fetch(path, {
+    method: "POST",
+    // Accept에 text/event-stream을 싣지 않는다 — 스트림을 열기 전 거절은 JSON으로 오는데, 그걸 받을 수 없다고 선언하면 406이 된다
+    headers: { "Content-Type": "application/json", "X-XSRF-TOKEN": csrfToken() },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 401 || (res.redirected && res.url.includes("/login"))) {
+    location.href = "/login.html";
+    throw new ApiError(401, { error: "로그인이 필요합니다" });
+  }
+  if (!res.ok || !(res.headers.get("Content-Type") || "").startsWith("text/event-stream")) {
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = { error: text }; }
+    throw new ApiError(res.status, data);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let cut;
+    while ((cut = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, cut);
+      buf = buf.slice(cut + 2);
+      let name = "message";
+      const data = [];
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) name = line.slice(6).trim();
+        else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+      }
+      if (data.length) onEvent(name, JSON.parse(data.join("\n")));
+    }
+  }
+}

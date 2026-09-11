@@ -159,11 +159,37 @@ public class DiagnosisService {
     }
 
     /**
+     * 진단 진행 알림 — 스텝마다 AI 판단을 기다리는 수십 초 동안 화면이 "지금 몇 번째 판단 중이고 방금 무엇을 불렀나"를
+     * 끝나기 전에 보여주게 한다. 알림은 결과를 바꾸지 않는다: 같은 트레이스가 최종 결과에도 그대로 실린다.
+     */
+    public interface DiagnosisListener {
+        DiagnosisListener NONE = new DiagnosisListener() {
+        };
+
+        /**
+         * AI 판단 한 번을 기다리기 시작했다.
+         *
+         * @param step      1부터
+         * @param synthesis 스텝을 다 써서 더 부르지 말고 종합하라고 강제한 마지막 판단이면 true
+         */
+        default void thinking(int step, boolean synthesis) {
+        }
+
+        default void toolCall(ToolCallTrace trace) {
+        }
+    }
+
+    /**
      * 자연어 질문 → AI가 MCP 도구를 스스로 연쇄 호출해 근본원인을 서술한다.
      * AI 백엔드가 없으면(키·CLI 둘 다 없음) 정직하게 "비활성" 결과를 돌려준다.
      */
     public DiagnosisResult diagnose(long instanceId, String instanceType, String instanceName,
                                     String question) {
+        return diagnose(instanceId, instanceType, instanceName, question, DiagnosisListener.NONE);
+    }
+
+    public DiagnosisResult diagnose(long instanceId, String instanceType, String instanceName,
+                                    String question, DiagnosisListener listener) {
         if (!aiEnabled) {
             return new DiagnosisResult(false, backend, question, null, null, "none", 0, List.of(),
                     "AI 백엔드가 없습니다(ANTHROPIC_API_KEY 미설정 + claude CLI 없음) — 자연어 진단이 비활성입니다. "
@@ -187,6 +213,7 @@ public class DiagnosisService {
         List<ToolCallTrace> traces = new ArrayList<>();
 
         for (int step = 1; step <= maxSteps; step++) {
+            listener.thinking(step, false);
             Optional<String> out = ai.complete(systemPrompt, transcript.toString());
             if (out.isEmpty()) {
                 return build(question, null, null, "low", traces,
@@ -218,6 +245,7 @@ public class DiagnosisService {
                 // 읽기 전용 화이트리스트 밖 요청 — 실행하지 않고 거부 사유를 다시 AI에 알린다
                 String msg = "거부됨: '" + tool + "'는 읽기 전용 화이트리스트에 없습니다. 허용 도구만 사용하라.";
                 rejectStep(traces, transcript, step, tool, arguments, reason, msg, instanceId);
+                listener.toolCall(traces.getLast());
                 log.warn("D3 진단 — 화이트리스트 밖 도구 요청 거부: {}", tool);
                 continue;
             }
@@ -226,6 +254,7 @@ public class DiagnosisService {
             if (verdict.rejected()) {
                 rejectStep(traces, transcript, step, tool, arguments, reason,
                         "거부됨: " + verdict.rejection(), instanceId);
+                listener.toolCall(traces.getLast());
                 log.warn("D3 진단 — 범위 밖 도구 호출 거부: tool={} args={} 사유={}",
                         tool, maskedArgs(arguments), verdict.rejection());
                 continue;
@@ -239,6 +268,7 @@ public class DiagnosisService {
             String snippet = observation.length() > OBSERVATION_CAP
                     ? observation.substring(0, OBSERVATION_CAP) + "…(생략)" : observation;
             traces.add(new ToolCallTrace(step, tool, executedArgs, reason, snippet, false));
+            listener.toolCall(traces.getLast());
             log.info("D3 진단 step {} — tool={} args={} reason={}", step, tool, executedArgs, reason);
             transcript.append("\n\n[도구 호출 #").append(step).append("] tool=").append(tool)
                     .append(" arguments=").append(executedArgs)
@@ -248,6 +278,7 @@ public class DiagnosisService {
         // 스텝 소진 — 지금까지 근거로 최종 종합을 강제한다
         transcript.append("\n\n최대 도구 호출 수에 도달했다. 더 부르지 말고, 지금까지의 근거만으로 반드시 "
                 + "{\"action\":\"final\",...} 형식의 최종 답변을 내라.");
+        listener.thinking(maxSteps + 1, true);
         Optional<String> last = ai.complete(systemPrompt, transcript.toString());
         if (last.isPresent()) {
             JsonNode d = extractJson(last.get());

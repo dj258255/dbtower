@@ -505,6 +505,10 @@ async function selectInstance(instance, card) {
   $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
   state.selections = {};
 
+  // 실시간이 켜진 채 대상을 바꾸면 새 대상으로 갈아탄다 — 추이는 대상이 다르면 이어 그릴 수 없어 비운다
+  live.history = [];
+  drawLiveSpark();
+  syncLive();
   await Promise.all([loadOverview(), loadActivity(), loadMetrics(), loadBackupInfo(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks(), loadReviews()]);
 }
 
@@ -2185,8 +2189,19 @@ async function loadSessions() {
     <tr><th class="num">PID</th><th>User</th><th>State</th><th>Wait</th>
         <th class="num">BlockedBy</th><th class="num">Elapsed(ms)</th><th>Query</th>${canKill ? "<th>Action</th>" : ""}</tr>`;
   try {
-    const rows = await api(`/api/instances/${state.instance.id}/sessions?limit=50`);
-    table.querySelector("tbody").innerHTML = rows.length ? rows.map((s) => `
+    renderSessionRows(await api(`/api/instances/${state.instance.id}/sessions?limit=50`));
+  } catch (e) {
+    table.querySelector("tbody").innerHTML =
+      `<tr><td colspan="${cols}" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+// 한 번 조회(loadSessions)와 실시간 프레임이 같은 행 모양을 쓴다 — 두 경로의 표가 달라 보이면 어느 쪽이 맞는지 묻게 된다
+function renderSessionRows(rows) {
+  const table = $("#session-table");
+  const canKill = can("TARGET_OPERATE");
+  const cols = canKill ? 8 : 7;
+  table.querySelector("tbody").innerHTML = rows.length ? rows.map((s) => `
       <tr class="${s.blockedByPid != null ? "blocked-row" : ""}">
         <td class="num">${esc(s.pid)}</td>
         <td>${esc(s.user ?? "-")}</td>
@@ -2200,11 +2215,119 @@ async function loadSessions() {
           <button class="btn btn-small btn-danger" data-kill="${esc(s.pid)}" data-force="true">강제종료</button>
         </td>` : ""}
       </tr>`).join("") : `<tr><td colspan="${cols}" class="muted">활성 세션이 없습니다.</td></tr>`;
-    if (canKill) wireKillButtons();
-  } catch (e) {
-    table.querySelector("tbody").innerHTML =
-      `<tr><td colspan="${cols}" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+  if (canKill) wireKillButtons();
+}
+
+// ---------- 실시간 세션 (VERIFICATION 140절) ----------
+// 서버가 대상별로 한 번 조회해 구독자 전원에게 나눠 주는 SSE를 받는다(LiveSessionHub).
+// 탭이 숨었거나 카드가 안 보이면 연결을 닫는다 — 안 보는 화면이 구독자로 남으면 대상 조회가 멈추지 않는다.
+const live = { on: false, source: null, instanceId: null, history: [], lastSeq: 0, hover: false, pending: null };
+const LIVE_HISTORY = 60;
+
+function setupLive() {
+  const btn = $("#live-toggle");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    live.on = !live.on;
+    live.history = [];
+    drawLiveSpark();
+    syncLive();
+  });
+  document.addEventListener("visibilitychange", syncLive);
+  // 표를 읽거나 kill 버튼을 누르려는 동안 행이 바뀌면 엉뚱한 pid를 누른다 — 포인터가 표 위에 있으면 그리기만 미룬다
+  const table = $("#session-table");
+  table.addEventListener("pointerenter", () => { live.hover = true; });
+  table.addEventListener("pointerleave", () => {
+    live.hover = false;
+    if (live.pending) { renderSessionRows(live.pending); live.pending = null; }
+  });
+}
+
+function syncLive() {
+  const btn = $("#live-toggle");
+  if (!btn) return;
+  btn.setAttribute("aria-pressed", String(live.on));
+  btn.classList.toggle("on", live.on);
+  btn.textContent = live.on ? "실시간 끄기" : "실시간 켜기";
+  const card = $(".session-card");
+  const visible = document.visibilityState === "visible" && card.offsetParent !== null;
+  const want = live.on && state.instance && visible;
+  if (want && live.source && live.instanceId === state.instance.id) return;
+  closeLive();
+  if (!want) {
+    setLiveStatus(live.on ? "일시정지 — 화면이 보이지 않아 연결을 닫았습니다" : "꺼짐 — 켜면 대상 조회 한 번을 보는 사람 모두가 나눠 받습니다");
+    return;
   }
+  live.instanceId = state.instance.id;
+  const es = new EventSource(`/api/instances/${live.instanceId}/live/sessions`);
+  live.source = es;
+  setLiveStatus("연결 중...");
+  // 재연결하면 서버 채널이 새로 시작됐을 수 있어 seq 기준을 버린다 — 안 버리면 없는 결번을 보고한다
+  es.onopen = () => { live.lastSeq = 0; };
+  es.addEventListener("frame", (ev) => onLiveFrame(JSON.parse(ev.data)));
+  es.onerror = () => {
+    if (es.readyState === EventSource.CLOSED) {
+      // 로그인 만료(302)·상한 초과(503)는 EventSource가 다시 붙지 않는다 — 켜진 척하지 않고 꺼 둔다
+      closeLive();
+      live.on = false;
+      syncLive();
+      setLiveStatus("연결이 끊겼습니다 — 다시 로그인했거나 잠시 뒤 다시 켜세요", "err");
+    } else {
+      setLiveStatus("재연결 중...");
+    }
+  };
+}
+
+function closeLive() {
+  live.source?.close();
+  live.source = null;
+  live.pending = null;
+}
+
+function onLiveFrame(f) {
+  if (f.instanceId !== state.instance?.id) return;
+  const time = new Date(f.atEpochMs).toLocaleTimeString("ko-KR", { hour12: false });
+  const gap = live.lastSeq && f.seq > live.lastSeq + 1 ? ` · 놓친 갱신 ${f.seq - live.lastSeq - 1}회` : "";
+  live.lastSeq = f.seq;
+  if (f.status === "GONE") {
+    live.on = false;
+    closeLive();
+    syncLive();
+    setLiveStatus(f.error ?? "인스턴스가 사라졌습니다", "err");
+    return;
+  }
+  if (f.status === "ERROR") {
+    // 마지막으로 성공한 표는 남긴다 — 순간 실패로 표가 비면 "세션이 다 사라졌다"로 읽힌다
+    setLiveStatus(`LIVE · ${time} 조회 실패: ${f.error ?? ""}${gap}`, "err");
+    return;
+  }
+  const s = f.summary;
+  live.history.push({ total: s.total, blocked: s.blocked });
+  if (live.history.length > LIVE_HISTORY) live.history.shift();
+  drawLiveSpark();
+  const paused = live.hover ? " · 표 위에 포인터가 있어 표 갱신을 멈춤" : "";
+  setLiveStatus(`LIVE · ${time} · 세션 ${s.total} · 막힘 ${s.blocked} · 대기 ${s.waiting} · 최장 ${fmtNum(s.longestMs)}ms · 수집 ${fmtNum(f.collectMs)}ms${gap}${paused}`,
+    s.blocked > 0 ? "warn" : "ok");
+  if (live.hover) live.pending = f.sessions;
+  else renderSessionRows(f.sessions);
+}
+
+function setLiveStatus(text, tone) {
+  const el = $("#live-status");
+  el.textContent = text;
+  el.dataset.tone = tone ?? "";
+}
+
+// 최근 2분 추이 — 세션 수(선)와 막힌 세션(붉은 선). 값은 서버가 센 숫자뿐이라 문자열이 끼어들 자리가 없다
+function drawLiveSpark() {
+  const svg = $("#live-spark");
+  const h = live.history;
+  if (h.length < 2) { svg.innerHTML = ""; svg.toggleAttribute("hidden", true); return; }
+  svg.toggleAttribute("hidden", false);
+  const max = Math.max(1, ...h.map((p) => p.total));
+  const line = (key) => h.map((p, i) => `${((i / (LIVE_HISTORY - 1)) * 240).toFixed(1)},${(34 - (p[key] / max) * 30).toFixed(1)}`).join(" ");
+  svg.innerHTML = `<title>최근 ${h.length}회 갱신 — 세션 수(파랑)·막힌 세션(빨강), 최대 ${max}</title>
+    <polyline class="spark-total" points="${line("total")}"/><polyline class="spark-blocked" points="${line("blocked")}"/>`;
 }
 
 // kill은 confirm 없이 바로 POST한다(장애 시 빠른 처치가 목적) — 대신 버튼 자체가 운영자·관리자에게만 보인다.
@@ -2602,44 +2725,109 @@ async function runOnlineDdl(execute) {
 }
 
 // ---------- 자연어 근본원인 진단 (D3) ----------
+// 도구 호출 한 줄 — 진행 중 목록과 최종 결과가 같은 모양을 쓴다
+function diagnoseStepHtml(c, i) {
+  const badge = c.rejected
+    ? `<span class="sev-badge sev-CRITICAL">거부</span>`
+    : `<span class="src-badge src-native">${i + 1}</span>`;
+  return `
+    <div class="diagnose-step">
+      <div class="diagnose-step-head">${badge} <code>${esc(c.tool)}</code>
+        <span class="muted diagnose-step-args">${esc(c.arguments || "")}</span></div>
+      <div class="diagnose-step-reason">${esc(c.reason || "")}</div>
+    </div>`;
+}
+
+// 서버가 흘리는 SSE를 POST로 받는다(141절) — EventSource는 본문과 CSRF 헤더를 실을 수 없다. workbench/api.js streamEvents와 같은 규칙.
+// Accept에 text/event-stream을 싣지 않는다: 스트림을 열기 전 거절(404·503)은 JSON으로 오는데 그걸 못 받는다고 선언하면 406이 된다
+async function streamSse(path, body, onEvent) {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-XSRF-TOKEN": csrfToken() },
+    body: JSON.stringify(body),
+  });
+  if (r.status === 401) { location.href = "/login.html"; throw new Error("로그인이 필요합니다"); }
+  if (!r.ok || !(r.headers.get("Content-Type") || "").startsWith("text/event-stream")) {
+    const t = await r.text();
+    throw new Error(`${r.status} ${t}`);
+  }
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let cut;
+    while ((cut = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, cut);
+      buf = buf.slice(cut + 2);
+      let name = "message";
+      const data = [];
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) name = line.slice(6).trim();
+        else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+      }
+      if (data.length) onEvent(name, JSON.parse(data.join("\n")));
+    }
+  }
+}
+
 async function runDiagnose() {
   const box = $("#diagnose-result");
   if (!state.instance) { box.className = "diagnose-result schema-warning"; box.textContent = "인스턴스를 먼저 선택하세요."; return; }
   const question = $("#diagnose-question").value.trim();
   if (!question) { box.className = "diagnose-result schema-warning"; box.textContent = "질문을 입력하세요."; return; }
 
-  box.className = "diagnose-result muted";
-  box.textContent = "AI가 도구를 연쇄 호출하며 진단 중... (수 초~수십 초 걸릴 수 있습니다)";
-  let d;
+  // 끝날 때까지 한 번에 기다리지 않고 스텝마다 흘려 받는다(141절) — 수십 초 동안 "진단 중"만 보이면 멈춘 것과 구분이 안 된다
+  box.className = "diagnose-result";
+  const progress = { steps: [], stage: "진단을 시작합니다", startedAt: Date.now() };
+  const drawProgress = () => {
+    box.innerHTML = `
+      <div class="diagnose-live" aria-live="polite"><span class="diagnose-live-stage">${esc(progress.stage)}</span>
+        <span class="muted" id="diagnose-elapsed"></span></div>
+      <div class="diagnose-steps">${progress.steps.map(diagnoseStepHtml).join("")}</div>`;
+    tickElapsed();
+  };
+  const tickElapsed = () => {
+    const el = $("#diagnose-elapsed");
+    if (el) el.textContent = `· ${Math.floor((Date.now() - progress.startedAt) / 1000)}초 경과`;
+  };
+  drawProgress();
+  const ticker = setInterval(tickElapsed, 1000);
+  let d = null;
   try {
-    d = await api(`/api/instances/${state.instance.id}/diagnose`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question }),
+    await streamSse(`/api/instances/${state.instance.id}/diagnose/stream`, { question }, (name, data) => {
+      if (name === "thinking") {
+        progress.stage = data.synthesis ? "도구 호출 상한에 도달해 지금까지의 근거로 답을 정리하는 중" : `AI가 ${data.step}번째 판단을 내리는 중`;
+      } else if (name === "tool") {
+        progress.steps.push(data);
+        progress.stage = data.rejected ? `요청한 도구가 거부됐습니다: ${data.tool}` : `${data.tool} 결과를 받았습니다`;
+      } else if (name === "result") {
+        d = data;
+        return;
+      } else if (name === "error") {
+        throw new Error(data.message);
+      }
+      drawProgress();
     });
+    if (!d) throw new Error("진단 결과가 끝까지 오지 않았습니다(연결 끊김)");
   } catch (e) {
     box.className = "diagnose-result schema-warning";
     box.textContent = `진단 실패: ${e.message}`;
     return;
+  } finally {
+    clearInterval(ticker);
   }
 
-  box.className = "diagnose-result";
   if (!d.aiEnabled) {
     box.innerHTML = `<div class="diagnose-note muted">${esc(d.note || "AI 진단 비활성")}</div>`;
     return;
   }
 
   // 사용한 도구(투명성) — 어떤 도구를 왜 불렀나, 거부된 요청도 표시
-  const calls = (d.toolCalls || []).map((c, i) => {
-    const badge = c.rejected
-      ? `<span class="sev-badge sev-CRITICAL">거부</span>`
-      : `<span class="src-badge src-native">${i + 1}</span>`;
-    return `
-      <div class="diagnose-step">
-        <div class="diagnose-step-head">${badge} <code>${esc(c.tool)}</code>
-          <span class="muted diagnose-step-args">${esc(c.arguments || "")}</span></div>
-        <div class="diagnose-step-reason">${esc(c.reason || "")}</div>
-      </div>`;
-  }).join("");
+  const calls = (d.toolCalls || []).map(diagnoseStepHtml).join("");
+  const took = Math.round((Date.now() - progress.startedAt) / 100) / 10;
 
   const conf = esc(d.confidence || "");
   box.innerHTML = `
@@ -2647,7 +2835,7 @@ async function runDiagnose() {
       <div class="diagnose-answer-head">
         <strong>근본원인</strong>
         <span class="src-badge conf-${conf}">확신도 ${conf}</span>
-        <span class="muted">${esc(d.backend || "")} · 사용 도구 ${d.toolCallCount}개</span>
+        <span class="muted">${esc(d.backend || "")} · 사용 도구 ${d.toolCallCount}개 · ${took}초</span>
       </div>
       ${d.rootCause ? `<div class="diagnose-rootcause">${esc(stripEmoji(d.rootCause))}</div>` : ""}
       <div class="diagnose-text">${esc(stripEmoji(d.answer) || "(답변 없음)")}</div>
@@ -2697,6 +2885,7 @@ function setupTabs() {
       ["top", "slow", "monitor"].forEach((name) => {
         $(`#tab-${name}`).hidden = name !== tab.dataset.tab;
       });
+      syncLive();
     });
   });
 }
@@ -2712,6 +2901,7 @@ function setupMonitorNav() {
 function showMonGroup(name) {
   document.querySelectorAll(".mon-tab").forEach((t) => t.classList.toggle("active", t.dataset.mon === name));
   document.querySelectorAll(".mon-group").forEach((g) => { g.hidden = g.dataset.group !== name; });
+  syncLive();
 }
 
 function setupPresets() {
@@ -2736,6 +2926,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadBackupFreshness(); // 함대 전체 백업 신선도 (D7) — 인스턴스 선택과 무관한 상시 뷰
   setupTabs();
   setupMonitorNav();
+  setupLive();
   setupTooltip();        // 네이티브 title을 예쁜 커스텀 툴팁으로 자동 승격(전역 위임)
   setupInstanceFilter(); // 검색·필터 이벤트 연결(검색·필터 구동 렌더)
   setupPresets();

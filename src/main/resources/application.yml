@@ -105,6 +105,15 @@ dbtower:
     retention-days: 7         # query_snapshot·wait_event_snapshot과 대칭. 장기는 lakehouse 몫
     retention-sweep-ms: 3600000
 
+  # 실시간 세션 스트림(SSE, VERIFICATION 140절) — 화면이 열려 있는 동안만 대상별로 한 번씩 조회해 구독자 전원에게 나눈다.
+  # 보는 사람이 늘어도 대상 조회는 늘지 않고, 아무도 안 보면 0이다(LiveSessionHub 주석).
+  live:
+    interval-ms: 2000         # 조회 주기. 1000 미만은 1000으로 올린다(A9 — 관측이 부하가 되면 안 된다)
+    max-sessions: 50          # 한 프레임에 싣는 세션 수(GET /sessions 기본값과 같다)
+    max-subscribers: 200      # 앱 전체 동시 구독 상한 — 넘으면 503
+    workers: 2                # 대상 조회 스레드. 공용 스케줄러 풀과 분리해 느린 대상이 폴러를 밀지 않게
+    emitter-timeout-ms: 300000 # 연결 수명. 끊기면 브라우저가 다시 붙고 그때 인가를 새로 받는다
+
   snapshot:
     workers: 4           # 한 틱 안에서 인스턴스별 수집을 병렬 실행하는 워커 수(ShedLock 노드 배타는 유지)
     interval-ms: 60000   # 쿼리 통계 수집 주기

@@ -1,5 +1,6 @@
 package io.dbtower.workbench.internal.web;
 
+import io.dbtower.AiStreamExecutor;
 import io.dbtower.workbench.StatementClassifier.Classification;
 import io.dbtower.workbench.internal.AgentQueryService;
 import io.dbtower.workbench.internal.ChangeExecutionService;
@@ -42,7 +43,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -61,14 +64,16 @@ public class WorkbenchController {
     private final WorkbenchAssistant assistant;
     private final ChangeExecutionService changes;
     private final AgentQueryService agents;
+    private final AiStreamExecutor streams;
 
     public WorkbenchController(WorkbenchService workbench, WorksheetService worksheets, WorkbenchAssistant assistant,
-                               ChangeExecutionService changes, AgentQueryService agents) {
+                               ChangeExecutionService changes, AgentQueryService agents, AiStreamExecutor streams) {
         this.workbench = workbench;
         this.worksheets = worksheets;
         this.assistant = assistant;
         this.changes = changes;
         this.agents = agents;
+        this.streams = streams;
     }
 
     /**
@@ -198,6 +203,69 @@ public class WorkbenchController {
     public Reply ask(@PathVariable Long worksheetId, @Valid @RequestBody AssistantBody req) {
         return assistant.ask(worksheetId, new AssistantRequest(req.message(), req.tables(), req.columns(),
                 req.failedSql(), req.failedError(), req.result()));
+    }
+
+    /**
+     * AI 보조 스트리밍(VERIFICATION 141절) — 저장되는 결과는 {@link #ask}와 같고, 기다리는 동안 단계·설명·SQL 앞부분을 흘린다.
+     * 이벤트: stage {text} → partial {explanation, sql}* → reply {Reply} 또는 error {status, message}.
+     *
+     * <p>소유·범위·값 공유 거절은 작업 스레드에서 판정되므로 HTTP 상태가 아니라 error 이벤트로 온다. 브라우저가 중간에 떠나도
+     * 답은 끝까지 만들어 저장한다 — 다시 열면 타임라인에 있다.
+     */
+    @PostMapping("/worksheets/{worksheetId}/assistant/stream")
+    public SseEmitter askStreaming(@PathVariable Long worksheetId, @Valid @RequestBody AssistantBody req) {
+        AssistantRequest request = new AssistantRequest(req.message(), req.tables(), req.columns(),
+                req.failedSql(), req.failedError(), req.result());
+        SseEmitter emitter = new SseEmitter(ASSISTANT_STREAM_TIMEOUT_MS);
+        boolean started = streams.trySubmit(() -> {
+            try {
+                Reply reply = assistant.ask(worksheetId, request, new WorkbenchAssistant.StreamListener() {
+                    @Override
+                    public void stage(String text) {
+                        send(emitter, "stage", Map.of("text", text));
+                    }
+
+                    @Override
+                    public void partial(WorkbenchAssistant.Partial partial) {
+                        send(emitter, "partial", partial);
+                    }
+                });
+                send(emitter, "reply", reply);
+            } catch (WorkbenchRejection e) {
+                send(emitter, "error", Map.of("status", e.status(), "message", e.getMessage()));
+            } catch (RuntimeException e) {
+                send(emitter, "error", Map.of("status", 500, "message", String.valueOf(e.getMessage())));
+            } finally {
+                emitter.complete();
+            }
+        });
+        if (!started) {
+            throw new StreamBusyException("AI 응답을 받는 자리가 모두 찼습니다. 잠시 뒤 다시 질문하세요");
+        }
+        return emitter;
+    }
+
+    /** 스트림 자리가 없을 때 — 스트림을 열기 전이라 다른 거절과 같은 JSON({error})으로 답한다 */
+    static final class StreamBusyException extends RuntimeException {
+        StreamBusyException(String message) {
+            super(message);
+        }
+    }
+
+    @ExceptionHandler(StreamBusyException.class)
+    public ResponseEntity<Map<String, Object>> streamBusy(StreamBusyException e) {
+        return ResponseEntity.status(503).contentType(MediaType.APPLICATION_JSON).body(Map.of("error", e.getMessage()));
+    }
+
+    /** AI 한 턴의 상한(CLI 180초)보다 넉넉히 — 연결이 먼저 끊기면 답은 저장되는데 화면만 실패로 보인다 */
+    private static final long ASSISTANT_STREAM_TIMEOUT_MS = 240_000;
+
+    private static void send(SseEmitter emitter, String name, Object data) {
+        try {
+            emitter.send(SseEmitter.event().name(name).data(data, MediaType.APPLICATION_JSON));
+        } catch (IOException | IllegalStateException e) {
+            // 브라우저가 떠났다. 작업은 멈추지 않는다(위 주석) — 남은 이벤트만 버린다
+        }
     }
 
     // ---------- 승인 티켓 실행·전후 비교 (드라이런·실행·되돌리기는 ADMIN, SecurityConfig) ----------

@@ -6282,3 +6282,205 @@ wb    @430·768·1024, login @430·768·1024: 수정 전후 모두 넘침 0
 PersonaUiE2ETest (DBTOWER_E2E=1)   tests 5 failures 0 errors 0 skipped 0
 node --check app.js, 규약 검사       통과
 ```
+
+## 140. 실시간 세션 관제 — 보는 사람이 늘어도 대상 조회는 늘지 않게 (2026-09-11)
+
+### 무엇을 했나
+
+사용자가 남은 일 1번(실시간 관제)을 보고 "이미 만들지 않았나"고 물었다. 확인해 보니 없었다. 비슷한 것은 ASH 샘플러(`AshSamplerJob`)인데,
+기본 꺼짐·PostgreSQL 전용이고 1초 샘플을 메타 DB에 **쌓는** 사후 분석용이다. 화면은 여전히 인스턴스를 고를 때 `GET /sessions`를 한 번 부르고 끝이었고,
+앱 어디에도 SSE·WebSocket·주기 갱신이 없었다. 그래서 세션/블로킹 카드에 실시간 스트림을 붙였다.
+
+### 설계: 브라우저 폴링이 아니라 대상별 채널 하나
+
+화면이 2초마다 `GET /sessions`를 부르면 대상 DB 조회는 "보는 사람 수 × 주기"로 는다. 장애가 나면 모두가 같은 대상을 열어 두므로
+관측이 가장 필요한 순간에 관측이 부하가 된다(A9 원칙). `LiveSessionHub`는 대상마다 채널 하나를 두고:
+
+- 채널이 주기(기본 2초, 1초 미만은 1초로 올림)마다 `activeSessions()`를 **한 번** 부르고 결과를 구독자 전원에게 SSE로 나눈다
+- 구독자가 0이 되면 조회를 멈추고 채널을 지운다. 늦게 온 사람은 직전 프레임을 바로 받는다(한 주기를 빈 화면으로 기다리지 않게)
+- fixedDelay라 느린 대상은 스스로 주기가 늘어난다(쌓이지 않는다). 프레임에 수집 시간(collectMs)과 seq를 실어 실제 간격과 놓친 갱신이 보인다
+- 대상 조회 실패는 건너뛰지 않고 ERROR 프레임으로, 인스턴스가 지워지면 GONE 프레임으로 닫는다 — 조용히 비우면 "세션 0건"과 "못 쟀다"가 같아진다
+- 전용 스레드(`live-sessions`, 기본 2개) — 공용 스케줄러 풀을 쓰면 느린 대상 조회가 폴러 전체를 민다(SchedulingConfig의 head-of-line 사건)
+- 앱 전체 동시 구독 상한 200, 넘으면 503
+
+WebSocket이 아니라 SSE인 이유: 흐름이 서버 → 화면 한 방향뿐이고, 평범한 GET이라 세션 쿠키·역할 인가·팀 스코프를 그대로 탄다.
+**권한**: 팀 스코프는 구독 순간 요청 주체로 확인한다(`findById`, 스코프 밖이면 404). 틱 스레드에는 인증이 없어 전역으로 대상을 다시 찾으므로,
+채널은 이미 인가된 사람끼리만 공유된다. 연결 수명을 5분으로 두어 끊기면 EventSource가 다시 붙고, 다시 붙는 요청이 인가를 새로 받는다 — 역할 회수가 5분 안에 반영된다.
+
+### 실측: 대상 PostgreSQL이 받은 세션 조회 수
+
+원장은 앱이 센 값이 아니라 대상의 `pg_stat_statements` — `pg_blocking_pids`가 들어간 문장(= `PostgresOperator.activeSessions`)의 calls 증분이다.
+허브가 스스로 "한 번만 물었다"고 말하는 것은 증거가 아니다. 계측 스크립트(`measure_140.py`, 스크래치)가 서비스 토큰으로 30초씩 돌렸다.
+
+```
+시나리오                  보는 사람   30초 동안 대상 조회   앱 계수(dbtower_live_polls_total)   사람당 받은 프레임
+아무도 안 봄                  0            0                    0
+브라우저가 각자 2초 폴링       1           15                    -
+                              5           76                    -
+                             10          150                    -
+허브(SSE)                     1           16                   15                                 15
+                              5           14                   14                                 15 x5
+                             10           14                   14                                 15 x10
+전원 떠난 뒤 30초              0            0                    0
+```
+
+10명 기준 150 -> 14회. 대상 조회 수가 보는 사람 수와 무관해졌고, 아무도 안 보면 0이다.
+사람당 프레임(15)이 앱 계수(14)보다 하나 많은 것은 늦게 붙은 구독자가 직전 프레임을 받은 것이다(새 조회 없음). 대상 16 vs 앱 15는 창 경계에서 조회 하나가 걸친 것으로 본다.
+
+**계측 결함 하나.** 첫 실행에서 사람당 프레임이 전부 1로 나왔다. 스크립트가 멈춤 신호를 보려고 소켓에 1초 타임아웃을 걸었는데, Python은 첫 타임아웃 뒤
+그 소켓의 모든 읽기를 실패시킨다("cannot read from timed out object"). 대상 조회 수는 이 결함과 무관했지만(연결은 살아 있었다) 프레임 수는 틀렸다.
+타임아웃 없이 읽고 다른 스레드가 연결을 닫게 고친 뒤 SSE 시나리오만 다시 재서 위 표의 프레임 수를 얻었다.
+
+### 화면
+
+세션/블로킹 카드의 "실시간 켜기". 켜면 표가 프레임마다 바뀌고, 상태 줄에 갱신 시각·세션·막힘·대기·최장 경과·수집 시간, 옆에 최근 60회 추이(세션 수 파랑, 막힌 세션 빨강)가 그려진다.
+
+- 탭이 숨었거나(visibilityState) 카드가 안 보이는 그룹·탭으로 가면 연결을 닫는다 — 안 보는 화면이 구독자로 남으면 대상 조회가 멈추지 않는다.
+  Chrome 확장으로 연 창은 앞에 있지 않아 `visibilityState`가 `hidden`이었고, 켜자마자 "일시정지 — 화면이 보이지 않아 연결을 닫았습니다"가 떴다. 설계대로의 동작이다
+- 포인터가 표 위에 있으면 표 다시 그리기만 미룬다 — 행이 바뀌는 순간 kill 버튼을 누르면 엉뚱한 pid를 누른다
+- 로그인 만료(302)·상한 초과(503)로 EventSource가 포기하면 켜진 척하지 않고 끈다
+- 켜짐은 색 하나로만 알리지 않는다(버튼 글자·점·상태 문장), 점 깜빡임은 `prefers-reduced-motion`에서 멈춘다
+
+대상 PostgreSQL에 `LOCK TABLE orders IN ACCESS EXCLUSIVE MODE`를 쥔 세션과 그 뒤에 막힌 `SELECT count(*) FROM orders`를 만들어 확인했다.
+Playwright(창이 앞에 있어 `visibilityState=visible`)로 켜고 26초 뒤의 카드다:
+
+```
+status=LIVE · 19시 7분 59초 · 세션 5 · 막힘 4 · 대기 5 · 최장 31,629.2ms · 수집 3.4ms
+sparkPoints=13   visibility=visible
+```
+
+막힘이 1이 아니라 4인 것은 계획에 없던 관측이다. 같은 시각 141절 계측으로 돌던 자연어 진단이 대상에 보낸 `pg_relation_size` 조회 셋(`dbtower_monitor`)이
+같은 락에 막혀 있었다 — 조회 계정의 진단 쿼리도 운영 락 앞에서는 줄을 선다는 것이 표에 그대로 보였다.
+같은 락 때문에 앱 로그에는 이 대상의 다른 조회(Advisors 통계 등)가 소켓 읽기 제한에 걸려 커넥션이 broken 처리된 경고가 남았다(`SocketTimeoutException: Read timed out` 13건,
+락을 쥔 동안만). 대상 하나의 락이 플랫폼을 세우지 않고 조회 단위 실패로 끝났다는 134절 경계가 그대로 동작한 것이다.
+
+![실시간 세션 카드 — 락을 쥔 1517과 그 뒤에 막힌 네 세션, 상태 줄과 추이](images/webui/100-live-sessions.png)
+
+### 테스트
+
+```
+LiveSessionHubTest (단위, 가짜 스케줄러로 틱을 직접 호출)     9개 통과
+  구독자 셋이어도 틱당 조회 1회 · 마지막 구독자가 떠나면 취소·채널 삭제(중복 close 무해) · 늦게 온 사람은 직전 프레임
+  보내기 실패한 구독자만 제거 · 조회 실패는 ERROR 프레임 · 삭제되면 GONE 후 닫힘 · 상한 초과 거절 · 1초 하한
+LiveSessionStreamTest (SpringBootTest + MockMvc, 실제 보안 필터)   3개 통과
+  관제가 붙으면 text/event-stream으로 프레임(ERROR, 접속 계정 미포함) · 다른 팀 대상은 404(비동기 시작 안 함) · 미인증은 스트림 안 열림
+PersonaUiE2ETest (DBTOWER_E2E=1, Playwright)                    6개 통과 (5 -> 6)
+  실시간을 켜면 실제 톰캣의 비동기 디스패치·보안 필터를 지나 EventSource로 ERROR 프레임이 오고, 진단 그룹으로 가면 일시정지, 돌아오면 다시 LIVE
+```
+
+MockMvc는 SSE의 비동기 디스패치를 실제로 태우지 않는다. 그래서 브라우저 경로는 E2E로 고정했다(CI에서 돈다).
+
+### 한계
+
+- 허브는 앱 노드마다 하나다. 앱을 N대 띄우면 같은 대상을 여러 노드에서 보는 경우 대상 조회는 최대 N배(보는 사람 수와는 여전히 무관)
+- 대기 이벤트 표는 흘리지 않았다. 기종에 따라 누적 카운터라 2초 간격의 순간값이 뜻을 갖지 않는다 — 세션 프레임의 wait 이벤트 요약(대기 중 세션 수)으로 대신한다
+- 프레임의 쿼리 원문은 `GET /sessions`와 같은 규칙이다(마스킹 없음). 권한은 같다
+
+## 141. AI 응답 스트리밍 — 흘린 조각은 보여주기만, 판단은 완성본으로 (2026-09-11)
+
+### 무엇을 했나
+
+남은 일 2번. 워크벤치 AI 제안(`POST /worksheets/{id}/assistant`)과 자연어 진단(`POST /instances/{id}/diagnose`)은 답이 다 만들어질 때까지
+빈 말풍선("AI가 스키마를 읽고 SQL을 작성하는 중입니다...")과 "진단 중..." 한 줄만 보였다. 둘 다 흘려 받는 경로를 더했다. 동기 경로는 그대로 둔다(MCP·스크립트·기존 테스트).
+
+### 설계
+
+**AiAnalyzer.completeStreaming** — `complete`와 반환·실패 규칙이 같고, 글자 조각을 콜백으로 넘긴다.
+- API 백엔드: `client.messages().createStreaming(params)`로 이벤트를 받으며 `MessageAccumulator`로 완성본 `Message`를 다시 조립한다. 토큰 계수·max_tokens 절단 판정은
+  동기 경로와 같은 `finishApi`를 지난다(잘린 응답은 조각이 이미 흘렀어도 완성본으로 올라가지 않는다). SDK 클래스·메서드는 추측하지 않고 claude-api 스킬의 Java 스트리밍 문서와
+  실제 jar(anthropic-java-core 2.34.0)를 `javap`로 열어 `createStreaming`·`StreamResponse.stream()`·`MessageAccumulator.create()/accumulate()/message()`를 확인했다.
+- CLI 백엔드(로컬, 구독): `claude -p --output-format stream-json --verbose --include-partial-messages`. 먼저 실제 출력을 받아 줄 모양을 확인했다(claude 2.1.268):
+
+```
+2 system · 1 message_start · 1 content_block_start · 5 content_block_delta:text_delta · 1 assistant · 1 content_block_stop
+1 message_delta · 1 message_stop · 1 rate_limit_event · 1 result(키: result, is_error, subtype, stop_reason, usage ... = --output-format json 봉투와 같음)
+```
+
+  최상위 대화(`parent_tool_use_id`가 null)의 `text_delta`만 흘리고, 결과 줄은 기존 `extractCliResult`로 완성본을 꺼낸다. 스트림은 읽는 동안이 곧 대기라
+  동기 경로와 달리 180초 뒤 프로세스를 끊는 감시를 따로 둔다.
+
+**워크벤치** — AI는 JSON 하나로 답해야 SQL·가정·제목을 나눠 저장한다. 토큰을 그대로 흘리면 사람은 따옴표와 역슬래시를 읽게 되므로:
+- `PartialJson.stringPrefix`가 미완성 JSON에서 `explanation`·`sql` 값의 앞부분만 꺼낸다(반쯤 온 이스케이프는 다음 조각을 기다림, 값 자리의 같은 글자는 키로 오인하지 않음)
+- `PartialRelay`가 앞부분이 바뀌었을 때만, 80ms 간격으로 알린다(조각은 몇 글자 단위라 조각마다 알리면 화면이 글자 수만큼 다시 그려진다)
+- 저장·분류·버전 카드는 완성본을 `JsonExtract`로 다시 파싱해 만든다 — 흘린 조각이 틀려도 남는 답은 바뀌지 않는다
+- 이벤트: `stage {text}` -> `partial {explanation, sql}`* -> `reply {Reply}` 또는 `error {status, message}`. 브라우저가 중간에 떠나도 답은 끝까지 만들어 저장한다(다시 열면 타임라인에 있다)
+- 화면은 기다리는 말풍선만 바꾼다(`updatePending`) — 타임라인 전체를 다시 그리면 앞 카드의 버튼·스크롤이 매번 초기화된다. 사람이 위로 올려 읽는 중이면 끌어내리지 않는다
+
+**자연어 진단** — 루프의 AI 출력은 도구 호출 결정 JSON이라 글자를 흘릴 뜻이 없다. 대신 `DiagnosisListener`로 단계를 흘린다:
+`thinking {step, synthesis}` -> `tool {ToolCallTrace}`(거부 포함) -> ... -> `result {DiagnosisResult}`. 알림은 결과를 바꾸지 않고, 흘린 트레이스와 결과의 트레이스가 같다.
+범위 확인은 스트림을 열기 전 요청 스레드에서 끝낸다(범위 밖이면 평범한 404).
+
+**작업 스레드(`AiStreamExecutor`, 루트 패키지)** — 두 모듈이 같은 상한(기본 4)을 나눠 쓴다.
+- 제출 순간의 SecurityContext를 실어 보낸다(`DelegatingSecurityContextRunnable`). 안 실으면 작업은 인증 없는 전역 주체로 돌아 팀 범위·워크시트 소유·감사 주체가 풀린다
+- 자리가 없으면 줄 세우지 않고 503(JSON `{error}`) — AI 한 턴은 수십 초라 대기열 뒤의 사람은 "기다림"과 "멈춤"을 구분하지 못한다
+- 브라우저 쪽은 EventSource가 아니라 fetch 스트림으로 받는다 — EventSource는 GET만 되고 본문·CSRF 헤더를 실을 수 없다. `Accept: text/event-stream`을 싣지 않는다:
+  스트림을 열기 전 거절(404·503)은 JSON인데, 그걸 못 받는다고 선언하면 406이 된다
+
+### 실측 1 — 워크벤치: 첫 글자까지 vs 완성본까지
+
+요청자 프록시 -> 앱 -> claude CLI. 같은 질문 셋을 스트림용·동기용 워크시트에 따로 물었다(같은 워크시트에 두 번 물으면 대화 기록이 달라진다). 계측 뒤 두 워크시트는 보관 처리했다(`measure_141.py`, 스크래치).
+
+```
+질문                                     흘려 받기: 첫 단계  첫 설명·SQL  완성본   partial 이벤트   한 번에 받기: 처음 보이는 것(=완성본)
+등급별 고객 수를 구해줘                       0.03s        4.45s     10.85s        23                  9.18s
+최근 7일 주문 금액 합계를 일별로 보여줘         0.01s       10.01s     19.96s        39                 16.38s
+결제 이벤트가 가장 많은 고객 상위 5명           0.01s        4.55s     12.10s        18                 15.99s
+분류: 앞의 둘은 두 방식 모두 READ 제안, 셋째는 두 방식 모두 SQL 없이 설명만
+```
+
+흘려 받으면 요청 직후 단계 문구가, 완성본의 약 절반 시점에 설명·SQL이 쓰이기 시작한다. 한 번에 받으면 완성본이 올 때까지 빈 말풍선이다.
+완성 시간 자체(10.85 vs 9.18 등)는 AI 호출마다 흔들려 두 방식의 차이로 해석하지 않는다 — 스트리밍이 생성을 빠르게 하지는 않는다.
+
+브라우저 경로(Playwright, 요청자 프록시, 네 번째 질문 "등급별 고객 수와 각 등급의 최근 30일 주문 금액 합계를 구해줘")도 확인했다. 보내기 클릭부터
+`.msg.ai.pending .ai-text`가 나타나기까지 11.885초, 기다리는 말풍선이 사라지기까지 19.498초. 화면 아래 표시는 `cli · 19.4초 · 첫 글자 9.8초`
+(서버 elapsedMs와, 화면이 요청을 보낸 뒤 첫 조각을 받은 시각 — 클릭 측정보다 저장 대기 `flushSave` 만큼 짧다). 계측 뒤 새 워크시트(28)는 보관 처리했다.
+쓰는 중 화면에서는 JSON 순서(title, sql, explanation)대로 SQL이 먼저 완성되고 설명이 문장 중간까지 와 있다.
+
+![워크벤치 AI 답을 흘려 받는 중 — 단계 문구, 쓰이는 중인 설명, 먼저 완성된 SQL](images/webui/101-workbench-ai-streaming.png)
+![완성 뒤 — 가정까지 붙은 설명, 읽기 분류, v1 체크포인트 카드, 첫 글자 9.8초 표시](images/webui/102-workbench-ai-streamed-done.png)
+
+### 실측 2 — 자연어 진단: 단계가 보이는 시각
+
+```
+events=8  unparseable_events=0  content_type=text/event-stream  backend=cli
+ 0.04s thinking 1
+ 6.38s tool query_stats      6.38s thinking 2
+16.94s tool wait_events     16.94s thinking 3
+34.10s tool explain         34.10s thinking 4
+108.16s result (도구 3개, 확신도 medium)
+```
+
+동기 경로라면 108초 동안 "진단 중..." 한 줄이다. 흘려 받으면 6초에 첫 도구가 보이고, 이 실행에서는 최종 답을 낸 네 번째 판단에 74초가 걸렸다는 것도 화면에서 보인다.
+
+브라우저 경로(Playwright, 관제 프록시 — 청크 결함을 고친 뒤)도 같은 질문으로 확인했다. 진단 클릭부터 첫 도구 줄이 보이기까지 4.883초, 결과까지 123.747초(도구 4개).
+진행 중 화면은 "AI가 2번째 판단을 내리는 중 · 5초 경과"와 첫 도구(query_stats)와 그 이유를, 끝난 뒤에는 기존 결과 화면에 소요 시간(123.6초)을 더해 보인다.
+
+![자연어 진단을 흘려 받는 중 — 지금 몇 번째 판단인지, 경과 시간, 이미 부른 도구와 이유](images/webui/103-diagnose-streaming-steps.png)
+![진단 결과 — 근본원인·확신도·사용 도구 4개·123.6초, 도구 호출 근거](images/webui/104-diagnose-result.jpg)
+
+**계측 결함 하나.** 첫 진단 계측은 역할 프록시를 거쳤는데 `JSONDecodeError: Invalid control character at: line 1 column 6352`로 깨졌다. 받은 원본 바이트를 떠 보니
+본문 앞이 `32\r\nevent:thinking...`이었다 — 프록시의 SSE 전달이 `res.fp.readline()`(원시 소켓)을 읽어, 앱이 보낸 chunked 청크 크기 줄을 본문에 섞고 있었다.
+6.7KB짜리 도구 이벤트가 청크 둘로 갈리자 크기 줄이 JSON 한가운데 끼었다. 앱 결함이 아니라 스크래치 프록시 결함이라 `res.readline()`(청크를 푸는 쪽)으로 고치고,
+진단은 프록시 없이 앱에 서비스 토큰으로 직접 붙어 다시 재서 모든 이벤트가 JSON으로 읽히는지(unparseable 0) 확인했다. 워크벤치 계측은 이벤트마다 청크가 하나라
+영향이 없었다(모든 질문에서 reply까지 파싱됨).
+
+### 테스트
+
+```
+AiAnalyzerStreamLineTest     4  최상위 text_delta만 조각 · 하위 에이전트·thinking_delta 무시 · 결과 줄은 기존 추출기로 본문 · 비JSON 무시
+PartialJsonTest              5  완성본 값 · 값 자리의 필드명 오인 없음 · 모든 잘림 위치에서 완성본의 접두사 · 반쯤 온 이스케이프 · null/미개봉
+WorkbenchAssistantTest   8 -> 11  스트리밍은 단계 둘을 흘리고 저장 답은 완성본(READ, v3) · 동기 요청은 스트리밍 경로를 타지 않음 · 조각 중계는 바뀔 때만
+DiagnosisServiceTest     9 -> 11  알림 순서(thinking 1 -> tool -> thinking 2 -> 거부된 tool -> thinking 3)와 결과 트레이스 일치 · 스텝 소진 시 synthesis
+AiAnalyzerTest               8  기존 그대로 통과(finishApi·recordCliUsage로 옮긴 뒤)
+```
+
+### 회귀 (140·141절 함께)
+
+```
+./gradlew compileJava, ./scripts/check-conventions.sh      통과
+node --check app.js, workbench/{main,api,chat}.js           통과
+./gradlew test                                              tests 814 skipped 23 failures 0 errors 0   (787 -> 814, 새 테스트 27)
+  건너뜀 23은 환경 변수로 켜는 것들: PersonaUiE2ETest 6, ChangeExecutionIT 6, ConsoleReadOnlyIT 4, MsSqlRestoreVerifyIT 2,
+  NetworkTimeoutAfterLoginIT 2, WebhookEmbedLiveFireTest 1, CloudWatchHostDiskMetricsIT 1, OracleRestoreVerifyIT 1
+DBTOWER_E2E=1 ./gradlew test --tests PersonaUiE2ETest       tests 6 skipped 0 failures 0
+```

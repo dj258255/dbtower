@@ -1,11 +1,11 @@
 // 거버넌스 SQL 워크벤치 — 인스턴스·워크시트·편집기·결과 미리보기·AI 대화를 잇는다.
 // 정책(분류·계정·읽기 전용·마스킹·기록)과 판정은 전부 서버가 강제한다. 이 화면은 결과를 보여줄 뿐 판정하지 않는다.
 
-import { request, esc, csrfToken, ApiError, localTime } from "./api.js";
+import { request, streamEvents, esc, csrfToken, ApiError, localTime } from "./api.js";
 import { SqlEditor, highlight } from "./editor.js";
 import { renderTree } from "./schema-tree.js";
 import { renderGrid } from "./grid.js";
-import { renderTimeline, renderChips } from "./chat.js";
+import { renderTimeline, renderChips, updatePending } from "./chat.js";
 import { renderDiff } from "./diff.js";
 import { TicketPanel } from "./tickets.js";
 
@@ -549,13 +549,35 @@ async function ask() {
     failedError: failure ? failure.error.message : null,
     result: share ? { columns: state.lastView.columns.map((c) => c.name), rows: state.lastView.rows.slice(0, 20) } : null,
   };
-  state.pendingQuestion = message;
+  state.pendingQuestion = { question: message, stage: "질문을 보내는 중입니다" };
   $("wb-ask").value = "";
   $("wb-send").disabled = true;
   drawTimeline();
   try {
-    const reply = await request(`/api/workbench/worksheets/${state.sheet.id}/assistant`, { method: "POST", body });
-    $("wb-backend").textContent = reply.aiEnabled ? `${reply.backend} · ${Math.round(reply.elapsedMs / 100) / 10}초` : "AI 꺼짐";
+    // 답을 한 번에 기다리지 않고 흘려 받는다(141절) — 수십 초 동안 빈 말풍선 대신 단계와 쓰이는 중인 설명·SQL이 보인다
+    const pending = state.pendingQuestion;
+    const sentAt = performance.now();
+    let reply = null;
+    await streamEvents(`/api/workbench/worksheets/${state.sheet.id}/assistant/stream`, {
+      body,
+      onEvent: (name, data) => {
+        if (name === "stage") {
+          pending.stage = data.text;
+        } else if (name === "partial") {
+          if (!pending.firstPartialMs && (data.explanation || data.sql)) pending.firstPartialMs = performance.now() - sentAt;
+          Object.assign(pending, { explanation: data.explanation, sql: data.sql, stage: "AI가 답을 쓰는 중입니다" });
+        } else if (name === "reply") {
+          reply = data;
+          return;
+        } else if (name === "error") {
+          throw new ApiError(data.status, { error: data.message });
+        }
+        updatePending($("wb-timeline"), pending);
+      },
+    });
+    if (!reply) throw new Error("AI 응답이 끝까지 오지 않았습니다(연결 끊김)");
+    const first = pending.firstPartialMs ? ` · 첫 글자 ${Math.round(pending.firstPartialMs / 100) / 10}초` : "";
+    $("wb-backend").textContent = reply.aiEnabled ? `${reply.backend} · ${Math.round(reply.elapsedMs / 100) / 10}초${first}` : "AI 꺼짐";
     if (reply.note) $("wb-share-note").textContent = reply.note;
     state.chips = [];
     state.lastFailure = null;
