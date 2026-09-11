@@ -677,20 +677,45 @@ function openTicket(sql, reason = "") {
   $("wb-ticket-reason").value = reason;
   $("wb-ticket-verify").value = "";
   $("wb-ticket-error").hidden = true;
+  $("wb-ticket-progress").hidden = true;
+  $("wb-ticket-progress").innerHTML = "";
   $("wb-ticket-ok").disabled = false;
   $("wb-ticket-modal").hidden = false;
   $("wb-ticket-reason").focus();
 }
 
+// 흘려 받는다(146절) — 규칙 판정은 몇 ms면 끝나는데 AI 소견을 기다리느라 버튼이 수십 초 "올리는 중"이었다.
+// 규칙 지적을 먼저 보이고 AI 소견을 쓰이는 대로 이어 붙인다. 티켓에 남는 소견은 서버가 완성본으로 저장한 것이다
 async function submitTicket() {
   const ok = $("wb-ticket-ok");
+  const progress = $("wb-ticket-progress");
   ok.disabled = true;
-  ok.textContent = "올리는 중(규칙 판정·AI 소견)...";
+  ok.textContent = "규칙 판정 중...";
+  progress.hidden = false;
+  progress.innerHTML = '<div class="muted">규칙 판정 중...</div>';
+  let opinion = "";
   try {
-    const created = await request(`/api/instances/${encodeURIComponent(state.instance.id)}/reviews`, {
-      method: "POST",
+    let created = null;
+    await streamEvents(`/api/instances/${encodeURIComponent(state.instance.id)}/reviews/stream`, {
       body: { sql: $("wb-ticket-sql").textContent, reason: $("wb-ticket-reason").value.trim(), verifySql: $("wb-ticket-verify").value.trim() || null },
+      onEvent: (name, data) => {
+        if (name === "findings") {
+          ok.textContent = "AI 소견 작성 중...";
+          progress.innerHTML = `<div class="wb-label">규칙 판정${data.parseLimited ? " (해석 한계 있음)" : ""}</div>
+            <ul class="tk-findings">${data.findings.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>
+            <div class="wb-label">AI 1차 소견 <span class="muted">작성 중</span></div><div class="wb-ticket-opinion"></div>`;
+        } else if (name === "text") {
+          opinion += data.delta;
+          const box = progress.querySelector(".wb-ticket-opinion");
+          if (box) box.textContent = opinion;
+        } else if (name === "created") {
+          created = data;
+        } else if (name === "error") {
+          throw new ApiError(data.status, { error: data.message });
+        }
+      },
     });
+    if (!created) throw new Error("티켓이 만들어졌는지 확인하지 못했습니다(연결 끊김) — 변경 티켓 목록을 새로고침해 보세요");
     $("wb-ticket-modal").hidden = true;
     showChatPane("tickets");
     await tickets.load(state.instance.id, created.id);

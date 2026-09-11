@@ -4,6 +4,7 @@ import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.AiAnalyzer.CallSite;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.analysis.RuleBasedAnalyzer;
+import io.dbtower.analysis.TextDeltaBatcher;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.registry.DatabaseInstance;
 import org.springframework.stereotype.Component;

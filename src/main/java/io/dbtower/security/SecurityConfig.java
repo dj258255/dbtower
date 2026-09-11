@@ -216,9 +216,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/reviews/pending").hasRole("APPROVER")
                         // 변경 요청 제출과 취소는 요청자부터 — 관제만 보는 VIEWER는 대상 DB 변경을 요청하지 않는다
                         // (남의 티켓을 취소할 수 있는지는 서비스가 요청자 본인·승인자·운영자·관리자로 판단한다)
-                        .requestMatchers(HttpMethod.POST, "/api/instances/*/reviews", "/api/reviews/*/cancel").hasRole("REQUESTER")
+                        // 흘려 받는 경로(146절)는 같은 일을 하는 다른 URL이라 같은 줄에 둔다 — 빠뜨리면 anyRequest(authenticated)로 떨어져 관제도 변경을 요청한다
+                        .requestMatchers(HttpMethod.POST, "/api/instances/*/reviews", "/api/instances/*/reviews/stream",
+                                "/api/reviews/*/cancel").hasRole("REQUESTER")
                         // 인시던트 리포트(B4)·월간 점검 리포트(B5)는 설정 값·성능을 담아 운영 경계.
-                        .requestMatchers(HttpMethod.POST, "/api/instances/*/incident-report").hasRole("OPERATOR")
+                        .requestMatchers(HttpMethod.POST, "/api/instances/*/incident-report", "/api/instances/*/incident-report/stream").hasRole("OPERATOR")
                         .requestMatchers(HttpMethod.POST, "/api/instances/*/monthly-report").hasRole("OPERATOR")
                         // 워크벤치 콘솔 계정(조회·변경 DB 계정)은 대상 DB 데이터 접근 권한 그 자체라 조회·등록·삭제 전부 ADMIN.
                         .requestMatchers("/api/instances/*/credentials", "/api/instances/*/credentials/*").hasRole("ADMIN")

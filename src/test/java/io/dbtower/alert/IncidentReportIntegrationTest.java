@@ -20,14 +20,23 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Consumer;
+
+import io.dbtower.analysis.AiAnalyzer;
+import io.dbtower.analysis.AiAnalyzer.CallSite;
+import org.springframework.test.web.servlet.MvcResult;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -60,6 +69,9 @@ class IncidentReportIntegrationTest {
     WaitEventHistoryService waitHistory;
     @MockitoBean
     SloService sloService;
+    // 로컬에서는 claude CLI가 있어 실제 AI를 부른다 — 흘리는 순서만 보려고 AI를 목으로 둔다(동기 경로는 빈 요약으로 기존 단언 그대로)
+    @MockitoBean
+    AiAnalyzer aiAnalyzer;
 
     private Long instanceId;
 
@@ -110,6 +122,49 @@ class IncidentReportIntegrationTest {
                 .andExpect(jsonPath("$.truncationNotes", org.hamcrest.Matchers.hasSize(
                         org.hamcrest.Matchers.greaterThanOrEqualTo(1))))
                 .andExpect(jsonPath("$.to").value("2026-07-19 00:00")); // from + 24h
+    }
+
+    @Test
+    @WithMockUser(roles = "OPERATOR")
+    void 흘려_받으면_AI_요약이_빠진_리포트가_먼저_오고_완성본에_흘린_요약이_들어간다() throws Exception {
+        String summary = "재료로 보면 호출이 늘었지만 설정 변경·플랜 플립이 없어 원인을 판단할 근거가 부족하다.";
+        when(aiAnalyzer.completeStreaming(eq(CallSite.INCIDENT), anyString(), anyString(), any())).thenAnswer(inv -> {
+            Consumer<String> onText = inv.getArgument(3);
+            onText.accept(summary.substring(0, 12));
+            onText.accept(summary.substring(12));
+            return Optional.of(summary);
+        });
+
+        MvcResult result = mvc.perform(post("/api/instances/" + instanceId + "/incident-report/stream").with(csrf())
+                        .param("from", "2026-07-18T03:00:00")
+                        .param("to", "2026-07-18T05:00:00")
+                        .param("publish", "false"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        String body = await(result, "event:result");
+
+        int draft = body.indexOf("event:draft");
+        int text = body.indexOf("event:text");
+        int done = body.indexOf("event:result");
+        org.assertj.core.api.Assertions.assertThat(draft).isGreaterThanOrEqualTo(0).isLessThan(text);
+        org.assertj.core.api.Assertions.assertThat(text).isLessThan(done);
+        String draftLine = body.substring(draft, text);
+        org.assertj.core.api.Assertions.assertThat(draftLine).contains("# 인시던트 리포트").doesNotContain("## AI 요약");
+        org.assertj.core.api.Assertions.assertThat(body.substring(done)).contains("## AI 요약").contains("판단할 근거가 부족하다");
+    }
+
+    private static String await(MvcResult result, String needle) throws Exception {
+        long deadline = System.currentTimeMillis() + 20_000;
+        String body = "";
+        while (System.currentTimeMillis() < deadline) {
+            // text/event-stream에는 charset이 안 붙어 MockMvc는 ISO-8859-1로 푼다. 브라우저는 SSE를 규격대로 UTF-8로 읽으므로 테스트도 UTF-8로 읽는다
+            body = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+            if (body.contains(needle)) {
+                return body;
+            }
+            Thread.sleep(100);
+        }
+        throw new AssertionError("20초 안에 " + needle + "가 오지 않았다. 받은 본문: " + body);
     }
 
     @Test

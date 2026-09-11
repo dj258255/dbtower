@@ -266,8 +266,9 @@ input[type="datetime-local"] {
 .qtable tbody tr.new-query:hover { background: #fbe2e6; }
 .qtext {
   font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
-  /* SQL 열은 뷰포트에 맞춰 줄이고 넘치면 말줄임 — 전체는 hover 툴팁으로. 고정 px가 아니라 반응형. */
-  max-width: min(46vw, 520px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* SQL 열이 남는 폭을 다 갖고 넘치면 말줄임 — 전체는 hover 툴팁으로. 표 셀의 max-width는 자동 레이아웃에서
+     무시돼(146절: 1512px에서 표 1,186px > 상자 1,022px, 인라인 상세까지 옆으로 잘림) max-width:0 + width:100%로 건다 */
+  max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* Wait 이벤트명(RESOURCE_SEMAPHORE_QUERY_COMPILE 등)도 길면 말줄임 — 전체는 hover 툴팁으로 */
 #session-table td:nth-child(4) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -301,12 +302,13 @@ input[type="datetime-local"] {
 
 /* 상세 */
 .detail { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-top: 14px; background: #fafbfc; }
-.detail-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+/* 버튼 7개와 64자 SQL ID가 한 줄에 안 들어가면 줄을 바꾼다 — 줄바꿈이 없으면 상세 폭이 버튼 줄 길이로 벌어진다 */
+.detail-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
 .qid {
   font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #0a7d4f;
-  background: rgba(34,160,107,.1); padding: 2px 8px; border-radius: 5px;
+  background: rgba(34,160,107,.1); padding: 2px 8px; border-radius: 5px; overflow-wrap: anywhere;
 }
-.detail-actions { display: inline-flex; gap: 8px; }
+.detail-actions { display: inline-flex; flex-wrap: wrap; gap: 8px; }
 /* 상세 섹션 헤더 — 파란 좌측 액센트 바(레퍼런스처럼 섹션 구분을 또렷하게) */
 .detail-section h3 {
   font-size: 13px; margin: 14px 0 7px; padding-left: 9px;
@@ -315,7 +317,9 @@ input[type="datetime-local"] {
 
 /* 인라인 쿼리 상세 — 클릭한 행 바로 아래 셀에 끼워 넣는다 */
 #top-table tr.detail-host > td.detail-cell { padding: 0; background: #f6f7fb; border-bottom: 1px solid var(--line); }
-#top-table tr.detail-host .detail { margin: 10px 12px 14px; }
+/* 상세는 표 열 폭 계산에 끼지 않는다(width:0) — 끼면 실행계획 표(12열)가 Top Query 표 전체를 벌린다(146절: 1280px에서 902px).
+   셀 폭은 min-width로 채우고, 넓은 실행계획은 코드블록 안에서 옆으로 스크롤된다 */
+#top-table tr.detail-host .detail { margin: 10px 12px 14px; box-sizing: border-box; width: 0; min-width: calc(100% - 24px); }
 .advisor-input { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .advisor-cols {
   flex: 1; border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px;

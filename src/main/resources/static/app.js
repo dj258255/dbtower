@@ -2660,9 +2660,28 @@ async function generateIncident() {
   // 로컬 벽시계 → UTC ISO(다른 조회와 동일한 toApiTime) — 서버는 UTC 저장이라 변환 없이 보내면 구간이 어긋난다
   const from = toApiTime(fromRaw), to = toApiTime(toRaw);
   const btn = $("#btn-incident"); btn.disabled = true;
-  box.className = "incident-result muted"; box.innerHTML = '<div class="muted">리포트 조립 중... (AI 요약 포함 시 시간이 걸립니다)</div>';
+  box.className = "incident-result muted"; box.innerHTML = '<div class="muted">재료(시점 비교·설정 변경·플랜 플립·대기·가용성) 조립 중...</div>';
+  // 흘려 받는다(146절) — 재료는 AI 전에 이미 다 모인다. AI 요약만 빠진 리포트를 먼저 그리고, 요약 칸을 쓰이는 대로 채운다.
+  // 다운로드·카드는 서버가 완성본으로 만든 마크다운이다
+  const startedAt = Date.now();
+  let summary = "", r = null;
   try {
-    const r = await api(`/api/instances/${state.instance.id}/incident-report?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&publish=true`, { method: "POST" });
+    await streamSse(`/api/instances/${state.instance.id}/incident-report/stream?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&publish=true`, {}, (name, data) => {
+      if (name === "draft") {
+        box.className = "incident-result";
+        box.innerHTML = `<div class="incident-ai-live"><h2>AI 요약</h2><div class="muted" id="incident-ai-stage">재료 ${((Date.now() - startedAt) / 1000).toFixed(1)}초 · AI가 재료만으로 요약하는 중</div>
+          <p id="incident-ai-text"></p></div>${mdToHtml(data.markdown)}`;
+      } else if (name === "text") {
+        summary += data.delta;
+        const el = $("#incident-ai-text");
+        if (el) el.textContent = stripEmoji(summary);
+      } else if (name === "result") {
+        r = data;
+      } else if (name === "error") {
+        throw new Error(data.message);
+      }
+    });
+    if (!r) throw new Error("리포트가 끝까지 오지 않았습니다(연결 끊김)");
     lastIncidentMarkdown = r.markdown;
     box.className = "incident-result";
     box.innerHTML = mdToHtml(r.markdown);
