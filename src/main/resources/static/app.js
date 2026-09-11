@@ -256,7 +256,8 @@ function instanceCardHtml(i) {
         <div class="inst-field"><span class="k">버전</span><span class="v ver" id="ver-${i.id}" title="">—</span></div>
         <div class="inst-field"><span class="k">수집</span><span class="v"><button class="collect-toggle ${i.collectionEnabled ? "" : "isolated"}" data-id="${i.id}"
           title="수집 격리 토글 — 끄면 스냅샷 수집·운영 경보에서 이 인스턴스를 뺀다(등록은 유지)">${i.collectionEnabled ? "수집중" : "격리됨"}</button></span></div>
-        ${i.environment || i.region || i.cluster || i.teamLabel || i.consoleUrl ? `<div class="instance-meta">
+        ${i.environment || i.region || i.cluster || i.teamLabel || i.consoleUrl || i.appSchema ? `<div class="instance-meta">
+          ${i.appSchema ? `<span class="tag-badge" title="앱 스키마 — 모니터 계정이 딕셔너리·콘솔에서 볼 스키마(Oracle)">스키마 ${esc(i.appSchema)}</span>` : ""}
           ${i.environment ? `<span class="tag-badge tag-env" title="환경">${esc(i.environment)}</span>` : ""}
           ${i.region ? `<span class="tag-badge tag-region" title="리전">${esc(i.region)}</span>` : ""}
           ${i.cluster ? `<span class="tag-badge tag-cluster" title="클러스터">${esc(i.cluster)}</span>` : ""}

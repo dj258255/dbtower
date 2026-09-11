@@ -145,6 +145,17 @@ public class DatabaseInstance {
     @Column(length = 100)
     private String clusterLabel;
 
+    /**
+     * 앱 스키마(V39, 선택) — 모니터 계정과 앱 데이터의 소유 스키마가 다른 기종(현재 Oracle)에서 딕셔너리 조회와 콘솔 세션이 볼 스키마.
+     * null이면 전역 설정(dbtower.oracle.app-schema)을 따른다. 인스턴스마다 앱 스키마가 달라 전역 하나로는 모자랐다(VERIFICATION 133절).
+     */
+    @Column(length = 128)
+    private String appSchema;
+
+    public void updateAppSchema(String appSchema) {
+        this.appSchema = appSchema == null || appSchema.isBlank() ? null : appSchema.trim();
+    }
+
     /** 담당 라벨·콘솔 링크·노드 매핑·조직 태그 갱신 — 접속 정보와 별개의 운영 메타라 updateConnection과 분리. */
     public void updateMeta(String teamLabel, String consoleUrl, String nodeFilter,
                            String environment, String region, String clusterLabel) {

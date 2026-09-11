@@ -52,6 +52,7 @@ dbtower:
     # C-4: Oracle 통계(queryStats/slowQueries)를 볼 앱 스키마. 모니터 계정과 앱 스키마가 다를 때
     # (모니터≠앱) 필수 — 비우면 모니터 CURRENT_SCHEMA가 아니라 SYS/SYSTEM/DBSNMP/SYSMAN 시스템
     # 스키마만 제외하고 모든 앱 SQL을 본다. 특정 앱 스키마만 보려면 그 이름(대문자)을 지정한다.
+    # 인스턴스 등록값(appSchema, V39)이 있으면 그것이 먼저다 — 이 값은 등록값이 없는 Oracle 인스턴스의 기본값이다(133절).
     app-schema: ""
   pool:
     # 인스턴스별 HikariCP 최대 커넥션(B-7) — 한 인스턴스를 폴러 다수(스냅샷·운영경보·SLO·백업·이상·회귀·
