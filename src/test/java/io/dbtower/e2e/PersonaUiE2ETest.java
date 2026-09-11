@@ -157,6 +157,24 @@ class PersonaUiE2ETest {
     }
 
     @Test
+    void 워크벤치는_스키마와_채팅을_함께_보이고_티켓은_가운데_결과_탭에서_연다() {
+        // 147절 전에는 오른쪽 탭 하나에 채팅·스키마·변경 티켓이 있어 서로를 가렸다 — 테이블을 채팅에 붙이려면 탭을 오갔다
+        Page page = loginAs("e2e-requester");
+        page.navigate(base() + "/workbench.html?instance=" + instance.getId());
+        page.locator("#wb-tree").waitFor();
+        assertThat(page.locator("#wb-tree")).isVisible();
+        assertThat(page.locator("#wb-ask")).isVisible();
+        assertThat(page.locator(".wb-ctab")).hasCount(0);
+
+        page.navigate(base() + "/workbench.html?instance=" + instance.getId() + "&ticket=" + pending.getId());
+        page.locator("#wb-ticket .tk-head").waitFor();
+        assertThat(page.locator("#wb-pane-tickets")).isVisible();
+        assertThat(page.locator(".wb-rtab[data-pane='tickets']")).hasClass(Pattern.compile("active"));
+        assertThat(page.locator("#wb-ask")).isVisible();
+        assertThat(page.locator("#wb-tree")).isVisible();
+    }
+
+    @Test
     void 리뷰_카드의_승인_시각은_브라우저_시간대로_보이고_UTC_원문은_툴팁에_남는다() {
         Page page = loginAs("e2e-viewer");
         page.navigate(base() + "/?instance=" + instance.getId() + "&view=review");

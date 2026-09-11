@@ -65,7 +65,7 @@ const tickets = new TicketPanel({
   count: $("wb-ticket-count"),
   can: (cap) => can(cap),
   me: () => (state.me ? state.me.username : null),
-  onOpenSql: (sql) => { editor.value = sql; onEdit(); editor.focus(); },
+  onOpenSql: (sql) => { editor.value = sql; onEdit(); showPane("grid"); editor.focus(); },
   onProposeTicket: (sql, reason) => openTicket(sql, reason),
 });
 
@@ -162,7 +162,29 @@ function bindChrome() {
   $("wb-ticket-cancel").addEventListener("click", () => { $("wb-ticket-modal").hidden = true; });
   $("wb-ticket-ok").addEventListener("click", submitTicket);
   document.querySelectorAll(".wb-rtab").forEach((b) => b.addEventListener("click", () => showPane(b.dataset.pane)));
-  document.querySelectorAll(".wb-ctab").forEach((b) => b.addEventListener("click", () => showChatPane(b.dataset.cpane)));
+  $("wb-sheets-toggle").addEventListener("click", () => setSheetsOpen($("wb-sheets").hidden));
+  setSheetsOpen(readSheetsOpen());
+}
+
+// 워크시트 목록 접기 — 스키마 트리가 왼쪽 칸을 함께 쓰므로 목록을 접어 트리를 길게 볼 수 있게 한다. 사람마다의 편의라 브라우저에만 둔다
+const SHEETS_OPEN_KEY = "dbtower.workbench.sheetsOpen";
+
+function readSheetsOpen() {
+  try {
+    return localStorage.getItem(SHEETS_OPEN_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+function setSheetsOpen(open) {
+  $("wb-sheets").hidden = !open;
+  $("wb-sheets-toggle").setAttribute("aria-expanded", String(open));
+  try {
+    localStorage.setItem(SHEETS_OPEN_KEY, String(open));
+  } catch {
+    // 저장소를 막은 브라우저에서는 이번 화면에서만 기억한다
+  }
 }
 
 // ---------- 인스턴스·워크시트 ----------
@@ -190,7 +212,7 @@ async function selectInstance(id, sheetId) {
   drawCompareTargets();
   const wantedTicket = state.pendingTicket;
   state.pendingTicket = null;
-  tickets.load(id, wantedTicket).then(() => { if (wantedTicket) showChatPane("tickets"); });
+  tickets.load(id, wantedTicket).then(() => { if (wantedTicket) showPane("tickets"); });
 
   state.sheets = await request(`/api/workbench/instances/${encodeURIComponent(id)}/worksheets`);
   if (!state.sheets.length) {
@@ -359,12 +381,12 @@ async function openTableDetail(name) {
     ${d.ddl ? `<pre class="ai-sql td-ddl"><code>${highlight(d.ddl)}</code></pre>` : '<div class="muted">DDL을 확보하지 못했습니다.</div>'}`;
   box.onclick = (e) => {
     const col = e.target.closest("[data-col]");
-    if (col) { addChip({ type: "column", value: `${name}.${col.dataset.col}` }); showChatPane("chat"); return; }
+    if (col) { addChip({ type: "column", value: `${name}.${col.dataset.col}` }); revealChat(); return; }
     const b = e.target.closest("[data-td]");
     if (!b) return;
     if (b.dataset.td === "preview") { showPane("grid"); previewSql(preview); }
     if (b.dataset.td === "editor") { editor.value = preview; onEdit(); editor.focus(); }
-    if (b.dataset.td === "chip") { addChip({ type: "table", value: name }); showChatPane("chat"); }
+    if (b.dataset.td === "chip") { addChip({ type: "table", value: name }); revealChat(); }
   };
 }
 
@@ -499,7 +521,7 @@ function showFailure(e) {
     if (b.dataset.overlay === "fix") {
       hideOverlay();
       $("wb-ask").value = "이 SQL이 실패했어. 원인을 짚고 고쳐줘.";
-      showChatPane("chat");
+      revealChat();
       ask();
     }
   };
@@ -654,19 +676,18 @@ async function loadHistory() {
   }
 }
 
+const PANES = ["grid", "table", "compare", "tickets", "history"];
+
 function showPane(name) {
   document.querySelectorAll(".wb-rtab").forEach((b) => b.classList.toggle("active", b.dataset.pane === name));
-  $("wb-pane-grid").hidden = name !== "grid";
-  $("wb-pane-compare").hidden = name !== "compare";
-  $("wb-pane-table").hidden = name !== "table";
-  $("wb-pane-history").hidden = name !== "history";
+  PANES.forEach((p) => { $(`wb-pane-${p}`).hidden = p !== name; });
+  // 티켓을 검토할 때는 편집기를 줄여 전후 비교·실행 기록에 높이를 준다 — 편집기로 가져오기를 누르면 결과 탭으로 돌아오며 다시 펼쳐진다
+  $("wb-main").classList.toggle("is-reviewing", name === "tickets");
 }
 
-function showChatPane(name) {
-  document.querySelectorAll(".wb-ctab").forEach((b) => b.classList.toggle("active", b.dataset.cpane === name));
-  $("wb-cpane-chat").hidden = name !== "chat";
-  $("wb-cpane-schema").hidden = name !== "schema";
-  $("wb-cpane-tickets").hidden = name !== "tickets";
+// 채팅은 늘 보이는 칸이라 탭을 바꿀 필요가 없다. 한 열로 접힌 좁은 화면에서만 아래에 있으니 입력창까지 스크롤한다
+function revealChat() {
+  $("wb-ask").scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 // ---------- 변경 요청·인스턴스 간 비교 ----------
@@ -717,7 +738,7 @@ async function submitTicket() {
     });
     if (!created) throw new Error("티켓이 만들어졌는지 확인하지 못했습니다(연결 끊김) — 변경 티켓 목록을 새로고침해 보세요");
     $("wb-ticket-modal").hidden = true;
-    showChatPane("tickets");
+    showPane("tickets");
     await tickets.load(state.instance.id, created.id);
   } catch (e) {
     $("wb-ticket-error").textContent = `요청을 올리지 못했습니다: ${e.message}`;

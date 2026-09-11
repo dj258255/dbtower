@@ -23,31 +23,40 @@
 </header>
 
 <div class="wb-shell">
-  <!-- 좌: 인스턴스와 워크시트(TOI의 페이지에 해당 — 대화와 SQL 버전이 워크시트마다 쌓인다) -->
-  <aside class="wb-left">
-    <label class="wb-label" for="wb-instance">인스턴스</label>
-    <select id="wb-instance"></select>
-    <div id="wb-instance-note" class="wb-note" hidden></div>
-    <div class="wb-left-head">
-      <span class="wb-label">워크시트</span>
-      <button id="wb-sheet-add" class="btn btn-small" title="새 워크시트">+ 새로</button>
+  <!-- 좌: 무엇을 보나 — 인스턴스와 그 스키마, 워크시트. 스키마는 인스턴스에 딸린 길잡이라 채팅 탭이 아니라 인스턴스 아래에 둔다(147절) -->
+  <aside class="wb-left" aria-label="인스턴스와 스키마">
+    <div class="wb-side-block">
+      <label class="wb-side-title" for="wb-instance">인스턴스</label>
+      <select id="wb-instance"></select>
+      <div id="wb-instance-note" class="wb-note" hidden></div>
     </div>
-    <ul id="wb-sheets" class="wb-sheets"></ul>
-    <p class="hint wb-policy">조회는 조회 전용 계정·읽기 전용 트랜잭션으로 즉시 실행되고, 변경은 승인 티켓으로, 위험한 문장은 차단됩니다. AI는 SQL을 제안만 합니다. 모든 실행과 대화는 기록됩니다.</p>
+
+    <section class="wb-side-block wb-schema" aria-labelledby="wb-schema-title">
+      <div class="wb-side-head">
+        <span id="wb-schema-title" class="wb-side-title">스키마</span>
+        <span id="wb-schema-count" class="wb-count"></span>
+      </div>
+      <input id="wb-tree-filter" class="wb-search" type="search" placeholder="테이블·컬럼 검색" autocomplete="off">
+      <div id="wb-tree" class="wb-tree muted">인스턴스를 고르세요</div>
+      <p class="hint wb-tree-hint">클릭 이름 넣기 · 더블클릭 미리보기 · 선택 모드에서 채팅에 붙이기</p>
+    </section>
+
+    <section class="wb-side-block wb-sheets-block">
+      <div class="wb-side-head">
+        <button id="wb-sheets-toggle" class="wb-disclosure" aria-expanded="true" aria-controls="wb-sheets">
+          <span class="wb-chevron" aria-hidden="true"></span><span class="wb-side-title">워크시트</span>
+        </button>
+        <button id="wb-sheet-add" class="wb-mini-btn" title="새 워크시트">+ 새로</button>
+      </div>
+      <ul id="wb-sheets" class="wb-sheets"></ul>
+    </section>
   </aside>
 
-  <!-- 중: 편집기와 결과 미리보기 -->
-  <main class="wb-main">
+  <!-- 중: 편집기와 결과. 변경 티켓도 결과 탭 줄에 둔다 — 전후 비교·실행 기록이 넓어야 읽히고, 승인자는 채팅 없이 티켓만 본다(147절) -->
+  <main id="wb-main" class="wb-main">
     <div class="wb-sheetbar">
       <input id="wb-title" class="wb-title" maxlength="100" aria-label="워크시트 이름">
       <span id="wb-version" class="wb-version"></span>
-      <span class="wb-spacer"></span>
-      <div class="wb-result-tabs">
-        <button class="wb-rtab active" data-pane="grid">결과</button>
-        <button class="wb-rtab" data-pane="table">테이블 상세</button>
-        <button class="wb-rtab" data-pane="compare">인스턴스 비교</button>
-        <button class="wb-rtab" data-pane="history">내 실행 기록</button>
-      </div>
     </div>
     <div class="editor" id="wb-editor">
       <pre class="editor-highlight" aria-hidden="true"><code id="wb-highlight"></code></pre>
@@ -65,8 +74,17 @@
       </select>
       <button id="wb-export" class="btn btn-small">CSV 내보내기</button>
       <span id="wb-class" class="wb-class"></span>
+    </div>
+    <div class="wb-result-bar">
+      <div class="wb-result-tabs" aria-label="결과 영역">
+        <button class="wb-rtab active" data-pane="grid">결과</button>
+        <button class="wb-rtab" data-pane="table">테이블 상세</button>
+        <button class="wb-rtab" data-pane="compare">인스턴스 비교</button>
+        <button class="wb-rtab" data-pane="tickets">변경 티켓 <span id="wb-ticket-count" class="wb-count"></span></button>
+        <button class="wb-rtab" data-pane="history">내 실행 기록</button>
+      </div>
       <span class="wb-spacer"></span>
-      <span id="wb-status" class="muted"></span>
+      <span id="wb-status" class="muted wb-status"></span>
     </div>
     <section id="wb-pane-grid" class="wb-pane wb-preview">
       <div id="wb-grid" class="muted">문장을 실행하면 결과가 여기에 나옵니다.</div>
@@ -74,7 +92,7 @@
       <div id="wb-overlay" class="wb-overlay" hidden></div>
     </section>
     <section id="wb-pane-table" class="wb-pane" hidden>
-      <div id="wb-table" class="hint">스키마 탭에서 테이블 옆 "상세"를 누르면 행 수·크기·인덱스(카디널리티)·DDL을 여기서 봅니다.
+      <div id="wb-table" class="hint">왼쪽 스키마에서 테이블 옆 "상세"를 누르면 행 수·크기·인덱스(카디널리티)·DDL을 여기서 봅니다.
         열 이름을 누르면 채팅에 붙고, 미리보기로 바로 조회할 수 있습니다.</div>
     </section>
     <section id="wb-pane-compare" class="wb-pane" hidden>
@@ -89,21 +107,24 @@
       <div id="wb-compare" class="hint">두 인스턴스에서 같은 조회를 각자의 조회 계정·읽기 전용 트랜잭션으로 실행하고 결과를 행 단위로 비교합니다(스테이징 대 운영, 원본 대 복제).
         값 표시는 두 인스턴스 마스킹 규칙을 합쳐 가립니다. 행 상한에 걸리는 조회는 ORDER BY나 조건으로 좁혀야 비교가 흔들리지 않습니다.</div>
     </section>
+    <section id="wb-pane-tickets" class="wb-pane wb-tickets-pane" hidden>
+      <div id="wb-tickets" class="tk-list muted">인스턴스를 고르세요</div>
+      <div id="wb-ticket" class="tk-detail"></div>
+    </section>
     <section id="wb-pane-history" class="wb-pane" hidden>
       <div id="wb-history" class="muted"></div>
     </section>
   </main>
 
-  <!-- 우: 채팅 | 스키마 (TOI의 채팅 | 연결된 API) -->
-  <aside class="wb-right">
-    <div class="wb-right-tabs">
-      <button class="wb-ctab active" data-cpane="chat">채팅</button>
-      <button class="wb-ctab" data-cpane="schema">스키마 <span id="wb-schema-count" class="wb-count"></span></button>
-      <button class="wb-ctab" data-cpane="tickets">변경 티켓 <span id="wb-ticket-count" class="wb-count"></span></button>
-    </div>
-    <div id="wb-cpane-tickets" class="wb-cpane" hidden>
-      <div id="wb-tickets" class="tk-list muted">인스턴스를 고르세요</div>
-      <div id="wb-ticket" class="tk-detail"></div>
+  <!-- 우: AI 어시스턴트만 — 탭에 넣지 않는다. 스키마·결과에서 칩을 붙이는 동안 대화가 가려지지 않아야 한다(147절) -->
+  <aside class="wb-right" aria-label="AI 어시스턴트">
+    <div class="wb-right-head">
+      <span class="wb-ai-mark" aria-hidden="true"></span>
+      <div class="wb-right-titles">
+        <span class="wb-side-title">AI 어시스턴트</span>
+        <span class="wb-right-sub">SQL을 제안만 합니다. 실행은 편집기에서</span>
+      </div>
+      <span id="wb-backend" class="wb-backend"></span>
     </div>
     <div id="wb-cpane-chat" class="wb-cpane">
       <div id="wb-timeline" class="wb-timeline"></div>
@@ -114,16 +135,11 @@
           <button id="wb-pick" class="wb-icon-btn" title="선택 모드: 결과 열이나 스키마의 테이블·컬럼을 눌러 질문에 붙입니다" aria-pressed="false">선택</button>
           <label id="wb-share-wrap" class="wb-share" hidden><input type="checkbox" id="wb-share"> 결과 함께 보내기</label>
           <span class="wb-spacer"></span>
-          <span id="wb-backend" class="muted wb-backend"></span>
           <button id="wb-send" class="btn btn-primary btn-small">보내기</button>
         </div>
-        <div id="wb-share-note" class="hint wb-share-note"></div>
       </div>
-    </div>
-    <div id="wb-cpane-schema" class="wb-cpane" hidden>
-      <input id="wb-tree-filter" type="search" placeholder="테이블·컬럼 검색" autocomplete="off">
-      <div id="wb-tree" class="wb-tree muted">인스턴스를 고르세요</div>
-      <p class="hint">클릭: 편집기에 이름 넣기 · 더블클릭: 미리보기 쿼리 · 선택 모드에서 클릭: 채팅에 붙이기</p>
+      <div id="wb-share-note" class="hint wb-share-note"></div>
+      <p class="hint wb-policy">조회는 조회 전용 계정·읽기 전용 트랜잭션으로 즉시 실행되고, 변경은 승인 티켓으로, 위험한 문장은 차단됩니다. 모든 실행과 대화는 기록됩니다.</p>
     </div>
   </aside>
 </div>
