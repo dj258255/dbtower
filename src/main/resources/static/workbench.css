@@ -86,8 +86,9 @@ body.mode-workbench #mode-workbench { flex: 1; min-height: 0; display: flex; fle
 .tree-cols { margin: 2px 0 4px 15px; padding-left: 12px; border-left: 1px solid rgba(15, 23, 42, .1); }
 .tree-col { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; padding: 2px 6px; border-radius: 7px; font-size: 12.5px; }
 .tree-col:hover { background: rgba(255, 255, 255, .7); }
-.tree-col span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-col span:last-child { font-size: 11px; font-family: "JetBrains Mono", "SFMono-Regular", Menlo, monospace; white-space: nowrap; }
+/* 열 이름이 타입보다 먼저 산다 — 긴 타입(timestamp without time zone)이 폭을 다 가져가 ordered_at이 "o…"로 잘렸다(150절 사진) */
+.tree-col span:first-child { flex: 1 1 auto; min-width: 4.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-col span:last-child { flex: 0 1 auto; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; font-size: 11px; font-family: "JetBrains Mono", "SFMono-Regular", Menlo, monospace; white-space: nowrap; }
 /* "상세"는 행에 올렸을 때와 키보드로 들어왔을 때 보인다 — hover만이면 키보드 사용자에게 없는 버튼이다 */
 .tree-detail {
   border: 1px solid var(--glass-hairline); background: #fff; border-radius: 999px; font: inherit; font-size: 10.5px;
@@ -95,6 +96,29 @@ body.mode-workbench #mode-workbench { flex: 1; min-height: 0; display: flex; fle
 }
 .tree-row:hover .tree-detail, .tree-row:focus-within .tree-detail { visibility: visible; }
 .tree-detail:hover { color: var(--primary); border-color: rgba(79, 94, 247, .45); }
+
+/* 스키마 트리 깊이(150절) — 루트 줄, 테이블/뷰 묶음, 기본키 표시, 인덱스 노드 */
+.tree-root { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 0 6px 6px; min-width: 0; }
+.tree-root-name { font-size: 12.5px; font-weight: 700; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-root-meta { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.tree-groups > .tree-group + .tree-group { margin-top: 8px; }
+.tree-group-head {
+  display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: none; padding: 2px 6px 4px;
+  font: inherit; font-size: 11px; font-weight: 700; color: var(--muted); text-align: left;
+}
+button.tree-group-head { cursor: pointer; }
+.tree-group-head[aria-expanded="true"] .wb-chevron { transform: rotate(45deg) translate(-1px, -1px); }
+/* 뷰 아이콘 — 테이블 격자를 점선으로. 글자 표기("뷰 · ")는 title에 */
+.tree-name.is-view::before { border-style: dashed; background: rgba(79, 94, 247, .04); }
+.tree-pk {
+  display: inline-block; margin-left: 5px; padding: 0 4px; border-radius: 4px; vertical-align: 1px;
+  font-size: 9.5px; font-weight: 700; line-height: 14px; color: #8a4400; background: #fff1e0;
+}
+.tree-index-head { list-style: none; padding: 6px 6px 1px; font-size: 10.5px; font-weight: 700; }
+.tree-index { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; padding: 2px 6px; border-radius: 7px; font-size: 12px; }
+.tree-index:hover { background: rgba(255, 255, 255, .7); }
+.tree-index-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "JetBrains Mono", "SFMono-Regular", Menlo, monospace; font-size: 11.5px; }
+.tree-index span:last-child { font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
 .wb-sheets-block { flex: 0 1 auto; max-height: 36%; }
 .wb-disclosure { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; cursor: pointer; font: inherit; }

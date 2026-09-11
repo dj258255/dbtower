@@ -5,6 +5,7 @@ import io.dbtower.operator.model.BackupPolicy.BackupType;
 import io.dbtower.operator.model.StatsHealth;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.model.ColumnSchema;
+import io.dbtower.operator.model.TableSchema;
 import io.dbtower.operator.ConnectionPools;
 import io.dbtower.operator.model.DbParameter;
 import io.dbtower.operator.model.DeadlockEvent;
@@ -932,13 +933,14 @@ public class MySqlOperator extends AbstractJdbcOperator {
      */
     @Override
     public SchemaSnapshot describeSchema() {
+        // 뷰도 함께 읽고 종류를 붙인다 — 전에는 BASE TABLE만 걸러 뷰가 트리에서 빠졌다(150절)
         String columnsSql = """
                 SELECT c.TABLE_NAME, c.COLUMN_NAME, c.COLUMN_TYPE,
-                       c.IS_NULLABLE, c.ORDINAL_POSITION
+                       c.IS_NULLABLE, c.ORDINAL_POSITION, t.TABLE_TYPE
                 FROM information_schema.COLUMNS c
                 JOIN information_schema.TABLES t
                   ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
-                WHERE c.TABLE_SCHEMA = ? AND t.TABLE_TYPE = 'BASE TABLE'
+                WHERE c.TABLE_SCHEMA = ? AND t.TABLE_TYPE IN ('BASE TABLE', 'VIEW')
                 ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION
                 """;
         // NON_UNIQUE=0이 유니크. 인덱스는 컬럼마다 한 행이라 SEQ_IN_INDEX 순서로 복합 인덱스 순서 보존.
@@ -949,20 +951,26 @@ public class MySqlOperator extends AbstractJdbcOperator {
                 ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
                 """;
         try {
+            Map<String, String> kinds = new HashMap<>();
             List<SchemaSupport.ColumnRow> columns = jdbc().query(columnsSql,
-                    (rs, i) -> new SchemaSupport.ColumnRow(
-                            rs.getString("TABLE_NAME"),
-                            new ColumnSchema(rs.getString("COLUMN_NAME"), rs.getString("COLUMN_TYPE"),
-                                    "YES".equalsIgnoreCase(rs.getString("IS_NULLABLE")),
-                                    rs.getInt("ORDINAL_POSITION"))),
+                    (rs, i) -> {
+                        String table = rs.getString("TABLE_NAME");
+                        kinds.put(table, "VIEW".equalsIgnoreCase(rs.getString("TABLE_TYPE")) ? TableSchema.VIEW : TableSchema.TABLE);
+                        return new SchemaSupport.ColumnRow(table,
+                                new ColumnSchema(rs.getString("COLUMN_NAME"), rs.getString("COLUMN_TYPE"),
+                                        "YES".equalsIgnoreCase(rs.getString("IS_NULLABLE")),
+                                        rs.getInt("ORDINAL_POSITION")));
+                    },
                     instance.getDbName());
+            // InnoDB의 기본키 인덱스 이름은 항상 PRIMARY다
             List<SchemaSupport.IndexColumnRow> indexes = jdbc().query(indexesSql,
                     (rs, i) -> new SchemaSupport.IndexColumnRow(
                             rs.getString("TABLE_NAME"), rs.getString("INDEX_NAME"),
-                            rs.getString("COLUMN_NAME"), rs.getInt("NON_UNIQUE") == 0),
+                            rs.getString("COLUMN_NAME"), rs.getInt("NON_UNIQUE") == 0,
+                            "PRIMARY".equals(rs.getString("INDEX_NAME"))),
                     instance.getDbName());
             return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
-                    columns, indexes, SchemaSupport.DEFAULT_MAX_TABLES);
+                    columns, indexes, kinds, Map.of(), SchemaSupport.DEFAULT_MAX_TABLES);
         } catch (DataAccessException e) {
             throw new OperatorException("MySQL 스키마 조회 실패: " + e.getMessage(), e);
         }

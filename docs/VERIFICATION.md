@@ -7152,3 +7152,94 @@ DBTOWER_E2E=1 PersonaUiE2ETest   7/7
 ```
 
 두 모드 × 1512·1280·1100·400px 페이지 넘침 0·화면 오류 0은 새 main 위로 옮겨 다시 빌드한 jar에서 한 번 더 확인했다.
+
+## 150. 스키마 트리 깊이 — 루트, 테이블과 뷰, 기본키, 인덱스 (2026-09-12)
+
+### 왜
+
+사용자가 "DB 테이블 보는 것도 손대야 할 것 같다"고 했고, 스키마 트리 깊이·테이블 상세·데이터 그리드·관제 쪽 테이블 표시를 모두 골랐다.
+이번 절은 스키마 트리 깊이다(테이블 상세·그리드·관제 쪽은 다음 절). 트리는 테이블 -> 열 두 단계뿐이었다.
+
+조사에서 확인한 것:
+
+- 서버는 5기종 모두 인덱스를 이미 받아 오는데 트리에 보이지 않았다
+- 뷰 처리가 기종마다 달랐다 — MySQL은 BASE TABLE만(뷰 제외), Oracle은 테이블 딕셔너리로 거름(뷰 제외),
+  PostgreSQL·SQL Server는 information_schema.columns가 뷰를 섞어 테이블처럼 보였고(`pg_stat_statements`), MongoDB는 이름 목록에 뷰가 섞이면
+  `listIndexes`가 실패해 스냅샷 전체가 오류가 될 수 있었다
+- 기본키 표시는 어디에도 없었다
+- `describeSchema`를 쓰는 곳이 9곳(트리·구조 비교·중복 인덱스(Advisor·FinOps)·관련 테이블 구조·심층 진단·변경 실행 전후 구조·AI 보조·리뷰 스키마 대조).
+  뷰에는 인덱스가 없어 중복 인덱스 판정에 영향이 없고, 관련 구조·AI 보조에는 뷰가 보이는 편이 맞다
+
+### 바꾼 것
+
+- **모델**: `TableSchema`에 `kind`(TABLE/VIEW)와 `primaryKey`(열 순서대로). 3인자 생성자는 TABLE·기본키 없음으로 남겨 기존 호출 17곳이 그대로
+- **조립**: `SchemaSupport.build`가 종류 맵과(Oracle용) 기본키 맵을 받는다. 기본키는 인덱스 행의 primary 표시에서 얻고, 기존 시그니처는 빈 맵으로 위임
+
+| 기종 | 종류 | 기본키 |
+|---|---|---|
+| MySQL | `information_schema.TABLES.TABLE_TYPE` — BASE TABLE·VIEW 함께 | `STATISTICS.INDEX_NAME = 'PRIMARY'` |
+| PostgreSQL | `information_schema.tables.table_type` 조인 | `pg_index.indisprimary` |
+| SQL Server | `INFORMATION_SCHEMA.TABLES.TABLE_TYPE` | `sys.indexes.is_primary_key` |
+| Oracle | `{v}views` 이름(열은 `{v}tab_columns`에 뷰까지) | `{v}constraints` 'P' + `{v}cons_columns`(인덱스 딕셔너리엔 기본키 표시가 없다) |
+| MongoDB | `listCollections`의 `type`, 뷰는 `listIndexes`를 건너뜀 | `_id` |
+
+- **화면(워크벤치 왼쪽 스키마)**: 루트 줄(데이터베이스 · 테이블 n · 뷰 m), 테이블 묶음과 접힌 뷰 묶음(점선 표 아이콘),
+  펼친 테이블에 열(기본키 PK 표시)과 인덱스(이름·열·UNIQUE·PK), 검색이 인덱스 이름까지. 뷰에는 테이블 상세 버튼을 두지 않는다(테이블만 된다),
+  선택 모드에서 인덱스는 칩이 되지 않는다
+
+### 실측 — 라이브 5기종
+
+`GET /api/instances/{id}/schema`를 전(149절 main jar)과 후(이 변경)로. Oracle은 로컬 인스턴스에 앱 스키마가 등록되어 있지 않아 전에는 객체 0개였다 —
+샘플 테이블은 SAMPLE 스키마에 있다(시스템 계정 읽기 조회로 확인). 후 확인은 등록을 바꾸지 않고 실행 인자 `--dbtower.oracle.app-schema=SAMPLE`로만 줬다.
+
+```
+전
+ 1 POSTGRESQL  객체 5 — customers, orders, payment_events, pg_stat_statements, pg_stat_statements_info (종류·기본키 필드 없음)
+ 2 MYSQL       객체 4
+ 3 MONGODB     객체 4
+ 4 ORACLE      객체 0 (앱 스키마 미등록)
+ 5 MSSQL       객체 5
+후
+ 1 POSTGRESQL  TABLE 3 · VIEW 2  customers pk=[id] · orders pk=[id] · payment_events pk=[id] · pg_stat_statements VIEW(열 43) · pg_stat_statements_info VIEW(열 2)
+ 2 MYSQL       TABLE 4           change_it pk=[id] · console_ro_probe pk=[] · customers pk=[id] · orders pk=[id]
+ 3 MONGODB     TABLE 4           네 컬렉션 pk=[_id]
+ 4 ORACLE      TABLE 4 (SAMPLE)  CHANGE_IT pk=[ID] · CONSOLE_RO_PROBE pk=[] · CUSTOMERS pk=[ID] · USERS pk=[]
+ 5 MSSQL       TABLE 5           change_it·change_it_big·customers·orders pk=[id] · console_ro_probe pk=[]
+```
+
+실제 뷰로 확인된 것은 PostgreSQL의 확장 뷰 2개뿐이다. 나머지 네 기종의 샘플 스키마에는 뷰가 없어, 뷰 경로는 코드와 단위 테스트까지만 확인했다(대상 DB에 검증용 뷰를 만들지 않았다).
+
+### 화면 — 같은 스크립트로 전후
+
+`schema150/TreeShot150.java`(관리자 프록시, 1512x900, 인스턴스 1 PostgreSQL). orders를 펼치고 트리를 읽었다.
+
+```
+전  루트 없음 · 묶음 없음 · 테이블 줄 5개(뷰 2개가 섞임) · 기본키 표시 0 · 인덱스 노드 0
+    검색 "merchant" -> payment_events와 그 열만
+후  루트 "sample · 테이블 3 · 뷰 2" · 묶음 [테이블 3, 뷰 2(접힘)] · 테이블 줄 3개 · 기본키 표시 1(orders.id) · 인덱스 노드 2(orders)
+    검색 "merchant" -> payment_events, id(PK), merchant_id…, 인덱스 payment_events_pkey(id · UNIQUE · PK)
+```
+
+글자 대비(계산): PK 표시 #8a4400 / #fff1e0 6.5:1, 묶음 머리·루트 개수 #5b6475 / 유리 5.12:1, 인덱스 열 #5b6475 / 행 강조 5.71:1.
+
+두 모드 × 1512·1280·1100·400px 페이지 넘침 0·화면 오류(pageerror·console.error) 0(149절 스크립트 재사용).
+
+첫 사진에서 찾은 것 하나: 긴 타입(`timestamp without time zone`)이 폭을 다 가져가 열 이름 `ordered_at`이 "o…"로 잘렸다(전·후 모두).
+이름이 먼저 살고 타입이 55%까지만 쓰다 말줄임하도록 고쳤다.
+
+### 화면 사진
+
+![전 — 테이블 -> 열 두 단계, 뷰 2개가 테이블처럼 섞이고 ordered_at이 "o…"로 잘림](images/webui/145-schema-tree-before.jpg)
+![후 — 루트 줄, 테이블/뷰 묶음, orders.id PK, 인덱스 2, 열 이름이 타입보다 먼저](images/webui/146-schema-tree-after.jpg)
+
+### 회귀
+
+```
+./scripts/check-conventions.sh   규약 검사 전부 통과
+./gradlew test                   tests 849 skipped 26 failures 0 errors 0 (149절 844 -> 849)
+  SchemaSupportTest 5            종류 맵으로 뷰 가르기·primary 인덱스 행에서 기본키, 복합 기본키 순서, Oracle식 기본키 맵,
+                                 예전 호출은 전부 테이블·기본키 없음, 상한에 잘린 테이블의 기본키 행 버림
+  SchemaDiffServiceTest·DuplicateIndexAdvisorTest·RedundantIndexAnalyzerTest·DeepAnalyzerTest·WorkbenchAssistantTest
+                                 3인자 TableSchema 생성자 그대로 통과(43건)
+DBTOWER_E2E=1 PersonaUiE2ETest   7/7 — 워크벤치 트리 선택자(.tree-name[data-table], [data-toggle])를 쓰는 흐름 포함
+```
