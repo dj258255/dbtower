@@ -256,7 +256,8 @@ function instanceCardHtml(i) {
         <div class="inst-field"><span class="k">버전</span><span class="v ver" id="ver-${i.id}" title="">—</span></div>
         <div class="inst-field"><span class="k">수집</span><span class="v"><button class="collect-toggle ${i.collectionEnabled ? "" : "isolated"}" data-id="${i.id}"
           title="수집 격리 토글 — 끄면 스냅샷 수집·운영 경보에서 이 인스턴스를 뺀다(등록은 유지)">${i.collectionEnabled ? "수집중" : "격리됨"}</button></span></div>
-        ${i.environment || i.region || i.cluster || i.teamLabel || i.consoleUrl ? `<div class="instance-meta">
+        ${i.environment || i.region || i.cluster || i.teamLabel || i.consoleUrl || i.appSchema ? `<div class="instance-meta">
+          ${i.appSchema ? `<span class="tag-badge" title="앱 스키마 — 모니터 계정이 딕셔너리·콘솔에서 볼 스키마(Oracle)">스키마 ${esc(i.appSchema)}</span>` : ""}
           ${i.environment ? `<span class="tag-badge tag-env" title="환경">${esc(i.environment)}</span>` : ""}
           ${i.region ? `<span class="tag-badge tag-region" title="리전">${esc(i.region)}</span>` : ""}
           ${i.cluster ? `<span class="tag-badge tag-cluster" title="클러스터">${esc(i.cluster)}</span>` : ""}
@@ -1119,6 +1120,18 @@ function setChartMetric(metric) {
   drawChart();
 }
 
+// 누적 통계의 행 지표는 기종마다 세는 것이 다르다(MySQL 검사한 행, PostgreSQL 돌려준 행, SQL Server 논리 읽기 등) —
+// "읽은 행수"로 뭉뚱그리면 PostgreSQL에서 호출이 늘어난 것을 스캔 증가로 읽게 된다(132절). 서버가 알려준 이름으로 적는다.
+const rowsMetricCache = new Map();
+function rowsMetricLabel(instanceId) {
+  if (!rowsMetricCache.has(instanceId)) {
+    rowsMetricCache.set(instanceId, api(`/api/instances/${instanceId}/rows-metric`).then((m) => m.label).catch(() => "행 지표"));
+  }
+  return rowsMetricCache.get(instanceId);
+}
+// 1ms 미만 평균은 소수 둘째 자리 표시가 0으로 뭉갠다 — 그 경우만 넷째 자리까지
+const msDigits = (...values) => (values.some((v) => v > 0 && v < 1) ? 4 : 2);
+
 // ---------- Top Query: 단순 조회 ----------
 async function runQuery() {
   state.compareMode = false;
@@ -1134,20 +1147,21 @@ async function runQuery() {
   } else {
     sum.hidden = true;
   }
-  const stats = await api(`/api/instances/${state.instance.id}/query-stats?limit=20`);
+  const [stats, rowsLabel] = await Promise.all([
+    api(`/api/instances/${state.instance.id}/query-stats?limit=20`), rowsMetricLabel(state.instance.id)]);
   const table = $("#top-table");
-  // Call/sec는 스냅샷 차분이라 이력 없으면 null → "—". Latency/Row Examined는 누적÷호출수(평균).
+  // Call/sec는 스냅샷 차분이라 이력 없으면 null → "—". Latency/행 지표는 누적÷호출수(평균).
   // Plan 컬럼은 값이 있는 기종(MongoDB — profiler가 계획 요약을 저장)에서만 그린다.
   const hasPlan = stats.some((q) => q.plan);
   table.querySelector("thead").innerHTML = `
     <tr><th>Load</th><th>Query</th><th class="num">Call/sec</th>
-        <th class="num">Latency(ms)</th><th class="num">Row Examined (Avg)</th>${hasPlan ? "<th>Plan</th>" : ""}</tr>`;
+        <th class="num">Latency(ms)</th><th class="num">${esc(rowsLabel)} (평균)</th>${hasPlan ? "<th>Plan</th>" : ""}</tr>`;
   table.querySelector("tbody").innerHTML = stats.map((q, idx) => `
     <tr data-idx="${idx}">
       <td class="num">${fmtNum(q.loadPct)}%</td>
       <td class="qtext" title="${esc(q.queryText)}">${esc(q.queryText)}</td>
       <td class="num">${q.callsPerSec == null ? '<span class="muted">—</span>' : fmtNum(q.callsPerSec)}</td>
-      <td class="num">${fmtNum(q.avgLatencyMs)}</td>
+      <td class="num">${fmtNum(q.avgLatencyMs, msDigits(q.avgLatencyMs))}</td>
       <td class="num">${fmtNum(q.rowsExaminedAvg, 0)}</td>
       ${hasPlan ? `<td>${q.plan ? `<span class="plan-badge ${/COLLSCAN/i.test(q.plan) ? "plan-bad" : "plan-ok"}">${esc(q.plan)}</span>` : '<span class="muted">—</span>'}</td>` : ""}
     </tr>`).join("");
@@ -1161,6 +1175,7 @@ async function runCompare() {
   closeDetail();
   const qs = `baseFrom=${toApiTime(p("#base-from"))}&baseTo=${toApiTime(p("#base-to"))}&targetFrom=${toApiTime(p("#target-from"))}&targetTo=${toApiTime(p("#target-to"))}`;
   let result;
+  const rowsLabel = await rowsMetricLabel(state.instance.id);
   try {
     result = await api(`/api/instances/${state.instance.id}/compare?${qs}`);
   } catch (e) {
@@ -1176,7 +1191,7 @@ async function runCompare() {
   sum.innerHTML = `
     <span class="summary-item">호출량 ${pct(result.totalCallsChangePct)}</span>
     <span class="summary-item">평균 레이턴시 ${pct(result.avgLatencyChangePct)}</span>
-    <span class="summary-item">읽은 행수 ${pct(result.rowsExaminedChangePct)}</span>
+    <span class="summary-item">${esc(rowsLabel)} ${pct(result.rowsExaminedChangePct)}</span>
     <span class="summary-item">신규 쿼리 <b>${result.newQueryCount}</b>개</span>
     <span class="summary-item muted">조회하는 시간 범위(KST): ${esc($("#target-from").value.replace("T", " "))} ~ ${esc($("#target-to").value.slice(11))}
       / 비교하는 시간 범위(KST): ${esc($("#base-from").value.replace("T", " "))} ~ ${esc($("#base-to").value.slice(11))}</span>`;
@@ -1194,13 +1209,13 @@ async function runCompare() {
   const rows = [...result.queries].sort((a, b) => targetLoad(b) - targetLoad(a));
   const table = $("#top-table");
   table.querySelector("thead").innerHTML = `
-    <tr><th class="num">Load</th><th>Query</th><th class="num">QPS</th><th class="num">Latency(ms)</th><th class="num">Rows/call</th></tr>`;
+    <tr><th class="num">Load</th><th>Query</th><th class="num">QPS</th><th class="num">Latency(ms)</th><th class="num">${esc(rowsLabel)}/call</th></tr>`;
   table.querySelector("tbody").innerHTML = rows.map((q, idx) => `
     <tr data-idx="${idx}" class="${q.newQuery ? "new-query" : ""}">
       <td>${deltaCell(baseLoad(q), targetLoad(q), loadPctChange(baseLoad(q), targetLoad(q)))}</td>
       <td class="qtext" title="${esc(q.queryText)}">${q.newQuery ? '<span class="badge-new">NEW</span>' : ""}${esc(q.queryText)}</td>
       <td>${deltaCell(q.baseQps, q.targetQps, q.qpsChangePct)}</td>
-      <td>${deltaCell(q.baseAvgMs, q.targetAvgMs, q.latencyChangePct)}</td>
+      <td>${deltaCell(q.baseAvgMs, q.targetAvgMs, q.latencyChangePct, msDigits(q.baseAvgMs, q.targetAvgMs))}</td>
       <td>${deltaCell(q.baseRowsPerCall, q.targetRowsPerCall, q.rowsPerCallChangePct, 0)}</td>
     </tr>`).join("");
   bindRowClicks(rows);
@@ -1673,31 +1688,19 @@ async function loadBackupInfo() {
   }
 }
 
-// MCP 카드 — 도구 목록을 실제 /mcp 엔드포인트(tools/list)에서 받아와 그린다.
-// 하드코딩하지 않는 이유: 이 목록이 곧 "MCP가 살아 있다"의 증거가 되기 때문.
+// MCP 카드 — 도구 목록을 MCP 코어의 tools/list에서 받아와 그린다.
+// 하드코딩하지 않는 이유: 이 목록이 곧 "MCP 코어가 이 도구들을 내놓는다"의 증거가 되기 때문.
+// /mcp는 Bearer 전용 체인(91절)이라 콘솔 세션으로 부르면 401이어서 카드가 안내 문구만 보였다 —
+// 같은 코어의 목록을 세션 경로로 받는다(132절).
 async function loadMcpTools() {
   const box = $("#mcp-tools");
   try {
-    // api() 래퍼를 쓰지 않는 이유 — /mcp는 세션이 아니라 OAuth/토큰 전용 stateless 체인(91절)이라
-    // 콘솔 세션으로는 401이 정상이다. 래퍼의 401 처리(로그인 리다이렉트)를 타면 로그인한 사용자가
-    // 페이지 진입마다 로그인으로 튕기는 회귀가 된다(실측) — 여기서는 401을 안내 문구로 삼는다.
-    const r = await fetch("/mcp", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
-    });
-    if (r.status === 401) {
-      box.textContent = "MCP는 토큰 인증 전용입니다 — 클라이언트에서 OAuth 브라우저 로그인 또는 API 토큰으로 접속하세요";
-      return;
-    }
-    if (!r.ok) throw new Error(`${r.status}`);
-    const data = await r.json();
+    const tools = await api("/api/mcp/tools");
     box.classList.remove("muted");
-    box.innerHTML = data.result.tools.map((t) => `
+    box.innerHTML = tools.map((t) => `
       <div class="mcp-tool"><b>${esc(t.name)}</b><p>${esc(t.description)}</p></div>`).join("");
   } catch (e) {
-    box.textContent = e.message.startsWith("403")
-      ? "MCP 카드는 ADMIN 역할만 볼 수 있습니다 (서비스 토큰 노출 방지)"
-      : `도구 목록 조회 실패: ${e.message}`;
+    box.textContent = `도구 목록 조회 실패: ${e.message}`;
   }
 }
 
@@ -2319,7 +2322,12 @@ async function loadReviews() {
   box.innerHTML = rows.map((r) => {
     const badge = r.status === "PENDING" ? '<span class="rv-pending">대기</span>'
       : r.status === "APPROVED" ? '<span class="rv-approved">승인</span>'
+      : r.status === "EXECUTED" ? '<span class="rv-approved">실행됨</span>'
+      : r.status === "ROLLED_BACK" ? '<span class="rv-pending">되돌림</span>'
+      : r.status === "EXECUTING" || r.status === "ROLLING_BACK" ? '<span class="rv-pending">실행 중</span>'
+      : r.status === "CANCELLED" ? '<span class="rv-rejected">취소</span>'
       : '<span class="rv-rejected">반려</span>';
+    const workbenchLink = `<a class="muted" href="/workbench.html?instance=${esc(encodeURIComponent(r.instanceId))}&amp;ticket=${esc(encodeURIComponent(r.id))}">워크벤치에서 드라이런·실행·되돌리기</a>`;
     const findings = (r.findings || []).map((f) => `<li>${esc(f)}</li>`).join("");
     const ai = r.aiOpinion ? `<div class="rv-ai"><b>AI 1차 소견:</b> ${esc(r.aiOpinion)}</div>` : "";
     const limited = r.parseLimited ? '<div class="rv-limited">다중 문장·복잡 구문 — 규칙 판정이 불완전할 수 있습니다(사람이 전체 확인).</div>' : "";
@@ -2332,7 +2340,7 @@ async function loadReviews() {
          </div>`
       : (r.status === "PENDING" ? '<div class="hint">승인/반려는 ADMIN만 가능합니다.</div>' : "");
     return `<div class="rv-item">
-      <div class="rv-head">#${r.id} ${badge} <span class="muted">${esc(r.requester)} · rules v${r.rulesVersion}</span></div>
+      <div class="rv-head">#${r.id} ${badge} <span class="muted">${esc(r.requester)} · rules v${r.rulesVersion}</span> ${workbenchLink}</div>
       <pre class="rv-sql codeblock">${esc(r.targetSql)}</pre>
       ${r.reason ? `<div class="rv-reason muted">사유: ${esc(r.reason)}</div>` : ""}
       <ul class="rv-findings">${findings}</ul>

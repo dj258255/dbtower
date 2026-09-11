@@ -1,4 +1,4 @@
-package io.dbtower.insight.internal;
+package io.dbtower.insight;
 
 import io.dbtower.operator.model.ColumnSchema;
 import io.dbtower.operator.model.IndexSchema;

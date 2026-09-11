@@ -70,7 +70,9 @@ public class AiAnalyzer {
         /** 스키마 변경 리뷰 게이트 1차 소견 (ReviewService) */
         REVIEW,
         /** D3 자연어 근본원인 진단 루프 (DiagnosisService) — 1건이 여러 호출이라 비용 구조가 다르다 */
-        DIAGNOSE;
+        DIAGNOSE,
+        /** 워크벤치 AI 보조 (WorkbenchAssistant) — 사람 대화 한 턴에 1회, SQL 제안만 한다 */
+        WORKBENCH;
 
         String tag() {
             return name().toLowerCase(Locale.ROOT);

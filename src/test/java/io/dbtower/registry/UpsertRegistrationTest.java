@@ -26,7 +26,7 @@ class UpsertRegistrationTest {
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         DatabaseInstance result = service.upsert("prod-orders", DbmsType.MYSQL,
-                "10.0.0.1", 3306, "orders", "monitor", "pw", false, null, null, null, null, null, null);
+                "10.0.0.1", 3306, "orders", "monitor", "pw", false, null, null, null, null, null, null, null);
 
         assertEquals("prod-orders", result.getName());
         verify(operations).health(any());
@@ -43,7 +43,7 @@ class UpsertRegistrationTest {
 
         // 같은 이름으로 host가 바뀐 재등록(예: 페일오버로 새 엔드포인트)
         DatabaseInstance result = service.upsert("prod-orders", DbmsType.MYSQL,
-                "10.0.0.2", 3306, "orders", "monitor", "new-pw", false, "db-core", "https://grafana.example/d/1", null, null, null, null);
+                "10.0.0.2", 3306, "orders", "monitor", "new-pw", false, "db-core", "https://grafana.example/d/1", null, null, null, null, null);
 
         assertEquals("10.0.0.2", result.getHost());
         assertEquals("new-pw", result.getPassword());
@@ -60,11 +60,28 @@ class UpsertRegistrationTest {
 
         DatabaseInstance result = service.upsert("prod-orders", DbmsType.MYSQL,
                 "10.0.0.1", 3306, "orders", "monitor", "pw", false, null, null, null,
-                "prod", "ap-northeast-2", "orders-cluster");
+                "prod", "ap-northeast-2", "orders-cluster", null);
 
         assertEquals("prod", result.getEnvironment());
         assertEquals("ap-northeast-2", result.getRegion());
         assertEquals("orders-cluster", result.getClusterLabel());
+    }
+
+    @Test
+    void 앱_스키마는_재등록에서_갱신되고_빈_값은_미지정으로_둔다() {
+        DatabaseInstance existing = new DatabaseInstance("prod-ora", DbmsType.ORACLE,
+                "10.0.0.1", 1521, "FREEPDB1", "monitor", "pw");
+        when(repository.findByName("prod-ora")).thenReturn(java.util.Optional.of(existing));
+        when(operations.health(any())).thenReturn(HealthStatus.up("v1", 1));
+        when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        DatabaseInstance withSchema = service.upsert("prod-ora", DbmsType.ORACLE, "10.0.0.1", 1521, "FREEPDB1",
+                "monitor", "pw", false, null, null, null, null, null, null, " SAMPLE ");
+        assertEquals("SAMPLE", withSchema.getAppSchema());
+
+        DatabaseInstance cleared = service.upsert("prod-ora", DbmsType.ORACLE, "10.0.0.1", 1521, "FREEPDB1",
+                "monitor", "pw", false, null, null, null, null, null, null, "  ");
+        assertNull(cleared.getAppSchema(), "빈 값은 전역 설정을 따르게 미지정으로 둔다");
     }
 
     @Test
@@ -75,7 +92,7 @@ class UpsertRegistrationTest {
         when(operations.health(any())).thenReturn(HealthStatus.down("접속 불가"));
 
         assertThrows(IllegalArgumentException.class, () -> service.upsert("prod-orders",
-                DbmsType.MYSQL, "10.0.0.9", 3306, "orders", "monitor", "pw", false, null, null, null, null, null, null));
+                DbmsType.MYSQL, "10.0.0.9", 3306, "orders", "monitor", "pw", false, null, null, null, null, null, null, null));
         verify(repository, never()).save(any());
     }
 }

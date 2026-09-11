@@ -1,5 +1,14 @@
 package io.dbtower.operator.internal;
 
+import com.mongodb.MongoException;
+import io.dbtower.operator.model.ChangeOutcome;
+import io.dbtower.operator.model.ChangePlan;
+import io.dbtower.operator.model.QueryResult;
+import io.dbtower.operator.model.ResultColumn;
+import io.dbtower.operator.model.RevertPlan;
+import io.dbtower.registry.ConsoleCredential;
+import io.dbtower.registry.CredentialPurpose;
+import java.util.LinkedHashSet;
 import io.dbtower.operator.BackupCommands;
 import io.dbtower.operator.model.BackupPolicy;
 import io.dbtower.operator.model.BackupPolicy.BackupType;
@@ -14,6 +23,7 @@ import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
 import io.dbtower.operator.model.QueryStat;
+import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.RestoreSupport;
 import io.dbtower.operator.model.RestoreVerification;
@@ -123,6 +133,12 @@ public class MongoOperator implements DbmsOperator {
      * system.profile을 queryHash 단위로 집계 — performance_schema digest 집계와 같은 역할.
      * queryHash가 없는 연산(insert 등)은 op:ns로 묶는다.
      */
+    /** system.profile의 docsExamined — 검사한 문서 수다 */
+    @Override
+    public RowsMetric rowsMetric() {
+        return RowsMetric.EXAMINED_DOCUMENTS;
+    }
+
     @Override
     public List<QueryStat> queryStats(int limit) {
         List<org.bson.conversions.Bson> pipeline = List.of(
@@ -452,6 +468,132 @@ public class MongoOperator implements DbmsOperator {
         } catch (Exception e) {
             throw new OperatorException("MongoDB 실행계획 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 워크벤치 콘솔 조회 — MongoDB에는 JDBC의 읽기 전용 트랜잭션에 해당하는 장치가 없어 경계를 세 겹으로 둔다:
+     * 읽기 명령 허용 목록(find·aggregate·count·distinct), 결과를 컬렉션에 쓰는 집계 스테이지($out·$merge) 거부,
+     * read 롤만 가진 콘솔 계정. 실행은 maxTimeMS로 서버에서 끊고 상한+1건까지만 받는다.
+     */
+    @Override
+    public QueryResult executeReadOnly(ConsoleCredential credential, String commandJson, int rowCap, int timeoutSeconds) {
+        Document command;
+        try {
+            command = Document.parse(commandJson);
+        } catch (Exception e) {
+            throw new IllegalArgumentException(
+                    "MongoDB 콘솔 입력은 명령 JSON이어야 합니다 — 예: {\"find\": \"users\", \"filter\": {}}");
+        }
+        String first = command.keySet().stream().findFirst().orElse("");
+        if (!EXPLAINABLE.contains(first)) {
+            throw new IllegalArgumentException("콘솔은 읽기 명령만 실행합니다: " + EXPLAINABLE);
+        }
+        int cap = DbmsOperator.clampLimit(rowCap);
+        int fetch = cap + 1;
+        if ("aggregate".equals(first)) {
+            List<Document> pipeline = new ArrayList<>(command.getList("pipeline", Document.class, List.of()));
+            if (pipeline.stream().anyMatch(stage -> stage.containsKey("$out") || stage.containsKey("$merge"))) {
+                throw new IllegalArgumentException("$out·$merge 스테이지는 결과를 컬렉션에 쓰므로 콘솔에서 실행하지 않습니다");
+            }
+            pipeline.add(new Document("$limit", fetch));
+            command.put("pipeline", pipeline);
+            command.put("cursor", new Document("batchSize", fetch));
+        } else if ("find".equals(first)) {
+            int requested = command.get("limit") instanceof Number n && n.intValue() > 0
+                    ? Math.min(n.intValue(), fetch) : fetch;
+            command.put("limit", requested);
+            command.put("batchSize", requested);
+            command.put("singleBatch", true);
+        }
+        command.put("maxTimeMS", Math.max(1, timeoutSeconds) * 1000L);
+        long start = System.nanoTime();
+        try {
+            MongoClient client = clients.console(instance, CredentialPurpose.READ, credential);
+            Document result = client.getDatabase(instance.getDbName()).runCommand(command);
+            List<Document> docs = switch (first) {
+                case "count" -> List.of(new Document("n", result.get("n")));
+                case "distinct" -> result.getList("values", Object.class, List.of()).stream()
+                        .map(v -> new Document("value", v)).toList();
+                default -> result.get("cursor", Document.class).getList("firstBatch", Document.class, List.of());
+            };
+            return consoleResult(docs, cap, start);
+        } catch (RuntimeException e) {
+            throw new OperatorException("MongoDB 콘솔 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /** 승인 변경 실행 — 트랜잭션·문서 사본·불변식은 {@link MongoChangeRunner}. 변경 계정(WRITE) 클라이언트로만 닿는다 */
+    @Override
+    public ChangeOutcome executeChange(ConsoleCredential credential, ChangePlan plan) {
+        try {
+            return new MongoChangeRunner(clients.console(instance, CredentialPurpose.WRITE, credential), instance.getDbName())
+                    .execute(plan);
+        } catch (MongoException e) {
+            throw new OperatorException("MongoDB 변경 실행 실패: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public RevertPlan.Outcome revertChange(ConsoleCredential credential, RevertPlan plan) {
+        try {
+            return new MongoChangeRunner(clients.console(instance, CredentialPurpose.WRITE, credential), instance.getDbName())
+                    .revert(plan);
+        } catch (MongoException e) {
+            throw new OperatorException("MongoDB 되돌리기 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /** 역변경 제안의 인덱스 제거 — SQL이 아니라 워크벤치가 받는 명령 JSON으로 */
+    @Override
+    public String dropIndexStatement(String table, String index) {
+        return new Document("dropIndexes", table).append("index", index).toJson();
+    }
+
+    /** drop 명령은 워크벤치 허용 목록 밖이라(분류기 MONGO_UNKNOWN) 제안하지 않는다 */
+    @Override
+    public String dropTableStatement(String table) {
+        return null;
+    }
+
+    /** 스키마리스라 열을 지우는 DDL이 없다 */
+    @Override
+    public String dropColumnStatement(String table, String column) {
+        return null;
+    }
+
+    /** 문서 목록을 표로 편다 — 열은 상한 안 문서들의 최상위 키 합집합(등장 순), 중첩 값은 JSON 문자열. */
+    private static QueryResult consoleResult(List<Document> docs, int cap, long startNanos) {
+        List<Document> kept = docs.size() > cap ? docs.subList(0, cap) : docs;
+        LinkedHashSet<String> keys = new LinkedHashSet<>();
+        kept.forEach(d -> keys.addAll(d.keySet()));
+        List<ResultColumn> columns = keys.stream().map(k -> new ResultColumn(k, k, "bson")).toList();
+        List<List<Object>> rows = new ArrayList<>(kept.size());
+        for (Document d : kept) {
+            List<Object> row = new ArrayList<>(keys.size());
+            for (String k : keys) {
+                row.add(consoleValue(d.get(k)));
+            }
+            rows.add(row);
+        }
+        return new QueryResult(columns, rows, docs.size() > cap, (System.nanoTime() - startNanos) / 1_000_000);
+    }
+
+    private static Object consoleValue(Object v) {
+        if (v instanceof org.bson.types.Decimal128 d) {
+            return d.bigDecimalValue();
+        }
+        if (v == null || v instanceof String || v instanceof Number || v instanceof Boolean) {
+            return v instanceof String s ? JdbcValues.clip(s) : v;
+        }
+        if (v instanceof org.bson.types.ObjectId id) {
+            return id.toHexString();
+        }
+        if (v instanceof java.util.Date date) {
+            return date.toInstant().toString();
+        }
+        // 중첩 문서·배열은 JSON으로 — 한 필드로 감싸 직렬화한 뒤 값 부분만 남긴다
+        String json = new Document("v", v).toJson();
+        return JdbcValues.clip(json.substring(json.indexOf(':') + 1, json.length() - 1).strip());
     }
 
     /**

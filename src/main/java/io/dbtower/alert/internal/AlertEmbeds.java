@@ -77,6 +77,18 @@ public final class AlertEmbeds {
                 approved ? GREEN : GRAY, fields);
     }
 
+    /** 승인 티켓 실행·되돌리기 결과 카드 — 누가 몇 행을 바꿨는지만 싣는다(행 값은 콘솔에서 마스킹을 거쳐 본다). */
+    public static Embed forReviewExecution(DatabaseInstance instance, long reviewId, boolean rolledBack,
+                                           String actor, long affectedRows) {
+        List<Embed.Field> fields = new ArrayList<>();
+        fields.add(new Embed.Field("결과", rolledBack ? "되돌림" : "실행", true));
+        fields.add(new Embed.Field(rolledBack ? "되돌린 사람" : "실행자", actor, true));
+        fields.add(new Embed.Field("인스턴스", instance.getName() + " (" + instance.getType() + ")", true));
+        fields.add(new Embed.Field(rolledBack ? "되돌린 행" : "영향 행", String.valueOf(affectedRows), true));
+        return new Embed("DBTower 변경 티켓 #" + reviewId + " " + (rolledBack ? "되돌림" : "실행") + " · " + instance.getName(),
+                rolledBack ? GRAY : GREEN, fields);
+    }
+
     /** 인시던트 리포트 요약 카드 (B4) — 전문은 콘솔 다운로드, 카드엔 AI 요약·구간·딥링크만. */
     public static Embed forIncident(DatabaseInstance instance, String from, String to,
                                     String aiSummary, String deeplink) {

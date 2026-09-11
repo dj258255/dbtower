@@ -1,9 +1,21 @@
 package io.dbtower.operator.internal;
 
+import io.dbtower.operator.OperatorException;
+import io.dbtower.operator.model.ChangeOutcome;
+import io.dbtower.operator.model.ChangePlan;
+import io.dbtower.operator.model.QueryResult;
+import io.dbtower.operator.model.RevertPlan;
+import io.dbtower.registry.ConsoleCredential;
+import io.dbtower.registry.CredentialPurpose;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.util.List;
 import io.dbtower.operator.BackupCommands;
 import io.dbtower.operator.model.BackupResult;
 import io.dbtower.operator.ConnectionPools;
+import io.dbtower.operator.JdbcConnectOptions;
 import io.dbtower.operator.DbmsOperator;
+import io.dbtower.operator.SqlCanonical;
 import io.dbtower.operator.model.IndexAdvice;
 import io.dbtower.operator.model.LatencyPercentile;
 import io.dbtower.operator.model.RestoreVerification;
@@ -40,8 +52,13 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
     /** 기종별 버전 조회 쿼리 */
     protected abstract String versionSql();
 
+    /** 기종별 접속 조정 — 로그인 단계 드라이버 속성과 로그인 뒤 네트워크 읽기 제한. 기본은 URL에 건 값 그대로다. */
+    protected JdbcConnectOptions connectOptions() {
+        return JdbcConnectOptions.DEFAULT;
+    }
+
     protected Connection open() throws SQLException {
-        return pools.getConnection(instance, jdbcUrl());
+        return pools.getConnection(instance, jdbcUrl(), connectOptions());
     }
 
     /**
@@ -53,7 +70,7 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
      * 되면 안 된다"는 원칙. 개별 메서드(explainAnalyze 등)가 더 짧게 덮어쓸 수 있다.
      */
     protected JdbcTemplate jdbc() {
-        JdbcTemplate t = new JdbcTemplate(pools.getDataSource(instance, jdbcUrl()));
+        JdbcTemplate t = new JdbcTemplate(pools.getDataSource(instance, jdbcUrl(), connectOptions()));
         t.setQueryTimeout(pools.queryTimeoutSeconds());
         return t;
     }
@@ -75,9 +92,24 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
             //
             // health()의 계약은 "떠 있나 아닌가"다 — 어떤 이유로 실패하든 답은 down이다.
             // 사유는 메시지에 실어 보내므로 원인이 감춰지지도 않는다.
-            String cause = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            return HealthStatus.down(cause);
+            return HealthStatus.down(failureMessage(e));
         }
+    }
+
+    /**
+     * 풀이 첫 연결을 늦게 열면(134절) 호출자가 받는 예외는 "커넥션을 못 얻었다"뿐이고 드라이버가 준 실제 사유는 원인 사슬 끝에 있다 —
+     * 다운 알림이 이유를 잃지 않게 가장 안쪽 사유를 덧붙인다.
+     */
+    static String failureMessage(Throwable e) {
+        String top = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+        Throwable root = e;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        if (root == e || root.getMessage() == null || top.contains(root.getMessage())) {
+            return top;
+        }
+        return top + ": " + root.getMessage();
     }
 
     /**
@@ -179,133 +211,13 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
         }
     }
 
-    /**
-     * 판정용 정규화 — 주석({@code --}, 중첩 가능한 블록 주석)과 인용 구간(문자열·식별자·달러 인용)을
-     * 같은 길이의 공백으로 지운 사본을 만든다. 원문은 그대로 실행하고 판정만 이 사본으로 한다.
-     *
-     * <p>백슬래시는 <b>이스케이프로 보지 않는다</b>(PostgreSQL의 standard_conforming_strings=on 동작).
-     * 이게 fail-closed인 이유: {@code 'a\'; DROP TABLE x}에서 백슬래시를 이스케이프로 보면 문자열이
-     * 계속 이어진다고 판단해 세미콜론을 놓치지만(통과), 안 보면 문자열이 거기서 끝나 세미콜론을 발견한다(거부).
-     * 놓치는 쪽보다 더 거부하는 쪽이 안전하다. 다만 PostgreSQL의 {@code E'...'}는 명세상 백슬래시가
-     * 이스케이프라 그때만 예외로 처리한다 — {@code SELECT E'\''; DROP TABLE x}가 정확히 이 경로로 뚫렸었다.
-     *
-     * <p>인용이 닫히지 않으면 남은 전체를 삼키지만, 그런 SQL은 DB가 문법 오류로 거부하므로
-     * "우리에게는 숨기면서 DB에서는 실행되는" 조합이 성립하지 않는다.
-     */
+    /** 판정용 정규화 — 규칙과 근거는 {@link SqlCanonical}. 워크벤치 문장 분류기와 같은 규칙을 쓰려고 옮겼다. */
     static String canonical(String sql) {
-        StringBuilder out = new StringBuilder(sql.length());
-        int i = 0;
-        int n = sql.length();
-        while (i < n) {
-            char c = sql.charAt(i);
-            if (c == '-' && i + 1 < n && sql.charAt(i + 1) == '-') {          // 라인 주석
-                while (i < n && sql.charAt(i) != '\n') {
-                    out.append(' ');
-                    i++;
-                }
-                continue;
-            }
-            if (c == '/' && i + 1 < n && sql.charAt(i + 1) == '*') {          // 블록 주석 (PostgreSQL은 중첩 허용)
-                int depth = 0;
-                while (i < n) {
-                    if (sql.charAt(i) == '/' && i + 1 < n && sql.charAt(i + 1) == '*') {
-                        depth++;
-                        out.append("  ");
-                        i += 2;
-                    } else if (sql.charAt(i) == '*' && i + 1 < n && sql.charAt(i + 1) == '/') {
-                        depth--;
-                        out.append("  ");
-                        i += 2;
-                        if (depth == 0) {
-                            break;
-                        }
-                    } else {
-                        out.append(' ');
-                        i++;
-                    }
-                }
-                continue;
-            }
-            if (c == '$') {                                                   // 달러 인용 $tag$ ... $tag$
-                int close = sql.indexOf('$', i + 1);
-                if (close > i && isDollarTag(sql, i + 1, close)) {
-                    String tag = sql.substring(i, close + 1);
-                    int end = sql.indexOf(tag, close + 1);
-                    int stop = end < 0 ? n : end + tag.length();
-                    out.append(" ".repeat(stop - i));
-                    i = stop;
-                    continue;
-                }
-            }
-            if (c == '\'' || c == '"' || c == '`') {                          // 문자열·식별자 인용
-                boolean backslashEscapes = c == '\'' && isEscapeStringPrefix(sql, i);
-                out.append(' ');
-                i++;
-                while (i < n) {
-                    char d = sql.charAt(i);
-                    if (backslashEscapes && d == '\\' && i + 1 < n) {
-                        out.append("  ");
-                        i += 2;
-                        continue;
-                    }
-                    if (d == c) {
-                        if (i + 1 < n && sql.charAt(i + 1) == c) {            // '' "" `` 는 이스케이프된 인용부호
-                            out.append("  ");
-                            i += 2;
-                            continue;
-                        }
-                        out.append(' ');
-                        i++;
-                        break;
-                    }
-                    out.append(' ');
-                    i++;
-                }
-                continue;
-            }
-            out.append(c);
-            i++;
-        }
-        return out.toString();
+        return SqlCanonical.canonical(sql);
     }
 
-    /** 달러 인용 태그는 비었거나 영숫자·밑줄만 (PostgreSQL 규약) */
-    private static boolean isDollarTag(String sql, int from, int toExclusive) {
-        for (int k = from; k < toExclusive; k++) {
-            char c = sql.charAt(k);
-            if (!Character.isLetterOrDigit(c) && c != '_') {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /** PostgreSQL의 E'...' — 이 안에서만 백슬래시가 이스케이프다. 앞 글자가 식별자면 E가 아니라 이름의 끝이다. */
-    private static boolean isEscapeStringPrefix(String sql, int quoteIndex) {
-        if (quoteIndex == 0) {
-            return false;
-        }
-        char prev = sql.charAt(quoteIndex - 1);
-        if (prev != 'E' && prev != 'e') {
-            return false;
-        }
-        return quoteIndex < 2 || !(Character.isLetterOrDigit(sql.charAt(quoteIndex - 2))
-                || sql.charAt(quoteIndex - 2) == '_');
-    }
-
-    /**
-     * 문장 구분자 세미콜론이 문장 <b>중간</b>에 있는지 검사한다(입력은 canonical 사본).
-     * 끝에 하나 붙은 세미콜론(뒤가 공백뿐)은 정상 종결로 허용한다.
-     */
     private static boolean hasStatementSeparator(String canonical) {
-        int idx = canonical.indexOf(';');
-        while (idx >= 0) {
-            if (!canonical.substring(idx + 1).isBlank()) {
-                return true;
-            }
-            idx = canonical.indexOf(';', idx + 1);
-        }
-        return false;
+        return SqlCanonical.hasStatementSeparator(canonical);
     }
 
     /**
@@ -331,5 +243,165 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
         return java.util.List.of(LatencyPercentile.unsupported(instance.getType()
                 + " 레이턴시 백분위 미지원 — 이 기종의 통계 뷰는 min/max/평균/총계만 제공하고 "
                 + "p95/p99 분위수 원자료도 근사에 필요한 표준편차도 없어, 실측 백분위도 정직한 근사도 낼 수 없다."));
+    }
+
+    /**
+     * 워크벤치 콘솔 조회 — 계약은 {@link DbmsOperator#executeReadOnly}.
+     *
+     * <p>읽기 전용은 JDBC 표준 {@code setReadOnly(true)}로 건다. MySQL Connector/J는 세션 READ ONLY로, pgjdbc는
+     * BEGIN READ ONLY로, Oracle JDBC는 SET TRANSACTION READ ONLY로 번역한다 — 기종 분기 없이 드라이버가 흡수한다.
+     * SQL Server 드라이버는 이 힌트를 무시하므로 그 기종의 경계는 콘솔 계정 권한뿐이다. 그래서 끝은 항상 롤백한다:
+     * 트랜잭션 안으로 새어 들어간 쓰기가 있어도 커밋되지 않는다(MySQL DDL의 암묵 커밋은 예외라 분류기가 먼저 막는다).
+     */
+    @Override
+    public QueryResult executeReadOnly(ConsoleCredential credential, String statement, int rowCap, int timeoutSeconds) {
+        if (statement == null || statement.isBlank()) {
+            throw new IllegalArgumentException("실행할 문장이 비었습니다");
+        }
+        if (hasStatementSeparator(canonical(statement))) {
+            throw new IllegalArgumentException("콘솔은 한 번에 한 문장만 실행합니다");
+        }
+        int cap = DbmsOperator.clampLimit(rowCap);
+        long start = System.nanoTime();
+        try (Connection c = pools.getConsoleDataSource(instance, jdbcUrl(), CredentialPurpose.READ, credential, connectOptions())
+                .getConnection()) {
+            c.setAutoCommit(false);
+            c.setReadOnly(true);
+            try (Statement st = c.createStatement()) {
+                beginReadOnly(st);
+                st.setQueryTimeout(Math.max(1, timeoutSeconds));
+                // 상한+1행까지만 받아 잘림 여부를 판정한다 — 나머지 행은 드라이버가 서버 쪽에서 끊는다
+                st.setMaxRows(cap + 1);
+                if (!st.execute(withoutTrailingSemicolon(statement))) {
+                    return new QueryResult(List.of(), List.of(), false, (System.nanoTime() - start) / 1_000_000);
+                }
+                try (ResultSet rs = st.getResultSet()) {
+                    return JdbcValues.read(rs, cap, start);
+                }
+            } finally {
+                try {
+                    c.rollback();
+                } catch (SQLException ignored) {
+                    // 커넥션이 깨졌다면 풀이 버린다 — 원래 예외를 롤백 실패가 덮지 않게 한다
+                }
+            }
+        } catch (SQLException | RuntimeException e) {
+            throw new OperatorException(instance.getType() + " 콘솔 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 드라이버가 {@code setReadOnly(true)}를 서버의 읽기 전용 트랜잭션으로 번역하지 않는 기종이 트랜잭션 첫 문장으로 직접 건다.
+     * 실측(VERIFICATION 128절): MySQL·PostgreSQL 드라이버는 번역한다(콘솔 실행 안에서 @@transaction_read_only=1,
+     * transaction_read_only=on). Oracle JDBC는 번역하지 않아 쓰기 권한 계정의 INSERT가 들어갔고 끝의 롤백만 막고 있었다.
+     */
+    protected void beginReadOnly(Statement st) throws SQLException {
+    }
+
+    /** 승인된 변경 실행 — 흐름과 불변식은 {@link JdbcChangeRunner}, 기종 차이는 아래 세 훅이 흡수한다. */
+    @Override
+    public ChangeOutcome executeChange(ConsoleCredential credential, ChangePlan plan) {
+        try (Connection c = writeConnection(credential)) {
+            return changeRunner().execute(c, plan);
+        } catch (SQLException e) {
+            throw new OperatorException(instance.getType() + " 변경 실행 실패: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public RevertPlan.Outcome revertChange(ConsoleCredential credential, RevertPlan plan) {
+        try (Connection c = writeConnection(credential)) {
+            return changeRunner().revert(c, plan);
+        } catch (SQLException e) {
+            throw new OperatorException(instance.getType() + " 되돌리기 실패: " + e.getMessage(), e);
+        }
+    }
+
+    private Connection writeConnection(ConsoleCredential credential) throws SQLException {
+        return pools.getConsoleDataSource(instance, jdbcUrl(), CredentialPurpose.WRITE, credential, connectOptions()).getConnection();
+    }
+
+    private JdbcChangeRunner changeRunner() {
+        return new JdbcChangeRunner(new JdbcChangeRunner.Dialect() {
+            @Override
+            public void beginChange(Statement st, int timeoutSeconds) throws SQLException {
+                AbstractJdbcOperator.this.beginChange(st, timeoutSeconds);
+            }
+
+            @Override
+            public String lockedSelect(String from, String where, int timeoutSeconds) {
+                return AbstractJdbcOperator.this.lockedSelect(from, where, timeoutSeconds);
+            }
+
+            @Override
+            public String explain(Connection c, String sql) throws SQLException {
+                return explainInTransaction(c, sql);
+            }
+
+            @Override
+            public void beforeExplicitKeyInsert(Connection c, String table) throws SQLException {
+                AbstractJdbcOperator.this.beforeExplicitKeyInsert(c, table);
+            }
+
+            @Override
+            public void afterExplicitKeyInsert(Connection c, String table) throws SQLException {
+                AbstractJdbcOperator.this.afterExplicitKeyInsert(c, table);
+            }
+        });
+    }
+
+    /** 변경 전 사본을 락과 함께 읽는 조회. 기본은 표준 락 절을 끝에 붙인다 — 락이 테이블 뒤 힌트로 오는 기종이 덮어쓴다 */
+    protected String lockedSelect(String from, String where, int timeoutSeconds) {
+        return "SELECT * FROM " + from + (where == null || where.isBlank() ? "" : " " + where) + lockClause(timeoutSeconds);
+    }
+
+    /** 자동 증가 열에 명시 키 값을 넣기 전후. 기본은 아무것도 안 한다 — PostgreSQL·MySQL·Oracle(BY DEFAULT)은 명시 값을 받는다 */
+    protected void beforeExplicitKeyInsert(Connection c, String table) throws SQLException {
+    }
+
+    protected void afterExplicitKeyInsert(Connection c, String table) throws SQLException {
+    }
+
+    /**
+     * 변경 트랜잭션 첫머리에서 락 대기 상한을 건다. 기본은 아무것도 하지 않는다 — 문장 타임아웃만으로는 락 대기가
+     * 끊기지 않는 기종(InnoDB 기본 50초, 메타데이터 락 기본 1년)이 덮어쓴다.
+     */
+    protected void beginChange(Statement st, int timeoutSeconds) throws SQLException {
+    }
+
+    /** 변경 전 사본 조회에 붙이는 행 락 절 */
+    protected String lockClause(int timeoutSeconds) {
+        return " FOR UPDATE";
+    }
+
+    /**
+     * 변경과 같은 커넥션·트랜잭션 안에서 실행계획을 본다. 모니터 풀의 explain은 다른 커넥션이라 커밋 전 변경(드라이런의
+     * 인덱스 생성 등)이 보이지 않는다 — 전후 비교는 같은 트랜잭션 안에서 재야 의미가 있다.
+     */
+    protected String explainInTransaction(Connection c, String sql) throws SQLException {
+        StringBuilder out = new StringBuilder();
+        try (Statement st = c.createStatement(); ResultSet rs = st.executeQuery(explainPrefix() + sql)) {
+            int n = rs.getMetaData().getColumnCount();
+            while (rs.next()) {
+                for (int i = 1; i <= n; i++) {
+                    out.append(i > 1 ? " | " : "").append(rs.getString(i));
+                }
+                out.append('\n');
+            }
+        }
+        return out.toString();
+    }
+
+    protected String explainPrefix() {
+        return "EXPLAIN ";
+    }
+
+    /** Oracle JDBC는 끝 세미콜론을 문법 오류(ORA-00911)로 본다 — 사람이 흔히 붙이는 종결자만 걷어낸다. */
+    static String withoutTrailingSemicolon(String sql) {
+        String s = sql.stripTrailing();
+        while (s.endsWith(";")) {
+            s = s.substring(0, s.length() - 1).stripTrailing();
+        }
+        return s;
     }
 }

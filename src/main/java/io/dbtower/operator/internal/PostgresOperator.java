@@ -14,6 +14,7 @@ import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
 import io.dbtower.operator.model.QueryStat;
+import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.operator.model.ReplicationSlot;
 import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.RestoreSupport;
@@ -254,6 +255,12 @@ public class PostgresOperator extends AbstractJdbcOperator {
         }
     }
 
+    /** SET LOCAL은 트랜잭션이 끝나면 풀린다 — 풀로 돌아간 커넥션에 락 대기 설정이 남지 않는다. */
+    @Override
+    protected void beginChange(java.sql.Statement st, int timeoutSeconds) throws java.sql.SQLException {
+        st.execute("SET LOCAL lock_timeout = '" + timeoutSeconds + "s'");
+    }
+
     @Override
     protected String jdbcUrl() {
         // useTls면 require — RDS rds.force_ssl 같은 TLS 강제 환경 대응. 미지정 시 드라이버 기본(prefer).
@@ -265,6 +272,12 @@ public class PostgresOperator extends AbstractJdbcOperator {
     @Override
     protected String versionSql() {
         return "SELECT version()";
+    }
+
+    /** pg_stat_statements.rows — 돌려주거나 바꾼 행 수다. 스캔한 행이 아니라 호출 수를 따라 늘어난다(131절의 "+706%") */
+    @Override
+    public RowsMetric rowsMetric() {
+        return RowsMetric.RETURNED_ROWS;
     }
 
     @Override

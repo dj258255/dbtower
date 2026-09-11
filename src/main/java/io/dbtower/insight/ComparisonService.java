@@ -69,7 +69,7 @@ public class ComparisonService {
                     queryId,
                     t.queryText,
                     round(baseQps), round(t.qps()), changePct(baseQps, t.qps()),
-                    round(baseAvgMs), round(t.avgMs()), changePct(baseAvgMs, t.avgMs()),
+                    roundMs(baseAvgMs), roundMs(t.avgMs()), changePct(baseAvgMs, t.avgMs()),
                     round(baseRowsPerCall), round(t.rowsPerCall()), changePct(baseRowsPerCall, t.rowsPerCall()),
                     isNew));
         }
@@ -92,7 +92,7 @@ public class ComparisonService {
         double totalTimeMs = stats.values().stream().mapToDouble(WindowStat::deltaTimeMs).sum();
         long totalRows = stats.values().stream().mapToLong(WindowStat::deltaRows).sum();
         double avgLatency = totalCalls == 0 ? 0 : totalTimeMs / totalCalls;
-        return new WindowSummary(totalCalls, round(totalTimeMs), round(avgLatency), totalRows, stats.size());
+        return new WindowSummary(totalCalls, round(totalTimeMs), roundMs(avgLatency), totalRows, stats.size());
     }
 
     /** 구간 양 끝 배치의 누적 카운터 차분으로 구간 내 발생량을 구한다 */
@@ -144,6 +144,11 @@ public class ComparisonService {
 
     private double round(double v) {
         return Math.round(v * 100) / 100.0;
+    }
+
+    // 평균 레이턴시만 소수 넷째 자리까지 둔다 — 인덱스를 탄 조회처럼 1ms 미만 평균은 둘째 자리 반올림이 0.0으로 뭉개 전후 차이를 지웠다(131절)
+    private double roundMs(double v) {
+        return Math.round(v * 10_000) / 10_000.0;
     }
 
     private record WindowStat(String queryText, long deltaCalls, double deltaTimeMs,

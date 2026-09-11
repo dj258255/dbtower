@@ -21,7 +21,7 @@ DBTOWER_ENCRYPTION_KEY=$(openssl rand -base64 32) DBTOWER_WEBHOOK_URL="" ./gradl
 ## 저장소 구조
 
 ```text
-src/main/java/io/dbtower/    Spring Modulith 모듈 15개 (순환·internal 침범은 ModularityTests가,
+src/main/java/io/dbtower/    Spring Modulith 모듈 16개 (순환·internal 침범은 ModularityTests가,
                              레이어 규칙은 scripts/check-conventions.sh가 빌드에서 강제)
 ├── operator/    DbmsOperator 인터페이스 + 5기종 구현(MySQL/PostgreSQL/MSSQL/Oracle/MongoDB), 커넥션 풀/클라이언트 캐시
 ├── registry/    인스턴스 등록·헬스체크
@@ -32,12 +32,13 @@ src/main/java/io/dbtower/    Spring Modulith 모듈 15개 (순환·internal 침�
 ├── advisor/     운영 모범규칙 자동 점검 (일일 스윕)
 ├── audit/       상태변경·로그인·월권 감사 기록
 ├── finops/      미사용·중복 인덱스 등 낭비 신호
-├── mcp/         MCP 서버 (프로토콜 코어 + stdio/HTTP 전송) + 자연어 진단
+├── mcp/         MCP 서버 (프로토콜 코어 + stdio/HTTP 전송) + 자연어 진단 + 워크벤치 요청·조회 도구(실행 도구 없음)
 ├── onlineddl/   gh-ost 온라인 스키마 변경 (MySQL)
-├── review/      스키마 변경 리뷰 게이트 (판정·승인·기록, 실행은 안 함)
+├── review/      변경 리뷰 게이트 (판정·승인·상태 전이의 단일 권위 — 실행권은 ChangeTicketGate의 조건부 UPDATE로만)
 ├── score/       통합 헬스 스코어 + 대상별 운영 종합(overview: 정체·건강·복제·백업을 한 대상에)
 ├── security/    인증·인가, 비밀번호 암호화, API 토큰
-└── slo/         SLO/에러 버짓
+├── slo/         SLO/에러 버짓
+└── workbench/   거버넌스 SQL 워크벤치 (조회 콘솔·AI 보조·승인 티켓 실행·행/구조/계획/인스턴스 간 전후 비교)
 src/main/resources/static/   웹 콘솔 (의존성 0 정적 SPA)
 docs/            DESIGN, VERIFICATION(실측 기록), PRESENTATION, ROADMAP, ai-analysis-rules
 scripts/         dbtower-mcp.sh (MCP stdio 실행기)
@@ -61,9 +62,14 @@ scripts/         dbtower-mcp.sh (MCP stdio 실행기)
   JDBC 드라이버 의존성, 프론트의 아이콘·색상. "1개로 끝난다"가 아니라
   "1개가 본체이고 나머지는 등록 절차"로 이해할 것 (컴파일러가 잡아주는 곳은 팩토리·`DeepAnalyzer`·
   `RuleBasedAnalyzer`의 exhaustive switch 셋뿐이므로, 새 기종 추가 시 위 목록을 직접 훑어야 한다)
-- 플랫폼 자체 저장소(PostgreSQL, dbtower DB)와 관리 대상 DB는 분리 — 대상 장애가 플랫폼을 죽이면 안 된다
-- 관리 플랫폼은 대상 DB에 임의 DML을 실행하지 않는다 (explain은 SELECT만 허용)
-- MCP·웹훅 등 채널 계층에 비즈니스 로직을 두지 않는다 — 전부 REST/서비스 코어에 위임
+- 플랫폼 자체 저장소(PostgreSQL, dbtower DB)와 관리 대상 DB는 분리 — 대상 장애가 플랫폼을 죽이면 안 된다.
+  연결만 받고 말이 없는 대상도 포함한다: 풀 생성이 연결을 붙잡지 않고, 드라이버 로그인 단계에 읽기 제한이 있어야 한다(ConnectionPools·UnresponsiveTargetTest)
+- 관리 플랫폼은 대상 DB에 임의 변경을 실행하지 않는다 — 조회는 분리된 조회 계정·읽기 전용 트랜잭션으로, 변경은
+  **승인된 티켓만** 변경 계정으로 실행한다(행 사본·영향 행 수 대조·되돌리기 경로와 함께). 모니터 계정의 explain은 SELECT만 허용
+- 변경 실행의 안전은 문장 해석이 아니라 실행 계층의 불변식에서 나온다 — 파서가 틀려도 사본 행 수와 영향 행 수가
+  어긋나면 커밋하지 않고, 되돌리기는 실행 직후 사본과 현재 행이 같을 때만 쓴다(JdbcChangeRunner 주석 참고)
+- MCP·웹훅 등 채널 계층에 비즈니스 로직을 두지 않는다 — 전부 REST/서비스 코어에 위임. 위임의 주체는 호출자 그대로 둔다
+  (서비스 토큰으로 바꿔 부르면 요청자·감사 기록이 사람을 잃는다 — McpHttpController 주석)
 - AI는 판단자가 아니라 1차 분석기다. 판단 기준은 docs/ai-analysis-rules.md에 사람이 정하고, AI는 그 위에서만 판정
 
 ## 코드 컨벤션

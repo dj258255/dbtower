@@ -66,8 +66,14 @@ public class DbmsOperatorFactory {
             case MYSQL -> new MySqlOperator(instance, pools, backupTools, histogramStore);
             case POSTGRESQL -> new PostgresOperator(instance, pools, backupTools);
             case MSSQL -> new MsSqlOperator(instance, pools, backupTools);
-            case ORACLE -> new OracleOperator(instance, pools, backupTools, oracleAppSchema);
+            case ORACLE -> new OracleOperator(instance, pools, backupTools, appSchemaOf(instance));
             case MONGODB -> new MongoOperator(instance, mongoClients, backupTools, histogramStore); // 비 JDBC — 풀 대신 클라이언트 캐시
         };
+    }
+
+    /** 인스턴스에 등록한 앱 스키마가 먼저, 없으면 전역 설정 — 인스턴스마다 앱 스키마가 다를 수 있다(133절) */
+    String appSchemaOf(DatabaseInstance instance) {
+        String own = instance.getAppSchema();
+        return own == null || own.isBlank() ? oracleAppSchema : own;
     }
 }

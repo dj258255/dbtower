@@ -40,15 +40,17 @@ public class RegistryService {
     public DatabaseInstance upsert(String name, DbmsType type, String host, int port,
                                    String dbName, String username, String password, boolean useTls,
                                    String teamLabel, String consoleUrl, String nodeFilter,
-                                   String environment, String region, String clusterLabel) {
+                                   String environment, String region, String clusterLabel, String appSchema) {
         DatabaseInstance existing = repository.findByName(name).orElse(null);
         if (existing == null) {
             DatabaseInstance created = new DatabaseInstance(name, type, host, port, dbName, username, password, useTls);
             created.updateMeta(teamLabel, consoleUrl, nodeFilter, environment, region, clusterLabel);
+            created.updateAppSchema(appSchema);
             return register(created);
         }
         existing.updateConnection(type, host, port, dbName, username, password, useTls);
         existing.updateMeta(teamLabel, consoleUrl, nodeFilter, environment, region, clusterLabel);
+        existing.updateAppSchema(appSchema);
         HealthStatus health = operations.health(existing);
         if (!health.up()) {
             throw new IllegalArgumentException("접속 실패로 갱신 거부: " + health.message());
@@ -100,6 +102,14 @@ public class RegistryService {
         } catch (InstanceNotFoundException e) {
             return java.util.Optional.empty();
         }
+    }
+
+    /**
+     * 현재 주체가 전역 범위인지 — 서비스 토큰으로 자기 REST를 대리 호출하는 쪽(자연어 진단 루프)이
+     * 호출자의 원래 범위를 기억해 두는 데 쓴다. 대리 호출 순간 주체가 ADMIN 토큰으로 바뀌기 때문이다.
+     */
+    public boolean hasGlobalScope() {
+        return currentTeamScope() == null;
     }
 
     /** 라벨 없는 인스턴스는 전역(모든 팀이 봄), 라벨이 있으면 같은 팀만. */

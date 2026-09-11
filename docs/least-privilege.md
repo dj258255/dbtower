@@ -18,7 +18,7 @@ DBTower가 대상 DB에 접속할 때 root/postgres/sa/SYSTEM 같은 관리자 �
 
 | 기종 | 최소 권한 집합 |
 |---|---|
-| MySQL | `SELECT ON sample.*` + `SELECT ON performance_schema.events_statements_summary_by_digest` + `SELECT ON mysql.slow_log` + `REPLICATION CLIENT, REPLICATION SLAVE ON *.*` |
+| MySQL | `SELECT ON sample.*` + performance_schema 테이블 단위 `SELECT`(다이제스트·대기·락·인덱스 사용) + `sys` INVOKER 뷰 2개(원천 테이블 `SELECT`와 `sys` 함수 `EXECUTE` 포함) + `SELECT ON mysql.slow_log` + `REPLICATION CLIENT, REPLICATION SLAVE, PROCESS ON *.*` (전문은 아래, 2026-09-10 재실측) |
 | PostgreSQL | `LOGIN` 롤 + `pg_read_all_stats` (+ EXPLAIN 대상 테이블 `SELECT`) |
 | SQL Server | `VIEW SERVER PERFORMANCE STATE` 단 하나 |
 | Oracle | `CREATE SESSION` + `SELECT_CATALOG_ROLE` + 대상 테이블 `READ` |
@@ -51,6 +51,12 @@ DBTower가 대상 DB에 접속할 때 root/postgres/sa/SYSTEM 같은 관리자 �
 | explain | `SELECT ON sample.*` (EXPLAIN은 대상 테이블 SELECT 권한 요구) | (스키마 SELECT 부여 후 통과 확인) |
 | replication | `REPLICATION CLIENT` (SHOW REPLICA STATUS) + `REPLICATION SLAVE` (SHOW REPLICAS 폴백) | 아래 에러 2건 |
 | 최근 데드락 (D-2) | `PROCESS` (SHOW ENGINE INNODB STATUS) | `Access denied; you need (at least one of) the PROCESS privilege(s)` |
+| wait-events, 심층 진단 대기 차분 (2026-09-10 재실측) | `SELECT ON performance_schema.events_waits_summary_global_by_event_name` + `SELECT ON performance_schema.setup_instruments` | 502 `SELECT command denied ... for table 'events_waits_summary_global_by_event_name'`. setup_instruments 하나만 빠져도 502 |
+| sessions 블로킹 관계 blockedByPid (재실측) | `SELECT ON sys.innodb_lock_waits` + `SELECT ON performance_schema.data_locks`·`data_lock_waits` + `EXECUTE ON FUNCTION sys.format_statement`·`sys.quote_identifier` | 502 `SELECT command denied ... for table 'innodb_lock_waits'`. 뷰만 부여하면 `ERROR 1356 View 'sys.innodb_lock_waits' references invalid table(s) ... or definer/invoker of view lack rights` |
+| 통계 수집 건강 advisor (재실측) | `SELECT ON performance_schema.prepared_statements_instances` | **HTTP 200**, 본문 점검 항목만 `status: ERROR` (`MySQL 통계 수집 건강 조회 실패`) |
+| finops 인덱스 사용량 (재실측) | `SELECT ON performance_schema.table_io_waits_summary_by_index_usage` | **HTTP 200**, 본문 점검 항목만 `status: ERROR` (`MySQL 인덱스 사용 통계 조회 실패`) |
+| 파티션 보조: 미사용 인덱스 (재실측) | `SELECT ON sys.schema_unused_indexes` (+ 위 table_io 테이블, INVOKER 뷰) | 코드 경로 기준으로 필요. sample에 파티션 테이블이 없어 API 차이는 관측하지 못했다 |
+| 복제: 그룹 복제 토폴로지 (재실측) | `SELECT ON performance_schema.replication_group_members` | 코드 경로 기준으로 필요. 단일 노드라 API 차이는 관측하지 못했다 |
 
 ### 계정 생성 전문
 
@@ -62,6 +68,18 @@ GRANT SELECT ON performance_schema.events_statements_histogram_by_digest TO 'dbt
 GRANT SELECT ON mysql.slow_log TO 'dbtower_monitor'@'%';
 GRANT REPLICATION CLIENT, REPLICATION SLAVE ON *.* TO 'dbtower_monitor'@'%';
 GRANT PROCESS ON *.* TO 'dbtower_monitor'@'%'; -- 최근 데드락(SHOW ENGINE INNODB STATUS)
+-- 2026-09-10 재실측으로 추가 (VERIFICATION 127절)
+GRANT SELECT ON performance_schema.events_waits_summary_global_by_event_name TO 'dbtower_monitor'@'%';
+GRANT SELECT ON performance_schema.setup_instruments TO 'dbtower_monitor'@'%';
+GRANT SELECT ON performance_schema.prepared_statements_instances TO 'dbtower_monitor'@'%';
+GRANT SELECT ON performance_schema.replication_group_members TO 'dbtower_monitor'@'%';
+GRANT SELECT ON performance_schema.table_io_waits_summary_by_index_usage TO 'dbtower_monitor'@'%';
+GRANT SELECT ON sys.schema_unused_indexes TO 'dbtower_monitor'@'%';
+GRANT SELECT ON sys.innodb_lock_waits TO 'dbtower_monitor'@'%';
+GRANT SELECT ON performance_schema.data_locks TO 'dbtower_monitor'@'%';
+GRANT SELECT ON performance_schema.data_lock_waits TO 'dbtower_monitor'@'%';
+GRANT EXECUTE ON FUNCTION sys.format_statement TO 'dbtower_monitor'@'%';
+GRANT EXECUTE ON FUNCTION sys.quote_identifier TO 'dbtower_monitor'@'%';
 ```
 
 ### 실측 에러 원문 (권한 추가 전)
@@ -199,6 +217,7 @@ GRANT VIEW SERVER PERFORMANCE STATE TO dbtower_monitor;
 | query-stats | `SELECT_CATALOG_ROLE` (V$SQL) | `ORA-00942: 테이블 또는 뷰 "SYS"."V_$SQL"이(가) 존재하지 않습니다` |
 | slow-queries | 동일 (V$SQL) | 동일 |
 | table-stats | 추가 권한 불요 (`user_tables` — 단, 자기 스키마만 보임) | 에러 없이 빈 결과 |
+| table-stats·테이블 상세·스키마 트리(앱 스키마 지정 시) | `SELECT_CATALOG_ROLE` (`dba_tables`·`dba_indexes`·`dba_segments`·`DBMS_METADATA.GET_DDL`의 다른 스키마) | 인스턴스 `appSchema`와 전역 `dbtower.oracle.app-schema`가 모두 비면 모니터 자신의 스키마만 봐서 "테이블을 찾을 수 없습니다"(VERIFICATION 132·133절) |
 | explain | `EXPLAIN PLAN` 자체는 불요, 대상 테이블 `READ` 필요 | `ORA-00942: 테이블 또는 뷰 "SAMPLE"."USERS"이(가) 존재하지 않습니다` |
 | replication | `SELECT_CATALOG_ROLE` (V$DATABASE) | `ORA-00942: 테이블 또는 뷰 "SYS"."V_$DATABASE"이(가) 존재하지 않습니다` |
 
@@ -273,6 +292,68 @@ db.getSiblingDB('admin').createUser({
 - 롤 변경은 즉시 반영됐다 (재등록 불필요 — 서버가 사용자 캐시를 무효화).
 - 전제: 대상 db의 프로파일러가 켜져 있어야 한다 (`db.runCommand({profile: 2})` —
   docker-compose가 `--profile 2 --slowms 0`으로 기동).
+
+---
+
+## 워크벤치 콘솔 계정 (2026-09-10)
+
+거버넌스 SQL 워크벤치는 모니터 계정을 쓰지 않는다. 사람이 여는 자유 조회는 인스턴스마다 따로 등록한 **콘솔 계정**으로만
+실행된다(`PUT /api/instances/{id}/credentials/READ`, ADMIN). 플랫폼은 모니터 계정과 같은 이름을 거부하고, 저장 전에 실제로
+접속해 본다. 재현 스크립트: `docker/workbench-{mysql,postgres,oracle}.sql`, `docker/workbench-mongo.js`.
+
+| 기종 | 조회 계정(READ) | 변경 계정(WRITE, 승인된 티켓만 실행) |
+|---|---|---|
+| MySQL | `GRANT SELECT ON sample.*` | `GRANT SELECT, INSERT, UPDATE, DELETE, ALTER, INDEX ON sample.*` |
+| PostgreSQL | `CONNECT` + `USAGE ON SCHEMA public` + `SELECT ON ALL TABLES` | 위 + `INSERT, UPDATE, DELETE` + `USAGE ON ALL SEQUENCES` + 소유 역할 멤버십 `GRANT sample_owner`(DDL용, 소유 역할에 `CREATE ON SCHEMA public` — 15+에서 인덱스 생성이 스키마 CREATE를 따로 본다) |
+| Oracle | `CREATE SESSION` + 테이블별 `READ`(SELECT와 달리 `FOR UPDATE` 락을 못 건다) | `CREATE SESSION` + 테이블별 `SELECT, INSERT, UPDATE, DELETE`(DDL 없음) |
+| SQL Server(Azure SQL Edge·SQL Server 2022 RTM-CU26 실측) | DB 사용자 매핑 + `SELECT ON SCHEMA::dbo` | 위 + `INSERT, UPDATE, DELETE ON SCHEMA::dbo` + `SHOWPLAN` + 테이블별 `ALTER`(인덱스·열 추가) |
+| MongoDB | `read@sample` (admin db에 생성) | `readWrite@sample`(문서 사본을 트랜잭션 안에서 잡으므로 복제셋 필요, 인덱스 생성·삭제 포함) |
+
+권한 변경 권한은 어느 계정에도 주지 않는다. 변경 계정의 DDL은 인덱스·열 추가 수준까지만 준다(MySQL `ALTER, INDEX`,
+PostgreSQL은 테이블 소유자만 DDL을 하므로 로그인 불가 소유 역할의 멤버십). 승인된 티켓이라도 계정 권한 밖의 문장
+(`DROP TABLE` 등)은 대상 DB가 거부한다 — 게이트·분류기 다음의 마지막 겹이다.
+
+### 변경 계정이 권한을 쓰는 곳 (승인 티켓 실행, VERIFICATION 130절)
+
+- 변경 전 행 사본은 `SELECT * ... FOR UPDATE`로 잡는다. 그래서 변경 계정에는 `READ`가 아니라 `SELECT`가 필요하다(Oracle).
+- 기본 키는 JDBC 메타데이터(`getPrimaryKeys`)로 찾는다. 테이블을 볼 수 있으면 추가 권한이 없다.
+- INSERT를 되돌리려면 생성된 키를 돌려받아야 한다. PostgreSQL `SERIAL`은 시퀀스 `USAGE`가 필요하고, MySQL은 키 값을
+  직접 넣는 INSERT에서 키를 돌려주지 않아 그 경우 되돌리기가 닫힌다(실행 기록에 이유가 남는다).
+- 검증 조회의 실행계획·응답시간은 변경과 같은 트랜잭션 안에서 변경 계정으로 잰다(MySQL·PostgreSQL `EXPLAIN`은 SELECT 권한,
+  Oracle `EXPLAIN PLAN`은 세션의 PLAN_TABLE, SQL Server `SET SHOWPLAN_TEXT`는 DB 수준 `SHOWPLAN` 권한).
+- SQL Server(VERIFICATION 131절 arm64 Azure SQL Edge, 132절 Rosetta VM의 실제 SQL Server 2022 RTM-CU26 16.0.4275.2 — 같은
+  `docker/workbench-mssql.sql`에서 아래 거부·허용이 두 엔진 모두 한 줄도 다르지 않았다):
+  - 조회 계정은 읽기 전용 겹이 없다. 드라이버가 `setReadOnly`를 무시하고 서버에 읽기 전용 트랜잭션이 없어, 쓰기 권한 계정으로 보낸 INSERT가
+    거부되지 않고 끝의 롤백으로만 사라졌다. 조회 계정에서 쓰기 권한을 빼는 것이 이 기종의 조회 경계 전부다
+    (`dbtower_reader`의 UPDATE: `The UPDATE permission was denied on the object 'customers'`).
+  - 변경 계정의 DDL은 테이블 단위 `ALTER`만 준다. 인덱스·열 추가는 되고, `DROP TABLE`은 스키마 `ALTER`나 테이블 `CONTROL`이 필요해
+    `Cannot drop the table 'orders', because it does not exist or you do not have permission`, `CREATE TABLE`은
+    `CREATE TABLE permission denied in database 'sample'`로 거부됐다.
+  - 삭제한 행을 같은 키로 되돌려 넣을 때 IDENTITY 열이면 `SET IDENTITY_INSERT`가 필요하고, 이는 그 테이블의 `ALTER` 권한을 요구한다.
+    ALTER가 없는 테이블의 DELETE 되돌리기는 대상 DB가 거부한다(되돌리기 트랜잭션 전체가 롤백된다).
+  - SQL Server 2022의 `VIEW SERVER PERFORMANCE STATE`는 SQL Edge(15.0 엔진)에 없어 모니터에는 이전 형태인 `VIEW SERVER STATE`를,
+    스키마 트리·테이블 상세용으로 `VIEW DEFINITION ON SCHEMA::dbo`를 줬다(모니터는 행 SELECT가 거부된다). 실제 2022에는
+    `docker/mssql-init.sql`의 `VIEW SERVER PERFORMANCE STATE`가 그대로 들어가고 `sys.dm_exec_query_stats` 조회가 통과했다.
+
+### 민감 컬럼은 계정 권한으로 뺀다 (본 방어선)
+
+워크벤치의 결과 마스킹은 컬럼 이름 기반이라 표현식(`email || ''`)은 원리상 못 잡는다. 반드시 가려야 하는 컬럼은 조회 계정의
+컬럼 단위 권한에서 뺀다. 실측(VERIFICATION 128절):
+
+```sql
+-- PostgreSQL
+REVOKE SELECT ON customers FROM dbtower_reader;
+GRANT SELECT (id, name, phone, grade, created_at) ON customers TO dbtower_reader;
+-- SELECT email || '' AS x FROM customers  ->  ERROR: permission denied for table customers
+-- MySQL도 같은 형태: GRANT SELECT (id, name, grade) ON sample.customers TO 'dbtower_reader'@'%';
+```
+
+### 읽기 전용 트랜잭션은 드라이버마다 다르게 걸린다
+
+콘솔 실행은 `setReadOnly(true)` 후 끝에 항상 롤백한다. 쓰기 권한 계정으로 직접 INSERT를 넣어 잰 결과:
+MySQL은 드라이버 텍스트 검사 + 서버 `@@transaction_read_only=1`, PostgreSQL은 서버가 `read-only transaction`으로 거부,
+**Oracle JDBC는 아무것도 하지 않아** 플랫폼이 `SET TRANSACTION READ ONLY`를 직접 건다(`ORA-01456`), SQL Server 드라이버는
+힌트를 무시하므로 그 기종의 경계는 조회 계정 권한뿐이다. 그래서 조회 계정에서 쓰기 권한을 빼는 것이 모든 기종에 공통인 마지막 겹이다.
 
 ---
 

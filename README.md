@@ -188,6 +188,64 @@ Seq Scan, Clustered Index Scan, TABLE ACCESS FULL, COLLSCAN 등)으로 비효율
 
 ![수정안 원클릭 재진단 — 괴리 300배에서 없음으로, 풀스캔에서 Index lookup으로](docs/images/webui/17-deep-before-after.png)
 
+### 거버넌스 SQL 워크벤치 — 자유 SQL, 경계는 플랫폼이
+
+DBeaver처럼 스키마 트리·탭 편집기·자동완성·결과 그리드로 대상 DB를 직접 조회하되, 정책은 플랫폼 코드가 강제합니다.
+외부 DB 클라이언트를 붙이지 않은 이유가 이 정책 계층입니다(그 도구들은 DB에 직접 붙어 마스킹·팀 범위·감사를 우회).
+
+- **문장 분류**: 읽기는 즉시, 변경은 승인 티켓으로, 트랜잭션 제어·다중문·부작용 함수는 차단(허용 목록)
+- **콘솔 계정 분리**: 모니터 계정과 다른 조회(READ)·변경(WRITE) 계정, 저장 전 실제 접속 검증, 응답에 비밀번호 없음
+- **읽기 전용 실행**: 콘솔 전용 풀 + 읽기 전용 트랜잭션(Oracle은 `SET TRANSACTION READ ONLY`) + 타임아웃 + 행 상한 + 항상 롤백
+- **결과 마스킹**: 개인정보 컬럼 기본 규칙, 별칭(`email AS e`)까지 추적. 표현식 우회는 컬럼 GRANT가 막는다는 역할 분담을 실측으로 확인
+- **실행 기록**: 거부·오류 포함, 리터럴을 가린 문장과 행 수·가린 열·CSV 사유
+
+"읽기 전용"은 쓰기 권한 계정으로 INSERT를 넣어 3기종에서 따로 증명했습니다 — 같은 JDBC 호출이 Oracle에서는 아무것도 막지 않았고,
+그걸 고쳤습니다([VERIFICATION 128절](docs/VERIFICATION.md), [AX 케이스 스터디](docs/PORTFOLIO-AX.md)).
+
+![워크벤치 — 분류 배지, 마스킹된 email·phone 열](docs/images/webui/67-workbench-query-masked.png)
+
+**워크시트와 AI 제안** — 사내 AI 화면 생성 도구(TOI Studio)처럼 워크시트마다 대화와 체크포인트(버전) 카드가 쌓입니다.
+AI는 SQL을 **제안만** 하고 실행 도구가 없습니다. 제안마다 서버가 분류(읽기/승인 필요/차단)와 스키마에 없는 테이블을 표시하고,
+"선택" 모드로 결과 열이나 스키마 테이블을 눌러 질문에 붙입니다. 조회 결과 값은 인스턴스 설정(ADMIN)이 켜진 경우에만 AI로 나갑니다.
+정확도는 AI SQL을 실제로 실행한 결과로 채점합니다(`scripts/eval-workbench-nl2sql.py`, 데모 12문항 lenient 12/12 · strict 7/12).
+
+![AI 답변과 체크포인트 카드](docs/images/webui/70-workbench-ai-checkpoint.png)
+
+**승인 티켓 실행과 전후 비교** — 변경 문장은 워크벤치에서 바로 실행되지 않고 "변경 요청으로 올리기"로 리뷰 게이트에 올라갑니다.
+승인 전에도 드라이런(실제로 실행한 뒤 롤백)으로 바뀔 행과, 커밋 전 인덱스가 반영된 실행계획을 봅니다. 승인된 티켓만 변경 계정으로 실행하고,
+실행권은 조건부 UPDATE로 한 요청만 얻습니다. 실행은 같은 트랜잭션에서 변경 전 행 사본을 락과 함께 잡아 영향 행 수가 사본과 같을 때만 커밋하고,
+되돌리기는 실행 직후 사본과 지금 행이 같을 때만 파라미터 바인딩으로 씁니다. 실행마다 행 diff·구조 diff·검증 조회 실행계획 전후·실행 시각 기준
+워크로드 비교가 남고, 같은 조회를 두 인스턴스에서 돌려 행 단위로 비교할 수도 있습니다. MySQL·PostgreSQL·Oracle 실DB로 실행·되돌리기·
+드리프트 충돌·불변식 위반을 증명했습니다([VERIFICATION 130절](docs/VERIFICATION.md), [AX 사례 5](docs/PORTFOLIO-AX.md)).
+
+![변경 티켓 — DDL 실행의 구조 변화와 같은 트랜잭션 안 전후 실행계획](docs/images/webui/74-workbench-ticket-ddl-probe.png)
+
+**티켓의 출구와 5기종 확장** — 승인된 채 실행하지 않을 티켓은 요청자나 ADMIN이 취소하고, 커밋 여부를 모른 채 멈춘 티켓은 ADMIN이
+대상 DB를 무엇으로 확인했는지 근거를 적어 정리합니다. DDL 실행 기록에는 생긴 구조만 지우는 역변경 문장을 기종 문법으로 제안하고
+(실행이 아니라 새 티켓으로 올리기), 스키마 트리에서 테이블 상세(행 수·크기·인덱스 카디널리티·DDL)를 엽니다. 변경 실행은 SQL Server
+(Apple Silicon 로컬은 `docker-compose.arm64.yml`의 Azure SQL Edge, Rosetta가 있으면 Rosetta VM의 실제 SQL Server 2022 RTM-CU26)와
+MongoDB(복제셋 트랜잭션 안의 문서 사본)까지 5기종으로 넓혔고, MCP에는 변경 요청·상태·조회 도구만 열었습니다(조회는 인스턴스의 결과 값
+AI 공유 설정이 켜진 경우만). Oracle은 인스턴스를 등록할 때 `appSchema`를(없으면 전역 `dbtower.oracle.app-schema`를) 주면 모니터 계정이 앱 스키마의 테이블 상세·스키마 트리를 봅니다.
+
+100만 행 표에 pgbench로 같은 부하를 인덱스 티켓 전후에 걸었습니다. 컨테이너 안·합계 한 줄 조회로는 평균 지연 49.634 ms -> 0.029 ms였고,
+호스트에서 포트 포워딩 TCP로 붙어 행 20건을 돌려주는 조회로 다시 재면 46.378 ms -> 0.521 ms입니다. 서버 안 실행 시간은 0.0325 ms이고
+같은 경로의 `SELECT 1`이 0.539 ms라, 남은 지연은 거의 전부 왕복 비용입니다([VERIFICATION 131~133절](docs/VERIFICATION.md)).
+Apple Silicon에는 SQL Server를 네이티브로 돌릴 경로가 없어(공식 지원은 x86-64 호스트뿐), 같은 Rosetta VM에서 PostgreSQL arm64와 amd64를 맞붙여
+번역 비용(처리량 약 0.7배)을 따로 쟀습니다. 네이티브 x64 수치는 GitHub Actions x64 러너의 SQL Server 2022에서 같은 IT와 같은 부하 측정기
+(`scripts/MssqlLoad.java`, `.github/workflows/mssql-x64.yml`)로 잽니다. 러너 두 번의 인덱스 전후 서버 실행은 53,052 -> 75.1 µs와
+122,541 -> 173.0 µs로 실행마다 두 배 넘게 흔들렸고(Rosetta VM 70,858 -> 145.0 µs), 흔들리지 않은 것은 실행계획과 논리 읽기(3,973 -> 63)였습니다.
+그래서 환경 사이의 µs 비교는 근거로 쓰지 않습니다.
+
+측정을 정리하다 결함 하나를 찾아 고쳤습니다. 연결만 받고 아무 말도 하지 않는 대상(죽은 포트 포워드 등) 하나에서 SQL Server·Oracle 풀 생성이 무기한
+매달렸고, 그 생성이 풀 맵의 락을 쥔 채라 모든 대상의 운영 경보·헬스 스코어 폴러와 인스턴스 삭제 API가 함께 멈췄습니다. 풀은 첫 연결을 늦게 열고,
+두 기종은 로그인 단계에만 읽기 제한을 걸었다가 로그인 뒤 풀어 긴 서버 사이드 백업을 끊지 않습니다(재현 테스트 25초 초과 -> 2초,
+[VERIFICATION 134절](docs/VERIFICATION.md)). 비교 화면의 행 지표는 기종마다 세는 것이 달라(PostgreSQL은 돌려준 행,
+SQL Server는 논리 읽기 페이지 등) 오퍼레이터가 알려준 이름으로 적습니다.
+
+![테이블 상세 탭](docs/images/webui/76-workbench-table-detail.png)
+
+![티켓 워크로드 비교 — 행 지표 이름, 1ms 미만 정밀도, 브라우저 시간대 시각](docs/images/webui/77-workbench-workload-rows-metric.png)
+
 ### MCP — AI 에이전트의 채널
 
 웹 콘솔이 사람의 채널이라면 MCP는 AI 에이전트의 채널입니다. 회귀 감지가 push(플랫폼이
@@ -198,7 +256,11 @@ Seq Scan, Clustered Index Scan, TABLE ACCESS FULL, COLLSCAN 등)으로 비효율
 claude mcp add --transport http dbtower http://localhost:8080/mcp
 ```
 
-![MCP 연동 카드 — 도구 목록은 tools/list 실시간 응답, 현재 16종](docs/images/webui/06-mcp.png)
+![MCP 연동 카드 — 콘솔 세션이 GET /api/mcp/tools로 받은 MCP 코어의 tools/list 그대로, 19종(132절 재촬영)](docs/images/webui/06-mcp.png)
+
+HTTP 전송은 도구 호출을 서비스 토큰이 아니라 그 요청을 인증한 호출자의 토큰으로 REST에 위임합니다. 서비스 토큰으로 위임하던 때는
+관리자가 MCP로 올린 변경 요청의 요청자가 `api-token`으로 남아, 같은 사람이 화면에서 자기 요청을 승인해도 요청자·승인자 분리가
+막지 못했습니다(수정 전 HTTP 200 APPROVED, 수정 뒤 409, [VERIFICATION 132절](docs/VERIFICATION.md)).
 
 ## 보안 — 사람은 세션, 기계는 토큰
 
@@ -369,19 +431,34 @@ GET  {base}/deadlocks              최근 데드락(MSSQL XE·MySQL INNODB STATU
 GET  {base}/slo                    SLO/에러 버짓              GET  {base}/finops         미사용·중복 인덱스
 GET  /api/health-score             전 인스턴스 헬스 스코어(나쁜 순)   GET  /api/backup-freshness  백업 신선도
 
+# 거버넌스 SQL 워크벤치 (/workbench.html)
+POST /api/workbench/instances/{id}/query     조회(분류→콘솔 계정→읽기 전용→마스킹→기록)
+POST /api/workbench/instances/{id}/classify  문장 분류(읽기/변경/차단)   POST .../export  CSV(사유 필수)
+GET  /api/workbench/instances/{id}/history   내 실행 기록               GET  /api/workbench/masking-rules  마스킹 규칙
+PUT  {base}/credentials/{READ|WRITE}         콘솔 계정 등록(ADMIN, 저장 전 접속 검증)
+GET|POST /api/workbench/instances/{id}/worksheets      워크시트 목록·생성    PATCH|DELETE /api/workbench/worksheets/{wid}
+POST /api/workbench/worksheets/{wid}/assistant         AI 제안(실행 안 함)   GET .../timeline  대화+체크포인트
+POST /api/workbench/worksheets/{wid}/versions/{n}/restore  되돌리기(새 버전)  PUT .../instances/{id}/settings  결과 값 AI 공유(ADMIN)
+POST /api/workbench/tickets/{rid}/dry-run    승인 전후 드라이런(실행 후 롤백, ADMIN)   POST .../execute  승인 티켓 실행(ADMIN)
+POST /api/workbench/tickets/{rid}/revert     행 사본으로 되돌리기 {dryRun}(ADMIN)     GET  .../executions  실행 기록·전후 비교
+GET  /api/workbench/executions/{eid}/workload  실행 전후 워크로드 비교   POST /api/workbench/compare  인스턴스 간 결과 비교
+POST /api/reviews/{rid}/cancel               티켓 취소(요청자·ADMIN)        POST /api/workbench/tickets/{rid}/resolve  커밋 불명 정리(ADMIN, 근거 필수)
+GET  /api/reviews/{rid}                      티켓 단건(팀 범위)             POST /api/workbench/instances/{id}/agent-query  에이전트 조회(AI 공유 설정 필요, 최대 50행)
+
 # 운영 행위 (ADMIN)
 POST {base}/backup                 즉시 백업                  POST {base}/backup/verify  복원 검증
 PUT  {base}/backup-policy          백업 정책                  POST {base}/online-ddl     gh-ost (기본 dry-run)
 POST {base}/sessions/{pid}/kill    세션 종료                  GET  /api/audit            감사 로그 검색
 
-POST /mcp                          MCP (Streamable HTTP) — 도구 16종
+POST /mcp                          MCP (Streamable HTTP) — 도구 19종(워크벤치 요청·조회 3종 포함, 실행 도구 없음)
 ```
 
 ## 문서
 
+- [PORTFOLIO-AX.md](docs/PORTFOLIO-AX.md) — AX 케이스 스터디: AI를 운영 플랫폼에 들일 때 정책을 코드로 강제한 사례별 결정·실측
 - [PRESENTATION.md](docs/PRESENTATION.md) — 문제 정의부터 설계·실측·교훈까지 전체 서사
 - [DESIGN.md](docs/DESIGN.md) — 인터페이스 경계, 시점 비교 데이터 모델
-- [VERIFICATION.md](docs/VERIFICATION.md) — 122개 절의 실측 기록 (명령·출력·스크린샷)
+- [VERIFICATION.md](docs/VERIFICATION.md) — 131개 절의 실측 기록 (명령·출력·스크린샷)
 - [ai-analysis-rules.md](docs/ai-analysis-rules.md) — 기종별 실행계획 판단 규칙: 근거와 예외
 - [operations.md](docs/operations.md) — 운영 규칙: 통계 소스의 함정과 대응 (digest 포화·PS 가시성·AAS)
 - [least-privilege.md](docs/least-privilege.md) — 기종별 최소 권한 모니터링 계정 (실측 확정)

@@ -1,0 +1,23 @@
+# Apple Silicon에서 Rosetta 없이 SQL Server 계열을 띄우는 덮어쓰기 (VERIFICATION 131절).
+#
+# 기본 docker-compose.yml의 mssql은 amd64 전용 SQL Server 2022 이미지라 Rosetta가 없는 VM(Colima vz 등)에서는 기동 즉시 죽는다.
+# 이 파일은 같은 서비스 이름·포트로 arm64 Azure SQL Edge를 띄운다. SQL Edge는 SQL Server 엔진(T-SQL·트랜잭션 DDL·SHOWPLAN)을
+# 공유하지만 2025-09-30에 지원이 끝난 제품이고 SQL Agent·CLR 등이 없다 — 여기서 잰 결과는 "SQL Server 호환 엔진에서의 검증"이며
+# 실제 SQL Server 2022 검증을 대신하지 않는다. 이미지에 sqlcmd가 없어 계정·데모 스크립트는 scripts/ApplySql.java로 적용한다.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.arm64.yml up -d mssql
+#
+# Mac에 Rosetta가 있으면 이 덮어쓰기 없이 실제 SQL Server 2022를 띄울 수 있다(VERIFICATION 132절). 기존 VM은 그대로 두고
+# Rosetta를 켠 Colima 프로필을 하나 더 만든다. 호스트 포트가 겹치지 않게 고른다(11434는 Ollama가 흔히 쓴다).
+#
+#   colima start mssql2022 --vm-type vz --vz-rosetta --cpu 4 --memory 6
+#   MSSQL_SA_PASSWORD='...' docker --context colima-mssql2022 run -d --name dbtower-mssql2022 --platform linux/amd64 \
+#     -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD -p 14330:1433 mcr.microsoft.com/mssql/server:2022-latest
+#   DBTOWER_CONSOLE_IT=1 DBTOWER_MSSQL_IT=1 DBTOWER_MSSQL_PORT=14330 ./gradlew test --tests '*ChangeExecutionIT'
+services:
+  mssql:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    platform: linux/arm64
+    environment:
+      ACCEPT_EULA: "1"
+      MSSQL_SA_PASSWORD: "Dbtower1234!"

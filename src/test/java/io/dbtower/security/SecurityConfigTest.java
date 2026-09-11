@@ -54,6 +54,17 @@ class SecurityConfigTest {
 
     @Test
     @WithMockUser(roles = "VIEWER")
+    void VIEWER는_승인_티켓을_대상_DB에_닿게_할_수_없다() throws Exception {
+        // 드라이런도 문장을 실제로 실행한 뒤 롤백하고 락을 잡으므로 실행·되돌리기와 같은 ADMIN 경계다
+        for (String path : new String[]{"/api/workbench/tickets/1/dry-run", "/api/workbench/tickets/1/execute",
+                "/api/workbench/tickets/1/revert"}) {
+            mvc.perform(post(path).with(csrf()).contentType("application/json").content("{\"dryRun\":true}"))
+                    .andExpect(status().isForbidden());
+        }
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
     void VIEWER는_서비스_토큰을_볼_수_없다() throws Exception {
         mvc.perform(get("/api/security/mcp-token")).andExpect(status().isForbidden());
     }

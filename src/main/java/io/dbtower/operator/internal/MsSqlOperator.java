@@ -10,10 +10,12 @@ import io.dbtower.operator.model.DbParameter;
 import io.dbtower.operator.model.DeadlockEvent;
 import io.dbtower.operator.model.IndexUsage;
 import io.dbtower.operator.model.LatencyPercentile;
+import io.dbtower.operator.JdbcConnectOptions;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
 import io.dbtower.operator.model.QueryStat;
+import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.RestoreSupport;
 import io.dbtower.operator.model.RestoreVerification;
@@ -48,6 +50,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -71,6 +74,94 @@ public class MsSqlOperator extends AbstractJdbcOperator {
 
     public MsSqlOperator(DatabaseInstance instance, ConnectionPools pools, BackupTools backupTools) {
         super(instance, pools, backupTools);
+    }
+
+    @Override
+    public String dropIndexStatement(String table, String index) {
+        return "DROP INDEX " + index + " ON " + table;
+    }
+
+    /**
+     * 변경 트랜잭션의 락 대기 상한. SET LOCK_TIMEOUT은 밀리초 단위 세션 설정이고 기본값(-1)은 무한 대기다.
+     * 변경 계정 풀은 이 경로만 쓰므로 매번 다시 건다(Azure SQL Edge 실측, VERIFICATION 131절).
+     */
+    @Override
+    protected void beginChange(Statement st, int timeoutSeconds) throws SQLException {
+        st.execute("SET LOCK_TIMEOUT " + (timeoutSeconds * 1000L));
+    }
+
+    /**
+     * SQL Server에는 FOR UPDATE 절이 없고 테이블 뒤 힌트로 락을 건다. UPDLOCK은 읽은 행의 갱신 락을 트랜잭션 끝까지 잡아
+     * 사본을 뜬 뒤 실제 변경 전에 다른 세션이 같은 행을 바꾸지 못하게 하고, ROWLOCK은 페이지·테이블 락으로 번지는 것을 줄인다.
+     */
+    @Override
+    protected String lockedSelect(String from, String where, int timeoutSeconds) {
+        return "SELECT * FROM " + from + " WITH (UPDLOCK, ROWLOCK)" + (where == null || where.isBlank() ? "" : " " + where);
+    }
+
+    /**
+     * SHOWPLAN_TEXT는 그 문장만으로 된 배치에서 켜지고, 켠 동안의 조회는 실행되지 않고 계획만 돌려준다 — 첫 결과 집합은 문장 원문,
+     * 다음이 계획 행이다. 변경과 같은 커넥션이라 커밋 전 인덱스도 계획에 보인다.
+     */
+    @Override
+    protected String explainInTransaction(Connection c, String sql) throws SQLException {
+        StringBuilder plan = new StringBuilder();
+        try (Statement st = c.createStatement()) {
+            st.execute("SET SHOWPLAN_TEXT ON");
+            try {
+                boolean hasResult = st.execute(sql);
+                boolean statementText = true;
+                while (true) {
+                    if (hasResult) {
+                        try (ResultSet rs = st.getResultSet()) {
+                            while (rs.next()) {
+                                if (!statementText) {
+                                    plan.append(rs.getString(1)).append('\n');
+                                }
+                            }
+                        }
+                        statementText = false;
+                    } else if (st.getUpdateCount() == -1) {
+                        break;
+                    }
+                    hasResult = st.getMoreResults();
+                }
+            } finally {
+                st.execute("SET SHOWPLAN_TEXT OFF");
+            }
+        }
+        return plan.toString();
+    }
+
+    /**
+     * 삭제한 행을 같은 키로 다시 넣을 때 IDENTITY 열은 SET IDENTITY_INSERT ON이 필요하다 — 다른 기종은 명시 값을 그냥 받는데
+     * SQL Server만 거부한다. 세션당 한 테이블만 켤 수 있고 테이블 ALTER 권한이 들어, 넣기 직후 반드시 끈다.
+     */
+    @Override
+    protected void beforeExplicitKeyInsert(Connection c, String table) throws SQLException {
+        if (hasIdentity(c, table)) {
+            try (Statement st = c.createStatement()) {
+                st.execute("SET IDENTITY_INSERT " + table + " ON");
+            }
+        }
+    }
+
+    @Override
+    protected void afterExplicitKeyInsert(Connection c, String table) throws SQLException {
+        if (hasIdentity(c, table)) {
+            try (Statement st = c.createStatement()) {
+                st.execute("SET IDENTITY_INSERT " + table + " OFF");
+            }
+        }
+    }
+
+    private static boolean hasIdentity(Connection c, String table) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("SELECT OBJECTPROPERTY(OBJECT_ID(?), 'TableHasIdentity')")) {
+            ps.setString(1, table);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getInt(1) == 1;
+            }
+        }
     }
 
     /**
@@ -308,13 +399,29 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         // useTls면 encrypt=true + 인증서 체인 검증(trustServerCertificate=false) — Azure SQL 등
         // TLS 강제 환경 대응. 검증을 끄는 우회는 일부러 안 둔다(자가서명이면 truststore에 등록).
         String encrypt = instance.isUseTls() ? "encrypt=true;trustServerCertificate=false" : "encrypt=false";
-        return "jdbc:sqlserver://%s:%d;databaseName=%s;%s;loginTimeout=3"
+        // socketTimeout은 로그인 단계 읽기를 막는 값이다 — 로그인 뒤에는 connectOptions()가 푼다
+        return "jdbc:sqlserver://%s:%d;databaseName=%s;%s;loginTimeout=3;socketTimeout=5000"
                 .formatted(instance.getHost(), instance.getPort(), instance.getDbName(), encrypt);
+    }
+
+    /**
+     * loginTimeout은 prelogin 소켓 읽기를 막지 못한다(mssql-jdbc #1529). 연결만 받고 말이 없는 대상에서 풀 생성이 7분 넘게 매달린 134절 실측이
+     * 근거다. URL의 socketTimeout으로 로그인 단계 읽기를 5초로 막고, 로그인이 끝나면 풀어 BACKUP·RESTORE 같은 긴 서버 작업이 예전처럼 끝까지 기다린다.
+     */
+    @Override
+    protected JdbcConnectOptions connectOptions() {
+        return new JdbcConnectOptions(Map.of(), 0);
     }
 
     @Override
     protected String versionSql() {
         return "SELECT @@VERSION";
+    }
+
+    /** sys.dm_exec_query_stats.total_logical_reads — 행이 아니라 버퍼 풀에서 읽은 8KB 페이지 수다 */
+    @Override
+    public RowsMetric rowsMetric() {
+        return RowsMetric.LOGICAL_READS;
     }
 
     @Override

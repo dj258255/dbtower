@@ -28,10 +28,12 @@ public final class McpProtocolHandler {
     private static final String SERVER_VERSION = "0.1.0";
     private static final String DEFAULT_PROTOCOL = "2025-06-18";
 
+    // 요청마다 호출자 토큰으로 핸들러를 새로 만들 수 있어(withToken) 커넥션 풀을 가진 클라이언트는 공유한다
+    private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+
     private final ObjectMapper mapper = new ObjectMapper();
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final String baseUrl;
-    private final String apiToken; // REST 위임 호출용 서비스 토큰 (null이면 헤더 생략 — 테스트 등)
+    private final String apiToken; // REST 위임에 싣는 Bearer 토큰 (null이면 헤더 생략 — 테스트 등)
     private final Map<String, Tool> tools = new LinkedHashMap<>();
 
     private record Tool(String description, ObjectNode inputSchema, ToolCall call) {
@@ -50,6 +52,15 @@ public final class McpProtocolHandler {
         this.baseUrl = baseUrl;
         this.apiToken = apiToken;
         registerTools();
+    }
+
+    /**
+     * 도구는 같고 위임 토큰만 다른 핸들러. HTTP 전송은 요청마다 그 요청을 인증한 호출자의 토큰으로 위임한다 — 서비스 토큰으로
+     * 위임하면 REST가 보는 주체가 사람이 아니라 api-token이 되어, 변경 요청의 요청자와 감사 기록이 사람을 잃고 요청자·승인자 분리
+     * 판정도 같은 사람을 다른 주체로 본다(VERIFICATION 132절).
+     */
+    public McpProtocolHandler withToken(String token) {
+        return new McpProtocolHandler(baseUrl, token);
     }
 
     /**
@@ -89,7 +100,9 @@ public final class McpProtocolHandler {
                 args -> get("/api/instances/" + args.get("instanceId").asLong() + "/health")));
 
         tools.put("query_stats", new Tool(
-                "현재 상위 쿼리 — 시간 점유율(load%), 호출수, 누적 시간, 읽은 행수. 지금 DB를 붙잡고 있는 쿼리를 본다.",
+                "현재 상위 쿼리 — 시간 점유율(load%), 호출수, 누적 시간, 행 지표. 지금 DB를 붙잡고 있는 쿼리를 본다. "
+                        + "행 지표는 기종마다 세는 것이 다르다: MySQL 검사한 행, PostgreSQL 돌려주거나 바꾼 행, "
+                        + "SQL Server 논리 읽기 페이지, Oracle 버퍼 읽기 블록, MongoDB 검사한 문서.",
                 schema(Map.of("instanceId", intProp("대상 인스턴스 id"),
                         "limit", intProp("최대 개수 (기본 20)"))),
                 args -> get("/api/instances/" + args.get("instanceId").asLong()
@@ -103,7 +116,8 @@ public final class McpProtocolHandler {
                         + "/slow-queries?limit=" + optInt(args, "limit", 20))));
 
         tools.put("compare", new Tool(
-                "시점 비교 — 평소 구간(base) 대비 문제 구간(target)의 쿼리별 QPS·레이턴시·rows/call 증감과 신규 쿼리. "
+                "시점 비교 — 평소 구간(base) 대비 문제 구간(target)의 쿼리별 QPS·레이턴시·rows/call 증감과 신규 쿼리"
+                        + "(rows는 query_stats 설명의 기종별 행 지표다 — PostgreSQL에서는 호출 수를 따라 늘 뿐 스캔 증가가 아니다). "
                         + "장애 원인 쿼리를 찾을 때 가장 먼저 쓰는 도구. 시각은 ISO LocalDateTime (예: 2026-07-03T15:20:30).",
                 schema(Map.of("instanceId", intProp("대상 인스턴스 id"),
                         "baseFrom", strProp("평소 구간 시작"), "baseTo", strProp("평소 구간 끝"),
@@ -182,6 +196,36 @@ public final class McpProtocolHandler {
                         "right", intProp("비교 대상 인스턴스 id"))),
                 args -> get("/api/schema-diff?left=" + args.get("left").asLong()
                         + "&right=" + args.get("right").asLong())));
+
+        // ---------- 워크벤치: 변경 요청과 조회 (승인·실행 계열은 의도적으로 없다) ----------
+        // 에이전트는 변경을 "요청"만 한다. 드라이런·실행·되돌리기·확인 뒤 정리·승인은 도구로 열지 않는다 — 드라이런도 문장을 실제로
+        // 실행한 뒤 롤백하고 락을 잡는다(아래 gh-ost를 도구로 열지 않은 것과 같은 판단). 사람이 웹 워크벤치에서 본다.
+        tools.put("change_ticket_submit", new Tool(
+                "변경 요청(승인 티켓) 올리기 — 실행되지 않는다. PENDING으로 쌓이고 규칙 판정·AI 소견이 붙으며, 사람(ADMIN)이 워크벤치에서 "
+                        + "드라이런·승인·실행한다. SQL 기종은 문장 한 개, MongoDB는 명령 JSON 한 개. verifySql은 변경 전후 실행계획을 잴 읽기 조회.",
+                schema(Map.of("instanceId", intProp("대상 인스턴스 id"), "sql", strProp("변경 문장(한 개)"),
+                        "reason", strProp("요청 사유"), "verifySql", strProp("검증 조회(선택, 기본 없음)"))),
+                args -> post("/api/instances/" + args.get("instanceId").asLong() + "/reviews",
+                        mapper.createObjectNode().put("sql", args.get("sql").asText())
+                                .put("reason", args.path("reason").asText(""))
+                                .put("verifySql", args.hasNonNull("verifySql") ? args.get("verifySql").asText() : null)
+                                .toString())));
+
+        tools.put("change_ticket_status", new Tool(
+                "변경 요청의 상태·규칙 판정·AI 소견과 실행 기록(드라이런·실행·되돌리기, 행 비교는 마스킹된 값). "
+                        + "요청을 올린 뒤 사람이 처리했는지 확인할 때 쓴다.",
+                schema(Map.of("ticketId", intProp("change_ticket_submit이 돌려준 id"))),
+                args -> "{\"ticket\": " + get("/api/reviews/" + args.get("ticketId").asLong())
+                        + ", \"executions\": " + get("/api/workbench/tickets/" + args.get("ticketId").asLong() + "/executions") + "}"));
+
+        tools.put("workbench_query", new Tool(
+                "대상 DB 읽기 조회 — ADMIN이 워크벤치 설정에서 '결과 값 AI 공유'를 켠 인스턴스만 열린다(꺼져 있으면 403). "
+                        + "조회 전용 계정·읽기 전용 트랜잭션·마스킹·실행 기록을 사람의 조회와 똑같이 거치고 최대 50행. 변경 문장은 거부된다.",
+                schema(Map.of("instanceId", intProp("대상 인스턴스 id"), "sql", strProp("읽기 조회(SQL 또는 MongoDB 읽기 명령 JSON)"),
+                        "rowLimit", intProp("최대 행 수 (기본 50, 상한 50)"))),
+                args -> post("/api/workbench/instances/" + args.get("instanceId").asLong() + "/agent-query",
+                        mapper.createObjectNode().put("sql", args.get("sql").asText())
+                                .put("rowLimit", optInt(args, "rowLimit", 50)).toString())));
 
         // 온라인 스키마 변경(gh-ost, B4)은 의도적으로 MCP 도구로 노출하지 않는다.
         // 실제 테이블 구조를 바꾸는 파괴적 행위를 에이전트가 스스로 실행하는 건 위험하기 때문 —
@@ -322,7 +366,7 @@ public final class McpProtocolHandler {
     private String get(String path) throws Exception {
         HttpRequest req = authorized(HttpRequest.newBuilder(URI.create(baseUrl + path))
                 .timeout(Duration.ofSeconds(30)).GET()).build();
-        return require2xx(http.send(req, HttpResponse.BodyHandlers.ofString()));
+        return require2xx(HTTP.send(req,HttpResponse.BodyHandlers.ofString()));
     }
 
     private String post(String path, String jsonBody) throws Exception {
@@ -330,7 +374,7 @@ public final class McpProtocolHandler {
                 .timeout(Duration.ofSeconds(30))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))).build();
-        return require2xx(http.send(req, HttpResponse.BodyHandlers.ofString()));
+        return require2xx(HTTP.send(req,HttpResponse.BodyHandlers.ofString()));
     }
 
     private HttpRequest.Builder authorized(HttpRequest.Builder builder) {

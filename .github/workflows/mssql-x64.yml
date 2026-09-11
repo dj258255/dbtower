@@ -1,0 +1,112 @@
+name: SQL Server x64
+
+# Apple Silicon 로컬에는 SQL Server를 번역 없이 돌릴 방법이 없다(VERIFICATION 133절). 같은 IT와 같은 부하 측정기를
+# GitHub 호스티드 ubuntu x64 러너의 SQL Server 2022에서 네이티브로 돌려, Rosetta VM에서 잰 값의 반대편을 만든다(134절).
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/main/java/io/dbtower/operator/**'
+      - 'src/test/java/io/dbtower/operator/internal/ChangeExecutionIT.java'
+      - 'src/test/java/io/dbtower/operator/internal/ConsoleReadOnlyIT.java'
+      - 'docker/*mssql*.sql'
+      - 'scripts/MssqlLoad.java'
+      - 'scripts/ApplySql.java'
+      - '.github/workflows/mssql-x64.yml'
+
+jobs:
+  mssql-x64:
+    runs-on: ubuntu-latest
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          # docker-compose.yml과 같은 데모 비밀번호다(IT가 이 값을 쓴다). 운영 비밀값이 아니다.
+          MSSQL_SA_PASSWORD: "Dbtower1234!"
+        ports:
+          - 11433:1433
+    env:
+      DB_PASSWORD: "Dbtower1234!"
+      URL: "jdbc:sqlserver://127.0.0.1:11433;databaseName=sample;encrypt=false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Runner hardware
+        shell: bash
+        run: |
+          echo "arch=$(uname -m) nproc=$(nproc)"
+          grep -m1 "model name" /proc/cpuinfo
+          free -m | head -2
+
+      # compileTestJava는 런타임 전용 의존성(mssql-jdbc) jar를 받지 않는다 — 첫 실행에서 JAR이 비어 "No suitable driver found"로
+      # 재시도만 반복했다. bootJar가 런타임 클래스패스를 실제로 받는다.
+      - name: Build (JDBC 드라이버 확보)
+        run: ./gradlew bootJar testClasses
+
+      - name: Wait for SQL Server and apply accounts
+        shell: bash
+        run: |
+          JAR=$(find ~/.gradle/caches -name 'mssql-jdbc-*.jre11.jar' | head -1)
+          if [ -z "$JAR" ]; then echo "mssql-jdbc jar를 찾지 못했다"; exit 1; fi
+          echo "JAR=$JAR" >> "$GITHUB_ENV"
+          for i in $(seq 1 60); do
+            if java -cp "$JAR" scripts/ApplySql.java "jdbc:sqlserver://127.0.0.1:11433;encrypt=false;loginTimeout=5" sa docker/mssql-init.sql; then
+              break
+            fi
+            sleep 5
+          done
+          java -cp "$JAR" scripts/ApplySql.java "jdbc:sqlserver://127.0.0.1:11433;encrypt=false" sa docker/workbench-mssql.sql
+
+      - name: Engine
+        shell: bash
+        run: java -cp "$JAR" scripts/MssqlLoad.java "$URL" sa env | tee env.log
+
+      - name: SQL Server IT (change execution, console read-only)
+        shell: bash
+        run: |
+          DBTOWER_MSSQL_IT=1 ./gradlew test --tests '*ChangeExecutionIT' --tests '*ConsoleReadOnlyIT' --tests '*NetworkTimeoutAfterLoginIT' -i > it.log 2>&1
+          # 로그 요약은 판정이 아니다 — 매치 없음·조기 종료로 step이 실패하지 않게 한다(판정은 위 gradle 종료 코드)
+          grep -E "^\s+\[MSSQL|^\s+\|--|timings|PASSED|FAILED|SKIPPED|BUILD" it.log | grep -v "Hikari" | head -80 || true
+
+      - name: Load before/after index (native x64)
+        shell: bash
+        run: |
+          L() { java -cp "$JAR" scripts/MssqlLoad.java "$URL" sa "$@"; }
+          {
+            L prepare
+            L drop-index
+            L plan
+            L bench 4 60 select1
+            L bench 4 60 query
+            L index
+            L plan
+            L bench 4 60 query
+            L drop-index
+          } 2>&1 | tee load.log
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '### SQL Server 2022 on native x64 runner'
+            echo '```'
+            cat env.log load.log 2>/dev/null || true
+            grep -E "^\s+\[MSSQL" it.log 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mssql-x64-logs
+          path: |
+            env.log
+            it.log
+            load.log

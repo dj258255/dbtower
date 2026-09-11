@@ -55,7 +55,10 @@ public class RegistryController {
             // 조직 태그(선택, V30) — 환경/리전/클러스터. 필터·표기용이고 화면엔 esc 경유로 들어간다
             @Size(max = 50) String environment,
             @Size(max = 50) String region,
-            @Size(max = 100) String cluster) {
+            @Size(max = 100) String cluster,
+            // 앱 스키마(선택, V39) — 모니터 계정과 앱 스키마가 다른 Oracle 등. ALTER SESSION 문장에 들어가므로 식별자 모양만 허용
+            @Size(max = 128) @Pattern(regexp = "[A-Za-z][A-Za-z0-9_$#]*", message = "appSchema는 스키마 식별자 형식만 허용합니다")
+            String appSchema) {
         boolean tls() {
             return Boolean.TRUE.equals(useTls);
         }
@@ -65,11 +68,11 @@ public class RegistryController {
     public record InstanceResponse(Long id, String name, DbmsType type, String host, int port, String dbName,
                                    boolean useTls, boolean collectionEnabled,
                                    String teamLabel, String consoleUrl, String nodeFilter,
-                                   String environment, String region, String cluster) {
+                                   String environment, String region, String cluster, String appSchema) {
         static InstanceResponse from(DatabaseInstance i) {
             return new InstanceResponse(i.getId(), i.getName(), i.getType(), i.getHost(), i.getPort(), i.getDbName(),
                     i.isUseTls(), i.isCollectionEnabled(), i.getTeamLabel(), i.getConsoleUrl(), i.getNodeFilter(),
-                    i.getEnvironment(), i.getRegion(), i.getClusterLabel());
+                    i.getEnvironment(), i.getRegion(), i.getClusterLabel(), i.getAppSchema());
         }
     }
 
@@ -85,6 +88,7 @@ public class RegistryController {
                 req.tls());
         instance.updateMeta(req.teamLabel(), req.consoleUrl(), req.nodeFilter(),
                 req.environment(), req.region(), req.cluster());
+        instance.updateAppSchema(req.appSchema());
         return InstanceResponse.from(registryService.register(instance));
     }
 
@@ -97,7 +101,7 @@ public class RegistryController {
         DatabaseInstance saved = registryService.upsert(
                 req.name(), req.type(), req.host(), req.port(), req.dbName(), req.username(), req.password(),
                 req.tls(), req.teamLabel(), req.consoleUrl(), req.nodeFilter(),
-                req.environment(), req.region(), req.cluster());
+                req.environment(), req.region(), req.cluster(), req.appSchema());
         return InstanceResponse.from(saved);
     }
 

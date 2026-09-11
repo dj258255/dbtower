@@ -1,5 +1,11 @@
 package io.dbtower.operator;
 
+import io.dbtower.operator.model.ChangeOutcome;
+import io.dbtower.operator.model.ChangePlan;
+import io.dbtower.operator.model.QueryResult;
+import io.dbtower.operator.model.RevertPlan;
+import io.dbtower.operator.model.RowsMetric;
+import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.operator.model.VolumeStat;
 import io.dbtower.operator.model.WaitEvent;
 import io.dbtower.operator.model.TableStat;
@@ -60,6 +66,9 @@ public interface DbmsOperator {
 
     /** 정규화된 쿼리별 누적 통계 상위 N개 (시점 비교의 원천 데이터) */
     List<QueryStat> queryStats(int limit);
+
+    /** queryStats의 rowsExamined 자리에 이 기종이 담는 지표 — 화면·알림이 같은 이름으로 다른 단위를 읽지 않게 기본값을 두지 않는다 */
+    RowsMetric rowsMetric();
 
     /** 느린 쿼리 상위 N개 */
     List<SlowQuery> slowQueries(int limit);
@@ -301,5 +310,49 @@ public interface DbmsOperator {
      */
     default Optional<Long> deadlockCount() {
         return Optional.empty();
+    }
+
+    /**
+     * 워크벤치 콘솔 조회 — 모니터 계정이 아니라 조회 전용 콘솔 계정으로 한 문장을 실행하고 행 상한까지만 읽는다.
+     *
+     * <p>이 메서드는 실행 계층의 방어를 책임진다: 분리된 계정, 읽기 전용 트랜잭션(기종이 지원하는 만큼),
+     * 타임아웃, 행 상한, 끝에 항상 롤백. "읽기 문장인가"의 분류는 호출자(workbench)가 먼저 한다 —
+     * 분류는 첫 방어선일 뿐이라 여기서 다시 믿지 않는다.
+     */
+    default QueryResult executeReadOnly(ConsoleCredential credential, String statement, int rowCap, int timeoutSeconds) {
+        throw new UnsupportedOperationException("이 기종은 콘솔 조회를 지원하지 않습니다");
+    }
+
+    /**
+     * 승인된 변경 한 문장을 변경 계정(WRITE)으로 실행한다 — 한 트랜잭션 안에서 변경 전 행 사본을 락과 함께 잡고, 실행하고,
+     * 영향 행 수와 사본을 대조한 뒤에만 커밋한다(드라이런이면 끝에서 롤백).
+     *
+     * <p>"승인된 티켓인가"는 호출자(workbench)가 티켓 게이트로 먼저 확인한다. 이 메서드는 실행 계층의 불변식만 책임진다.
+     */
+    default ChangeOutcome executeChange(ConsoleCredential credential, ChangePlan plan) {
+        throw new UnsupportedOperationException("이 기종은 변경 티켓 실행을 지원하지 않습니다");
+    }
+
+    /**
+     * 인덱스 제거 문장 — DDL 실행 뒤 역변경 티켓 제안에만 쓴다(실행은 새 티켓의 드라이런·승인을 다시 거친다).
+     * 표준 문법은 인덱스 이름만 받지만 MySQL·SQL Server는 테이블을 요구해 구현체가 덮어쓴다.
+     */
+    default String dropIndexStatement(String table, String index) {
+        return "DROP INDEX " + index;
+    }
+
+    /** 생긴 테이블을 지우는 역변경 문장. 이 기종에서 워크벤치가 허용하지 않는 명령이면 null(제안하지 않는다) */
+    default String dropTableStatement(String table) {
+        return "DROP TABLE " + table;
+    }
+
+    /** 생긴 열을 지우는 역변경 문장. 열 개념이 없는 기종은 null */
+    default String dropColumnStatement(String table, String column) {
+        return "ALTER TABLE " + table + " DROP COLUMN " + column;
+    }
+
+    /** 커밋된 변경을 행 사본으로 되돌린다. 실행 이후 달라진 행이 있으면 아무것도 쓰지 않고 충돌을 돌려준다. */
+    default RevertPlan.Outcome revertChange(ConsoleCredential credential, RevertPlan plan) {
+        throw new UnsupportedOperationException("이 기종은 변경 되돌리기를 지원하지 않습니다");
     }
 }
