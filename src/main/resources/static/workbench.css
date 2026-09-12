@@ -428,6 +428,7 @@ tr.df-removed td { background: #fdf1f2; }
 .df-arrow { color: var(--muted); margin: 0 4px; }
 .df-title { font-weight: 700; font-size: 12.5px; margin-top: 6px; }
 .df-schema ul { margin: 4px 0; padding-left: 18px; font-size: 12.5px; line-height: 1.6; }
+.df-schema li { overflow-wrap: anywhere; white-space: pre-wrap; }
 .sd-add { color: #137a4b; }
 .sd-remove { color: #b42335; }
 .sd-change { color: #a35200; }

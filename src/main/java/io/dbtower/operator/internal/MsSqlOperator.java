@@ -21,6 +21,7 @@ import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.RestoreSupport;
 import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.SchemaDefinition;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableDetail;
@@ -854,9 +855,49 @@ public class MsSqlOperator extends AbstractJdbcOperator {
                     "VIEW".equalsIgnoreCase(rs.getString("TABLE_TYPE")) ? TableSchema.VIEW : TableSchema.TABLE));
             return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
                     columns, indexes, kinds, Map.of(),
-                    TableDetailSupport.foreignKeysByTable(mssqlForeignKeys(null)), SchemaSupport.DEFAULT_MAX_TABLES);
+                    TableDetailSupport.foreignKeysByTable(mssqlForeignKeys(null)),
+                    mssqlDefinitions(false), mssqlDefinitions(true), SchemaSupport.DEFAULT_MAX_TABLES);
         } catch (DataAccessException e) {
             throw new OperatorException("MSSQL 스키마 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    private SchemaSupport.Definitions mssqlDefinitions(boolean triggers) {
+        String source = triggers ? "sys.triggers + sys.sql_modules" : "sys.check_constraints";
+        try {
+            // 권한은 데이터베이스·스키마 어느 쪽으로 와도 정의를 읽을 수 있다 — 최소 권한 구성은 스키마 단위로 주므로 둘 다 본다
+            // (라이브 156절: DB 단위만 보던 게이트가 GRANT VIEW DEFINITION ON SCHEMA::dbo를 가진 모니터 계정을 미확보로 떨어뜨렸다)
+            Integer visible = jdbc().queryForObject("""
+                    SELECT CASE WHEN HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'VIEW DEFINITION') = 1
+                                  OR HAS_PERMS_BY_NAME(QUOTENAME(SCHEMA_NAME()), 'SCHEMA', 'VIEW DEFINITION') = 1
+                                THEN 1 ELSE 0 END
+                    """, Integer.class);
+            if (!Integer.valueOf(1).equals(visible)) {
+                return SchemaSupport.unavailableDefinitions(source + ": 미확보, VIEW DEFINITION 권한 필요(데이터베이스 또는 스키마)");
+            }
+            String sql = triggers ? """
+                    SELECT t.name AS table_name, g.name, m.definition,
+                           CONCAT('disabled=', g.is_disabled, ';replication=', g.is_not_for_replication,
+                                  ';insteadOf=', g.is_instead_of_trigger, ';ansiNulls=', m.uses_ansi_nulls,
+                                  ';quotedIdentifier=', m.uses_quoted_identifier) AS state
+                    FROM sys.triggers g JOIN sys.objects t ON t.object_id = g.parent_id
+                    LEFT JOIN sys.sql_modules m ON m.object_id = g.object_id
+                    WHERE g.parent_class = 1 AND g.is_ms_shipped = 0 AND t.type IN ('U', 'V')
+                      AND SCHEMA_NAME(t.schema_id) = SCHEMA_NAME()
+                    ORDER BY t.name, g.name
+                    """ : """
+                    SELECT t.name AS table_name, c.name, c.definition,
+                           CONCAT('disabled=', c.is_disabled, ';notTrusted=', c.is_not_trusted,
+                                  ';replication=', c.is_not_for_replication) AS state
+                    FROM sys.check_constraints c JOIN sys.tables t ON t.object_id = c.parent_object_id
+                    WHERE t.is_ms_shipped = 0 AND SCHEMA_NAME(t.schema_id) = SCHEMA_NAME()
+                    ORDER BY t.name, c.name
+                    """;
+            return SchemaSupport.definitions(() -> jdbc().query(sql,
+                    (rs, i) -> new SchemaSupport.DefinitionRow(rs.getString("table_name"),
+                            new SchemaDefinition(rs.getString("name"), rs.getString("definition"), rs.getString("state")))), source);
+        } catch (DataAccessException e) {
+            return SchemaSupport.unavailableDefinitions(source + ": 권한 조회 실패");
         }
     }
 

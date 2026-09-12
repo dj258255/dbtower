@@ -17,7 +17,19 @@ import java.util.List;
  *                    구조 비교가 제약조건 변화를 보려면 스냅샷에 들어와야 한다(153절). 개념이 없는 기종은 빈 리스트
  */
 public record TableSchema(String name, List<ColumnSchema> columns, List<IndexSchema> indexes,
-                          String kind, List<String> primaryKey, List<ForeignKey> foreignKeys) {
+                          String kind, List<String> primaryKey, List<ForeignKey> foreignKeys,
+                          SchemaDefinitions checks, SchemaDefinitions triggers) {
+
+    public TableSchema {
+        // 이전 실행 기록에는 새 필드가 없으므로 미확보로 읽어 허위 삭제를 막는다.
+        if (checks == null) checks = SchemaDefinitions.unavailable("CHECK 미확보");
+        if (triggers == null) triggers = SchemaDefinitions.unavailable("트리거 미확보");
+    }
+
+    public TableSchema(String name, List<ColumnSchema> columns, List<IndexSchema> indexes,
+                       String kind, List<String> primaryKey, List<ForeignKey> foreignKeys) {
+        this(name, columns, indexes, kind, primaryKey, foreignKeys, null, null);
+    }
 
     public static final String TABLE = "TABLE";
     public static final String VIEW = "VIEW";

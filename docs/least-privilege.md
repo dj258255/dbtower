@@ -386,3 +386,24 @@ mysqldump/pg_dump는 대상 테이블 전체 읽기+락, SQL Server `BACKUP DATA
   https://www.mongodb.com/docs/manual/reference/built-in-roles/
 - MongoDB 프로파일러 관리:
   https://www.mongodb.com/docs/manual/tutorial/manage-the-database-profiler/
+
+## CHECK·트리거 구조 비교 (156절)
+
+스냅샷에는 정의의 수집 상태를 함께 넣는다. 권한 부족·조회 실패·암호화된 정의는 `UNAVAILABLE`(미확보),
+개념이 없는 MongoDB SQL CHECK·트리거는 `UNSUPPORTED`다. 둘 다 빈 목록을 얻은 `AVAILABLE`과 다르다.
+
+| 기종 | 읽는 원천·범위 | 권한과 한계 |
+|---|---|---|
+| PostgreSQL | 현재 스키마 `pg_constraint`, 사용자 `pg_trigger`와 직접 연결된 함수 정의 | 내부 트리거 제외. 호출 함수가 다시 부르는 다른 함수까지 추적하지 않음 |
+| MySQL | 대상 DB `information_schema.CHECK_CONSTRAINTS`, `TRIGGERS` | 트리거 조회에도 TRIGGER 권한 필요. 직접 전역/스키마 권한이 확인될 때만 읽음. 테이블 단위·역할 경유 권한은 현재 미확보 처리 |
+| Oracle | 앱 스키마 지정 시 `DBA_CONSTRAINTS`·`DBA_TRIGGERS`, 아니면 `USER_*` | 기존 SELECT_CATALOG_ROLE 범위. NOT NULL을 포함한 C 제약 원문을 LONG으로 읽음 |
+| SQL Server | 현재 스키마 `sys.check_constraints`, `sys.triggers`, `sys.sql_modules` | VIEW DEFINITION이 데이터베이스 또는 스키마 단위로 확인될 때 읽음(이 저장소의 모니터는 `ON SCHEMA::dbo`). 암호화된 본문(NULL)은 미확보 |
+
+MySQL 모니터에 TRIGGER를 자동 부여하지 않는다. 이 권한은 조회 전용이 아니기 때문이다.
+SQL Server는 이미 가진 스키마 단위 VIEW DEFINITION으로 읽는다 — 라이브에서 데이터베이스 단위만 보던 게이트가 이 권한을 못 봐 미확보로 떨어뜨렸고, 권한을 넓히는 대신 게이트를 고쳤다(156절).
+Oracle 변경 계정의 `sample.customers` DML 권한은 외래키 생성에 필요한 REFERENCES를 대신하지 않는다.
+이번 작업에서는 그 권한을 넓히지 않았으며 외래키 실행 성공은 미확보다.
+
+근거: [MySQL TRIGGERS](https://dev.mysql.com/doc/refman/8.0/en/information-schema-triggers-table.html),
+[Oracle ALL_CONSTRAINTS](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/ALL_CONSTRAINTS.html),
+[SQL Server sys.sql_modules](https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-sql-modules-transact-sql?view=sql-server-ver17).

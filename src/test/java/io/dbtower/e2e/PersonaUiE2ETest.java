@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
+import java.nio.file.Path;
 
 import static com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -219,6 +220,34 @@ class PersonaUiE2ETest {
         Page operator = loginAs("e2e-operator");
         operator.locator("#user-chip .role-badge").waitFor();
         assertThat(operator.locator("#users-card")).hasAttribute("hidden", "");
+    }
+
+    @Test
+    void 구조_정의는_좁은_화면에_맞고_미확보_경고와_이스케이프를_지킨다() {
+        Page page = loginAs("e2e-requester");
+        page.setContent("<link rel='stylesheet' href='/style.css'><link rel='stylesheet' href='/workbench.css'>"
+                + "<main id='schema-fixture' style='padding:16px;min-width:0'></main>");
+        page.evaluate("""
+                async () => {
+                  const { renderSchemaDiff } = await import('/workbench/diff.js');
+                  const definition = {name: 'ck_amount', definition: "amount > 0 AND note <> '<img src=x onerror=alert(1)>'", state: 'validated=true'};
+                  const trigger = {name: 'tr_orders_audit', definition: 'CREATE TRIGGER tr_orders_audit BEFORE UPDATE ON orders EXECUTE FUNCTION '
+                    + 'long_identifier_'.repeat(25) + '()', state: 'O'};
+                  const changed = {identical:false, complete:true, changedTables:[{table:'orders',
+                    checks:{added:[definition]}, triggers:{changed:[{name:trigger.name, left:trigger, right:{...trigger, state:'D'}}]}}]};
+                  const partial = {identical:true, complete:false, warning:'트리거 미확보: TRIGGER 권한 확인 필요'};
+                  document.querySelector('#schema-fixture').innerHTML = renderSchemaDiff(changed) + renderSchemaDiff(partial);
+                }
+                """);
+        assertThat(page.locator("#schema-fixture").textContent()).contains("CHECK ck_amount", "트리거 tr_orders_audit", "미확보", "TRIGGER 권한");
+        assertThat(page.locator("#schema-fixture img")).hasCount(0);
+        for (int width : List.of(390, 1512)) {
+            page.setViewportSize(width, 900);
+            assertThat((Boolean) page.evaluate("document.documentElement.scrollWidth <= innerWidth"))
+                    .as("구조 비교 가로 넘침, viewport=" + width).isTrue();
+            page.screenshot(new Page.ScreenshotOptions().setFullPage(true)
+                    .setPath(Path.of("build/reports/schema-diff-156-" + width + ".png")));
+        }
     }
 
     private Page loginAs(String username) {

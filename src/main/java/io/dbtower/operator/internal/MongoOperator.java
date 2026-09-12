@@ -28,6 +28,7 @@ import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.RestoreSupport;
 import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.SchemaDefinitions;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableDetail;
@@ -1215,7 +1216,8 @@ public class MongoOperator implements DbmsOperator {
                     }
                     // 뷰는 인덱스가 없어 listIndexes가 실패한다 — 이름 목록만 보던 때는 뷰 하나가 스냅샷 전체를 오류로 만들 수 있었다(150절)
                     if ("view".equals(info.getString("type"))) {
-                        tables.add(new TableSchema(name, List.of(), List.of(), TableSchema.VIEW, List.of()));
+                        tables.add(new TableSchema(name, List.of(), List.of(), TableSchema.VIEW, List.of(), List.of(),
+                                SchemaDefinitions.unsupported(), SchemaDefinitions.unsupported()));
                         continue;
                     }
                     List<IndexSchema> indexes = new ArrayList<>();
@@ -1226,7 +1228,8 @@ public class MongoOperator implements DbmsOperator {
                                 new ArrayList<>(key.keySet()), unique));
                     }
                     // 스키마리스: columns는 빈 리스트(TableSchema 주석 참고). 기본키는 모든 컬렉션의 _id
-                    tables.add(new TableSchema(name, List.of(), indexes, TableSchema.TABLE, List.of("_id")));
+                    tables.add(new TableSchema(name, List.of(), indexes, TableSchema.TABLE, List.of("_id"), List.of(),
+                            SchemaDefinitions.unsupported(), SchemaDefinitions.unsupported()));
                 }
                 return new SchemaSnapshot(instance.getType().name(), instance.getDbName(),
                         tables, truncated, SchemaSupport.DEFAULT_MAX_TABLES);

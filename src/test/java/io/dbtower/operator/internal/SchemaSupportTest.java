@@ -3,6 +3,9 @@ package io.dbtower.operator.internal;
 import io.dbtower.operator.model.ColumnSchema;
 import io.dbtower.operator.model.ForeignKey;
 import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.SchemaDefinition;
+import io.dbtower.operator.model.SchemaDefinitions;
+import org.springframework.dao.PermissionDeniedDataAccessException;
 import io.dbtower.operator.model.TableSchema;
 import org.junit.jupiter.api.Test;
 
@@ -114,5 +117,34 @@ class SchemaSupportTest {
 
         assertThat(s.tables().get(0).foreignKeys()).isEmpty();
         assertThat(new TableSchema("t", List.of(), List.of()).foreignKeys()).isEmpty();
+    }
+
+    @Test
+    void 정의를_테이블에_묶고_상한_밖의_정의는_버린다() {
+        var definition = new SchemaDefinition("ck", "id > 0", "ENABLED");
+        var definitions = SchemaSupport.definitions(() -> List.of(
+                new SchemaSupport.DefinitionRow("a", definition),
+                new SchemaSupport.DefinitionRow("c", definition)), "catalog");
+        var schema = SchemaSupport.build("POSTGRESQL", "sample",
+                List.of(col("a", "id", 1), col("b", "id", 1), col("c", "id", 1)), List.of(),
+                Map.of(), Map.of(), Map.of(), definitions, definitions, 2);
+        assertThat(schema.truncated()).isTrue();
+        assertThat(schema.tables()).extracting(TableSchema::name).containsExactly("a", "b");
+        assertThat(schema.tables().get(0).checks().definitions()).containsExactly(definition);
+        assertThat(schema.tables().get(0).triggers().definitions()).containsExactly(definition);
+        assertThat(schema.tables().get(1).checks().status()).isEqualTo(SchemaDefinitions.Status.AVAILABLE);
+        assertThat(schema.tables().get(1).checks().definitions()).isEmpty();
+    }
+
+    @Test
+    void 조회_실패와_NULL_정의는_빈_목록으로_위장하지_않는다() {
+        var denied = SchemaSupport.definitions(() -> {
+            throw new PermissionDeniedDataAccessException("denied", null);
+        }, "catalog");
+        assertThat(denied.forTable("a").status()).isEqualTo(SchemaDefinitions.Status.UNAVAILABLE);
+        var encrypted = SchemaSupport.definitions(() -> List.of(
+                new SchemaSupport.DefinitionRow("a", new SchemaDefinition("hidden", null, "ENABLED"))), "catalog");
+        assertThat(encrypted.forTable("a").status()).isEqualTo(SchemaDefinitions.Status.UNAVAILABLE);
+        assertThat(encrypted.forTable("b").status()).isEqualTo(SchemaDefinitions.Status.AVAILABLE);
     }
 }

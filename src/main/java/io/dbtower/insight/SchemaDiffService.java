@@ -4,6 +4,8 @@ import io.dbtower.operator.model.ColumnSchema;
 import io.dbtower.operator.model.ForeignKey;
 import io.dbtower.operator.model.IndexSchema;
 import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.SchemaDefinition;
+import io.dbtower.operator.model.SchemaDefinitions;
 import io.dbtower.operator.model.TableSchema;
 import org.springframework.stereotype.Service;
 
@@ -39,6 +41,16 @@ public class SchemaDiffService {
     public record ForeignKeyChange(String name, ForeignKey left, ForeignKey right) {
     }
 
+    public record DefinitionChange(String name, SchemaDefinition left, SchemaDefinition right) {
+    }
+
+    public record DefinitionDiff(List<SchemaDefinition> added, List<SchemaDefinition> removed,
+                                 List<DefinitionChange> changed) {
+        boolean hasChange() {
+            return !added.isEmpty() || !removed.isEmpty() || !changed.isEmpty();
+        }
+    }
+
     /** 한 테이블 안의 차이 — 양쪽에 존재하는 테이블에 대해서만 채워진다 */
     public record TableDiff(String table,
                             List<ColumnSchema> addedColumns, List<ColumnSchema> removedColumns,
@@ -46,7 +58,18 @@ public class SchemaDiffService {
                             List<IndexSchema> addedIndexes, List<IndexSchema> removedIndexes,
                             List<IndexChange> changedIndexes,
                             List<ForeignKey> addedForeignKeys, List<ForeignKey> removedForeignKeys,
-                            List<ForeignKeyChange> changedForeignKeys) {
+                            List<ForeignKeyChange> changedForeignKeys,
+                            DefinitionDiff checks, DefinitionDiff triggers) {
+
+        public TableDiff(String table, List<ColumnSchema> addedColumns, List<ColumnSchema> removedColumns,
+                         List<ColumnChange> changedColumns, List<IndexSchema> addedIndexes,
+                         List<IndexSchema> removedIndexes, List<IndexChange> changedIndexes,
+                         List<ForeignKey> addedForeignKeys, List<ForeignKey> removedForeignKeys,
+                         List<ForeignKeyChange> changedForeignKeys) {
+            this(table, addedColumns, removedColumns, changedColumns, addedIndexes, removedIndexes, changedIndexes,
+                    addedForeignKeys, removedForeignKeys, changedForeignKeys,
+                    new DefinitionDiff(List.of(), List.of(), List.of()), new DefinitionDiff(List.of(), List.of(), List.of()));
+        }
 
         /** 외래키를 다루지 않는 호출(153절 이전에 만든 기록·단위 테스트) — 외래키 목록은 비어 있다 */
         public TableDiff(String table, List<ColumnSchema> addedColumns, List<ColumnSchema> removedColumns,
@@ -67,7 +90,12 @@ public class SchemaDiffService {
      */
     public record SchemaDiff(String leftType, String rightType, boolean identical, String warning,
                              List<TableSchema> addedTables, List<TableSchema> removedTables,
-                             List<TableDiff> changedTables) {
+                             List<TableDiff> changedTables, boolean complete) {
+        public SchemaDiff(String leftType, String rightType, boolean identical, String warning,
+                          List<TableSchema> addedTables, List<TableSchema> removedTables,
+                          List<TableDiff> changedTables) {
+            this(leftType, rightType, identical, warning, addedTables, removedTables, changedTables, false);
+        }
     }
 
     public SchemaDiff diff(SchemaSnapshot left, SchemaSnapshot right) {
@@ -97,7 +125,8 @@ public class SchemaDiffService {
 
         boolean identical = added.isEmpty() && removed.isEmpty() && changed.isEmpty();
         return new SchemaDiff(left.type(), right.type(), identical,
-                warning(left, right), added, removed, changed);
+                warning(left, right), added, removed, changed, complete(left) && complete(right)
+                        && Objects.equals(left.type(), right.type()));
     }
 
     private TableDiff diffTable(String table, TableSchema left, TableSchema right) {
@@ -165,7 +194,35 @@ public class SchemaDiffService {
         }
 
         return new TableDiff(table, addedCols, removedCols, changedCols,
-                addedIdx, removedIdx, changedIdx, addedFks, removedFks, changedFks);
+                addedIdx, removedIdx, changedIdx, addedFks, removedFks, changedFks,
+                diffDefinitions(left.checks(), right.checks()), diffDefinitions(left.triggers(), right.triggers()));
+    }
+
+    private static DefinitionDiff diffDefinitions(SchemaDefinitions left, SchemaDefinitions right) {
+        if (left.status() != SchemaDefinitions.Status.AVAILABLE || right.status() != SchemaDefinitions.Status.AVAILABLE) {
+            return new DefinitionDiff(List.of(), List.of(), List.of());
+        }
+        Map<String, SchemaDefinition> before = new LinkedHashMap<>();
+        Map<String, SchemaDefinition> after = new LinkedHashMap<>();
+        left.definitions().forEach(d -> before.put(d.name(), d));
+        right.definitions().forEach(d -> after.put(d.name(), d));
+        List<SchemaDefinition> added = new ArrayList<>();
+        List<SchemaDefinition> removed = new ArrayList<>();
+        List<DefinitionChange> changed = new ArrayList<>();
+        after.forEach((name, value) -> {
+            if (!before.containsKey(name)) added.add(value);
+        });
+        before.forEach((name, value) -> {
+            if (!after.containsKey(name)) removed.add(value);
+            else if (!value.equals(after.get(name))) changed.add(new DefinitionChange(name, value, after.get(name)));
+        });
+        return new DefinitionDiff(added, removed, changed);
+    }
+
+    private static boolean complete(SchemaSnapshot snapshot) {
+        return !snapshot.truncated() && snapshot.tables().stream().allMatch(t ->
+                t.checks().status() == SchemaDefinitions.Status.AVAILABLE
+                        && t.triggers().status() == SchemaDefinitions.Status.AVAILABLE);
     }
 
     private static boolean sameIndex(IndexSchema a, IndexSchema b) {
@@ -186,7 +243,7 @@ public class SchemaDiffService {
                 || !td.changedColumns().isEmpty() || !td.addedIndexes().isEmpty()
                 || !td.removedIndexes().isEmpty() || !td.changedIndexes().isEmpty()
                 || !td.addedForeignKeys().isEmpty() || !td.removedForeignKeys().isEmpty()
-                || !td.changedForeignKeys().isEmpty();
+                || !td.changedForeignKeys().isEmpty() || td.checks().hasChange() || td.triggers().hasChange();
     }
 
     /** 기종 차이·상한 절단은 diff 해석을 왜곡할 수 있어, 있으면 정직하게 경고로 싣는다 */
@@ -199,7 +256,16 @@ public class SchemaDiffService {
         if (left.truncated() || right.truncated()) {
             notes.add("테이블 상한(" + left.tableCap() + ")에 걸려 일부 테이블이 잘려 부분 비교입니다");
         }
+        definitionWarnings(left, "왼쪽", notes);
+        definitionWarnings(right, "오른쪽", notes);
         return notes.isEmpty() ? null : String.join(" / ", notes);
+    }
+
+    private static void definitionWarnings(SchemaSnapshot snapshot, String side, List<String> notes) {
+        snapshot.tables().stream().flatMap(t -> java.util.stream.Stream.of(t.checks(), t.triggers()))
+                .filter(d -> d.status() != SchemaDefinitions.Status.AVAILABLE)
+                .map(d -> side + " CHECK·트리거 부분 비교: " + d.status() + " (" + d.note() + ")")
+                .distinct().forEach(notes::add);
     }
 
     private static Map<String, TableSchema> byName(List<TableSchema> tables) {

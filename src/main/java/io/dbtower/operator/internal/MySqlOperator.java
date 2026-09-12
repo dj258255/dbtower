@@ -21,6 +21,7 @@ import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.RestoreSupport;
 import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.SchemaDefinition;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableDetail;
@@ -1006,9 +1007,59 @@ public class MySqlOperator extends AbstractJdbcOperator {
                     instance.getDbName());
             return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
                     columns, indexes, kinds, Map.of(),
-                    TableDetailSupport.foreignKeysByTable(mysqlForeignKeys(null)), SchemaSupport.DEFAULT_MAX_TABLES);
+                    TableDetailSupport.foreignKeysByTable(mysqlForeignKeys(null)),
+                    mysqlChecks(), mysqlTriggers(), SchemaSupport.DEFAULT_MAX_TABLES);
         } catch (DataAccessException e) {
             throw new OperatorException("MySQL 스키마 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    private SchemaSupport.Definitions mysqlChecks() {
+        return SchemaSupport.definitions(() -> jdbc().query("""
+                SELECT tc.TABLE_NAME, cc.CONSTRAINT_NAME, tc.ENFORCED, cc.CHECK_CLAUSE
+                FROM information_schema.TABLE_CONSTRAINTS tc
+                JOIN information_schema.CHECK_CONSTRAINTS cc
+                  ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+                WHERE tc.TABLE_SCHEMA = ? AND tc.CONSTRAINT_TYPE = 'CHECK'
+                ORDER BY tc.TABLE_NAME, cc.CONSTRAINT_NAME
+                """, (rs, i) -> new SchemaSupport.DefinitionRow(rs.getString("TABLE_NAME"),
+                new SchemaDefinition(rs.getString("CONSTRAINT_NAME"), rs.getString("CHECK_CLAUSE"),
+                        "enforced=" + rs.getString("ENFORCED"))), instance.getDbName()), "information_schema.CHECK_CONSTRAINTS");
+    }
+
+    private SchemaSupport.Definitions mysqlTriggers() {
+        try {
+            // TRIGGER 권한이 없으면 메타데이터도 빈 목록이 된다. 읽기 계정에 쓰기 권한을 자동 부여하지 않는다.
+            Integer grants = jdbc().queryForObject("""
+                    SELECT COUNT(*) FROM (
+                      SELECT GRANTEE FROM information_schema.USER_PRIVILEGES WHERE PRIVILEGE_TYPE = 'TRIGGER'
+                      UNION ALL
+                      SELECT GRANTEE FROM information_schema.SCHEMA_PRIVILEGES
+                        WHERE PRIVILEGE_TYPE = 'TRIGGER' AND TABLE_SCHEMA = ?
+                    ) p WHERE GRANTEE = CONCAT(QUOTE(SUBSTRING_INDEX(CURRENT_USER(), '@', 1)),
+                                               '@', QUOTE(SUBSTRING_INDEX(CURRENT_USER(), '@', -1)))
+                    """, Integer.class, instance.getDbName());
+            if (grants == null || grants == 0) {
+                return SchemaSupport.unavailableDefinitions("트리거 미확보: 스키마 전체의 직접 TRIGGER 권한을 확인하지 못함");
+            }
+            return SchemaSupport.definitions(() -> jdbc().query("""
+                    SELECT EVENT_OBJECT_TABLE, TRIGGER_NAME, ACTION_TIMING, EVENT_MANIPULATION,
+                           ACTION_ORIENTATION, ACTION_ORDER, SQL_MODE, DEFINER,
+                           CHARACTER_SET_CLIENT, COLLATION_CONNECTION, DATABASE_COLLATION, ACTION_STATEMENT
+                    FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = ?
+                    ORDER BY EVENT_OBJECT_TABLE, TRIGGER_NAME
+                    """, (rs, i) -> new SchemaSupport.DefinitionRow(rs.getString("EVENT_OBJECT_TABLE"),
+                    new SchemaDefinition(rs.getString("TRIGGER_NAME"),
+                            rs.getString("ACTION_TIMING") + " " + rs.getString("EVENT_MANIPULATION")
+                                    + " " + rs.getString("ACTION_ORIENTATION") + " " + rs.getString("ACTION_STATEMENT"),
+                            "order=" + rs.getInt("ACTION_ORDER") + ";sqlMode=" + rs.getString("SQL_MODE")
+                                    + ";definer=" + rs.getString("DEFINER")
+                                    + ";charset=" + rs.getString("CHARACTER_SET_CLIENT")
+                                    + ";collation=" + rs.getString("COLLATION_CONNECTION")
+                                    + ";databaseCollation=" + rs.getString("DATABASE_COLLATION"))), instance.getDbName()),
+                    "information_schema.TRIGGERS");
+        } catch (DataAccessException e) {
+            return SchemaSupport.unavailableDefinitions("트리거 미확보: TRIGGER 권한 조회 실패");
         }
     }
 

@@ -53,8 +53,9 @@ const fkText = (f) => `${(f.columns || []).join(", ")} → ${f.refTable}(${(f.re
 
 export function renderSchemaDiff(sd) {
   if (sd.identical) {
-    // 비교 범위를 밝힌다 — 구조 스냅샷은 열·인덱스·외래키까지 담는다(153절). CHECK·트리거는 아직 담지 않는다
-    return '<div class="df-schema"><div class="df-title">구조 변화</div><div class="muted">열·인덱스·외래키 차이가 없습니다(모니터 계정이 보는 범위 기준). CHECK·트리거 정의는 비교하지 않습니다.</div></div>';
+    return `<div class="df-schema"><div class="df-title">구조 변화</div>
+      <div class="muted">${sd.complete ? "열·인덱스·외래키·CHECK·트리거 차이가 없습니다(모니터 계정이 보는 범위 기준)." : "확보한 구조에서 차이가 없습니다. 미확보·UNSUPPORTED 항목은 비교하지 않았습니다."}</div>
+      ${sd.warning ? `<div class="hint">${esc(sd.warning)}</div>` : ""}</div>`;
   }
   const lines = [];
   (sd.addedTables || []).forEach((t) => lines.push(["add", `테이블 ${t.name} 생김 (열 ${(t.columns || []).length})`]));
@@ -70,11 +71,18 @@ export function renderSchemaDiff(sd) {
     (t.addedForeignKeys || []).forEach((f) => lines.push(["add", `${t.table} 외래키 ${f.name} 생김 (${fkText(f)})`]));
     (t.removedForeignKeys || []).forEach((f) => lines.push(["remove", `${t.table} 외래키 ${f.name} 사라짐 (${fkText(f)})`]));
     (t.changedForeignKeys || []).forEach((f) => lines.push(["change", `${t.table} 외래키 ${f.name}: ${fkText(f.left)} → ${fkText(f.right)}`]));
+    [["CHECK", t.checks], ["트리거", t.triggers]].forEach(([label, changes]) => {
+      (changes?.added || []).forEach((d) => lines.push(["add", `${t.table} ${label} ${d.name} 생김: ${definitionText(d)}`]));
+      (changes?.removed || []).forEach((d) => lines.push(["remove", `${t.table} ${label} ${d.name} 사라짐: ${definitionText(d)}`]));
+      (changes?.changed || []).forEach((d) => lines.push(["change", `${t.table} ${label} ${d.name}: ${definitionText(d.left)} → ${definitionText(d.right)}`]));
+    });
   });
   return `<div class="df-schema"><div class="df-title">구조 변화</div>
     ${sd.warning ? `<div class="hint">${esc(sd.warning)}</div>` : ""}
     <ul>${lines.map(([kind, text]) => `<li class="sd-${kind}">${esc(text)}</li>`).join("")}</ul></div>`;
 }
+
+const definitionText = (d) => `${d.definition ?? "미확보"} [${d.state ?? "미확보"}]`;
 
 export function renderProbe(p) {
   const badge = p.beforePlan && p.afterPlan

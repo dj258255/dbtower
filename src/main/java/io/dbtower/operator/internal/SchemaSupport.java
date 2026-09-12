@@ -5,11 +5,15 @@ import io.dbtower.operator.model.ForeignKey;
 import io.dbtower.operator.model.IndexSchema;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.TableSchema;
+import io.dbtower.operator.model.SchemaDefinition;
+import io.dbtower.operator.model.SchemaDefinitions;
+import org.springframework.dao.DataAccessException;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * describeSchema 공통 조립 로직 (B7). 기종별 Operator는 "평평한 컬럼 행"과 "평평한 인덱스-컬럼 행"만
@@ -32,6 +36,37 @@ final class SchemaSupport {
 
     /** 컬럼 한 행 — 어느 테이블의 컬럼인지 + 컬럼 자체 */
     record ColumnRow(String table, ColumnSchema column) {
+    }
+
+    record DefinitionRow(String table, SchemaDefinition definition) {
+    }
+
+    record Definitions(Map<String, SchemaDefinitions> tables, SchemaDefinitions fallback) {
+        SchemaDefinitions forTable(String table) {
+            return tables.getOrDefault(table, fallback);
+        }
+    }
+
+    static Definitions definitions(Supplier<List<DefinitionRow>> query, String source) {
+        try {
+            Map<String, List<SchemaDefinition>> grouped = new LinkedHashMap<>();
+            query.get().forEach(row -> grouped.computeIfAbsent(row.table(), key -> new ArrayList<>())
+                    .add(row.definition()));
+            Map<String, SchemaDefinitions> tables = new LinkedHashMap<>();
+            grouped.forEach((table, rows) -> tables.put(table,
+                    rows.stream().anyMatch(row -> row.definition() == null)
+                            ? SchemaDefinitions.unavailable(source + ": 정의 미확보")
+                            : new SchemaDefinitions(SchemaDefinitions.Status.AVAILABLE, rows, source)));
+            return new Definitions(tables,
+                    new SchemaDefinitions(SchemaDefinitions.Status.AVAILABLE, List.of(), source));
+        } catch (DataAccessException e) {
+            // 메타데이터 권한 부족이 열·인덱스 조회까지 막지 않게 수집 범위를 따로 표시한다.
+            return unavailableDefinitions(source + ": 조회 실패, 버전·권한 확인 필요");
+        }
+    }
+
+    static Definitions unavailableDefinitions(String note) {
+        return new Definitions(Map.of(), SchemaDefinitions.unavailable(note));
     }
 
     /**
@@ -76,6 +111,15 @@ final class SchemaSupport {
                                 Map<String, String> kinds, Map<String, List<String>> primaryKeys,
                                 Map<String, List<ForeignKey>> foreignKeys,
                                 int maxTables) {
+        return build(type, database, columnRows, indexRows, kinds, primaryKeys, foreignKeys,
+                unavailableDefinitions("CHECK 미확보"), unavailableDefinitions("트리거 미확보"), maxTables);
+    }
+
+    static SchemaSnapshot build(String type, String database,
+                                List<ColumnRow> columnRows, List<IndexColumnRow> indexRows,
+                                Map<String, String> kinds, Map<String, List<String>> primaryKeys,
+                                Map<String, List<ForeignKey>> foreignKeys,
+                                Definitions checks, Definitions triggers, int maxTables) {
         // 등장 순서 보존 + 상한 적용. 상한을 넘은 테이블은 포함 집합에 넣지 않는다.
         Map<String, List<ColumnSchema>> columnsByTable = new LinkedHashMap<>();
         boolean truncated = false;
@@ -121,7 +165,8 @@ final class SchemaSupport {
                     ? primaryKeys.get(e.getKey())
                     : primaryFromIndexes.getOrDefault(e.getKey(), List.of());
             tables.add(new TableSchema(e.getKey(), List.copyOf(e.getValue()), indexes, kind, List.copyOf(primaryKey),
-                    List.copyOf(foreignKeys.getOrDefault(e.getKey(), List.of()))));
+                    List.copyOf(foreignKeys.getOrDefault(e.getKey(), List.of())),
+                    checks.forTable(e.getKey()), triggers.forTable(e.getKey())));
         }
         return new SchemaSnapshot(type, database, tables, truncated, maxTables);
     }
