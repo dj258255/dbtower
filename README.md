@@ -552,15 +552,28 @@ POST /mcp                          MCP (Streamable HTTP) — 도구 19종(워크
 
 ## 문서
 
-- [PORTFOLIO-AX.md](docs/PORTFOLIO-AX.md) — AX 케이스 스터디: AI를 운영 플랫폼에 들일 때 정책을 코드로 강제한 사례별 결정·실측
-- [PRESENTATION.md](docs/PRESENTATION.md) — 문제 정의부터 설계·실측·교훈까지 전체 서사
-- [DESIGN.md](docs/DESIGN.md) — 인터페이스 경계, 시점 비교 데이터 모델
-- [VERIFICATION.md](docs/VERIFICATION.md) — 131개 절의 실측 기록 (명령·출력·스크린샷)
-- [ai-analysis-rules.md](docs/ai-analysis-rules.md) — 기종별 실행계획 판단 규칙: 근거와 예외
-- [operations.md](docs/operations.md) — 운영 규칙: 통계 소스의 함정과 대응 (digest 포화·PS 가시성·AAS)
-- [least-privilege.md](docs/least-privilege.md) — 기종별 최소 권한 모니터링 계정 (실측 확정)
-- [infra/](infra/) — 프로비저닝 연동(Phase C): K8s(CloudNativePG)·Ansible·Terraform으로 생성→자동 등록
-- [ROADMAP.md](docs/ROADMAP.md) — Phase A(운영 안전)~E(셀프호스트 제품화) 전 항목 완료 기록과 "범위 밖" 결정
+**처음 보신다면** — [한 장 요약](docs/PORTFOLIO-ONEPAGER.md)으로 시작해 [5분 시연 순서](docs/DEMO-5MIN.md)를 따라가는 것이 가장 빠릅니다.
+
+| 문서 | 무엇이 있나 |
+|---|---|
+| [PORTFOLIO-ONEPAGER.md](docs/PORTFOLIO-ONEPAGER.md) | 한 장 요약 — 무엇을 만들었고 무엇을 실측했나 |
+| [DEMO-5MIN.md](docs/DEMO-5MIN.md) | 5분 시연 순서 (역할을 바꿔 가며 변경 한 건을 끝까지) |
+| [PORTFOLIO-AX.md](docs/PORTFOLIO-AX.md) | AX 케이스 스터디 — AI를 운영 플랫폼에 들일 때 정책을 코드로 강제한 사례별 결정·실측 |
+| [INTERVIEW-QA.md](docs/INTERVIEW-QA.md) | 면접 예상 질문과 답 (설계 결정의 근거) |
+| [PRESENTATION.md](docs/PRESENTATION.md) | 문제 정의부터 설계·실측·교훈까지 전체 서사 |
+| [DESIGN.md](docs/DESIGN.md) | 인터페이스 경계, 시점 비교 데이터 모델 |
+| [VERIFICATION.md](docs/VERIFICATION.md) | 160개 절의 실측 기록 (명령·출력·스크린샷). 이 저장소의 모든 수치가 여기서 나온다 |
+| [ROADMAP.md](docs/ROADMAP.md) | Phase A~E 완료 기록, 심화 백로그의 현재 상태, "범위 밖" 결정 |
+| [ai-analysis-rules.md](docs/ai-analysis-rules.md) | 기종별 실행계획 판단 규칙: 근거와 예외 |
+| [operations.md](docs/operations.md) | 운영 규칙: 통계 소스의 함정과 대응 (digest 포화·PS 가시성·AAS) |
+| [least-privilege.md](docs/least-privilege.md) | 기종별 최소 권한 모니터링 계정 (실측 확정) |
+| [CHANGELOG.md](CHANGELOG.md) | 릴리즈별 변경 |
+| [infra/](infra/) | 프로비저닝 연동(Phase C): K8s(CloudNativePG)·Ansible·Terraform으로 생성→자동 등록 |
+
+기록으로만 보존하는 문서 — 당시의 착수 명세·감사 결과이고, 해당 작업은 모두 끝났습니다.
+[deepening-spec.md](docs/deepening-spec.md)(심화 아크 2차 명세) ·
+[HARDENING-ROADMAP.md](docs/HARDENING-ROADMAP.md)(4축 감사 → 수정 계획) ·
+[OPERATIONAL-BOTTLENECK-ARCS.md](docs/OPERATIONAL-BOTTLENECK-ARCS.md)(운영 병목 B1~B5 종합)
 
 ## 기술 선택 근거 (요약)
 
