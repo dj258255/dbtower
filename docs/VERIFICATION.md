@@ -7348,7 +7348,7 @@ POST /api/instances/1/referenced-schema (orders JOIN customers)
               orders pk [id] foreignKeys [fk_orders_customer] · customers pk [id] referencedBy [fk_orders_customer]
 ```
 
-Oracle의 외래키 짝짓기는 실제 외래키가 없어 단위 테스트(자기 참조·대문자 이름)까지만 확인했다. 검증용 외래키를 Oracle에 만들지는 않았다.
+Oracle의 외래키 짝짓기는 이 시점에 실제 외래키가 없어 단위 테스트(자기 참조·대문자 이름)까지만 확인했다. 라이브 검증은 157절에서 승인 티켓 4건으로 채웠다.
 
 ### 화면 — 같은 스크립트로 전후
 
@@ -7708,6 +7708,76 @@ SQL Server(인스턴스 5, 권한 게이트 수정 뒤)
 ### 남긴 한계
 
 - MySQL 트리거는 모니터 계정에 TRIGGER 권한이 없어 UNAVAILABLE이다. 조회 전용 권한이 아니라 부여하지 않았고, 화면은 미확보로 적는다
-- Oracle 변경 계정은 `sample.customers`에 DML 권한만 있어 외래키 실행 검증은 여전히 미확보다(151절과 같은 한계). REFERENCES를 임의로 넓히지 않았다
+- Oracle 외래키 실행 검증은 157절에서 최소 권한(자식 ALTER·부모 REFERENCES)만 더해 승인 티켓 4건으로 채웠고, 데모 열·외래키는 원복했다
 - 뷰 본문·파티션·함수의 재귀 의존성·트리거 실행 순서의 모든 기종별 옵션은 범위 밖이다
 - `complete`는 이 구현이 비교하는 항목의 수집 범위이지 완전한 DDL 동등성 보장이 아니다
+
+## 157. Oracle 외래키까지 승인 티켓으로 — 5기종 라이브 완성 (2026-09-12)
+
+### 왜
+
+151절에서 데모 외래키를 PostgreSQL·MySQL·SQL Server에 승인 티켓으로 만들었지만 Oracle만 남겼다. SAMPLE 스키마에 orders가 없었고,
+변경 계정에 `sample.customers` DML 권한만 있어 실행이 거부될 것이 분명했기 때문이다. 156절에서도 같은 이유로 미확보로 적었다.
+"5기종 전부 실측"을 쓰려면 이 한 칸을 채워야 한다.
+
+### 쌍을 고른 근거 — 자연스러운 부모·자식이 없었다
+
+읽기 전용 조회로 후보를 먼저 셌다.
+
+```
+SAMPLE 테이블      CHANGE_IT(3행, PK) · CONSTOMERS 오타 아님 CUSTOMERS(3행, PK) · USERS(20,000행, PK 없음) · CONSOLE_RO_PROBE
+후보 USERS.CATEGORY -> CUSTOMERS.ID
+  users total 20,000 · category is null 0 · distinct category 10
+  orphan(category가 customers.id에 없음) 14,000
+```
+
+`USERS.CATEGORY`는 고아 행이 14,000건이라 외래키를 걸면 실패한다. 데이터를 고쳐서 통과시키는 것은 검증이 아니라 조작이라 하지 않았다.
+대신 3행짜리 `CHANGE_IT`에 열을 더해 부모·자식 쌍을 만들고, 검증이 끝나면 같은 티켓 흐름으로 되돌리기로 했다.
+
+### 최소 권한 추가 (티켓 흐름 밖의 환경 구성이라 따로 적는다)
+
+`docker/workbench-oracle.sql`의 변경 계정에 자식 테이블 `ALTER`와 부모 테이블 `REFERENCES`만 더했다. 모니터에는 자식 테이블 `READ`를 더했다
+(구조 비교가 그 테이블을 봐야 한다). `CREATE TABLE`·`DROP TABLE`·권한 변경은 주지 않았다.
+
+```
+GRANT SELECT, INSERT, UPDATE, DELETE, ALTER ON sample.change_it TO dbtower_writer;
+GRANT REFERENCES ON sample.customers TO dbtower_writer;
+GRANT READ ON sample.change_it TO dbtower_monitor;
+
+적용 뒤 dba_tab_privs
+  DBTOWER_WRITER   CHANGE_IT  ALTER/DELETE/INSERT/SELECT/UPDATE
+  DBTOWER_WRITER   CUSTOMERS  DELETE/INSERT/REFERENCES/SELECT/UPDATE
+  DBTOWER_MONITOR  CHANGE_IT/CUSTOMERS/USERS  READ
+```
+
+변경 실행 연결도 `beginChange`가 `ALTER SESSION SET CURRENT_SCHEMA = SAMPLE`을 먼저 걸어, 티켓 SQL을 스키마 접두어 없이 쓸 수 있다(조회 연결의 `beginReadOnly`와 같다).
+
+### 실측 — 승인 티켓 4건으로 만들고 되돌렸다
+
+요청자 제출 -> 승인자 승인 -> 운영자 실행을 네 번(`detail151/oracle_fk_157.py`). 모두 COMMITTED.
+
+```
+시작  CHANGE_IT 열 [ID, NAME, NOTE, AMOUNT, UPDATED, PAYLOAD] · 외래키 []
+#80 ALTER TABLE change_it ADD (customer_id NUMBER)
+      addedColumns        CUSTOMER_ID NUMBER nullable=true (7번째)
+#81 ALTER TABLE change_it ADD CONSTRAINT fk_change_it_customer FOREIGN KEY (customer_id) REFERENCES customers (id)
+      addedForeignKeys    FK_CHANGE_IT_CUSTOMER  CHANGE_IT(CUSTOMER_ID) -> CUSTOMERS(ID)  ON DELETE NO ACTION · ON UPDATE null
+#82 ALTER TABLE change_it DROP CONSTRAINT fk_change_it_customer
+      removedForeignKeys  같은 외래키
+#83 ALTER TABLE change_it DROP COLUMN customer_id
+      removedColumns      CUSTOMER_ID
+끝    CHANGE_IT 열 [ID, NAME, NOTE, AMOUNT, UPDATED, PAYLOAD] · 외래키 []   (시작과 동일)
+네 건 모두 identical=false · complete=true
+```
+
+Oracle에는 외래키의 ON UPDATE 개념이 없어 `onUpdate`가 null이다(153절 모델이 정한 대로 지어내지 않는다).
+
+### 화면 사진
+
+![실행 기록 — Oracle 외래키가 생겼다(티켓 #81)](images/webui/157-exec-oracle-fk-added.jpg)
+![실행 기록 — 같은 외래키가 사라졌다(티켓 #82), 스키마는 원래 구조로](images/webui/158-exec-oracle-fk-removed.jpg)
+
+### 이로써 닫힌 것
+
+151절의 "Oracle은 코드·단위 테스트까지만", 156절의 "Oracle 외래키 실행은 미확보"가 닫혔다. 외래키 구조 수집·비교·실행 기록이 5기종 전부 라이브로 확인됐다.
+남은 Oracle 한계는 그대로다 — 변경 계정은 여전히 `CREATE TABLE`·`DROP TABLE`을 갖지 않고, 데모 열·외래키는 검증 뒤 원복했다.

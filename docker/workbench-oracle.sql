@@ -22,11 +22,16 @@ GRANT CREATE SESSION TO dbtower_reader;
 GRANT READ ON sample.users TO dbtower_reader;
 GRANT READ ON sample.customers TO dbtower_reader;
 
--- 변경 계정(3단계, 승인된 티켓만 실행): DML만
+-- 변경 계정(3단계, 승인된 티켓만 실행): DML과 데모 테이블 한 개의 열·외래키 추가 DDL.
+-- 외래키는 자식 테이블 ALTER에 더해 가리키는 테이블의 REFERENCES가 있어야 만들어진다(VERIFICATION 151·157절).
+-- CREATE TABLE·DROP TABLE·권한 변경은 주지 않는다 — 승인된 티켓이라도 계정 권한이 마지막 겹이다.
 CREATE USER dbtower_writer IDENTIFIED BY dbtower1234;
 GRANT CREATE SESSION TO dbtower_writer;
 GRANT SELECT, INSERT, UPDATE, DELETE ON sample.customers TO dbtower_writer;
+GRANT SELECT, INSERT, UPDATE, DELETE, ALTER ON sample.change_it TO dbtower_writer;
+GRANT REFERENCES ON sample.customers TO dbtower_writer;
 
 -- 모니터 계정의 스키마 트리·EXPLAIN용
 GRANT READ ON sample.customers TO dbtower_monitor;
+GRANT READ ON sample.change_it TO dbtower_monitor;
 EXIT;
