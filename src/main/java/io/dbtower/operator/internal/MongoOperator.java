@@ -455,6 +455,11 @@ public class MongoOperator implements DbmsOperator {
      */
     @Override
     public Optional<String> planShapeForDigest(String queryId, String queryText) {
+        // queryStats가 queryHash 없는 연산(insert·listIndexes 등)에 붙인 대체 식별자("op:ns")로는
+        // 계획을 뜰 수 없다. 그대로 넘기면 회귀가 감지될 때마다 0건이 확정된 조회를 대상 DB에 보낸다(159절 라이브 관측).
+        if (!isQueryHash(queryId)) {
+            return Optional.empty();
+        }
         try {
             return withClient(client -> {
                 Document sample = db(client).getCollection("system.profile")
@@ -483,6 +488,27 @@ public class MongoOperator implements DbmsOperator {
         } catch (Exception e) {
             return Optional.empty();
         }
+    }
+
+    /**
+     * 이 식별자로 계획을 뜰 수 있는가 — queryStats·latencyPercentiles가 쓰는 그룹 키는 두 형태다.
+     * queryHash는 16진 문자열(예: FCE9A3F8)이고, queryHash가 없는 연산에는 "op:ns"(예: insert:sample.orders)
+     * 형태의 대체 식별자를 붙인다. 후자는 재실행할 조회 자체가 없으니 계획도 없다.
+     *
+     * 라이브 표본 1,043건 중 queryHash가 붙은 것은 287건이었다(159절) — 나머지를 걸러내지 않으면
+     * 회귀가 감지될 때마다 결과가 0건으로 정해진 조회를 대상 DB에 보낸다.
+     */
+    static boolean isQueryHash(String queryId) {
+        if (queryId == null || queryId.isBlank()) {
+            return false;
+        }
+        for (int i = 0; i < queryId.length(); i++) {
+            char c = queryId.charAt(i);
+            if (Character.digit(c, 16) < 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

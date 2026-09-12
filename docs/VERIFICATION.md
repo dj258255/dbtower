@@ -7933,3 +7933,69 @@ PostgreSQL(인스턴스 1) 안내 숨김(hidden) — 되는 기종에 잔소리�
 ```
 
 ![티켓 상세 — 사유·규칙 판정·AI 소견이 각자 카드로](images/webui/160-ticket-detail-blocks.jpg)
+
+## 160. 백로그 세 번째 재조사(테마 B·D), MongoDB 플랜 조회 헛발 제거 (2026-09-12)
+
+### 왜
+
+157~159절에서 테마 C와 테마 A가 연달아 "이미 구현돼 있음"으로 밝혀졌다. 남은 테마 B·D도 같은 의심을 하고 착수 전에 코드로 대조했다.
+같은 자리에서 159절이 남긴 한 가지를 닫는다 — MongoDB의 대체 식별자로 계획을 뜨려는 조회다.
+
+### 테마 D(데드락 축) — 이미 구현돼 있었다
+
+코드 대조만으로 확인됐다. 세 항목이 전부 있다.
+
+```
+operator/model/DeadlockEvent.java                       모델
+DbmsOperator.recentDeadlocks(int)                       MySQL(SHOW ENGINE INNODB STATUS)·SQL Server(system_health XE)
+DbmsOperator.deadlockCount()                            PostgreSQL(pg_stat_database.deadlocks 누적)
+alert/internal/job/OpsAlertDetector.java                카운터 델타 경보
+static/app.js · index.html                              화면
+test/.../MySqlDeadlockParseTest · MsSqlDeadlockParseTest 파싱 테스트
+```
+
+Oracle·MongoDB는 인터페이스 기본 구현(빈 목록)이다 — 두 기종에 개별 데드락 리포트를 읽는 무설정 경로가 없다는 판단이 코드에 남아 있다.
+
+### 테마 B(p95 정직 등급 상향) — 네 항목 모두 이미 구현돼 있었다
+
+`LatencyPercentile`의 등급이 여섯 값이고, 테마가 요구한 승격이 전부 그 등급으로 들어가 있다.
+
+| 기종 | 테마 B 요구 | 현재 코드 |
+|---|---|---|
+| MySQL | 히스토그램 스냅샷 차분으로 구간 p95 | `NATIVE_WINDOWED`(버킷별 차분) |
+| SQL Server | query_store_runtime_stats avg+stdev로 UNSUPPORTED 해제 | `ESTIMATED` — count_executions 가중 재집계, max로 캡. Query Store OFF면 UNSUPPORTED 안내 행 하나 |
+| PostgreSQL | pg_stat_monitor 있으면 승격 | 확장 존재 게이트 뒤 `NATIVE_HISTOGRAM`, 없으면 `ESTIMATED` |
+| MongoDB | opLatencies 히스토그램 병행 | `NATIVE_HISTOGRAM`(프로파일러 무관) + 표본 직접 계산 `COMPUTED` |
+| Oracle | UNSUPPORTED 유지가 정직 | `UNSUPPORTED` — 분위수 원자료도 표준편차도 없다는 사유를 안내 행에 담는다 |
+
+### MongoDB 플랜 조회 헛발 — 159절이 남긴 것
+
+`queryStats`는 `queryHash`가 없는 연산에 `$ifNull` 폴백으로 `op:ns` 형태의 식별자를 붙인다. 이 식별자는 회귀 감지를 거쳐
+`planShapeForDigest`로 그대로 들어가는데, 그 안에서 하는 일은 `find({queryHash: "command:sample.users"})` 이다. 결과는 늘 0건이다.
+
+라이브 실측(오늘, 데모 MongoDB `sample`):
+
+```
+system.profile 표본 1,023건 · queryHash 있음 302 · 없음 721
+그룹 5개 중 대체 식별자 4개
+  해시  FCE9A3F8                  호출 31  · 126ms
+  대체  command:sample.change_it  호출 179 · 47ms
+  대체  command:sample.change_it_big  호출 180 · 27ms
+  대체  command:sample.customers  호출 180 · 27ms
+  대체  command:sample.users      호출 180 · 26ms
+```
+
+즉 상위 5개가 전부 회귀로 걸리는 최악의 경우, 폴마다 5번 중 4번이 결과가 정해진 조회였다.
+`isQueryHash`로 대상 DB에 보내기 전에 끊는다 — 16진 문자열만 통과시키고, `op:ns`는 콜론과 점 때문에 자연히 걸린다.
+값을 지어내지 않는 것과 같은 원칙이다: 답을 얻을 수 없는 질문은 묻지 않는다.
+
+### 검증
+
+```
+./gradlew test                  885건 실패 0 (882 -> 885, 늘어난 3건이 대체 식별자 가드)
+./scripts/check-conventions.sh  7개 전부 통과
+라이브 재측정                    MongoDB sample — 표본 1,023 · 해시 302 · 그룹 5 중 대체 4
+```
+
+가드는 대상 DB 없이 판정되는 순수 함수라 단위 테스트로 고정했다(`MongoPlanShapeGuardTest`) —
+단정문에는 지어낸 예시가 아니라 위 라이브 표본에서 그대로 관측된 식별자를 쓴다.

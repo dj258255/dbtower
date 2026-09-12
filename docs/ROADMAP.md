@@ -698,7 +698,19 @@ Oracle 외래키 실행은 157절에서 데모 테이블 한 개에 최소 권�
 | Oracle | v$sqlstats가 sql_id×plan_hash_value당 1행 — 폴링에 phv 컬럼 추가 | 무료 확정(19c 라이선스 매뉴얼 — 팩 대상은 V$ASH·DBA_HIST뿐). age-out 대비 자체 저장 |
 | MongoDB | explain queryPlanner.queryHash/planCacheKey + $planCacheStats 폴링 | 8.0 planCacheShapeHash 개명 방어. 캐시 인메모리라 자체 스냅샷 필수 |
 
-### 테마 B — p95 정직 등급 상향
+### 테마 B — p95 정직 등급 상향 (2026-09-12 재조사 — 160절: 네 항목 모두 이미 구현돼 있었다)
+
+`LatencyPercentile`의 등급이 이미 여섯 값이고(NATIVE·NATIVE_WINDOWED·NATIVE_HISTOGRAM·COMPUTED·ESTIMATED·UNSUPPORTED),
+테마가 요구한 승격이 전부 그 등급으로 들어가 있다.
+
+- MySQL 히스토그램 스냅샷 차분 -> `NATIVE_WINDOWED`
+- MSSQL Query Store avg+stdev -> `ESTIMATED`(가중 재집계까지). Query Store가 꺼진 DB는 UNSUPPORTED 안내 행 하나 — 켜는 행위는 하지 않는다
+- PG `pg_stat_monitor` "있으면 승격" -> 확장 존재 확인 게이트 + `NATIVE_HISTOGRAM`, 없으면 ESTIMATED 유지
+- Mongo `opLatencies` 인스턴스 히스토그램 -> `NATIVE_HISTOGRAM`(프로파일러가 꺼져 COMPUTED가 전멸해도 남는 관측)
+- Oracle -> `UNSUPPORTED` 유지. 분위수 원자료도 표준편차도 없어 정직한 근사가 불가능하다는 사유를 안내 행에 적는다
+
+아래 원문은 조사 시점 기록으로 남긴다.
+
 - MySQL: events_statements_histogram_by_digest **스냅샷 차분**(TRUNCATE 불요) → 구간 p95(버킷 근사 표기) — 기존 잔여 해소
 - MSSQL: query_store_runtime_stats의 avg+stdev로 ESTIMATED — **UNSUPPORTED 해제**(+runtime_stats_interval로 구간 통계, 활성 버킷 재집계 주의)
 - PG: pg_stat_monitor 있으면 resp_calls 히스토그램으로 승격(HypoPG 대칭 "있으면" 패턴)
@@ -721,7 +733,11 @@ Oracle 외래키 실행은 157절에서 데모 테이블 한 개에 최소 권�
 - MySQL 복제 심화 — replication_applier_status_by_worker(마이크로초·워커별·적용 에러), NTP 전제 clamp
 - Mongo oplog window(local.oplog.rs 양끝) + flowControl + $currentOp 승격(idle 트랜잭션)
 
-### 테마 D — 데드락 축 신설
+### 테마 D — 데드락 축 신설 (2026-09-12 재조사 — 160절: 이미 구현돼 있었다)
+
+착수 전 코드 대조에서 세 항목이 전부 구현돼 있었다. `DeadlockEvent` 모델, `DbmsOperator.recentDeadlocks`(SQL Server·MySQL)와
+`deadlockCount`(PostgreSQL 누적 카운터), `OpsAlertDetector`의 델타 경보, 화면까지 연결돼 있다. 아래 원문은 조사 시점 기록으로 남긴다.
+
 - MSSQL: system_health XE **file target** 읽기(기본 존재·설정 변경 0, ring_buffer는 2022 빈결과 함정)
 - MySQL: SHOW ENGINE INNODB STATUS의 LATEST DETECTED DEADLOCK 파싱(읽기 전용, 최근 1건 한계 표기)
 - PG: pg_stat_database.deadlocks 카운터
