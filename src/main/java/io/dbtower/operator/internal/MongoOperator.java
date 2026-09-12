@@ -32,6 +32,7 @@ import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SchemaDefinitions;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
+import io.dbtower.operator.model.ResourcePressure;
 import io.dbtower.operator.model.TableDetail;
 import io.dbtower.operator.model.TableDetail.DdlSource;
 import io.dbtower.operator.model.TableSchema;
@@ -1054,6 +1055,54 @@ public class MongoOperator implements DbmsOperator {
         return IndexAdvice.unsupported(instance.getType()
                 + " 가상 인덱스 시뮬레이션 미지원 — MongoDB는 HypoPG 같은 가상 인덱스가 없고, "
                 + "실제 인덱스를 만든 뒤 explain을 비교해야 하므로 대상 DB를 바꾸지 않는 이 기능의 범위 밖.");
+    }
+
+    /**
+     * 자원 압박 (162절) — MongoDB의 동시 실행 한도는 커넥션이 아니라 <b>WiredTiger 티켓</b>이다.
+     * 읽기·쓰기 티켓이 각각 정해진 수만큼 있고, 다 쓰면 그때부터 큐가 생긴다 — 그 지점이 곧 압박이다.
+     * 티켓을 못 읽으면(권한·버전) empty.
+     */
+    @Override
+    public java.util.Optional<ResourcePressure> resourcePressure() {
+        try {
+            return withClient(client -> {
+                Document status = db(client).runCommand(new Document("serverStatus", 1)
+                        .append("wiredTiger", true));
+                Document wt = status.get("wiredTiger", Document.class);
+                Document tickets = wt == null ? null : wt.get("concurrentTransactions", Document.class);
+                if (tickets == null) {
+                    return java.util.Optional.<ResourcePressure>empty();
+                }
+                long out = 0, total = 0, queued = 0;
+                for (String side : java.util.List.of("read", "write")) {
+                    Document t = tickets.get(side, Document.class);
+                    if (t == null) {
+                        continue;
+                    }
+                    out += num(t.get("out"));
+                    total += num(t.get("totalTickets"));
+                    queued += num(t.get("queueLength"));
+                }
+                if (total == 0) {
+                    return java.util.Optional.<ResourcePressure>empty();
+                }
+                return java.util.Optional.of(new ResourcePressure(
+                        out, total, queued, "WiredTiger 티켓", "serverStatus.wiredTiger.concurrentTransactions"));
+            });
+        } catch (RuntimeException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    /** 티켓 수치는 버전에 따라 Integer·Long·Document(고저 분할)로 온다 — 숫자만 안전하게 뽑는다 */
+    private static long num(Object v) {
+        if (v instanceof Number n) {
+            return n.longValue();
+        }
+        if (v instanceof Document d) {
+            return num(d.get("low"));
+        }
+        return 0;
     }
 
     @Override

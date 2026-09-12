@@ -24,6 +24,7 @@ import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SchemaDefinition;
 import io.dbtower.operator.model.SessionInfo;
+import io.dbtower.operator.model.ResourcePressure;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableDetail;
 import io.dbtower.operator.model.TableDetail.DdlSource;
@@ -1362,6 +1363,29 @@ public class MsSqlOperator extends AbstractJdbcOperator {
      * <p>권한: sys.fn_xe_file_target_read_file·dm_xe_session_targets 조회에는 VIEW SERVER STATE가 필요하다 —
      * 없으면 이 메서드는 OperatorException으로 실패하고 상위에서 ERROR로 격리된다.
      */
+    /**
+     * 자원 압박 (162절) — 실행 중 요청 수를 온라인 스케줄러 수(= 동시에 CPU를 쥘 수 있는 자리)와 함께 본다.
+     * runnable_tasks_count 합은 "자리를 기다리며 줄 선 작업"이라 CPU 압박의 직접 신호다(SQL Server 관례).
+     */
+    @Override
+    public java.util.Optional<ResourcePressure> resourcePressure() {
+        String sql = """
+                SELECT (SELECT COUNT(*) FROM sys.dm_exec_requests WHERE status = 'running')            AS running,
+                       (SELECT COUNT(*) FROM sys.dm_os_schedulers
+                         WHERE status = 'VISIBLE ONLINE' AND is_online = 1)                             AS schedulers,
+                       (SELECT ISNULL(SUM(runnable_tasks_count), 0) FROM sys.dm_os_schedulers
+                         WHERE status = 'VISIBLE ONLINE')                                               AS queued
+                """;
+        try {
+            return java.util.Optional.ofNullable(jdbc().query(sql, rs -> rs.next()
+                    ? new ResourcePressure(rs.getLong("running"), rs.getLong("schedulers"),
+                            rs.getLong("queued"), "실행 중 요청", "dm_exec_requests / dm_os_schedulers")
+                    : null));
+        } catch (DataAccessException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
     @Override
     public List<DeadlockEvent> recentDeadlocks(int limit) {
         // A-5: Azure SQL Database(EngineEdition=5)는 system_health XE 세션도 로컬 .xel 파일도 제공하지 않는다.

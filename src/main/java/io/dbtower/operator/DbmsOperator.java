@@ -9,6 +9,7 @@ import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.operator.model.VolumeStat;
 import io.dbtower.operator.model.WaitEvent;
 import io.dbtower.operator.model.TableStat;
+import io.dbtower.operator.model.ResourcePressure;
 import io.dbtower.operator.model.TableBloat;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.SessionInfo;
@@ -303,6 +304,19 @@ public interface DbmsOperator {
      */
     default List<TableBloat> tableBloat(int limit) {
         return List.of();
+    }
+
+    /**
+     * 자원 압박 — "지금 몇 개가 동시에 일하고 있고 한도는 얼마인가" (162절, {@link ResourcePressure}).
+     *
+     * <p>CPU 사용률이 아니다. CPU는 호스트 지표라 인스턴스에 귀속되지 않지만, 동시 실행 압박은
+     * 기종마다 DB 자신이 자기 통계로 답한다 — 그래서 이 축은 5기종 공통으로 낼 수 있다.
+     * 세는 대상(스레드·세션·요청·티켓)은 기종마다 다르므로 {@code unit}·{@code source}에 무엇을 읽었는지 담는다.
+     *
+     * <p>읽기 전용. 권한 부족·지표 부재로 못 읽으면 empty — 0으로 위장하지 않는다(빈 값과 한가함은 다르다).
+     */
+    default Optional<ResourcePressure> resourcePressure() {
+        return Optional.empty();
     }
 
     /**

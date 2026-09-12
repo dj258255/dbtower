@@ -121,6 +121,8 @@ DBTOWER_ENCRYPTION_KEY=$(openssl rand -base64 32) ./gradlew bootRun
 승인자와 운영자는 서로를 포함하지 않습니다. 화면은 `/api/me`가 반환한 능력으로 동작을
 표시하고, 최종 권한은 서버가 검사합니다.
 
+직접 역할을 바꿔 가며 확인하는 순서는 [역할별 수동 테스트](docs/MANUAL-TEST.md)에 있습니다.
+
 ## 아키텍처
 
 플랫폼은 Spring Modulith 기반 16개 모듈로 나뉩니다. 다른 모듈은 공개 서비스와 DTO만
@@ -157,6 +159,7 @@ DBTOWER_ENCRYPTION_KEY=$(openssl rand -base64 32) ./gradlew bootRun
 - 설계 이해하기: [설계](docs/DESIGN.md), [AI 판단 규칙](docs/ai-analysis-rules.md)
 - 운영·배포하기: [운영](docs/operations.md), [최소 권한](docs/least-privilege.md)
 - API 연동하기: [API 빠른 참조](docs/API.md)
+- 직접 눌러보기: [역할별 수동 테스트](docs/MANUAL-TEST.md)
 - 근거 확인하기: [검증 기록](docs/VERIFICATION.md), [변경 이력](CHANGELOG.md)
 - 개발에 참여하기: [기여 가이드](CONTRIBUTING.md), [저장소 규칙](AGENTS.md)
 

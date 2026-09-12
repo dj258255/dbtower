@@ -49,7 +49,14 @@ export function renderTimeline(container, items, { currentVersion, pending, onAp
     return `<div class="msg ai"><div class="ai-text">${esc(m.content)}</div>${sqlBlock}${m.version ? card(m.version) : ""}</div>`;
   };
 
-  container.innerHTML = items.map((it) => (it.type === "MESSAGE" ? message(it.message) : `<div class="msg ai">${card(it.version)}</div>`)).join("")
+  // 대화가 한 번도 없으면 체크포인트만 줄줄이 쌓여 "이력 목록"처럼 보인다(162절 지적) —
+  // 이 칸은 말을 거는 곳이라는 것을 맨 위에 한 줄로 남긴다. 항목이 있으니 빈 화면 안내는 안 나오던 자리다.
+  const hasTalk = items.some((it) => it.type === "MESSAGE");
+  const intro = hasTalk || pending ? "" : `<div class="wb-empty wb-empty-inline">
+    아직 대화가 없습니다 — 아래에 보고 싶은 데이터를 말로 설명하면 AI가 SQL을 제안합니다.<br>
+    아래 기록은 이 워크시트에 저장된 버전입니다.</div>`;
+  container.innerHTML = intro
+    + items.map((it) => (it.type === "MESSAGE" ? message(it.message) : `<div class="msg ai">${card(it.version)}</div>`)).join("")
     + (pending ? `<div class="msg user">${esc(pending.question)}</div>${pendingBubble(pending)}` : "");
   container.scrollTop = container.scrollHeight;
 

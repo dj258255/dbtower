@@ -25,15 +25,23 @@ package io.dbtower.score.internal;
  * @param sloAtRisk       SLO 위험(AT_RISK) 감점
  * @param backupNoBackup  백업 없음(NO_BACKUP, 사각지대) 감점
  * @param backupStale     백업 오래됨(STALE) 감점
+ * @param resourceWarn          자원 압박 경고 감점
+ * @param resourceCritical      자원 압박 한도 근접 감점
+ * @param resourceWarnRatio     경고로 보는 한도 대비 사용 비율
+ * @param resourceCriticalRatio 근접으로 보는 한도 대비 사용 비율
  */
 public record ScoreWeights(double healthDown,
                            double anomalyPerHit, double anomalyCap,
                            double advisorCritical, double advisorWarning, double advisorCap,
                            double sloBreaching, double sloAtRisk,
-                           double backupNoBackup, double backupStale) {
+                           double backupNoBackup, double backupStale,
+                           double resourceWarn, double resourceCritical,
+                           double resourceWarnRatio, double resourceCriticalRatio) {
 
     /** 기본 가중치 — 100점 만점 기준. 합산 최대 감점이 100을 넘어도 점수는 0에서 바닥친다. */
     public static ScoreWeights defaults() {
-        return new ScoreWeights(45, 4, 16, 8, 3, 30, 25, 10, 20, 12);
+        // 자원 압박은 경고 6·근접 14, 임계는 한도의 75%·90%. SLO(30)보다 가볍게 둔다 —
+        // 압박은 '지금 바쁘다'이지 '사용자가 이미 아프다'가 아니다(후자는 SLO가 본다).
+        return new ScoreWeights(45, 4, 16, 8, 3, 30, 25, 10, 20, 12, 6, 14, 0.75, 0.90);
     }
 }

@@ -3,6 +3,7 @@ package io.dbtower.score.internal;
 import io.dbtower.advisor.InstanceAdvisorReport;
 import io.dbtower.backup.BackupFreshness;
 import io.dbtower.insight.BaselineService.AnomalyScan;
+import io.dbtower.operator.model.ResourcePressure;
 import io.dbtower.registry.HealthStatus;
 import io.dbtower.slo.SloReport;
 
@@ -26,7 +27,7 @@ import io.dbtower.slo.SloReport;
 public record SignalContribution(Signal signal, State state, double penalty, String summary) {
 
     /** 신호 종류 — health·이상감지·Advisors·SLO·백업 */
-    public enum Signal { HEALTH, ANOMALY, ADVISOR, SLO, BACKUP }
+    public enum Signal { HEALTH, ANOMALY, ADVISOR, SLO, BACKUP, RESOURCE }
 
     /** 신호 판정 상태 */
     public enum State { OK, PENALIZED, INSUFFICIENT_DATA, ERROR }
@@ -111,6 +112,30 @@ public record SignalContribution(Signal signal, State state, double penalty, Str
      * 백업 신선도(D7) — NO_BACKUP(사각지대)·STALE는 실제 위험이므로 감점한다. FRESH는 OK.
      * NO_BACKUP은 "데이터 부족"이 아니라 "백업이 없다는 사실"(나쁨)이라 감점 대상이다.
      */
+    /**
+     * 자원 압박 기여 (162절) — "지금 몇 개가 동시에 일하고 한도는 얼마인가"를 점수에 반영한다.
+     *
+     * <p>CPU가 아니라 동시 실행 압박인 이유는 {@link io.dbtower.operator.model.ResourcePressure} 주석에 있다.
+     * 한도를 모르는 기종(비율을 낼 수 없는 경우)은 감점하지 않고 판정 보류로 둔다 — 절대 수치만으로는
+     * 많은지 적은지 말할 수 없고, 그걸 추측해 깎으면 "모르는 것을 나쁘다고 한 것"이 된다.
+     */
+    static SignalContribution fromResource(ResourcePressure pressure, ScoreWeights w) {
+        Double ratio = pressure.usedRatio();
+        String seen = pressure.running() + (pressure.limit() == null ? "" : "/" + pressure.limit())
+                + " " + pressure.unit();
+        if (ratio == null) {
+            return insufficient(Signal.RESOURCE, seen + " — 한도를 몰라 비율 판정 보류 (" + pressure.source() + ")");
+        }
+        String summary = String.format("%s 사용 %.0f%% (%s)", seen, ratio * 100, pressure.source());
+        if (ratio >= w.resourceCriticalRatio()) {
+            return penalized(Signal.RESOURCE, w.resourceCritical(), summary + " — 한도에 근접");
+        }
+        if (ratio >= w.resourceWarnRatio()) {
+            return penalized(Signal.RESOURCE, w.resourceWarn(), summary + " — 여유가 줄고 있다");
+        }
+        return ok(Signal.RESOURCE, summary);
+    }
+
     static SignalContribution fromBackup(BackupFreshness backup, ScoreWeights w) {
         return switch (backup.status()) {
             case NO_BACKUP -> penalized(Signal.BACKUP, w.backupNoBackup(), "백업 없음 (사각지대)");

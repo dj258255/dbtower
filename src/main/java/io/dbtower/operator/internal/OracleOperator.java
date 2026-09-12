@@ -21,6 +21,7 @@ import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SchemaDefinition;
 import io.dbtower.operator.model.SessionInfo;
+import io.dbtower.operator.model.ResourcePressure;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableDetail;
 import io.dbtower.operator.model.TableDetail.DdlSource;
@@ -627,6 +628,32 @@ public class OracleOperator extends AbstractJdbcOperator {
      * 보장되지 않는다. 그래서 "미사용 인덱스 후보"를 실측 통계로 정직하게 낼 수 없어 UNSUPPORTED로 표기한다
      * (지원 위장 금지). 구조 기반 중복·잉여 인덱스 후보(D2 describeSchema)는 Oracle에서도 여전히 유효하다.
      */
+    /**
+     * 자원 압박 (162절) — Oracle은 Average Active Sessions(AAS)를 직접 준다. AAS는 "평균 몇 개의 세션이
+     * 동시에 일하고 있나"라 CPU 코어 수와 견주면 그대로 압박이 된다(코어보다 크면 줄 서고 있다는 뜻).
+     *
+     * <p>함정: PDB 접속에서는 {@code v$sysmetric}이 0행이고 {@code v$con_sysmetric}을 봐야 한다(162절 실측).
+     * 컨테이너 뷰가 막히면 empty — 값을 지어내지 않는다.
+     */
+    @Override
+    public java.util.Optional<ResourcePressure> resourcePressure() {
+        String sql = """
+                SELECT ROUND(m.value, 2) AS aas,
+                       (SELECT TO_NUMBER(value) FROM v$parameter WHERE name = 'cpu_count') AS cores
+                FROM v$con_sysmetric m
+                WHERE m.metric_name = 'Average Active Sessions'
+                """;
+        try {
+            return java.util.Optional.ofNullable(jdbc().query(sql, rs -> rs.next()
+                    ? new ResourcePressure(Math.round(rs.getDouble("aas")),
+                            rs.getObject("cores") == null ? null : rs.getLong("cores"),
+                            null, "평균 활성 세션(AAS)", "v$con_sysmetric Average Active Sessions / cpu_count")
+                    : null));
+        } catch (DataAccessException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
     @Override
     public List<IndexUsage> indexUsage(int limit) {
         return List.of(IndexUsage.unsupported(instance.getType()

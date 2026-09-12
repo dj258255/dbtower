@@ -25,6 +25,7 @@ import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SchemaDefinition;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
+import io.dbtower.operator.model.ResourcePressure;
 import io.dbtower.operator.model.TableBloat;
 import io.dbtower.operator.model.TableDetail;
 import io.dbtower.operator.model.TableDetail.DdlSource;
@@ -1160,6 +1161,30 @@ public class PostgresOperator extends AbstractJdbcOperator {
      * ANALYZE 이후 변경 수. dead 튜플 많은 순 상위 N개. 추정치 기반(n_dead_tup은 통계 추정). 읽기 전용.
      */
     @Override
+    /**
+     * 자원 압박 (162절) — PostgreSQL은 CPU를 SQL로 알려주지 않는다. 대신 pg_stat_activity가
+     * "지금 active인 백엔드"를 주고, max_connections가 한도다. 대기 중(waiting)은 따로 세어
+     * 한도에 걸린 것과 락에 걸린 것을 구분한다.
+     */
+    public Optional<ResourcePressure> resourcePressure() {
+        String sql = """
+                SELECT count(*) FILTER (WHERE state = 'active')                    AS running,
+                       count(*) FILTER (WHERE state = 'active' AND wait_event IS NOT NULL) AS queued,
+                       current_setting('max_connections')::bigint                  AS max_conn
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                """;
+        try {
+            return Optional.ofNullable(jdbc().query(sql, rs -> rs.next()
+                    ? new ResourcePressure(rs.getLong("running"), rs.getLong("max_conn"),
+                            rs.getLong("queued"), "활성 백엔드", "pg_stat_activity / max_connections")
+                    : null));
+        } catch (DataAccessException e) {
+            return Optional.empty();
+        }
+    }
+
+
     public List<TableBloat> tableBloat(int limit) {
         String sql = """
                 SELECT schemaname || '.' || relname AS table_name,
@@ -1441,7 +1466,10 @@ public class PostgresOperator extends AbstractJdbcOperator {
                 SELECT pid, usename, state, wait_event,
                        (pg_blocking_pids(pid))[1] AS blocked_by,
                        query,
-                       COALESCE(EXTRACT(EPOCH FROM (now() - query_start)) * 1000, 0) AS elapsed_ms
+                       -- now()는 트랜잭션 시작 시각에 고정된다 — 조회 트랜잭션이 열린 뒤 시작된 쿼리는
+                       -- query_start가 now()보다 늦어 경과가 음수로 나왔다(162절, 화면에 -7.84ms).
+                       -- 지금 시각이 필요하므로 clock_timestamp()를 쓰고, 그래도 음수면 0으로 바닥친다.
+                       GREATEST(COALESCE(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)) * 1000, 0), 0) AS elapsed_ms
                 FROM pg_stat_activity
                 WHERE backend_type = 'client backend'
                   AND pid <> pg_backend_pid()
