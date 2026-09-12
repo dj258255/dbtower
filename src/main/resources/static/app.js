@@ -1805,7 +1805,10 @@ async function loadMcpTools() {
 }
 
 // MCP 등록 명령 — ADMIN이면 서비스 토큰을 받아 실제 명령을 완성한다 (A1)
+// 능력을 먼저 본다: 토큰 발급은 ADMIN 전용이라 다른 역할이 부르면 403이다. 눌러서 403을 받는 화면을
+// 만들지 않는다는 규칙(loadMe 주석)은 사람이 누르는 버튼만이 아니라 화면이 스스로 거는 호출에도 같이 적용된다.
 async function loadMcpCommand() {
+  if (!can("PLATFORM_ADMIN")) return; // 비관리자는 카드에 적힌 OAuth 등록 안내를 그대로 쓴다
   try {
     const { token } = await api("/api/security/mcp-token");
     $("#mcp-cmd-http").textContent =
