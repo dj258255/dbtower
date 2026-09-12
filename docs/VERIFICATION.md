@@ -2596,7 +2596,7 @@ V18에서 query_snapshot을 파티션 테이블로 바꾼 뒤, 문의 카드의 
 검증: 478건 그린. 라이브로 /api/instances/4/referenced-schema(도그푸딩 쿼리) 응답이
 rowCountApprox=472,217, dataBytes=156,950,528, indexBytes=25,157,632,
 인덱스 idx_snapshot_instance_time(instance_id,captured_at) btree +
-query_snapshot_pkey[U](id,captured_at) btree — 수정 전 "0행·없음"과 대비.
+`query_snapshot_pkey[U](id,captured_at)` btree — 수정 전 "0행·없음"과 대비.
 전 필드 문의 실발사 {"sent":true} (검증용 임시 admin은 사용 직후 삭제).
 카디널리티는 null — 파티션 부모에 pg_stats 통계가 없어 미확보 정직 표기(위장 금지 원칙).
 
@@ -7401,7 +7401,7 @@ SQL Server orders        키 표시 0                            PK 2 · FK 1 ·
 
 ### 바꾼 것
 
-- 목록 머리에 [열린 것 n | 전체 m](`aria-pressed`). 탭 옆 숫자(열린 티켓 수)는 그대로
+- 목록 머리에 `[열린 것 n | 전체 m]` 토글(`aria-pressed`). 탭 옆 숫자(열린 티켓 수)는 그대로
 - 고르기 전 기본은 열린 티켓이 있으면 열린 것, 없으면 전체. 열린 것이 0일 때 빈 목록으로 기록을 가리지 않게
 - 고른 티켓이 끝난 것이면(닫힌 티켓 딥링크, 방금 실행해 닫힌 티켓) 전체로 넓혀 목록에서 사라지지 않게. 인스턴스를 바꾸면 기본으로 돌아간다
 
