@@ -15,6 +15,7 @@ import io.dbtower.operator.BackupCommands;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
+import io.dbtower.operator.model.QueryAntiPattern;
 import io.dbtower.operator.model.QueryStat;
 import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.operator.model.ReplicationState;
@@ -348,6 +349,42 @@ public class MySqlOperator extends AbstractJdbcOperator {
     @Override
     public RowsMetric rowsMetric() {
         return RowsMetric.EXAMINED_ROWS;
+    }
+
+    /**
+     * 안티패턴 신호 (158절) — digest가 이미 세고 있는 컬럼만 읽는다(추가 계측 없음).
+     * 세 축 모두 서버 기동 이후 누적이라 비율로 환산해 실행 수와 무관하게 읽히게 한다.
+     */
+    @Override
+    public List<QueryAntiPattern> queryAntiPatterns(int limit) {
+        String sql = """
+                SELECT DIGEST, DIGEST_TEXT, COUNT_STAR,
+                       SUM_NO_INDEX_USED, SUM_SELECT_FULL_JOIN,
+                       SUM_CREATED_TMP_DISK_TABLES, SUM_SORT_MERGE_PASSES,
+                       SUM_ROWS_EXAMINED, SUM_ROWS_SENT
+                FROM performance_schema.events_statements_summary_by_digest
+                WHERE DIGEST_TEXT IS NOT NULL AND COUNT_STAR > 0
+                ORDER BY SUM_TIMER_WAIT DESC
+                LIMIT ?
+                """;
+        try {
+            return jdbc().query(sql, (rs, i) -> {
+                long calls = rs.getLong("COUNT_STAR");
+                double noIndex = rs.getLong("SUM_NO_INDEX_USED") + rs.getLong("SUM_SELECT_FULL_JOIN");
+                double spill = rs.getLong("SUM_CREATED_TMP_DISK_TABLES") + rs.getLong("SUM_SORT_MERGE_PASSES");
+                long sent = rs.getLong("SUM_ROWS_SENT");
+                // 돌려준 행이 0이면(집계·DDL 등) 나눌 수 없다 — 지어내지 않고 미확보로 둔다
+                Double perRow = sent > 0 ? rs.getLong("SUM_ROWS_EXAMINED") / (double) sent : null;
+                return new QueryAntiPattern(rs.getString("DIGEST"), rs.getString("DIGEST_TEXT"), calls,
+                        new QueryAntiPattern.Metric("SUM_NO_INDEX_USED + SUM_SELECT_FULL_JOIN", noIndex / calls, "실행당"),
+                        new QueryAntiPattern.Metric("SUM_CREATED_TMP_DISK_TABLES + SUM_SORT_MERGE_PASSES", spill / calls, "실행당"),
+                        new QueryAntiPattern.Metric("SUM_ROWS_EXAMINED / SUM_ROWS_SENT", perRow, "검사행/반환행"),
+                        QueryAntiPattern.NATIVE,
+                        "performance_schema digest 누적(서버 기동 이후). 돌려준 행이 0인 문장은 행당 읽은 양을 미확보로 둔다");
+            }, limit);
+        } catch (DataAccessException e) {
+            return List.of(QueryAntiPattern.unsupported("MySQL 안티패턴 신호 미확보: " + e.getMessage()));
+        }
     }
 
     @Override

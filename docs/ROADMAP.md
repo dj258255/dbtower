@@ -695,7 +695,15 @@ Oracle 외래키 실행은 157절에서 데모 테이블 한 개에 최소 권�
 - Mongo: serverStatus opLatencies·$collStats latencyStats 히스토그램(프로파일러 불요) — 쿼리 단위가 아니라 인스턴스/컬렉션 단위이므로 **병행**
 - Oracle: v$sqlstats에 분위수·표준편차 부재 재확인 — **UNSUPPORTED 유지가 정직**
 
-### 테마 C — UNSUPPORTED 해제·저비용 고가치
+### 테마 C — UNSUPPORTED 해제·저비용 고가치 (2026-09-12 착수 시 재조사 — 158절)
+
+착수 전에 네 항목을 코드·라이브로 대조하니 둘은 이미 구현돼 있었다. 아래 원문은 조사 시점 기록으로 남기고, 실제 상태는 이렇다.
+
+- PG 복제 슬롯 잔량: **이미 구현**(`replicationSlots()` + `OpsAlertDetector` 경보)
+- PG 블로트 신호: **이미 구현**(`TableBloat` + `BloatAdvisor`, 추정치 명시). 남은 보강은 `pg_stat_progress_vacuum`·`pgstattuple_approx`
+- Oracle 인덱스 사용 통계: **이 환경에서 부분 해제 불가**(실측 — `INDEX_STATS_ENABLED=1`·플러시 154회인데 조회 600건 뒤에도 `DBA_INDEX_USAGE` 0행)
+- MySQL digest 안티패턴: **158절에서 5기종으로 구현** — 축은 공통, 원천 지표는 기종이 답한다
+
 - **PG 복제 슬롯 잔량**(pg_replication_slots wal_status/safe_wal_size) — 디스크 고갈 대표 장애 사각, SELECT 1개
 - **PG 블로트 신호** — 이미 읽는 pg_stat_user_tables의 미사용 컬럼 4개(n_dead_tup 등) + pg_stat_progress_vacuum + pgstattuple_approx("있으면", 권한 pg_stat_scan_tables)
 - **Oracle indexUsage 부분 해제** — DBA_INDEX_USAGE(12.2+, 켜는 것 없이 읽기만). SAMPLED 표본이라 "미사용≠삭제근거" 경고 필수

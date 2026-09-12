@@ -13,6 +13,7 @@ import io.dbtower.operator.JdbcConnectOptions;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.RestoreSupport;
+import io.dbtower.operator.model.QueryAntiPattern;
 import io.dbtower.operator.model.QueryStat;
 import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.model.RestoreVerification;
@@ -207,6 +208,36 @@ public class OracleOperator extends AbstractJdbcOperator {
     @Override
     protected String versionSql() {
         return "SELECT banner FROM v$version WHERE ROWNUM = 1";
+    }
+
+    /**
+     * 안티패턴 신호 (158절) — v$sqlstats가 (sql_id, plan_hash_value)당 유지하는 누적값만 읽는다(무료 뷰).
+     * SORTS는 디스크 정렬만 세는 값이 아니라 정렬 횟수 전체다 — 디스크 스필의 근사로만 쓰고 note에 밝힌다.
+     */
+    @Override
+    public List<QueryAntiPattern> queryAntiPatterns(int limit) {
+        String sql = """
+                SELECT sql_id, sql_text, executions, sorts, disk_reads, buffer_gets, rows_processed
+                FROM v$sqlstats
+                WHERE executions > 0
+                ORDER BY elapsed_time DESC
+                FETCH FIRST ? ROWS ONLY
+                """;
+        try {
+            return jdbc().query(sql, (rs, i) -> {
+                long calls = rs.getLong("executions");
+                long rows = rs.getLong("rows_processed");
+                Double perRow = rows > 0 ? rs.getLong("buffer_gets") / (double) rows : null;
+                return new QueryAntiPattern(rs.getString("sql_id"), rs.getString("sql_text"), calls,
+                        QueryAntiPattern.Metric.absent("v$sqlstats에 인덱스 미사용 카운터 없음(실행계획으로 판단)"),
+                        new QueryAntiPattern.Metric("sorts (디스크 한정 아님)", rs.getLong("sorts") / (double) calls, "정렬/실행"),
+                        new QueryAntiPattern.Metric("buffer_gets / rows_processed", perRow, "버퍼읽기/반환행"),
+                        QueryAntiPattern.NATIVE,
+                        "v$sqlstats 누적이며 공유 풀에서 밀리면 사라진다. sorts는 메모리 정렬을 포함해 디스크 스필의 상한 근사다");
+            }, limit);
+        } catch (DataAccessException e) {
+            return List.of(QueryAntiPattern.unsupported("Oracle 안티패턴 신호 미확보: " + e.getMessage()));
+        }
     }
 
     @Override
