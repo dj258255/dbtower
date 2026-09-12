@@ -402,7 +402,7 @@ mysqldump/pg_dump는 대상 테이블 전체 읽기+락, SQL Server `BACKUP DATA
 MySQL 모니터에 TRIGGER를 자동 부여하지 않는다. 이 권한은 조회 전용이 아니기 때문이다.
 SQL Server는 이미 가진 스키마 단위 VIEW DEFINITION으로 읽는다 — 라이브에서 데이터베이스 단위만 보던 게이트가 이 권한을 못 봐 미확보로 떨어뜨렸고, 권한을 넓히는 대신 게이트를 고쳤다(156절).
 Oracle 변경 계정의 `sample.customers` DML 권한은 외래키 생성에 필요한 REFERENCES를 대신하지 않는다.
-이번 작업에서는 그 권한을 넓히지 않았으며 외래키 실행 성공은 미확보다.
+157절에서 데모 테이블 한 개에 한해 자식 `ALTER`와 부모 `REFERENCES`만 더해 라이브로 확인했고(`CREATE TABLE`·`DROP TABLE`은 여전히 없다), 데모 열·외래키는 원복했다.
 
 근거: [MySQL TRIGGERS](https://dev.mysql.com/doc/refman/8.0/en/information-schema-triggers-table.html),
 [Oracle ALL_CONSTRAINTS](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/ALL_CONSTRAINTS.html),
