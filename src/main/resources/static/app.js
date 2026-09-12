@@ -3129,7 +3129,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#btn-antipattern").addEventListener("click", runAntiPatterns);
   $("#btn-ai").addEventListener("click", runAiAnalysis);
   // "인덱스 제안" 버튼은 섹션을 펼치고, 섹션 안의 "시뮬레이션" 버튼이 실제 호출한다(후보 컬럼 입력이 필요해서)
-  $("#btn-advisor").addEventListener("click", () => { $("#advisor-section").hidden = false; $("#advisor-columns").focus(); });
+  $("#btn-advisor").addEventListener("click", () => {
+    $("#advisor-section").hidden = false;
+    // 가상 인덱스(HypoPG)는 PostgreSQL 전용이다 — 눌러서 UNSUPPORTED를 받기 전에 미리 알린다(159절)
+    const hint = $("#advisor-unsupported");
+    const pg = state.instance && state.instance.type === "POSTGRESQL";
+    hint.hidden = pg;
+    if (!pg && state.instance) {
+      hint.textContent = `${state.instance.type}는 가상 인덱스 시뮬레이션을 지원하지 않습니다 — `
+        + "실제 인덱스를 만들어야 계획을 비교할 수 있고, 그건 대상 DB를 바꾸는 일이라 이 기능의 범위 밖입니다. "
+        + "대신 실행계획 보기와 안티패턴 신호로 후보를 좁히세요.";
+    }
+    $("#advisor-columns").focus();
+  });
   $("#btn-advisor-run").addEventListener("click", runIndexAdvisor);
   // 관제에서 본 쿼리를 요청자가 워크벤치의 새 워크시트로 가져간다(행 값 조회는 워크벤치의 조회 계정·마스킹을 거친다)
   $("#btn-to-workbench").addEventListener("click", () => handToWorkbench("sql", $("#detail-sql").value.trim()));

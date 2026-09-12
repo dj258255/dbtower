@@ -29,6 +29,12 @@ const ARMED = new Set(["execute", "execute-raw", "revert", "approve", "cancel", 
 const OPEN = ["PENDING", "APPROVED", "EXECUTING", "ROLLING_BACK"];
 const time = (t) => localTime(t, { seconds: true });
 
+// AI 소견은 "1. ... 2. ..."처럼 번호 문장이 한 줄로 온다 — 번호 앞에서 끊어 문단으로 만든다(내용은 그대로).
+function aiParagraphs(text) {
+  const parts = String(text).split(/(?=(?:^|\s)\d+\.\s)/).map((s) => s.trim()).filter(Boolean);
+  return (parts.length > 1 ? parts : [String(text)]).map((p) => `<p>${esc(p)}</p>`).join("");
+}
+
 export class TicketPanel {
   constructor({ list, detail, count, can, me, onOpenSql, onProposeTicket }) {
     Object.assign(this, { list, detail, count, can, me, onOpenSql, onProposeTicket });
@@ -157,13 +163,15 @@ export class TicketPanel {
       ? `<div class="wb-msg ${this.message.error ? "blocked" : "change"}">${esc(this.message.text)}</div>` : "";
     this.proposals = [];
     this.detail.innerHTML = `
-      <div class="tk-head"><span class="tk-id">#${esc(t.id)}</span><span class="tk-st ${cls}">${esc(label)}</span>
-        <span class="muted">rules v${esc(t.rulesVersion)}</span></div>
+      <div class="tk-head"><span class="tk-id">#${esc(t.id)}</span><span class="tk-st ${cls}">${esc(label)}</span></div>
       <pre class="ai-sql"><code>${highlight(t.targetSql)}</code></pre>
-      ${t.reason ? `<div class="tk-line"><span class="muted">사유</span> ${esc(t.reason)}</div>` : ""}
-      ${findings ? `<ul class="tk-findings">${findings}</ul>` : ""}
-      ${t.aiOpinion ? `<div class="tk-line"><span class="muted">AI 1차 소견</span> ${esc(t.aiOpinion)}</div>` : ""}
-      ${t.verifySql ? `<div class="tk-line muted">검증 조회</div><pre class="ai-sql"><code>${highlight(t.verifySql)}</code></pre>` : ""}
+      ${t.reason ? `<div class="tk-block"><div class="tk-label">사유</div><div class="tk-body">${esc(t.reason)}</div></div>` : ""}
+      ${findings ? `<div class="tk-block tk-rules"><div class="tk-label">규칙 판정 <span class="muted">rules v${esc(t.rulesVersion)}</span></div>
+        <ul class="tk-findings">${findings}</ul></div>` : ""}
+      ${t.aiOpinion ? `<div class="tk-block tk-ai"><div class="tk-label">AI 1차 소견 <span class="muted">판단은 사람이 한다</span></div>
+        <div class="tk-body">${aiParagraphs(t.aiOpinion)}</div></div>` : ""}
+      ${t.verifySql ? `<div class="tk-block"><div class="tk-label">검증 조회</div>
+        <pre class="ai-sql"><code>${highlight(t.verifySql)}</code></pre></div>` : ""}
       <ol class="tk-steps">${steps}</ol>
       ${this.actions(t)}
       ${message}
