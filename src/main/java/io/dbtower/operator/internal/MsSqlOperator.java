@@ -15,6 +15,7 @@ import io.dbtower.operator.JdbcConnectOptions;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
+import io.dbtower.operator.model.QueryAntiPattern;
 import io.dbtower.operator.model.QueryStat;
 import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.operator.model.ReplicationState;
@@ -426,6 +427,50 @@ public class MsSqlOperator extends AbstractJdbcOperator {
     @Override
     public RowsMetric rowsMetric() {
         return RowsMetric.LOGICAL_READS;
+    }
+
+    /**
+     * 안티패턴 신호 (158절) — dm_exec_query_stats가 이미 세는 컬럼만 읽는다.
+     * spills는 메모리 그랜트가 모자라 tempdb로 넘어간 양이고, 그랜트 대비 실사용은 과다 요청 신호다.
+     * "인덱스를 안 썼다"를 쿼리 단위로 세는 컬럼은 DMV에 없어 그 축은 미확보로 둔다.
+     */
+    @Override
+    public List<QueryAntiPattern> queryAntiPatterns(int limit) {
+        String sql = """
+                SELECT TOP (?) qs.query_hash, SUBSTRING(t.text, 1, 400) AS query_text,
+                       qs.execution_count, qs.total_spills, qs.total_logical_reads, qs.total_rows,
+                       qs.total_grant_kb, qs.total_used_grant_kb
+                FROM sys.dm_exec_query_stats qs
+                CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) t
+                WHERE qs.execution_count > 0
+                ORDER BY qs.total_elapsed_time DESC
+                """;
+        try {
+            return jdbc().query(sql, (rs, i) -> {
+                long calls = rs.getLong("execution_count");
+                long rows = rs.getLong("total_rows");
+                Double perRow = rows > 0 ? rs.getLong("total_logical_reads") / (double) rows : null;
+                return new QueryAntiPattern(bytesToHex(rs.getBytes("query_hash")), rs.getString("query_text"), calls,
+                        QueryAntiPattern.Metric.absent("DMV에 인덱스 미사용 카운터 없음(실행계획으로 판단)"),
+                        new QueryAntiPattern.Metric("total_spills", rs.getLong("total_spills") / (double) calls, "페이지/실행"),
+                        new QueryAntiPattern.Metric("total_logical_reads / total_rows", perRow, "논리읽기/반환행"),
+                        QueryAntiPattern.NATIVE,
+                        "dm_exec_query_stats는 플랜 캐시 기반 누적이라 캐시에서 밀린 계획은 사라진다. spills는 tempdb로 넘어간 페이지다");
+            }, limit);
+        } catch (DataAccessException e) {
+            return List.of(QueryAntiPattern.unsupported("MSSQL 안티패턴 신호 미확보: " + e.getMessage()));
+        }
+    }
+
+    private static String bytesToHex(byte[] value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder("0x");
+        for (byte b : value) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
     }
 
     @Override

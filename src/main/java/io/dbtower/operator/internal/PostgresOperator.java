@@ -14,6 +14,7 @@ import io.dbtower.operator.model.LatencyPercentile;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
+import io.dbtower.operator.model.QueryAntiPattern;
 import io.dbtower.operator.model.QueryStat;
 import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.operator.model.ReplicationSlot;
@@ -281,6 +282,38 @@ public class PostgresOperator extends AbstractJdbcOperator {
     @Override
     public RowsMetric rowsMetric() {
         return RowsMetric.RETURNED_ROWS;
+    }
+
+    /**
+     * 안티패턴 신호 (158절) — pg_stat_statements가 이미 세는 컬럼만 읽는다.
+     * PostgreSQL 통계에는 "인덱스를 안 썼다"를 쿼리 단위로 세는 컬럼이 없다(그건 실행계획의 몫) — 그 축은 미확보로 둔다.
+     */
+    @Override
+    public List<QueryAntiPattern> queryAntiPatterns(int limit) {
+        String sql = """
+                SELECT queryid, query, calls, rows,
+                       temp_blks_read + temp_blks_written AS temp_blks,
+                       shared_blks_read
+                FROM pg_stat_statements
+                WHERE calls > 0
+                ORDER BY total_exec_time DESC
+                LIMIT ?
+                """;
+        try {
+            return jdbc().query(sql, (rs, i) -> {
+                long calls = rs.getLong("calls");
+                long rows = rs.getLong("rows");
+                Double perRow = rows > 0 ? rs.getLong("shared_blks_read") / (double) rows : null;
+                return new QueryAntiPattern(String.valueOf(rs.getLong("queryid")), rs.getString("query"), calls,
+                        QueryAntiPattern.Metric.absent("pg_stat_statements에 인덱스 미사용 카운터 없음(실행계획으로 판단)"),
+                        new QueryAntiPattern.Metric("temp_blks_read + temp_blks_written", rs.getLong("temp_blks") / (double) calls, "블록/실행"),
+                        new QueryAntiPattern.Metric("shared_blks_read / rows", perRow, "디스크블록/반환행"),
+                        QueryAntiPattern.NATIVE,
+                        "pg_stat_statements 누적(리셋 이후). temp 블록은 정렬·해시가 work_mem을 넘겨 디스크로 간 양이다");
+            }, limit);
+        } catch (DataAccessException e) {
+            return List.of(QueryAntiPattern.unsupported("PostgreSQL 안티패턴 신호 미확보(pg_stat_statements 필요): " + e.getMessage()));
+        }
     }
 
     @Override

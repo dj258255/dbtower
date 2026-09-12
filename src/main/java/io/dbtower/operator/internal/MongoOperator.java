@@ -22,6 +22,7 @@ import io.dbtower.operator.model.LatencyPercentile;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.PlanShapes;
+import io.dbtower.operator.model.QueryAntiPattern;
 import io.dbtower.operator.model.QueryStat;
 import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.operator.model.ReplicationState;
@@ -138,6 +139,55 @@ public class MongoOperator implements DbmsOperator {
     @Override
     public RowsMetric rowsMetric() {
         return RowsMetric.EXAMINED_DOCUMENTS;
+    }
+
+    /**
+     * 안티패턴 신호 (158절) — system.profile을 queryHash로 묶어 센다(queryStats와 같은 원천·같은 한계).
+     * 프로파일러는 capped collection이라 누적 카운터가 아니라 <b>최근 표본</b>이다. COLLSCAN 비율과
+     * 정렬 단계 비율, 문서 하나를 돌려주려고 검사한 문서 수를 낸다.
+     */
+    @Override
+    public List<QueryAntiPattern> queryAntiPatterns(int limit) {
+        try {
+            return withClient(client -> {
+                List<Document> pipeline = List.of(
+                        new Document("$match", new Document("queryHash", new Document("$exists", true))),
+                        new Document("$group", new Document("_id", "$queryHash")
+                                .append("calls", new Document("$sum", 1))
+                                .append("docsExamined", new Document("$sum", new Document("$ifNull", List.of("$docsExamined", 0L))))
+                                .append("nreturned", new Document("$sum", new Document("$ifNull", List.of("$nreturned", 0L))))
+                                .append("sortStages", new Document("$sum", new Document("$cond",
+                                        List.of(new Document("$eq", List.of("$hasSortStage", true)), 1, 0))))
+                                .append("collScans", new Document("$sum", new Document("$cond",
+                                        List.of(new Document("$eq", List.of("$planSummary", "COLLSCAN")), 1, 0))))
+                                .append("millis", new Document("$sum", new Document("$ifNull", List.of("$millis", 0)))))
+                        ,
+                        new Document("$sort", new Document("millis", -1)),
+                        new Document("$limit", limit));
+                List<QueryAntiPattern> out = new ArrayList<>();
+                for (Document doc : db(client).getCollection("system.profile").aggregate(pipeline)) {
+                    long calls = ((Number) doc.getOrDefault("calls", 0)).longValue();
+                    long returned = ((Number) doc.getOrDefault("nreturned", 0)).longValue();
+                    Double perRow = returned > 0
+                            ? ((Number) doc.getOrDefault("docsExamined", 0)).doubleValue() / returned : null;
+                    out.add(new QueryAntiPattern(doc.getString("_id"), null, calls,
+                            new QueryAntiPattern.Metric("planSummary = COLLSCAN 비율",
+                                    ((Number) doc.getOrDefault("collScans", 0)).doubleValue() / calls, "표본 비율"),
+                            new QueryAntiPattern.Metric("hasSortStage 비율",
+                                    ((Number) doc.getOrDefault("sortStages", 0)).doubleValue() / calls, "표본 비율"),
+                            new QueryAntiPattern.Metric("docsExamined / nreturned", perRow, "검사문서/반환문서"),
+                            QueryAntiPattern.NATIVE,
+                            "system.profile은 capped collection이라 누적이 아니라 최근 표본이다. 프로파일러가 꺼져 있으면 빈 결과다"));
+                }
+                if (out.isEmpty()) {
+                    return List.of(QueryAntiPattern.unsupported(
+                            "MongoDB 안티패턴 신호 미확보 — system.profile에 표본이 없다(프로파일러 레벨 확인)"));
+                }
+                return out;
+            });
+        } catch (Exception e) {
+            return List.of(QueryAntiPattern.unsupported("MongoDB 안티패턴 신호 미확보: " + e.getMessage()));
+        }
     }
 
     @Override

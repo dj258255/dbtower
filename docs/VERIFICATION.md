@@ -7781,3 +7781,74 @@ Oracle에는 외래키의 ON UPDATE 개념이 없어 `onUpdate`가 null이다(15
 
 151절의 "Oracle은 코드·단위 테스트까지만", 156절의 "Oracle 외래키 실행은 미확보"가 닫혔다. 외래키 구조 수집·비교·실행 기록이 5기종 전부 라이브로 확인됐다.
 남은 Oracle 한계는 그대로다 — 변경 계정은 여전히 `CREATE TABLE`·`DROP TABLE`을 갖지 않고, 데모 열·외래키는 검증 뒤 원복했다.
+
+## 158. 쿼리 안티패턴 신호 5기종 — 느림의 크기가 아니라 성질 (2026-09-12)
+
+### 왜
+
+ROADMAP "테마 C — UNSUPPORTED 해제·저비용 고가치"를 착수하며 네 항목을 먼저 코드와 라이브로 대조했다. 백로그가 낡아 있었다.
+
+| 백로그 항목 | 실제 상태 | 근거 |
+|---|---|---|
+| PostgreSQL 복제 슬롯 잔량 | **이미 구현** | `PostgresOperator.replicationSlots()`가 `wal_status`·보존 바이트·`safe_wal_size`를 읽고, `OpsAlertDetector.detectReplicationSlots`가 경보까지 낸다 |
+| PostgreSQL 블로트 신호 | **이미 구현** | `TableBloat` + `BloatAdvisor`. `n_dead_tup`이 추정치임을 모델 주석이 이미 밝힌다 |
+| Oracle 인덱스 사용 통계 부분 해제 | **이 환경에서 불가(실측)** | 아래 |
+| MySQL digest 안티패턴 컬럼 | **열려 있었다 -> 이 절** | 5기종으로 넓혀 구현 |
+
+Oracle은 켜져 있는데도 값이 없었다. `v$index_usage_info`가 `INDEX_STATS_ENABLED=1`·`FLUSH_COUNT=154`인데, 인덱스를 타는 조회 600건을 준 뒤에도
+`DBA_INDEX_USAGE`가 0행이었다(Oracle 26ai Free). 지금의 `UNSUPPORTED` 표기가 여전히 정직하므로 부분 해제를 하지 않았다.
+
+### 무엇을 재는가 — 크기가 아니라 성질
+
+`queryStats`는 느림의 크기(호출·시간·행)를 답한다. 이 절이 더하는 것은 성질이다. 인덱스 없이 훑는가, 디스크로 넘치는가,
+한 행을 돌려주려고 얼마나 읽는가. 실행계획을 뜨지 않고 통계 뷰만 읽어 후보를 좁히는 값싼 신호다.
+
+`QueryStat`에 컬럼을 더하지 않았다. 5기종 공통 모델에 특정 기종 컬럼을 넣으면 나머지가 전부 "미확보 필드"를 갖고,
+화면이 같은 이름으로 다른 단위를 읽게 된다. 대신 `DbmsOperator.queryAntiPatterns`라는 능력 하나와 전용 모델을 뒀고,
+`IndexUsage`·`rowsMetric`과 같은 규약으로 **값과 함께 그 기종이 실제로 읽은 지표 이름·단위**를 담는다. 없는 축은 0이 아니라 사유를 단 null이다.
+
+| 축 | MySQL | PostgreSQL | SQL Server | Oracle | MongoDB |
+|---|---|---|---|---|---|
+| 인덱스 없이 훑음 | `SUM_NO_INDEX_USED + SUM_SELECT_FULL_JOIN` | 카운터 없음(미확보) | 카운터 없음(미확보) | 카운터 없음(미확보) | `planSummary = COLLSCAN` 비율 |
+| 디스크로 넘침 | `SUM_CREATED_TMP_DISK_TABLES + SUM_SORT_MERGE_PASSES` | `temp_blks_read + temp_blks_written` | `total_spills` | `sorts`(디스크 한정 아님) | `hasSortStage` 비율 |
+| 행당 읽은 양 | `SUM_ROWS_EXAMINED / SUM_ROWS_SENT` | `shared_blks_read / rows` | `total_logical_reads / total_rows` | `buffer_gets / rows_processed` | `docsExamined / nreturned` |
+
+세 기종에 "인덱스 미사용" 카운터가 없다는 것은 한계가 아니라 사실이다 — 그건 실행계획의 몫이라 통계 뷰가 세지 않는다. 그래서 그 축은 사유를 적고 비운다.
+Oracle `sorts`는 메모리 정렬을 포함하므로 디스크 스필의 상한 근사로만 쓰고 note에 밝힌다.
+
+### 실측 — 5기종 라이브
+
+`GET /api/instances/{id}/query-anti-patterns?limit=3` (관리자 프록시, 모니터 계정).
+
+```
+1 PostgreSQL  fullScan 미확보 · diskSpill temp_blks 0.0 블록/실행 · examinedPerRow 5.9e-05 디스크블록/반환행
+2 MySQL       fullScan 1.00 실행당 · diskSpill 0.0 · examinedPerRow 2.10 검사행/반환행
+3 MongoDB     fullScan COLLSCAN 비율 1.0 · diskSpill hasSortStage 비율 1.0 · examinedPerRow 257.7 검사문서/반환문서
+4 Oracle      fullScan 미확보 · diskSpill sorts 1.0 정렬/실행 · examinedPerRow 1,229.0 버퍼읽기/반환행
+5 SQL Server  fullScan 미확보 · diskSpill total_spills 0.0 페이지/실행 · examinedPerRow 9.43 논리읽기/반환행
+```
+
+값이 실제로 신호 역할을 했다. MongoDB의 상위 쿼리는 COLLSCAN 비율 1.0에 문서 하나를 돌려주려고 257.7개를 검사하고,
+Oracle의 상위 쿼리는 반환행당 버퍼 읽기가 1,229회다. 실행계획을 뜨지 않고 통계 뷰만으로 "먼저 볼 쿼리"가 드러난다.
+
+### 화면
+
+쿼리 상세에 "안티패턴 신호" 버튼과 칸을 더했다. 축마다 값·단위와 그 값을 준 지표 이름을 함께 적고, 값이 없는 축은 "미확보"로 표시한다(0으로 그리지 않는다).
+지금 보고 있는 쿼리가 목록에 있으면 맨 위로 올린다.
+글자 대비(계산): 지표 이름 #5b6475/흰 5.96, 보조 글자 #667085/흰 4.97, 강조 행 위 #667085/#f3f6ff 4.60.
+
+브라우저 확인(`ap158/ApShot158.java`, 관리자 프록시):
+
+```
+MongoDB(인스턴스 3)    행 5 · 축 15 · 미확보 0
+                       지표 이름 planSummary = COLLSCAN 비율 / hasSortStage 비율 / docsExamined / nreturned
+                       첫 행 "인덱스 없이 훑음 1 표본 비율 · 디스크로 넘침 1 표본 비율 · 행당 읽은 양 258 검사문서/반환문서"
+SQL Server(인스턴스 5) 행 10 · 축 30 · 첫 행 "인덱스 없이 훑음 미확보"
+                       DMV에 인덱스 미사용 카운터가 없다는 사유가 지표 이름 자리에 남는다
+폭 1512·390px 넘침 0 · 화면 오류(pageerror·console.error) 0 · img 요소 0(이스케이프)
+```
+
+첫 사진에서 고친 것 둘: 값과 단위가 세로로 떨어져 "1"과 "표본 비율"이 다른 항목처럼 읽혔고, 행마다 같은 note가 다섯 번 반복됐다.
+값·단위를 한 줄로 묶고 note를 목록 아래 한 번만 적었다. 미확보 표기도 흐린 글자에서 값 자리의 굵은 글자로 바꿨다(#5b6475/#f7f8fb 5.61:1).
+
+![안티패턴 신호 — 축마다 값·단위와 그 값을 준 지표 이름, 없는 축은 미확보](images/webui/159-antipattern-signals.jpg)

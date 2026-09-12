@@ -104,6 +104,16 @@ public class InsightController {
                 .toList();
     }
 
+    /**
+     * 쿼리 안티패턴 신호 (158절) — 느림의 크기(query-stats)와 달리 성질을 본다.
+     * 축이 없는 기종은 값이 null이고, 통계 뷰가 없거나 꺼진 환경은 UNSUPPORTED 안내 행 하나가 온다.
+     */
+    @GetMapping("/query-anti-patterns")
+    public List<io.dbtower.operator.model.QueryAntiPattern> queryAntiPatterns(
+            @PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
+        return operatorFactory.create(registryService.findById(id)).queryAntiPatterns(DbmsOperator.clampLimit(limit));
+    }
+
     @GetMapping("/table-stats")
     public List<TableStat> tableStats(@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
         return operatorFactory.create(registryService.findById(id)).tableStats(DbmsOperator.clampLimit(limit));

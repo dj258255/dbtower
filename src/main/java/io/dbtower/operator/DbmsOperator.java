@@ -18,6 +18,7 @@ import io.dbtower.operator.model.StatsHealth;
 import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.model.ReplicationSlot;
+import io.dbtower.operator.model.QueryAntiPattern;
 import io.dbtower.operator.model.QueryStat;
 import io.dbtower.operator.model.PartitionInfo;
 import io.dbtower.operator.model.LatencyPercentile;
@@ -66,6 +67,17 @@ public interface DbmsOperator {
 
     /** 정규화된 쿼리별 누적 통계 상위 N개 (시점 비교의 원천 데이터) */
     List<QueryStat> queryStats(int limit);
+
+    /**
+     * 정규화 쿼리별 안티패턴 신호 상위 N개 (테마 C, 158절) — 느림의 크기가 아니라 성질을 본다.
+     * 인덱스 없이 훑는가, 디스크로 넘치는가, 한 행에 얼마나 읽는가. 실행계획을 뜨지 않고 통계 뷰만 읽는 값싼 신호다.
+     *
+     * 축은 공통이지만 원천 지표는 기종마다 다르므로 값에 지표 이름을 함께 담는다. 그 기종에 없는 축은
+     * null로 두고(0으로 위장하지 않는다), 통계 뷰 자체가 없거나 꺼진 환경은 UNSUPPORTED 안내 행 하나를 낸다.
+     */
+    default List<QueryAntiPattern> queryAntiPatterns(int limit) {
+        return List.of(QueryAntiPattern.unsupported("이 기종은 쿼리 안티패턴 신호를 아직 읽지 않습니다"));
+    }
 
     /** queryStats의 rowsExamined 자리에 이 기종이 담는 지표 — 화면·알림이 같은 이름으로 다른 단위를 읽지 않게 기본값을 두지 않는다 */
     RowsMetric rowsMetric();

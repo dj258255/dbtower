@@ -1354,6 +1354,51 @@ async function runExplain() {
   } finally { btn.classList.remove("loading"); }
 }
 
+// 안티패턴 신호 (158절) — 느림의 크기가 아니라 성질. 축은 5기종 공통이지만 원천 지표 이름은 기종이 답한다.
+// 값이 없는 축은 0으로 그리지 않는다 — 그 기종에 그 카운터가 없다는 사유를 그대로 보인다.
+async function runAntiPatterns() {
+  const btn = $("#btn-antipattern");
+  btn.classList.add("loading");
+  $("#antipattern-section").hidden = false;
+  const box = $("#antipattern-result");
+  box.innerHTML = '<div class="muted">안티패턴 신호 조회 중...</div>';
+  try {
+    const rows = await api(`/api/instances/${state.instance.id}/query-anti-patterns?limit=20`);
+    box.innerHTML = renderAntiPatterns(rows);
+  } catch (e) {
+    box.innerHTML = `<div class="finding-item">조회 실패: ${esc(e.message)}</div>`;
+  } finally { btn.classList.remove("loading"); }
+}
+
+function renderAntiPatterns(rows) {
+  if (!rows.length) return '<div class="muted">신호가 없습니다.</div>';
+  if (rows.length === 1 && rows[0].source === "UNSUPPORTED") {
+    return `<div class="finding-item muted">판정 불가: ${esc(rows[0].note ?? "")}</div>`;
+  }
+  // 지금 보고 있는 쿼리를 먼저 — 통계 뷰의 식별자가 쿼리 상세와 같은 기종에서만 맞아떨어진다
+  const current = state.currentQuery ? String(state.currentQuery.queryId) : null;
+  const sorted = [...rows].sort((a, b) => (String(b.queryId) === current) - (String(a.queryId) === current));
+  const axis = (m) => {
+    if (!m || m.value == null) return '<b class="ap-none">미확보</b>';
+    const v = m.value >= 100 ? fmtNum(m.value, 0) : fmtNum(m.value, 2);
+    return `<b>${v}</b> <span class="muted">${esc(m.unit ?? "")}</span>`;
+  };
+  const src = (m) => (m ? `<div class="ap-src">${esc(m.sourceName ?? "")}</div>` : "");
+  return sorted.slice(0, 10).map((q) => `
+    <div class="finding-item ap-row${current && String(q.queryId) === current ? " ap-current" : ""}">
+      <div class="ap-head"><b>${esc(String(q.queryId ?? "-"))}</b>
+        <span class="muted">실행 ${fmtNum(q.calls, 0)}회</span></div>
+      ${q.queryText ? `<div class="ap-text muted">${esc(q.queryText.replace(/\s+/g, " ").slice(0, 120))}</div>` : ""}
+      <div class="ap-axes">
+        <div><span class="muted">인덱스 없이 훑음</span><span class="ap-val">${axis(q.fullScan)}</span>${src(q.fullScan)}</div>
+        <div><span class="muted">디스크로 넘침</span><span class="ap-val">${axis(q.diskSpill)}</span>${src(q.diskSpill)}</div>
+        <div><span class="muted">행당 읽은 양</span><span class="ap-val">${axis(q.examinedPerRow)}</span>${src(q.examinedPerRow)}</div>
+      </div>
+    </div>`).join("")
+    // 같은 기종이면 note가 모든 행에 같다 — 행마다 반복하지 않고 목록 아래 한 번만 적는다
+    + (sorted[0].note ? `<div class="ap-note muted">${esc(sorted[0].note)}</div>` : "");
+}
+
 // 관련 테이블 구조 — 쿼리가 참조하는 테이블의 컬럼·인덱스·대략 행수. 문의 시 서버가 자동 첨부하지만,
 // 보내기 전에 사이트에서 미리 확인할 수 있게 한다(원본 요청: "그 사이트에서 볼 때도 마찬가지").
 async function runReferencedSchema() {
@@ -3081,6 +3126,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#btn-compare").addEventListener("click", runCompare);
   $("#btn-explain").addEventListener("click", runExplain);
   $("#btn-schema").addEventListener("click", runReferencedSchema);
+  $("#btn-antipattern").addEventListener("click", runAntiPatterns);
   $("#btn-ai").addEventListener("click", runAiAnalysis);
   // "인덱스 제안" 버튼은 섹션을 펼치고, 섹션 안의 "시뮬레이션" 버튼이 실제 호출한다(후보 컬럼 입력이 필요해서)
   $("#btn-advisor").addEventListener("click", () => { $("#advisor-section").hidden = false; $("#advisor-columns").focus(); });
