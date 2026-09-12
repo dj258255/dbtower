@@ -664,6 +664,14 @@ DBA가 매달 손으로 만드는 정기 점검 보고서의 자동화. B4의 �
 
 ## 심화 후보 백로그 — 5기종 전수 갭 조사 (2026-07-07, 공식 문서·상용 도구 대조)
 
+### 남긴 한계 후속 (156절)
+
+CHECK·트리거 스냅샷·정의/상태 diff·수집 범위 표시를 구현하고, 승인 티켓으로 CHECK를 넣었다 뺀 실행 기록을
+PostgreSQL·SQL Server에서 실측했다(#76·#77·#78·#79, 두 대상 모두 원래 상태로 복귀).
+라이브에서 SQL Server 권한 게이트가 스키마 단위 VIEW DEFINITION을 못 봐 최소 권한 계정을 미확보로 떨어뜨리던 것을 찾아 고쳤다.
+MySQL 트리거는 TRIGGER 권한이 없어 미확보, MongoDB SQL CHECK·트리거는 UNSUPPORTED로 구별한다.
+Oracle 외래키 실행의 REFERENCES 권한 한계는 이번에도 넓히지 않았다. 상세는 [VERIFICATION 156절](VERIFICATION.md).
+
 > **착수 명세는 [docs/deepening-spec.md](deepening-spec.md)** — 아크 1~4차 구현 방법(쿼리·클래스
 > 수준)·함정·검증 기준·산출물 체크리스트. 아크 1~4차는 그 명세대로 구현 완료(VERIFICATION 57~60절).
 

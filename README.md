@@ -255,6 +255,8 @@ ON DELETE와 함께 적고, 참조 테이블을 누르면 그 상세로 넘어�
 검증용 외래키는 제품의 승인 티켓으로 올렸는데, MySQL·SQL Server에서 변경 계정에 가리키는 테이블의 REFERENCES 권한이 없어 실행이 거부됐습니다.
 최소 권한이 실제로 막은 사례라 계정 구성을 고치고 같은 티켓을 다시 실행했습니다([VERIFICATION 151·152절](docs/VERIFICATION.md)).
 실행 기록과 인스턴스 구조 비교는 열·인덱스에 더해 외래키까지 봅니다. 외래키만 추가·삭제한 변경이 "구조 차이 없음"으로 남던 것을 고쳤습니다([VERIFICATION 153절](docs/VERIFICATION.md)).
+CHECK·트리거의 정의와 상태도 구조 비교에 연결했습니다. 승인 티켓으로 CHECK를 넣었다 뺀 실행 기록에 생김·사라짐이 정의 원문과 함께 남는 것을 PostgreSQL·SQL Server에서 확인했습니다.
+권한이 없어 못 읽은 것은 미확보, 개념이 없는 MongoDB는 UNSUPPORTED로 구별합니다. 그러지 않으면 권한 부족이 "제약이 사라졌다"로 읽힙니다([VERIFICATION 156절](docs/VERIFICATION.md)).
 리뷰 가능성도 품질로 봅니다. 원시 NUL 바이트 한 개 때문에 Java·JS 소스가 바이너리로 취급되던 문제를 찾아, 값은 유지하고 표기만 `\u0000` 이스케이프로 바꾼 뒤 규약 검사에 NUL 금지를 넣었습니다([VERIFICATION 154절](docs/VERIFICATION.md)).
 
 ![워크벤치 — 왼쪽 스키마에서 orders를 펼치고 선택 모드로 테이블·열을 질문에 붙인 순간](docs/images/webui/132-workbench-layout-after.jpg)

@@ -18,6 +18,7 @@ import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.RowsMetric;
 import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.SchemaDefinition;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableDetail;
@@ -1168,10 +1169,47 @@ public class OracleOperator extends AbstractJdbcOperator {
                     .computeIfAbsent(rs.getString("table_name"), t -> new ArrayList<>()).add(rs.getString("column_name")), oneOwner);
             return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
                     columns, indexes, kinds, primaryKeys,
-                    TableDetailSupport.foreignKeysByTable(oracleForeignKeys(null)), SchemaSupport.DEFAULT_MAX_TABLES);
+                    TableDetailSupport.foreignKeysByTable(oracleForeignKeys(null)),
+                    oracleChecks(), oracleTriggers(), SchemaSupport.DEFAULT_MAX_TABLES);
         } catch (DataAccessException e) {
             throw new OperatorException("Oracle 스키마 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    private SchemaSupport.Definitions oracleChecks() {
+        // SEARCH_CONDITION_VC는 4,000자에서 잘리므로 LONG 원문을 마지막 열로 읽는다.
+        return SchemaSupport.definitions(() -> jdbc().query(dictionary("""
+                SELECT k.table_name, k.constraint_name, k.status, k.validated,
+                       k.deferrable, k.deferred, k.rely, k.search_condition
+                FROM {v}constraints k WHERE k.constraint_type = 'C'{and:k.owner = ?}
+                ORDER BY k.table_name, k.constraint_name
+                """), (rs, i) -> {
+                    String table = rs.getString("table_name");
+                    String name = rs.getString("constraint_name");
+                    String state = rs.getString("status") + ";" + rs.getString("validated")
+                            + ";" + rs.getString("deferrable") + ";" + rs.getString("deferred")
+                            + ";rely=" + rs.getString("rely");
+                    return new SchemaSupport.DefinitionRow(table,
+                            new SchemaDefinition(name, rs.getString("search_condition"), state));
+                }, withOwner()), hasAppSchema() ? "DBA_CONSTRAINTS" : "USER_CONSTRAINTS");
+    }
+
+    private SchemaSupport.Definitions oracleTriggers() {
+        return SchemaSupport.definitions(() -> jdbc().query(dictionary("""
+                SELECT g.table_name, g.trigger_name, g.status, g.trigger_type, g.triggering_event,
+                       g.description, g.when_clause, g.trigger_body
+                FROM {v}triggers g WHERE g.base_object_type IN ('TABLE', 'VIEW'){and:g.owner = ?}
+                ORDER BY g.table_name, g.trigger_name
+                """), (rs, i) -> {
+                    String table = rs.getString("table_name");
+                    String name = rs.getString("trigger_name");
+                    String state = rs.getString("status") + ";" + rs.getString("trigger_type")
+                            + ";" + rs.getString("triggering_event");
+                    String description = rs.getString("description") + "\nWHEN " + rs.getString("when_clause");
+                    String body = rs.getString("trigger_body");
+                    return new SchemaSupport.DefinitionRow(table,
+                            new SchemaDefinition(name, body == null ? null : description + "\n" + body, state));
+                }, withOwner()), hasAppSchema() ? "DBA_TRIGGERS" : "USER_TRIGGERS");
     }
 
     /** 파라미터 — v$parameter(name/value). 접근하려면 계정에 v_$parameter SELECT 권한이 필요하다 */

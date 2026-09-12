@@ -7619,3 +7619,95 @@ BUILD SUCCESSFUL in 4m 49s
 
 `./gradlew test` 중 일부 Spring 테스트 컨텍스트 종료 훅에서 스케줄러가 H2 테이블 삭제 뒤 한 번 더 돌아 `shedlock`·`database_instance` 없음 로그를 냈지만,
 Gradle 최종 결과는 성공이었다.
+
+## 156. CHECK·트리거 구조 비교와 미확보 구분 (2026-09-12)
+
+### 범위와 판정
+
+153절 외래키 경로를 따라 CHECK·트리거 정의를 테이블 스냅샷, 구조 diff, 실행 기록 화면에 연결했다.
+이름 기준으로 추가·삭제를 구별하고 원문과 상태를 비교한다. 문자열 리터럴의 공백도 의미가 있을 수 있어
+공백을 일괄 정규화하지 않는다. 기존 저장 JSON에 필드가 없으면 미확보이며 허위 삭제를 만들지 않는다.
+
+`AVAILABLE`은 해당 조회에서 확보한 정의, `UNAVAILABLE`은 미확보, `UNSUPPORTED`는 SQL CHECK·트리거를
+지원하지 않는 기종이다. 어느 한쪽이 미확보이면 그 항목의 추가·삭제 판정을 생략하고 `complete=false`와
+경고를 반환한다. 화면의 동일 문구도 "확보한 구조에서 차이가 없습니다"로 범위를 제한한다.
+`complete`는 이 구현이 비교하는 항목의 수집 범위이지 완전한 DDL 동등성 보장이 아니다.
+
+| 기종 | 구현한 원천 | 라이브 수집 상태(모니터 계정, `GET /api/instances/{id}/schema`) |
+|---|---|---|
+| PostgreSQL | `pg_constraint`, `pg_get_constraintdef`, 사용자 `pg_trigger`, 직접 호출 함수 정의·tgenabled | CHECK·트리거 모두 AVAILABLE (샘플에 정의 0개) |
+| MySQL | CHECK_CLAUSE·ENFORCED, 트리거 본문·이벤트·순서·SQL_MODE·문자셋 | CHECK AVAILABLE, 트리거 UNAVAILABLE — 모니터에 TRIGGER 권한이 없다(조회 전용이 아니라 부여하지 않았다) |
+| Oracle | C 제약의 SEARCH_CONDITION LONG·상태, 트리거 DESCRIPTION·WHEN_CLAUSE·TRIGGER_BODY LONG·상태 | 모두 AVAILABLE — CUSTOMERS 4개·CHANGE_IT 2개의 C 제약(NOT NULL 포함)을 실제로 읽었다 |
+| SQL Server | check_constraints 정의·활성/검증 상태, triggers/sql_modules 정의·활성 상태 | 모두 AVAILABLE(권한 게이트 수정 뒤 — 아래 "찾은 것"). 컨테이너는 Azure SQL Edge |
+| MongoDB | SQL CHECK·트리거 `UNSUPPORTED` | 모두 UNSUPPORTED — 개념이 없다 |
+
+Oracle SEARCH_CONDITION_VC는 잘릴 수 있어 LONG 원문을 마지막 열로 읽는다.
+근거: [Oracle ALL_CONSTRAINTS](https://docs.oracle.com/en/database/oracle/oracle-database/19/refrn/ALL_CONSTRAINTS.html).
+MySQL의 트리거는 조회에도 TRIGGER 권한이 필요하므로 기본 모니터에 쓰기 권한을 추가하는 대신
+직접 전역/스키마 권한을 확인한 경우만 수집한다.
+근거: [MySQL TRIGGERS](https://dev.mysql.com/doc/refman/8.0/en/information-schema-triggers-table.html).
+SQL Server의 암호화된 본문(NULL)은 없는 트리거가 아니라 미확보로 처리한다.
+근거: [sys.sql_modules](https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-sql-modules-transact-sql?view=sql-server-ver17).
+
+### 단위·화면 검증
+
+```text
+./gradlew test --tests '*SchemaSupportTest' --tests '*SchemaDiffServiceTest' --tests '*ChangeExecutionServiceTest'
+BUILD SUCCESSFUL in 6s
+
+DBTOWER_E2E=1 ./gradlew test --tests '*PersonaUiE2ETest.구조_정의는_좁은_화면에_맞고_미확보_경고와_이스케이프를_지킨다'
+BUILD SUCCESSFUL in 13s
+```
+
+검증 동작: CHECK·트리거 단독 추가·삭제, CHECK 검증 상태 변경, 트리거 본문·활성 상태 변경,
+원문 문자열 공백 보존, 정의 순서 무시, 조회 실패·이전 JSON에서 허위 삭제 방지, 새 JSON 왕복,
+상한 밖 테이블의 정의 제외, NULL 정의 미확보.
+
+브라우저 회귀는 합성 fixture로 렌더러만 좁게 본다(실제 티켓 기록을 찍은 화면은 아래 "화면 사진"에 따로 있다).
+390×900·1512×900에서 documentElement.scrollWidth <= innerWidth 통과, img 요소 0개로 이스케이프 확인.
+스크린샷을 생성하고 직접 확인했다: `build/reports/schema-diff-156-390.png`, `build/reports/schema-diff-156-1512.png`.
+초기 E2E 컴파일에서 Playwright containsText 인자 형식 오류가 나서 문자열 assertion으로 수정 후 재실행했다.
+
+### 찾은 것 — SQL Server 권한 게이트가 최소 권한 계정을 미확보로 떨어뜨렸다
+
+첫 라이브에서 SQL Server만 CHECK·트리거가 둘 다 UNAVAILABLE이었다(`sys.check_constraints: 미확보, 데이터베이스 VIEW DEFINITION 필요`).
+권한 확인이 데이터베이스 단위(`HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', ...)`)뿐이었는데, 이 저장소의 모니터 계정은
+`docker/workbench-mssql.sql`에서 **스키마 단위**로 받는다(`GRANT VIEW DEFINITION ON SCHEMA::dbo`). 권한은 있는데 게이트가 못 본 것이다.
+스키마 단위도 함께 보도록 고친 뒤 같은 계정에서 AVAILABLE이 됐다. 단위 테스트로는 보이지 않는 종류라 라이브가 잡았다.
+
+### 실측 — 승인 티켓으로 CHECK를 넣었다 뺐다 (PostgreSQL·SQL Server)
+
+요청자 제출 -> 승인자 승인 -> 운영자 실행을 기종마다 두 번. 두 대상 모두 샘플에 CHECK·트리거가 0개였고, 끝난 뒤 그 상태로 돌아왔다(`detail151/check_diff_156.py`).
+
+```
+PostgreSQL(인스턴스 1)
+#76 ALTER TABLE orders ADD CONSTRAINT ck_orders_amount_positive CHECK (amount > 0)
+    제출 14.6s PENDING · 승인 APPROVED · 실행 COMMITTED affectedRows 0
+    구조 비교 identical=false complete=true warning 없음
+      orders checks.added   ck_orders_amount_positive  CHECK ((amount > 0))  [validated=true]
+#77 ALTER TABLE orders DROP CONSTRAINT ck_orders_amount_positive
+      orders checks.removed ck_orders_amount_positive  CHECK ((amount > 0))  [validated=true]
+
+SQL Server(인스턴스 5, 권한 게이트 수정 뒤)
+#78 같은 ADD   실행 COMMITTED · identical=false complete=true
+      orders checks.added   ck_orders_amount_positive  ([amount]>(0))  [disabled=0;notTrusted=0;replication=0]
+#79 같은 DROP  실행 COMMITTED · identical=false complete=true
+      orders checks.removed ck_orders_amount_positive  ([amount]>(0))  [disabled=0;notTrusted=0;replication=0]
+
+전후 5기종 수집 상태(위 표) 동일 — 티켓 전에 읽은 값과 티켓 뒤 값이 같고, 두 샘플의 CHECK는 다시 0개다.
+```
+
+기종마다 정의 원문 표기가 다르다는 것도 그대로 드러났다. 같은 조건을 PostgreSQL은 `CHECK ((amount > 0))`, SQL Server는 `([amount]>(0))`로 준다.
+정규화해서 같게 만들지 않았다 — 엔진이 보관한 원문이 곧 그 DB의 사실이고, 정규화는 "같은데 다르게 보인다"보다 "다른데 같게 보인다"를 만든다.
+
+### 화면 사진
+
+![실행 기록 — CHECK 제약이 생겼다(PostgreSQL 티켓 #76)](images/webui/155-exec-check-added.jpg)
+![실행 기록 — 같은 제약이 사라졌다(티켓 #77), DB는 원래 상태로](images/webui/156-exec-check-removed.jpg)
+
+### 남긴 한계
+
+- MySQL 트리거는 모니터 계정에 TRIGGER 권한이 없어 UNAVAILABLE이다. 조회 전용 권한이 아니라 부여하지 않았고, 화면은 미확보로 적는다
+- Oracle 변경 계정은 `sample.customers`에 DML 권한만 있어 외래키 실행 검증은 여전히 미확보다(151절과 같은 한계). REFERENCES를 임의로 넓히지 않았다
+- 뷰 본문·파티션·함수의 재귀 의존성·트리거 실행 순서의 모든 기종별 옵션은 범위 밖이다
+- `complete`는 이 구현이 비교하는 항목의 수집 범위이지 완전한 DDL 동등성 보장이 아니다

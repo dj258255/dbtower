@@ -5,6 +5,8 @@ import io.dbtower.operator.model.ColumnSchema;
 import io.dbtower.operator.model.ForeignKey;
 import io.dbtower.operator.model.IndexSchema;
 import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.SchemaDefinition;
+import io.dbtower.operator.model.SchemaDefinitions;
 import io.dbtower.operator.model.TableSchema;
 import org.junit.jupiter.api.Test;
 
@@ -51,7 +53,8 @@ class SchemaDiffServiceTest {
         SchemaDiffService.SchemaDiff diff = service.diff(left, right);
 
         assertFalse(diff.identical());
-        assertNull(diff.warning(), "같은 기종·미절단이면 경고 없음");
+        assertTrue(diff.warning().contains("미확보"), "이전 스냅샷은 CHECK·트리거 비교 범위를 알 수 없다");
+        assertFalse(diff.complete());
 
         // 테이블: audit 추가(right에만), orders 삭제(left에만)
         assertEquals(List.of("audit"), diff.addedTables().stream().map(TableSchema::name).toList());
@@ -160,5 +163,103 @@ class SchemaDiffServiceTest {
 
         assertNotNull(diff.warning());
         assertTrue(diff.warning().contains("부분 비교"));
+    }
+
+    private static SchemaDefinitions available(SchemaDefinition... rows) {
+        return new SchemaDefinitions(SchemaDefinitions.Status.AVAILABLE, List.of(rows), "catalog");
+    }
+
+    private static TableSchema table(SchemaDefinitions checks, SchemaDefinitions triggers) {
+        return new TableSchema("orders", List.of(col("id", "int", false, 1)), List.of(),
+                TableSchema.TABLE, List.of("id"), List.of(), checks, triggers);
+    }
+
+    private SchemaDiffService.SchemaDiff compare(TableSchema left, TableSchema right) {
+        return service.diff(new SchemaSnapshot("POSTGRESQL", "sample", List.of(left), false, 200),
+                new SchemaSnapshot("POSTGRESQL", "sample", List.of(right), false, 200));
+    }
+
+    @Test
+    void 체크와_트리거만_추가되거나_삭제되어도_차이로_남는다() {
+        var check = new SchemaDefinition("positive", "id > 0", "validated=true");
+        var trigger = new SchemaDefinition("audit", "BEFORE UPDATE EXECUTE FUNCTION audit()", "O");
+        var empty = table(available(), available());
+        var populated = table(available(check), available(trigger));
+        var added = compare(empty, populated);
+        assertFalse(added.identical());
+        assertTrue(added.complete());
+        assertNull(added.warning());
+        assertEquals(List.of(check), added.changedTables().get(0).checks().added());
+        assertEquals(List.of(trigger), added.changedTables().get(0).triggers().added());
+        var removed = compare(populated, empty);
+        assertEquals(List.of(check), removed.changedTables().get(0).checks().removed());
+        assertEquals(List.of(trigger), removed.changedTables().get(0).triggers().removed());
+    }
+
+    @Test
+    void 정의의_문자열_리터럴과_활성화_상태_변경을_보존한다() {
+        var before = table(available(new SchemaDefinition("status", "status <> 'a  b'", "ENABLED")),
+                available(new SchemaDefinition("audit", "body", "O")));
+        var after = table(available(new SchemaDefinition("status", "status <> 'a b'", "ENABLED")),
+                available(new SchemaDefinition("audit", "body", "D")));
+        var diff = compare(before, after);
+        assertFalse(diff.identical());
+        assertEquals("status <> 'a  b'", diff.changedTables().get(0).checks().changed().get(0).left().definition());
+        assertEquals("D", diff.changedTables().get(0).triggers().changed().get(0).right().state());
+    }
+
+    @Test
+    void 체크_검증_상태와_트리거_본문만_바뀌어도_차이다() {
+        var before = table(available(new SchemaDefinition("positive", "id > 0", "validated=false")),
+                available(new SchemaDefinition("audit", "old body", "O")));
+        var after = table(available(new SchemaDefinition("positive", "id > 0", "validated=true")),
+                available(new SchemaDefinition("audit", "new body", "O")));
+        var diff = compare(before, after);
+        assertEquals(1, diff.changedTables().get(0).checks().changed().size());
+        assertEquals(1, diff.changedTables().get(0).triggers().changed().size());
+    }
+
+    @Test
+    void 수집_실패와_이전_기록은_허위_삭제를_만들지_않는다() {
+        var collected = table(available(new SchemaDefinition("positive", "id > 0", "ENABLED")),
+                available(new SchemaDefinition("audit", "body", "O")));
+        var unknown = table(null, SchemaDefinitions.unavailable("권한 부족"));
+        var diff = compare(collected, unknown);
+        assertTrue(diff.identical());
+        assertFalse(diff.complete());
+        assertTrue(diff.changedTables().isEmpty());
+        assertTrue(diff.warning().contains("권한 부족"));
+        assertTrue(compare(unknown, collected).changedTables().isEmpty());
+    }
+
+    @Test
+    void 지원하지_않는_정의는_부분_비교로_명시한다() {
+        var unsupported = table(SchemaDefinitions.unsupported(), SchemaDefinitions.unsupported());
+        var diff = compare(unsupported, unsupported);
+        assertTrue(diff.identical());
+        assertFalse(diff.complete());
+        assertTrue(diff.warning().contains("UNSUPPORTED"));
+    }
+
+    @Test
+    void 정의_순서와_출처_설명은_변경이_아니다() {
+        var a = new SchemaDefinition("a", "id > 0", "ENABLED");
+        var b = new SchemaDefinition("b", "id < 10", "ENABLED");
+        var diff = compare(table(available(a, b), available()), table(available(b, a), available()));
+        assertTrue(diff.identical());
+        assertTrue(diff.complete());
+        assertNull(diff.warning());
+    }
+
+    @Test
+    void 이전_JSON의_새_필드는_미확보이고_새_정의는_왕복한다() throws Exception {
+        var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        var old = mapper.readValue("""
+                {"name":"orders","columns":[],"indexes":[],"kind":"TABLE","primaryKey":[],"foreignKeys":[]}
+                """, TableSchema.class);
+        assertEquals(SchemaDefinitions.Status.UNAVAILABLE, old.checks().status());
+        assertEquals(SchemaDefinitions.Status.UNAVAILABLE, old.triggers().status());
+        var current = table(available(new SchemaDefinition("check", "id > 0", "enabled")), available());
+        assertEquals(current, mapper.readValue(mapper.writeValueAsString(current), TableSchema.class));
     }
 }

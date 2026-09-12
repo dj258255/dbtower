@@ -2411,7 +2411,7 @@ async function runSchemaDiff() {
   }
   if (d.warning) { warnBox.hidden = false; warnBox.textContent = `주의: ${d.warning}`; }
   if (d.identical) {
-    box.innerHTML = '<div class="schema-same">두 스키마가 동일합니다 — 구조 차이 없음.</div>';
+    box.innerHTML = `<div class="schema-same">${d.complete ? "비교한 구조에서 차이가 없습니다." : "확보한 구조에서 차이가 없습니다. 미확보·UNSUPPORTED 항목은 비교하지 않았습니다."}</div>`;
     return;
   }
   const parts = [];
@@ -2443,6 +2443,12 @@ async function runSchemaDiff() {
     (t.removedForeignKeys ?? []).forEach((f) => lines.push(line("schema-del", "−", `외래키 ${esc(f.name)} ${fkDiffText(f)}`)));
     (t.changedForeignKeys ?? []).forEach((f) => lines.push(line("schema-chg", "~",
       `외래키 ${esc(f.name)}: ${fkDiffText(f.left)} → ${fkDiffText(f.right)}`)));
+    [["CHECK", t.checks], ["트리거", t.triggers]].forEach(([label, changes]) => {
+      const definition = (d) => `${esc(d.definition ?? "미확보")} [${esc(d.state ?? "미확보")}]`;
+      (changes?.added ?? []).forEach((d) => lines.push(line("schema-add", "+", `${label} ${esc(d.name)}: ${definition(d)}`)));
+      (changes?.removed ?? []).forEach((d) => lines.push(line("schema-del", "−", `${label} ${esc(d.name)}: ${definition(d)}`)));
+      (changes?.changed ?? []).forEach((d) => lines.push(line("schema-chg", "~", `${label} ${esc(d.name)}: ${definition(d.left)} → ${definition(d.right)}`)));
+    });
     parts.push(`<div class="schema-block"><h4>변경된 테이블: ${esc(t.table)}</h4>${lines.join("")}</div>`);
   });
   box.innerHTML = parts.join("");

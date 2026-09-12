@@ -21,6 +21,7 @@ import io.dbtower.operator.model.ReplicationState;
 import io.dbtower.operator.RestoreSupport;
 import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.SchemaDefinition;
 import io.dbtower.operator.model.SessionInfo;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableBloat;
@@ -1511,10 +1512,37 @@ public class PostgresOperator extends AbstractJdbcOperator {
                             rs.getString("column_name"), rs.getBoolean("is_unique"), rs.getBoolean("is_primary")));
             return SchemaSupport.build(instance.getType().name(), instance.getDbName(),
                     columns, indexes, kinds, Map.of(),
-                    TableDetailSupport.foreignKeysByTable(postgresForeignKeys(null)), SchemaSupport.DEFAULT_MAX_TABLES);
+                    TableDetailSupport.foreignKeysByTable(postgresForeignKeys(null)),
+                    postgresChecks(), postgresTriggers(), SchemaSupport.DEFAULT_MAX_TABLES);
         } catch (DataAccessException e) {
             throw new OperatorException("PostgreSQL 스키마 조회 실패: " + e.getMessage(), e);
         }
+    }
+
+    private SchemaSupport.Definitions postgresChecks() {
+        return SchemaSupport.definitions(() -> jdbc().query("""
+                SELECT t.relname AS table_name, c.conname, c.convalidated,
+                       pg_get_constraintdef(c.oid) AS definition
+                FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid
+                JOIN pg_namespace n ON n.oid = t.relnamespace
+                WHERE c.contype = 'c' AND n.nspname = current_schema()
+                ORDER BY t.relname, c.conname
+                """, (rs, i) -> new SchemaSupport.DefinitionRow(rs.getString("table_name"),
+                new SchemaDefinition(rs.getString("conname"), rs.getString("definition"),
+                        "validated=" + rs.getBoolean("convalidated")))), "pg_constraint");
+    }
+
+    private SchemaSupport.Definitions postgresTriggers() {
+        return SchemaSupport.definitions(() -> jdbc().query("""
+                SELECT t.relname AS table_name, g.tgname, g.tgenabled,
+                       pg_get_triggerdef(g.oid) || chr(10) || pg_get_functiondef(g.tgfoid) AS definition
+                FROM pg_trigger g JOIN pg_class t ON t.oid = g.tgrelid
+                JOIN pg_namespace n ON n.oid = t.relnamespace
+                WHERE NOT g.tgisinternal AND n.nspname = current_schema()
+                ORDER BY t.relname, g.tgname
+                """, (rs, i) -> new SchemaSupport.DefinitionRow(rs.getString("table_name"),
+                new SchemaDefinition(rs.getString("tgname"), rs.getString("definition"),
+                        rs.getString("tgenabled")))), "pg_trigger + pg_get_functiondef");
     }
 
     /** 파라미터 — pg_settings가 이름·값·단위를 함께 준다(단위는 8kB/ms 등, 없으면 null) */
