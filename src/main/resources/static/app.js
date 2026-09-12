@@ -328,7 +328,10 @@ function bindInstanceCards() {
         await api(`/api/instances/${inst.id}/collection`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !inst.collectionEnabled }) });
         inst.collectionEnabled = !inst.collectionEnabled;
         renderInstanceMatches();
-      } catch (err) { alert("수집 토글 실패: " + err.message); }
+      } catch (err) {
+        // 경고창 대신 목록 안에 적는다 — 어느 인스턴스에서 실패했는지 맥락이 남는다(162절)
+        setInstanceNotice(`수집 토글 실패 — ${inst.name}: ${err.message}`);
+      }
     });
   });
 }
@@ -633,6 +636,8 @@ async function loadFinOps() {
 // 인스턴스 선택과 무관한 함대 전체 뷰. "어디부터 볼지"를 서버가 정렬해 내려주고, 행 클릭 시 감점 사유를 분해한다.
 const SCORE_SIGNAL_LABEL = {
   HEALTH: "가용성", ANOMALY: "이상 감지", ADVISOR: "Advisors", SLO: "SLO / 버짓", BACKUP: "백업 신선도",
+  // CPU가 아니라 "동시 실행 압박" — 기종마다 세는 단위가 달라 요약 문구에 무엇을 읽었는지 담긴다(162절)
+  RESOURCE: "자원 압박",
 };
 const SCORE_STATE_LABEL = {
   OK: "정상", PENALIZED: "감점", INSUFFICIENT_DATA: "데이터 부족", ERROR: "수집 실패",
@@ -1221,7 +1226,12 @@ async function runCompare() {
   try {
     result = await api(`/api/instances/${state.instance.id}/compare?${qs}`);
   } catch (e) {
-    alert(`비교 실패: ${e.message}\n(구간 안에 스냅샷 배치가 2개 이상 필요합니다 — 수집 주기 1분)`);
+    // 브라우저 경고창은 화면 밖으로 튀어나오고 맥락을 잃는다 — 실패한 자리에 그대로 적는다
+    const sum = $("#compare-summary");
+    sum.hidden = false;
+    sum.innerHTML = `<div class="finding-item">비교하지 못했습니다 — ${esc(e.message)}`
+      + `<div class="muted">구간 안에 스냅샷 배치가 2개 이상 있어야 차분을 낼 수 있습니다(수집 주기 1분).`
+      + ` 구간을 넓히거나, 수집이 도는 동안 기다린 뒤 다시 조회하세요.</div></div>`;
     return;
   }
   state.compareMode = true;
@@ -1370,6 +1380,18 @@ async function runAntiPatterns() {
   } finally { btn.classList.remove("loading"); }
 }
 
+// 정규화 쿼리 식별자를 사람이 읽을 길이로 줄인다. PostgreSQL queryid는 부호 있는 64비트라 음수로 찍히는데,
+// 화면에서 20자리 숫자는 서로 구분이 안 되고 "왜 마이너스인가"라는 오해만 남긴다(162절 지적).
+// 전체 값은 title로 남겨 복사·대조가 가능하게 둔다 — 줄이되 숨기지 않는다.
+function shortQueryId(id) {
+  const s = String(id ?? "");
+  if (!s) return "—";
+  if (s.length <= 12) return s;
+  const neg = s.startsWith("-") || s.startsWith("−");
+  const digits = neg ? s.slice(1) : s;
+  return `${neg ? "n" : ""}${digits.slice(0, 6)}…${digits.slice(-4)}`;
+}
+
 function renderAntiPatterns(rows) {
   if (!rows.length) return '<div class="muted">신호가 없습니다.</div>';
   if (rows.length === 1 && rows[0].source === "UNSUPPORTED") {
@@ -1386,7 +1408,7 @@ function renderAntiPatterns(rows) {
   const src = (m) => (m ? `<div class="ap-src">${esc(m.sourceName ?? "")}</div>` : "");
   return sorted.slice(0, 10).map((q) => `
     <div class="finding-item ap-row${current && String(q.queryId) === current ? " ap-current" : ""}">
-      <div class="ap-head"><b>${esc(String(q.queryId ?? "-"))}</b>
+      <div class="ap-head"><b title="${esc(String(q.queryId ?? ""))}">${esc(shortQueryId(q.queryId))}</b>
         <span class="muted">실행 ${fmtNum(q.calls, 0)}회</span></div>
       ${q.queryText ? `<div class="ap-text muted">${esc(q.queryText.replace(/\s+/g, " ").slice(0, 120))}</div>` : ""}
       <div class="ap-axes">
@@ -1603,6 +1625,18 @@ async function runIndexAdvisor() {
 async function runDeepDiagnose() {
   const sql = $("#detail-sql").value.trim();
   if (!sql) return;
+  // 이 진단만 쿼리를 실제로 실행한다 — 통계의 정규화 텍스트($1·?)를 그대로 보내면 대상 DB가 바인드 단계에서
+  // 거부하고("bind message supplies 0 parameters"), 화면에는 errorId만 남아 서버 장애처럼 보인다(162절).
+  // 보내기 전에 여기서 막고 무엇을 고쳐야 하는지 적는다.
+  const placeholder = sql.match(/\$\d+|(?<![\w'"])\?(?![\w'"])|:\w+/);
+  if (placeholder) {
+    $("#deep-section").hidden = false;
+    $("#deep-result").innerHTML = `<div class="finding-item">파라미터 자리가 남아 있습니다 — `
+      + `<code>${esc(placeholder[0])}</code>`
+      + `<div class="muted">이 진단은 쿼리를 대상 DB에서 실제로 실행하므로 자리표시자를 그대로 보낼 수 없습니다. `
+      + `위 SQL 편집칸에서 실제 값으로 바꾼 뒤 다시 눌러 주세요(추정만 하는 "실행계획 보기"는 그대로 됩니다).</div></div>`;
+    return;
+  }
   const btn = $("#btn-deep");
   btn.classList.add("loading");
   $("#deep-section").hidden = false;
@@ -1829,7 +1863,7 @@ function handToWorkbench(kind, sql, reason = "") {
     });
     localStorage.setItem(HANDOFF_PREFIX + id, JSON.stringify({ kind, sql, reason, at: Date.now() }));
   } catch {
-    alert("브라우저 저장소를 쓸 수 없어 워크벤치로 넘기지 못했습니다. SQL을 복사해 워크벤치에 붙여 넣으세요.");
+    setInstanceNotice("브라우저 저장소를 쓸 수 없어 워크벤치로 넘기지 못했습니다. SQL을 복사해 워크벤치에 붙여 넣으세요.");
     return;
   }
   // 같은 페이지의 워크벤치 모드로 넘긴다(149절) — 전에는 새 탭에 페이지를 한 벌 더 띄웠다
@@ -2384,6 +2418,17 @@ function onLiveFrame(f) {
   else renderSessionRows(f.sessions);
 }
 
+// 화면 밖으로 튀어나오는 브라우저 경고창을 쓰지 않는다(162절) — 인스턴스 목록 위 한 줄로 알린다.
+// 자리가 없으면 조용히 삼키지 않고 콘솔에 남긴다 — "알렸다고 착각"이 가장 나쁘다.
+function setInstanceNotice(text) {
+  const host = document.getElementById("instance-notice");
+  if (!host) { console.warn("[dbtower] " + text); return; }
+  host.hidden = false;
+  host.innerHTML = `<div class="finding-item">${esc(text)}</div>`;
+  clearTimeout(setInstanceNotice.timer);
+  setInstanceNotice.timer = setTimeout(() => { host.hidden = true; host.innerHTML = ""; }, 8000);
+}
+
 function setLiveStatus(text, tone) {
   const el = $("#live-status");
   el.textContent = text;
@@ -2415,7 +2460,7 @@ function wireKillButtons() {
         await loadSessions();
       } catch (e) {
         btn.disabled = false;
-        alert(`세션 종료 실패: ${e.message}`);
+        setLiveStatus(`세션 종료 실패: ${e.message}`, "bad");
       }
     });
   });
@@ -2665,7 +2710,11 @@ async function decideReview(id, approved) {
     });
     await loadReviews();
   } catch (e) {
-    alert(e.message.startsWith("403") ? "승인/반려는 승인자(APPROVER)·관리자만 합니다." : `처리 실패: ${e.message}`);
+    const msg = e.message.startsWith("403")
+      ? "승인/반려는 승인자(APPROVER)·관리자만 합니다."
+      : `처리 실패: ${e.message}`;
+    const box = document.getElementById("review-list");
+    if (box) box.insertAdjacentHTML("afterbegin", `<div class="finding-item">${esc(msg)}</div>`);
   }
 }
 

@@ -24,6 +24,7 @@ import io.dbtower.operator.model.RestoreVerification;
 import io.dbtower.operator.model.SchemaSnapshot;
 import io.dbtower.operator.model.SchemaDefinition;
 import io.dbtower.operator.model.SessionInfo;
+import io.dbtower.operator.model.ResourcePressure;
 import io.dbtower.operator.model.SlowQuery;
 import io.dbtower.operator.model.TableDetail;
 import io.dbtower.operator.model.TableDetail.DdlSource;
@@ -1214,6 +1215,26 @@ public class MySqlOperator extends AbstractJdbcOperator {
      * SHOW ... LIKE '이름'의 Value 컬럼을 읽는다(반동기 상태/변수용). 행이 없으면(플러그인 미설치 등)
      * null을 돌려준다 — "없음"과 "OFF"를 구분하기 위해서다. sql은 코드 내 고정 리터럴이라 주입 위험이 없다.
      */
+    /**
+     * 자원 압박 (162절) — InnoDB가 지금 실제로 돌리고 있는 스레드 수를 한도(max_connections)와 함께 본다.
+     * Threads_connected가 아니라 Threads_running인 이유: 붙어만 있고 노는 커넥션은 압박이 아니다.
+     */
+    @Override
+    public java.util.Optional<ResourcePressure> resourcePressure() {
+        try {
+            String running = mysqlShowValue("SHOW GLOBAL STATUS LIKE 'Threads_running'");
+            String max = mysqlShowValue("SHOW GLOBAL VARIABLES LIKE 'max_connections'");
+            if (running == null) {
+                return java.util.Optional.empty();
+            }
+            Long limit = max == null ? null : Long.parseLong(max);
+            return java.util.Optional.of(new ResourcePressure(
+                    Long.parseLong(running), limit, null, "실행 중 스레드", "Threads_running / max_connections"));
+        } catch (RuntimeException e) {
+            return java.util.Optional.empty(); // 권한·지표 부재 — 0으로 위장하지 않는다
+        }
+    }
+
     private String mysqlShowValue(String sql) {
         try {
             return jdbc().query(sql, rs -> rs.next() ? rs.getString("Value") : null);

@@ -6,6 +6,8 @@ import io.dbtower.backup.BackupFreshness;
 import io.dbtower.backup.BackupFreshnessService;
 import io.dbtower.insight.BaselineService;
 import io.dbtower.insight.BaselineService.AnomalyScan;
+import io.dbtower.operator.DbmsOperator;
+import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
 import io.dbtower.registry.HealthStatus;
@@ -38,6 +40,8 @@ class ScoreServiceTest {
     private final AdvisorService advisorService = Mockito.mock(AdvisorService.class);
     private final SloService sloService = Mockito.mock(SloService.class);
     private final BackupFreshnessService freshnessService = Mockito.mock(BackupFreshnessService.class);
+    private final DbmsOperatorFactory operatorFactory = Mockito.mock(DbmsOperatorFactory.class);
+    private final DbmsOperator operator = Mockito.mock(DbmsOperator.class);
 
     private ScoreService service;
     private final LocalDateTime now = LocalDateTime.now();
@@ -45,8 +49,14 @@ class ScoreServiceTest {
     @BeforeEach
     void setUp() {
         // 가중치는 기본값(ScoreWeights.defaults와 동일)으로 주입
+        // 자원 압박은 읽히는 상태를 기본으로 둔다(162절) — Mockito 기본값은 Optional.empty()라
+        // 그냥 두면 모든 시나리오가 "부분 데이터"가 되어, 이 테스트들이 보려는 health·SLO·백업 판정이 가려진다.
+        when(operatorFactory.create(any())).thenReturn(operator);
+        when(operator.resourcePressure()).thenReturn(java.util.Optional.of(
+                new io.dbtower.operator.model.ResourcePressure(2, 151L, 0L, "실행 중 스레드", "Threads_running")));
         service = new ScoreService(registryService, baselineService, advisorService, sloService, freshnessService,
-                45, 4, 16, 8, 3, 30, 25, 10, 20, 12);
+                operatorFactory,
+                45, 4, 16, 8, 3, 30, 25, 10, 20, 12, 6, 14, 0.75, 0.90);
     }
 
     private DatabaseInstance instance(long id, String name) {
@@ -79,7 +89,7 @@ class ScoreServiceTest {
 
         assertEquals(100, s.score());        // 나머지 신호는 모두 정상 → 감점 0
         assertTrue(s.partial());             // 부분 데이터 표기
-        assertEquals(4, s.countedSignals()); // Advisor만 제외
+        assertEquals(5, s.countedSignals()); // 여섯 신호 중 Advisor만 제외(162절에 자원 압박이 늘었다)
         SignalContribution advisor = s.contributions().stream()
                 .filter(c -> c.signal() == Signal.ADVISOR).findFirst().orElseThrow();
         assertEquals(State.ERROR, advisor.state());

@@ -3,6 +3,8 @@ package io.dbtower.score.internal;
 import io.dbtower.advisor.AdvisorService;
 import io.dbtower.backup.BackupFreshnessService;
 import io.dbtower.insight.BaselineService;
+import io.dbtower.operator.DbmsOperator;
+import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.HealthStatus;
 import io.dbtower.registry.RegistryService;
@@ -41,11 +43,13 @@ public class ScoreService implements ScoreQuery {
     private final AdvisorService advisorService;
     private final SloService sloService;
     private final BackupFreshnessService freshnessService;
+    private final DbmsOperatorFactory operatorFactory;
     private final ScoreWeights weights;
 
     public ScoreService(RegistryService registryService, BaselineService baselineService,
                         AdvisorService advisorService, SloService sloService,
                         BackupFreshnessService freshnessService,
+                        DbmsOperatorFactory operatorFactory,
                         @Value("${dbtower.score.weights.health-down:45}") double healthDown,
                         @Value("${dbtower.score.weights.anomaly-per-hit:4}") double anomalyPerHit,
                         @Value("${dbtower.score.weights.anomaly-cap:16}") double anomalyCap,
@@ -55,15 +59,21 @@ public class ScoreService implements ScoreQuery {
                         @Value("${dbtower.score.weights.slo-breaching:25}") double sloBreaching,
                         @Value("${dbtower.score.weights.slo-at-risk:10}") double sloAtRisk,
                         @Value("${dbtower.score.weights.backup-no-backup:20}") double backupNoBackup,
-                        @Value("${dbtower.score.weights.backup-stale:12}") double backupStale) {
+                        @Value("${dbtower.score.weights.backup-stale:12}") double backupStale,
+                        @Value("${dbtower.score.weights.resource-warn:6}") double resourceWarn,
+                        @Value("${dbtower.score.weights.resource-critical:14}") double resourceCritical,
+                        @Value("${dbtower.score.weights.resource-warn-ratio:0.75}") double resourceWarnRatio,
+                        @Value("${dbtower.score.weights.resource-critical-ratio:0.90}") double resourceCriticalRatio) {
         this.registryService = registryService;
+        this.operatorFactory = operatorFactory;
         this.baselineService = baselineService;
         this.advisorService = advisorService;
         this.sloService = sloService;
         this.freshnessService = freshnessService;
         this.weights = new ScoreWeights(healthDown, anomalyPerHit, anomalyCap,
                 advisorCritical, advisorWarning, advisorCap, sloBreaching, sloAtRisk,
-                backupNoBackup, backupStale);
+                backupNoBackup, backupStale,
+                resourceWarn, resourceCritical, resourceWarnRatio, resourceCriticalRatio);
     }
 
     /**
@@ -131,6 +141,9 @@ public class ScoreService implements ScoreQuery {
                 () -> SignalContribution.fromSlo(sloService.evaluate(id), weights)));
         contributions.add(collect(Signal.BACKUP,
                 () -> SignalContribution.fromBackup(freshnessService.freshnessFor(instance), weights)));
+        // 자원 압박 (162절) — 기종이 자기 통계로 답하는 "지금 몇 개가 동시에 일하나".
+        // 못 읽는 기종·환경은 empty라 판정 보류로 두고 점수에서 제외한다(0으로 위장하지 않는다).
+        contributions.add(collect(Signal.RESOURCE, () -> resourceSignal(instance)));
 
         return HealthScore.of(id, instance.getName(), instance.getType(), now, contributions);
     }
@@ -149,6 +162,24 @@ public class ScoreService implements ScoreQuery {
      * 신호 하나를 격리해 수집한다 — 예외가 나면 그 신호만 ERROR로 접고 나머지 계산을 살린다.
      * (데이터 부족 자체는 예외가 아니라 각 팩토리가 INSUFFICIENT_DATA로 정상 반환한다.)
      */
+    /**
+     * 자원 압박 신호 (162절) — 못 읽는 것과 수집이 깨진 것을 가른다.
+     *
+     * <p>기종이 이 축을 주지 않거나 권한이 없으면 empty가 오는데, 그건 "판정 보류"이지 "수집 실패"가 아니다.
+     * 오퍼레이터를 만들지 못하는 경우(등록 정보 부족 등)도 같은 자리로 수렴시킨다 — 자원 압박 하나 때문에
+     * 스코어가 "수집 실패"로 물드는 것이 더 나쁜 오해다. 진짜 예외는 collect가 ERROR로 잡는다.
+     */
+    private SignalContribution resourceSignal(DatabaseInstance instance) {
+        DbmsOperator operator = operatorFactory.create(instance);
+        if (operator == null) {
+            return SignalContribution.insufficient(Signal.RESOURCE, "이 대상의 오퍼레이터를 만들 수 없다");
+        }
+        return operator.resourcePressure()
+                .map(p -> SignalContribution.fromResource(p, weights))
+                .orElseGet(() -> SignalContribution.insufficient(Signal.RESOURCE,
+                        "이 기종·환경에서 동시 실행 압박을 읽을 수 없다"));
+    }
+
     private SignalContribution collect(Signal signal, Supplier<SignalContribution> supplier) {
         try {
             return supplier.get();

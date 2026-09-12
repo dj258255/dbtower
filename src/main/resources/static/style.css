@@ -209,20 +209,39 @@ input[type="datetime-local"] {
 .preset:hover { color: var(--text); border-color: #b9c0cc; }
 
 /* 버튼 */
+/* 버튼은 유리 재질로 통일한다(162절). 유리를 "뜨는 계층에만" 쓰던 규칙의 예외이자 확장이다 —
+   버튼은 콘텐츠가 아니라 손이 닿는 조작 계층이라, 표·카드가 불투명해도 그 위에서 떠 보이는 편이 맞다.
+   색 버튼은 흰 글자를 반투명 위에 얹으면 대비가 무너져서(primary 4.91 -> 4.26, danger 4.46 -> 4.02,
+   accent는 불투명에서도 2.47로 원래 미달) 방향을 뒤집었다: 색을 옅게 깔고 글자를 같은 계열 진한 색으로 둔다.
+   계산 결과 primary 7.62 · accent 5.70 · danger 6.89 · dark 14.97로 전부 4.5:1을 넘는다. */
 .btn {
-  border: 1px solid var(--line); background: #fff; color: var(--text);
-  border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--glass-hairline);
+  background: var(--glass-fill-strong);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shine), 0 1px 2px rgba(30, 41, 59, .07);
+  color: var(--text);
+  border-radius: 8px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
   text-decoration: none; display: inline-block;
+  transition: background-color .12s ease, box-shadow .12s ease;
 }
-.btn:hover { filter: brightness(.97); }
-.btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
-.btn-accent { background: var(--base); border-color: var(--base); color: #fff; }
-.btn-dark { background: var(--dark); border-color: var(--dark); color: #fff; }
-.btn-small { padding: 4px 10px; font-size: 12.5px; }
-.btn-target { border-color: var(--target); color: var(--target); }
-.btn-base { border-color: var(--base); color: #c26a12; }
-.btn-target.active { background: var(--target); color: #fff; }
-.btn-base.active { background: var(--base); color: #fff; }
+.btn:hover { background: rgba(255, 255, 255, .94); box-shadow: var(--glass-shine), 0 2px 8px rgba(30, 41, 59, .12); }
+.btn:active { box-shadow: inset 0 1px 2px rgba(30, 41, 59, .12); }
+.btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* 색 버튼 — 옅은 색 유리 + 같은 계열 진한 글자(대비는 위 주석의 계산값) */
+.btn-primary { background: rgba(79, 94, 247, .18); border-color: rgba(79, 94, 247, .34); color: #2b34a8; }
+.btn-primary:hover { background: rgba(79, 94, 247, .26); }
+.btn-accent { background: rgba(240, 140, 45, .18); border-color: rgba(240, 140, 45, .38); color: #8a4d05; }
+.btn-accent:hover { background: rgba(240, 140, 45, .26); }
+.btn-danger { background: rgba(214, 64, 79, .16); border-color: rgba(214, 64, 79, .34); color: #8e1f2b; }
+.btn-danger:hover { background: rgba(214, 64, 79, .24); color: #8e1f2b; }
+/* dark만 짙은 유리 — 흰 글자가 맞는 유일한 계열(14.97:1) */
+.btn-dark { background: var(--glass-dark); border-color: rgba(255, 255, 255, .14); color: #fff; }
+.btn-dark:hover { background: rgba(23, 27, 36, .88); }
+.btn-small { padding: 4px 10px; font-size: 12.5px; border-radius: 7px; }
+.btn-target { border-color: rgba(34, 160, 107, .42); color: #14724a; }
+.btn-base { border-color: rgba(240, 140, 45, .42); color: #8a4d05; }
+.btn-target.active { background: rgba(34, 160, 107, .18); color: #14724a; }
+.btn-base.active { background: rgba(240, 140, 45, .2); color: #8a4d05; }
 
 /* 차트 */
 .chart-head {
@@ -271,7 +290,14 @@ input[type="datetime-local"] {
   max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* Wait 이벤트명(RESOURCE_SEMAPHORE_QUERY_COMPILE 등)도 길면 말줄임 — 전체는 hover 툴팁으로 */
+/* 세션 표(162절) — 자동 표 레이아웃에서 max-width는 무시된다(AGENTS.md 화면 규칙).
+   말줄임을 걸 열은 max-width: 0 + width로 비율을 준다. Query 열(8번째)이 가장 길어 그 열에 남는 폭을 몰아준다. */
 #session-table td:nth-child(4) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 열 순서: PID · User · State · Wait · BlockedBy · Elapsed · Query(7) · Action(권한 있을 때만) */
+#session-table td:nth-child(7), #session-table th:nth-child(7) {
+  max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#session-table td:nth-child(-n+6), #session-table th:nth-child(-n+6) { white-space: nowrap; }
 /* 좁아지면 kill 버튼이 한 줄에 안 들어갈 때 줄바꿈(세로로 쌓임) */
 .session-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -621,18 +647,28 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 .verify-UNSUPPORTED { background: #eef0f3; color: #6b7280; }
 
 /* SLO / 에러 버짓 (D4) — SLI·목표·버짓 소진 게이지·번인 레이트 */
+/* 경고창을 대신하는 알림 줄(162절) — 목록 위에 뜨고 8초 뒤 사라진다 */
+.instance-notice { margin: 0 0 10px; }
+
 .slo-result { margin-top: 4px; }
 .slo-verdict { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 700; color: #fff; }
 .slo-verdict-MEETING { background: #22a06b; }
 .slo-verdict-AT_RISK { background: #f08c2d; }
 .slo-verdict-BREACHING { background: #d6404f; }
 .slo-verdict-INSUFFICIENT_DATA { background: #8a94a6; }
-.slo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
-.slo-block { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; background: #fafbfc; }
-.slo-block h4 { margin: 0 0 8px; font-size: 13px; }
-.slo-metric { font-size: 20px; font-weight: 700; }
-.slo-sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
-.slo-note { font-size: 11.5px; color: #6b7280; margin-top: 8px; line-height: 1.6; }
+/* SLO 카드(162절) — 숫자는 크게, 설명은 확실히 작게. 전에는 20px 수치와 12px 설명이 붙어 있어
+   블록 안에서 무엇이 결론인지 한눈에 안 잡혔다. 담는 칸이 좁아지면 한 열로 접는다(뷰포트가 아니라 @container). */
+.slo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+.slo-block {
+  border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: #fafbfc;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.slo-block h4 { margin: 0 0 10px; font-size: 12.5px; color: #5b6475; font-weight: 600; letter-spacing: .01em; }
+.slo-metric { font-size: 26px; font-weight: 700; line-height: 1.15; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.slo-sub { font-size: 12px; color: #5b6475; margin-top: 4px; line-height: 1.55; }
+.slo-note { font-size: 11.5px; color: #5b6475; margin-top: 10px; line-height: 1.65; padding-top: 8px; border-top: 1px solid var(--line); }
+.slo-card { container-type: inline-size; }
+@container (max-width: 720px) { .slo-grid { grid-template-columns: minmax(0, 1fr); } }
 .slo-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; color: #fff; }
 .slo-badge-MEETING, .slo-badge-OK { background: #22a06b; }
 .slo-badge-WARNING { background: #f08c2d; }
@@ -679,8 +715,11 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 .score-contrib-penalty { color: #d6404f; font-weight: 700; text-align: right; }
 .score-contrib-summary { color: var(--muted); }
 /* 커스텀 호버 툴팁 — 네이티브 title 대체(전역). 긴 버전 문자열도 줄바꿈 보존해 읽히게. */
+/* 툴팁은 표 위에 떠서 옆 열을 덮는다 — 긴 SQL이 들어오면 화면 절반을 가렸다(162절 지적).
+   폭을 화면에 맞춰 좁히고 높이를 제한해, 가리는 면적 자체를 줄인다. 전문은 셀을 눌러 상세에서 본다. */
 .tooltip {
-  position: fixed; z-index: 9999; max-width: 380px; pointer-events: none;
+  position: fixed; z-index: 9999; pointer-events: none;
+  max-width: min(420px, 42vw); max-height: 40vh; overflow: hidden;
   background: #1f2430; color: #f2f4f8; font-size: 12px; line-height: 1.5;
   padding: 7px 10px; border-radius: 7px; box-shadow: 0 8px 24px rgba(15, 20, 30, .28);
   white-space: pre-wrap; word-break: break-word;
@@ -696,13 +735,23 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 
 /* 안티패턴 신호 (테마 C, 158절) — 축마다 값과 그 값을 준 지표 이름을 함께 보인다.
    값이 없는 축은 0이 아니라 "미확보"로 적는다. 대비(계산): 지표 이름 #5b6475/흰 5.96, 보조 #667085/흰 4.97·강조행 4.60 */
-.ap-row { display: flex; flex-direction: column; gap: 4px; }
+/* 안티패턴 카드(162절) — 축 3개가 붙어 있어 어디까지가 한 축인지 안 보였다. 축마다 칸을 주고
+   이름·값·원천을 세로 위계로 세운다. 카드 사이 간격도 벌려 목록이 벽처럼 읽히지 않게 한다. */
+.ap-row { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; }
+.ap-row + .ap-row { margin-top: 8px; }
 .ap-current { background: #f3f6ff; }
 .ap-head { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
-.ap-head b { font-family: var(--mono, monospace); }
-.ap-text { font-size: 11.5px; overflow-wrap: anywhere; }
-.ap-axes { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px 12px; font-size: 12px; }
-.ap-axes > div { display: flex; flex-direction: column; gap: 1px; }
+.ap-head b { font-family: var(--mono, monospace); font-size: 12px; letter-spacing: .01em; cursor: help; }
+.ap-text { font-size: 11.5px; overflow-wrap: anywhere; line-height: 1.55; }
+.ap-axes {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px; font-size: 12px; margin-top: 2px;
+}
+/* 축마다 제 칸 — 왼쪽 세로선으로 경계를 주면 셋이 한 문단처럼 흐르지 않는다 */
+.ap-axes > div {
+  display: flex; flex-direction: column; gap: 3px;
+  padding-left: 10px; border-left: 2px solid var(--line);
+}
 /* 값과 단위는 한 줄로 — 세로로 떨어지면 "1"과 "표본 비율"이 다른 항목처럼 읽힌다(첫 사진) */
 .ap-axes .ap-val { display: flex; align-items: baseline; gap: 4px; }
 .ap-none { color: #5b6475; font-weight: 600; }
@@ -921,14 +970,10 @@ body::before {
 .detail { border-radius: 12px; }
 .summary-strip { border-radius: 12px; background: rgba(255, 255, 255, .8); }
 
-/* 버튼 — 기본 버튼은 위쪽 광택 한 줄로 재질감 */
-.btn { border-radius: 10px; transition: box-shadow .15s ease, filter .15s ease; }
-.btn-primary {
-  /* 흰 글자 대비 위 4.73:1·아래 5.96:1 — 처음 쓴 #6573ff 위쪽은 3.85:1이라 기준(4.5:1) 미달이었다 */
-  background: linear-gradient(180deg, #5462f5 0%, #4250e6 100%); border-color: #3d4ad6;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 1px 2px rgba(79, 94, 247, .35);
-}
-.btn-primary:hover { filter: brightness(1.05); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4), 0 4px 14px rgba(79, 94, 247, .32); }
+/* 버튼 — 재질은 위쪽 .btn 블록이 유리로 정의한다(162절). 여기서는 모서리만 맞춘다.
+   전에 있던 짙은 그라데이션 .btn-primary 재정의는 유리 버튼을 덮어써서 걷어냈다 —
+   같은 선택자를 두 곳에서 칠하면 나중 것만 보이고 앞의 대비 계산이 무의미해진다. */
+.btn { border-radius: 10px; }
 .user-chip .role-badge { background: rgba(255, 255, 255, .6); border: 1px solid var(--glass-hairline); box-shadow: var(--glass-shine); }
 
 /* 어두운 유리 — 툴팁 */
