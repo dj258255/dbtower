@@ -256,7 +256,7 @@ export class TicketPanel {
     </details>`;
   }
 
-  /** DDL 역변경 제안 — 실행 버튼이 아니라 "새 티켓으로 올리기"다. 역변경도 드라이런·승인을 다시 거친다 */
+  /** DDL 역변경 제안 — 실행 버튼이 아니라 "역변경 티켓으로 올리기"다. 역변경도 드라이런·승인을 다시 거친다 */
   inverse(t, x) {
     if (!x.inverse) return "";
     const items = (x.inverse.statements || []).map((sql) => {
