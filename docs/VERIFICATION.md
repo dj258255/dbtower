@@ -7554,3 +7554,68 @@ git ls-files 전수 NUL 검사        0 (이미지·jar 제외)
 ```
 
 값은 바뀌지 않는다(묶음 키는 여전히 NUL로 시작한다). 바뀐 것은 소스에 그 문자를 적는 방법뿐이다.
+
+## 155. 면접 문서 최신화 — 146~154절 사건을 질문 답으로 올림 (2026-09-12)
+
+### 범위
+
+코드는 건드리지 않고 문서만 최신화했다. `docs/INTERVIEW-QA.md`가 71줄에서 멈춰 146~154절의 사건이 없던 것을 보강했다.
+특히 면접에서 바로 말할 수 있는 세 사건을 질문 답으로 올렸다.
+
+- 데모 외래키 티켓이 MySQL·SQL Server 변경 계정의 `REFERENCES` 권한에 막힌 것(151절)
+- 외래키를 추가했는데 실행 기록의 구조 비교가 `identical: true`로 남아 사실과 다르게 읽히던 것(151·153절)
+- 원시 NUL 바이트 한 개 때문에 Java·JS 소스가 바이너리 파일로 취급되어 리뷰와 검색이 깨지던 것(154절)
+
+함께 고친 문서 색인:
+
+- `README.md`: AX 사례 수 12개로 갱신, 154절 NUL 사건 한 줄 추가
+- `docs/ROADMAP.md`: 완료 표에 154절 행 추가
+- `docs/PORTFOLIO-AX.md`: 로드맵 행과 사례 12 추가
+
+줄 수 확인:
+
+```
+wc -l docs/INTERVIEW-QA.md docs/PORTFOLIO-AX.md docs/ROADMAP.md README.md
+      95 docs/INTERVIEW-QA.md
+     453 docs/PORTFOLIO-AX.md
+     721 docs/ROADMAP.md
+     574 README.md
+    1843 total
+```
+
+문서 포맷 확인:
+
+```
+git diff --check
+# 출력 없음
+```
+
+라이브 API·대상 DB 실측은 하지 않았다. 이번 변경은 문서 최신화만이고, 기능/API 동작이나 대상 DB 상태를 바꾸지 않는다.
+세션 전용 비밀번호·앱 기동 환경도 이 작업에는 쓰지 않았다.
+
+### 회귀
+
+```
+./gradlew compileJava
+> Task :compileJava UP-TO-DATE
+BUILD SUCCESSFUL in 1s
+1 actionable task: 1 up-to-date
+
+./scripts/check-conventions.sh
+통과: Lombok 규율 (@Data/@Setter/@ToString/@Builder 금지)
+통과: 모듈 경계 (외부 모듈 리포지토리 직접 참조 금지)
+통과: 이모지 금지
+통과: 기종 분기 기준선 (17 <= 32)
+통과: 읽기 전용 게이트의 주석 인식
+통과: MySQL 모니터 권한 기준선 (오퍼레이터가 읽는 테이블 = init 스크립트 GRANT)
+통과: 원시 NUL 바이트 금지 (소스가 바이너리로 취급되지 않게)
+
+규약 검사 전부 통과
+
+./gradlew test
+BUILD SUCCESSFUL in 4m 49s
+5 actionable tasks: 1 executed, 4 up-to-date
+```
+
+`./gradlew test` 중 일부 Spring 테스트 컨텍스트 종료 훅에서 스케줄러가 H2 테이블 삭제 뒤 한 번 더 돌아 `shedlock`·`database_instance` 없음 로그를 냈지만,
+Gradle 최종 결과는 성공이었다.

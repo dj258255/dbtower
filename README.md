@@ -40,7 +40,7 @@ DBTower는 이 차이를 인터페이스 뒤로 숨겨, 플랫폼 코드와 사�
 | 연결만 받고 말이 없는 대상 하나가 폴러 전체를 멈추던 결함 | 25초 초과 -> 약 2초 | 134절 |
 | 실시간 세션 화면을 10명이 볼 때 대상 DB가 받는 조회(30초, pg_stat_statements) | 브라우저 각자 폴링 150회 -> 서버 허브 14회 | 140절 |
 
-**더 읽기.** [한 장 요약](docs/PORTFOLIO-ONEPAGER.md) · [면접 예상 질문](docs/INTERVIEW-QA.md) · [AX 사례 10개](docs/PORTFOLIO-AX.md) · [검증 기록](docs/VERIFICATION.md)
+**더 읽기.** [한 장 요약](docs/PORTFOLIO-ONEPAGER.md) · [면접 예상 질문](docs/INTERVIEW-QA.md) · [AX 사례 12개](docs/PORTFOLIO-AX.md) · [검증 기록](docs/VERIFICATION.md)
 
 ## 왜 만들었나
 
@@ -255,6 +255,7 @@ ON DELETE와 함께 적고, 참조 테이블을 누르면 그 상세로 넘어�
 검증용 외래키는 제품의 승인 티켓으로 올렸는데, MySQL·SQL Server에서 변경 계정에 가리키는 테이블의 REFERENCES 권한이 없어 실행이 거부됐습니다.
 최소 권한이 실제로 막은 사례라 계정 구성을 고치고 같은 티켓을 다시 실행했습니다([VERIFICATION 151·152절](docs/VERIFICATION.md)).
 실행 기록과 인스턴스 구조 비교는 열·인덱스에 더해 외래키까지 봅니다. 외래키만 추가·삭제한 변경이 "구조 차이 없음"으로 남던 것을 고쳤습니다([VERIFICATION 153절](docs/VERIFICATION.md)).
+리뷰 가능성도 품질로 봅니다. 원시 NUL 바이트 한 개 때문에 Java·JS 소스가 바이너리로 취급되던 문제를 찾아, 값은 유지하고 표기만 `\u0000` 이스케이프로 바꾼 뒤 규약 검사에 NUL 금지를 넣었습니다([VERIFICATION 154절](docs/VERIFICATION.md)).
 
 ![워크벤치 — 왼쪽 스키마에서 orders를 펼치고 선택 모드로 테이블·열을 질문에 붙인 순간](docs/images/webui/132-workbench-layout-after.jpg)
 
