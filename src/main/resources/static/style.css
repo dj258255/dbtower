@@ -325,6 +325,8 @@ input[type="datetime-local"] {
   flex: 1; border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px;
   font-size: 13px; font-family: inherit; color: var(--text); background: #fff;
 }
+/* 가상 인덱스 미지원 기종 안내(159절) — 눌러서 UNSUPPORTED를 받기 전에 미리 보인다 */
+.advisor-unsupported { margin: -2px 0 8px; line-height: 1.6; }
 .advisor-status { font-weight: 700; margin-right: 6px; }
 .advisor-status.advised { color: var(--down); }
 .advisor-status.no-benefit { color: var(--muted); }

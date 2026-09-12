@@ -7852,3 +7852,84 @@ SQL Server(인스턴스 5) 행 10 · 축 30 · 첫 행 "인덱스 없이 훑음 
 값·단위를 한 줄로 묶고 note를 목록 아래 한 번만 적었다. 미확보 표기도 흐린 글자에서 값 자리의 굵은 글자로 바꿨다(#5b6475/#f7f8fb 5.61:1).
 
 ![안티패턴 신호 — 축마다 값·단위와 그 값을 준 지표 이름, 없는 축은 미확보](images/webui/159-antipattern-signals.jpg)
+
+## 159. 플랜 플립 5기종 실태, 티켓 상세 읽기, 인덱스 제안의 기종별 한계 (2026-09-12)
+
+### 왜
+
+ROADMAP 테마 A는 "플랜 플립 — 현재 PG만 완전, 최우선 추천"으로 적혀 있었다. 테마 C에서 백로그가 낡았던 일을 겪은 뒤라,
+착수 전에 코드와 라이브로 먼저 대조했다. 같은 자리에서 사용자가 티켓 상세 화면의 가독성과 "인덱스 제안은 PostgreSQL만 되는 것 같은데 다른 기종은 어떤가"를 물었다.
+
+### 실태 — 플랜 플립은 이미 5기종에 구현돼 있었다
+
+`planShapeForDigest`는 5기종 모두 구현돼 있다. 조사용 IT(`PlanShapeReadOnlyIT`)로 `queryStats`가 주는 식별자를 그대로 넣어
+회귀 감지와 같은 순서로 태웠다(읽기 전용).
+
+```
+1차 (있는 그대로)
+POSTGRESQL  상위 5개 중 shape 4개   Limit>[Gather Merge>[Sort>[Seq Scan(payment_events)]]] 등
+MYSQL       상위 5개 중 shape 2개   index(cat:name)>index(cat:name)>eq_ref(sch:catalog_id)...
+ORACLE      상위 1개 중 shape 0개   상위가 LOCK TABLE뿐 — 계획을 뜰 문장이 아니다
+MSSQL       상위 5개 중 shape 0개
+MONGODB     상위 4개 중 shape 0개
+```
+
+MySQL이 5개 중 2개인 것은 설계대로다 — `QUERY_SAMPLE_TEXT`가 있고 SELECT인 digest만 EXPLAIN한다(샘플이 없거나 SHOW 문이면 스킵).
+
+원인을 갈랐더니 코드 결함은 하나도 아니었다.
+
+- **SQL Server**: Query Store가 `actual_state_desc = OFF`, 저장된 쿼리 0건이었다. 코드의 게이트가 정확히 그 상태를 보고 스킵한 것이다.
+  `ALTER DATABASE sample SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE)` 뒤 재측정하니 shape가 나왔다:
+  `Nested Loops>[Filter>[Table-valued function],Table-valued fu...`
+- **MongoDB**: `queryStats`는 `queryHash`가 없는 연산(listIndexes 등)을 `op:ns`로 묶는다(코드 주석에 이미 명시). 상위를 그런 연산이 차지하고 있었다.
+  `queryHash`가 붙는 조회를 만들어 재측정하니 `FCE9A3F8` -> `SORT>[COLLSCAN]`으로 정상 산출됐다.
+  라이브 표본 1,043건 중 `queryHash`가 붙은 것은 287건이고, 나머지는 애초에 계획을 뜰 수 없는 연산이다.
+- **Oracle**: 상위 문장이 `LOCK TABLE`뿐이라 표본이 부적절했다. `v$sqlstats`의 `plan_hash_value` 경로 자체는 158절에서 값이 나오는 것을 확인했다.
+
+그래서 테마 A의 실제 남은 일은 "5기종 구현"이 아니라 **환경 조건(Query Store 활성)과 표본 품질**이다. ROADMAP을 그렇게 고쳤다.
+
+### 인덱스 제안 — 기종별로 무엇이 되고 무엇이 안 되나
+
+사용자 질문에 대한 조사다. 결론부터: **가상 인덱스로 before/after 비용을 비교하는 것은 PostgreSQL(HypoPG)만 된다.**
+나머지는 "대상 DB를 바꾸지 않는다"는 이 제품의 원칙과 충돌하거나, 이 환경에서 값이 잡히지 않았다.
+
+| 기종 | 가능한 수단 | 실측 결과 |
+|---|---|---|
+| PostgreSQL | HypoPG 가상 인덱스 — 세션 로컬 메모리에만 만들고 EXPLAIN 재실행 | 동작(137절 Total Cost 12,578.73 -> 8.47) |
+| SQL Server | `sys.dm_db_missing_index_*`(읽기 전용, 옵티마이저가 남긴 후보) | 2만 행 테이블의 인덱스 없는 열에 부하를 줘도 **후보 0행**(Azure SQL Edge) |
+| MySQL | `optimizer_trace`(세션 변수, 대상 DB 변경 아님) | 세션에서 켜서 읽히는 것 확인. 다만 "왜 이 인덱스를 안 썼나"이지 "만들면 얼마나 좋아지나"가 아니다 |
+| Oracle | `v$sql_plan`의 전체 훑기 근거 | SAMPLE 대상 계획이 공유 풀에 남아 있지 않아 0건. 가상 인덱스는 원래 없다(invisible index는 실제 생성이라 범위 밖) |
+| MongoDB | 없음 | 가상 인덱스 개념 자체가 없다 |
+
+지금 코드는 PostgreSQL 외 기종에서 `IndexAdvice.UNSUPPORTED`와 사유 문장을 돌려주고, 화면은 그 사유를 그대로 보여준다.
+바꾼 것은 하나다 — 사유가 버튼을 누른 뒤에야 보였다. 기종을 고른 시점에 미리 보이게 했다.
+
+브라우저 확인(`adv159/AdvShot159.java`, 관리자 프록시):
+
+```
+MongoDB(인스턴스 3)    안내 보임 · "MONGODB는 가상 인덱스 시뮬레이션을 지원하지 않습니다 ..."
+PostgreSQL(인스턴스 1) 안내 숨김(hidden) — 되는 기종에 잔소리를 남기지 않는다
+두 기종 모두 입력칸과 시뮬레이션 버튼이 같은 줄(높이 29px) · 화면 오류 0
+```
+
+안내를 넣다가 `.advisor-input`을 쪼개 버튼이 아랫줄로 떨어졌던 것을 되돌렸다 — 안내는 입력 줄 바깥에 둔다.
+
+![인덱스 제안 — 되지 않는 기종은 버튼을 누르기 전에 이유를 말한다](images/webui/161-advisor-unsupported.jpg)
+
+### 티켓 상세 읽기 — 사용자가 지적한 화면
+
+사유·규칙 판정·AI 1차 소견이 `라벨 + 본문` 한 줄로 붙어 있어, 긴 AI 소견이 라벨과 한 덩어리로 흘렀다.
+
+- 세 가지를 각각 카드로 나누고 라벨을 위로 뺐다(규칙은 연노랑, AI는 연파랑으로 성격 구분)
+- AI 소견이 "1. ... 2. ..."로 오면 번호 앞에서 끊어 문단으로 만든다(내용은 그대로)
+- 머리줄에 있던 `rules v2`를 규칙 판정 카드로 옮겨 중복을 없앴다
+
+글자 대비(계산): 라벨 #5b6475 on #f7f8fb 5.61 · on #fffaf2 5.73 · on #f5f7ff 5.57, 본문 #1e232a 14.8~15.2, 실행 기록 안내 #3d4452/흰 9.78.
+
+브라우저 확인(`diff153/TkShot159.java`, 운영자 프록시, 티켓 #72):
+
+```
+카드 3개(사유·규칙 판정·AI 1차 소견) · AI 소견 문단 1 · 옛 한 줄 형식 잔여 2줄(제출·승인 이력, 원래 한 줄이 맞다)
+```
+
+![티켓 상세 — 사유·규칙 판정·AI 소견이 각자 카드로](images/webui/160-ticket-detail-blocks.jpg)

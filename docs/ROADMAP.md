@@ -680,7 +680,17 @@ Oracle 외래키 실행은 157절에서 데모 테이블 한 개에 최소 권�
 대상 설정 변경이 필요한 것(track_io_timing 활성화, Query Store ON, setParameter,
 프로파일러 레벨, blocked process threshold 등)은 전부 "켜져 있으면 쓴다" 게이트 또는 제외.
 
-### 테마 A — 플랜 플립 5기종 완성 (현재 PG만 완전, 최우선 추천)
+### 테마 A — 플랜 플립 5기종 (2026-09-12 재조사 — 159절: 이미 5기종 구현돼 있었다)
+
+착수 전 조사용 IT로 5기종을 태워 보니 `planShapeForDigest`는 모두 구현돼 있었고, 못 잡던 기종의 원인은 코드가 아니라 환경·표본이었다.
+
+- PostgreSQL 상위 5개 중 4개, MySQL 2개(샘플 있는 SELECT digest만 — 설계대로)
+- SQL Server: Query Store가 꺼져 있어 스킵됐다. 켜니 shape 산출
+- MongoDB: `queryHash`가 없는 연산(listIndexes 등)이 상위를 차지했다. 해시가 붙는 조회에서는 정상 산출
+- Oracle: 상위가 `LOCK TABLE`뿐이라 표본이 부적절. `v$sqlstats` 경로 자체는 동작
+
+남은 일은 "구현"이 아니라 환경 조건 안내(Query Store 활성)와 표본 품질이다. 아래 원문은 조사 시점 기록으로 남긴다.
+
 | 기종 | 방법 | 비고 |
 |---|---|---|
 | MySQL | performance_schema digest의 QUERY_SAMPLE_TEXT(리터럴 샘플, 기본 60초 신선도)를 EXPLAIN에 투입 | Datadog DBM 동일 방식. 1024B 절단 시 폴백. "샘플 기반" 표기 |

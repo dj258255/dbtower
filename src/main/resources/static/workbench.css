@@ -397,7 +397,19 @@ body.picking table.grid th:not(.rownum), body.picking .tree-name, body.picking .
 .st-rolled { background: #f1f2f6; color: #4b5563; }
 .tk-detail { min-width: 0; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
 .tk-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tk-line { font-size: 12.5px; line-height: 1.6; }
+/* 실행 기록 안의 짧은 안내(되돌리기 불가 사유 등) — 새 카드(.tk-block)와 같은 리듬으로 */
+.tk-line { margin: 4px 0; font-size: 12.5px; line-height: 1.6; color: #3d4452; }
+/* 티켓 상세의 사유·규칙·AI 소견 — 라벨과 본문이 한 줄로 붙어 긴 소견이 덩어리로 흘렀다(사용자 지적).
+   라벨을 위로 빼고 본문을 카드로 감싼다. 콘텐츠라 불투명. 대비(계산): 라벨 #5b6475/#f7f8fb 5.61, 본문 #1e232a/#f7f8fb 14.0 */
+.tk-block { margin: 8px 0; padding: 8px 10px; background: #f7f8fb; border: 1px solid rgba(15, 23, 42, .06); border-radius: 10px; }
+.tk-label { margin-bottom: 4px; font-size: 11.5px; font-weight: 700; color: #5b6475; }
+.tk-label .muted { font-weight: 400; }
+.tk-body { font-size: 12.5px; line-height: 1.65; overflow-wrap: anywhere; }
+.tk-body p { margin: 0 0 6px; }
+.tk-body p:last-child { margin-bottom: 0; }
+.tk-rules { background: #fffaf2; border-color: #f0e0c8; }
+.tk-ai { background: #f5f7ff; border-color: #dfe4fb; }
+.tk-block .ai-sql { margin: 0; }
 .tk-findings, .tk-steps, .tk-conflicts { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.6; }
 .tk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .tk-comment { flex: 1; min-width: 120px; padding: 4px 10px; border: 1px solid rgba(15, 23, 42, .12); border-radius: 10px; font: inherit; font-size: 12px; }
