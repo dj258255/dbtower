@@ -2,8 +2,13 @@
 |===
 |Base package
 |`io.dbtower.finops`
+|Spring components
+|_Services_
+
+* `i.d.f.FinOpsQuery` (via `i.d.f.internal.FinOpsService`)
 |Bean references
 |* `i.d.r.RegistryService` (in Registry)
 * `i.d.o.DbmsOperatorFactory` (in Operator)
 * `i.d.a.DuplicateIndexAdvisor` (in Advisor)
+* `i.d.i.IndexUsageHistoryService` (in Insight)
 |===

@@ -2,15 +2,25 @@
 |===
 |Base package
 |`io.dbtower.alert`
+|Spring components
+|* `i.d.a.AlertMessageIndex`
+* `i.d.a.AlertMuter`
 |Bean references
 |* `i.d.r.RegistryService` (in Registry)
 * `i.d.o.DbmsOperatorFactory` (in Operator)
-* `i.d.r.DatabaseInstanceRepository` (in Registry)
-* `i.d.i.BaselineService` (in Insight)
-* `i.d.i.QuerySnapshotRepository` (in Insight)
-* `i.d.b.BackupFreshnessService` (in Backup)
 * `i.d.i.ComparisonService` (in Insight)
+* `i.d.i.WaitEventHistoryService` (in Insight)
+* `i.d.s.SloService` (in Slo)
 * `i.d.a.AiAnalyzer` (in Analysis)
+* `i.d.a.QueryMasker` (in Analysis)
+* `i.d.s.ScoreQuery` (in Score)
+* `i.d.a.AdvisorService` (in Advisor)
+* `i.d.b.BackupFreshnessService` (in Backup)
+* `i.d.f.FinOpsQuery` (in Finops)
+* `i.d.i.BaselineService` (in Insight)
 |Events listened to
-|* `i.d.r.InstanceDeletedEvent` 
+|* `i.d.r.ReviewDecidedEvent`
+* `i.d.r.ReviewExecutedEvent`
+* `i.d.r.ReviewSubmittedEvent`
+* `i.d.r.InstanceDeletedEvent`
 |===

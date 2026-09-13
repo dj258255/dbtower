@@ -7,16 +7,24 @@
 
 * `i.d.i.BaselineService`
 * `i.d.i.ComparisonService`
+* `i.d.i.IndexUsageHistoryService`
+* `i.d.i.SchemaDiffService`
+* `i.d.i.WaitEventHistoryService`
 
 _Repositories_
 
 * `i.d.i.QuerySnapshotRepository`
+
+_Others_
+
+* `i.d.i.HostDiskMetrics`
+* `i.d.i.PrometheusClient`
 |Bean references
-|* `i.d.r.DatabaseInstanceRepository` (in Registry)
-* `i.d.o.DbmsOperatorFactory` (in Operator)
-* `i.d.r.RegistryService` (in Registry)
+|* `i.d.o.DbmsOperatorFactory` (in Operator)
 * `i.d.a.RuleBasedAnalyzer` (in Analysis)
 * `i.d.a.AiAnalyzer` (in Analysis)
+* `i.d.a.QueryMasker` (in Analysis)
+* `i.d.r.RegistryService` (in Registry)
 * `i.d.a.DeepAnalyzer` (in Analysis)
 |Aggregate roots
 |* `i.d.i.QuerySnapshot`

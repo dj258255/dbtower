@@ -4,13 +4,14 @@
 import { esc, localTime } from "./api.js";
 
 const time = (t) => localTime(t);
+const finite = (v) => v !== null && v !== undefined && Number.isFinite(Number(v));
 // 1ms 미만 평균은 소수 둘째 자리 표시가 0으로 뭉갠다(131절의 "0.0ms") — 그 구간만 유효숫자 3자리로 보인다
-const ms = (v) => (v === null || v === undefined ? "-"
-  : Number(v).toLocaleString("ko-KR", v !== 0 && Math.abs(v) < 1 ? { maximumSignificantDigits: 3 } : { maximumFractionDigits: 2 }));
+const ms = (v) => (!finite(v) ? "-"
+  : Number(v).toLocaleString("ko-KR", Number(v) !== 0 && Math.abs(Number(v)) < 1 ? { maximumSignificantDigits: 3 } : { maximumFractionDigits: 2 }));
 const cell = (v) => (v === null || v === undefined ? '<span class="null">NULL</span>' : esc(v));
-const micros = (v) => (v === null || v === undefined ? "-" : v < 1000 ? `${v}µs` : `${(v / 1000).toFixed(v < 10000 ? 2 : 1)}ms`);
-const pct = (v) => (v === null || v === undefined ? "-" : `${v > 0 ? "+" : ""}${Number(v).toFixed(1)}%`);
-const num = (v) => (v === null || v === undefined ? "-" : Number(v).toLocaleString("ko-KR", { maximumFractionDigits: 2 }));
+const micros = (v) => (!finite(v) || Number(v) < 0 ? "-" : Number(v) < 1000 ? `${Number(v)}µs` : `${(Number(v) / 1000).toFixed(Number(v) < 10000 ? 2 : 1)}ms`);
+const pct = (v) => (!finite(v) ? "-" : `${Number(v) > 0 ? "+" : ""}${Number(v).toFixed(1)}%`);
+const num = (v) => (!finite(v) ? "-" : Number(v).toLocaleString("ko-KR", { maximumFractionDigits: 2 }));
 
 export function renderDiff(diff, { leftLabel = "전", rightLabel = "후", addedLabel = "추가", removedLabel = "삭제", maskedColumns = [] } = {}) {
   const masked = new Set((maskedColumns || []).map((c) => c.toLowerCase()));

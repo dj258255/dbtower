@@ -1,0 +1,106 @@
+---
+config:
+  look: handDrawn
+  handDrawnSeed: 17
+  theme: base
+  htmlLabels: true
+  flowchart:
+    curve: basis
+  themeVariables:
+    fontFamily: "Pretendard, Apple SD Gothic Neo, sans-serif"
+    primaryTextColor: "#172033"
+    lineColor: "#52606d"
+    clusterBkg: "#ffffff"
+    clusterBorder: "#9aa5b1"
+---
+flowchart TB
+  human["운영자 · 개발자<br/>5개 역할"]:::actor
+  agent["AI Agent<br/>MCP Client"]:::actor
+  oncall["온콜 채널<br/>Discord · Slack"]:::actor
+
+  subgraph app["DBTower · Java 21 / Spring Boot 4 / Spring Modulith · 16 modules"]
+    direction TB
+
+    subgraph boundary["접근과 신뢰 경계"]
+      direction LR
+      web["Web Console<br/>정적 SPA · Session"]:::channel
+      mcp["mcp<br/>stdio · HTTP · OAuth 2.1/PKCE<br/>읽기·요청 도구 19개"]:::channel
+      security["security<br/>RBAC · 팀 범위 · AES-GCM"]:::security
+      audit["audit<br/>주체 · 행위 · 결과"]:::security
+    end
+
+    subgraph observe["관측 · 상태 모델"]
+      direction LR
+      registry["registry<br/>대상 등록 · 헬스"]:::observe
+      insight["insight<br/>스냅샷 · 시점 비교 · diff"]:::observe
+      score["score<br/>통합 헬스 · 자원 압박"]:::observe
+      slo["slo<br/>SLI · 에러 버짓"]:::observe
+    end
+
+    subgraph reason["분석 · 자동 감지"]
+      direction LR
+      analysis["analysis<br/>규칙 판정 · AI 1차 분석"]:::reason
+      advisor["advisor<br/>운영 규칙 일일 점검"]:::reason
+      finops["finops<br/>인덱스 낭비 신호"]:::reason
+      alert["alert<br/>회귀 · 이상 · 복제 · 웹훅"]:::reason
+    end
+
+    subgraph govern["변경 거버넌스 · 운영"]
+      direction LR
+      workbench["workbench<br/>조회 · AI 보조 · 비교"]:::govern
+      review["review<br/>요청 · 승인 · 실행 게이트"]:::gate
+      backup["backup<br/>백업 · 복원 검증 · 원격 보관"]:::govern
+      onlineddl["onlineddl<br/>MySQL gh-ost"]:::govern
+    end
+
+    operator["operator<br/>DbmsOperator + Factory<br/>연결 풀 · 클라이언트 캐시"]:::adapter
+  end
+
+  human -->|HTTPS| web
+  agent -->|JSON-RPC| mcp
+  alert -->|push| oncall
+  web --> security
+  mcp --> security
+  security -. 감사 이벤트 .-> audit
+
+  web --> observe
+  web --> workbench
+  mcp --> observe
+  mcp --> analysis
+  mcp --> workbench
+  observe --> reason
+  workbench --> review
+  review -->|승인된 티켓만| operator
+  backup --> operator
+  onlineddl --> operator
+  reason --> operator
+  observe --> operator
+
+  operator --> mysql[(MySQL)]:::target
+  operator --> pg[(PostgreSQL)]:::target
+  operator --> mssql[(SQL Server)]:::target
+  operator --> oracle[(Oracle)]:::target
+  operator --> mongo[(MongoDB)]:::target
+
+  meta[("플랫폼 메타 DB<br/>PostgreSQL 16 · Flyway V41")]:::infra
+  ai["AI Backend<br/>Anthropic / CLI"]:::external
+  obs["Prometheus · Grafana<br/>DB / Node exporters"]:::external
+  store["Vault · S3 호환 저장소"]:::external
+
+  app --> meta
+  analysis -->|실행권 없음| ai
+  app --> obs
+  security -. 동적 자격증명 .-> store
+  backup -. 암호화 산출물 .-> store
+
+  classDef actor fill:#f8fafc,stroke:#334155,color:#172033,stroke-width:1.5px
+  classDef channel fill:#eef2ff,stroke:#4f46e5,color:#25216b
+  classDef security fill:#f3e8ff,stroke:#7e22ce,color:#4a1768
+  classDef observe fill:#e8f7f2,stroke:#087f5b,color:#084c3c
+  classDef reason fill:#fff7d6,stroke:#b7791f,color:#633c0c
+  classDef govern fill:#eaf4ff,stroke:#1971c2,color:#103d67
+  classDef gate fill:#fff0f0,stroke:#c92a2a,color:#6b1717,stroke-width:2px
+  classDef adapter fill:#edf2f7,stroke:#364152,color:#172033,stroke-width:2px
+  classDef target fill:#ffffff,stroke:#087f5b,color:#084c3c
+  classDef infra fill:#f8fafc,stroke:#475569,color:#172033
+  classDef external fill:#fff8e7,stroke:#9a6700,color:#5c3c00

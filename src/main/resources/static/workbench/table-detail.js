@@ -7,7 +7,9 @@ import { highlight } from "./editor.js";
 const DDL_SOURCE = { NATIVE: "엔진이 준 원문", RECONSTRUCTED: "카탈로그로 재구성한 근사", UNSUPPORTED: "미지원" };
 
 export function bytes(n) {
-  if (n === null || n === undefined || n < 0) return "미확보";
+  if (n === null || n === undefined) return "미확보";
+  n = Number(n);
+  if (!Number.isFinite(n) || n < 0) return "미확보";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let v = n;
   let u = 0;
@@ -15,7 +17,8 @@ export function bytes(n) {
   return `${v.toFixed(u ? 1 : 0)} ${units[u]}`;
 }
 
-const count = (n) => (n === null || n === undefined || n < 0 ? "미확보" : Number(n).toLocaleString("ko-KR"));
+const count = (n) => n === null || n === undefined || !Number.isFinite(Number(n)) || Number(n) < 0
+  ? "미확보" : Number(n).toLocaleString("ko-KR");
 const lower = (s) => String(s ?? "").toLowerCase();
 const colList = (cols) => esc((cols || []).join(", "));
 const rule = (v) => (v ? esc(v) : '<span class="muted">-</span>');

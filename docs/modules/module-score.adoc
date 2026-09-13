@@ -2,10 +2,15 @@
 |===
 |Base package
 |`io.dbtower.score`
+|Spring components
+|_Services_
+
+* `i.d.s.ScoreQuery` (via `i.d.s.internal.ScoreService`)
 |Bean references
 |* `i.d.r.RegistryService` (in Registry)
+* `i.d.b.BackupFreshnessService` (in Backup)
+* `i.d.o.DbmsOperatorFactory` (in Operator)
 * `i.d.i.BaselineService` (in Insight)
 * `i.d.a.AdvisorService` (in Advisor)
 * `i.d.s.SloService` (in Slo)
-* `i.d.b.BackupFreshnessService` (in Backup)
 |===

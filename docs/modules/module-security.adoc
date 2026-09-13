@@ -8,4 +8,8 @@
 * `i.d.s.EncryptedStringConverter`
 * `i.d.s.SecretCipher`
 * `i.d.s.SecurityConfig`
+* `i.d.s.SessionConfig`
+|Events listened to
+|* `org.springframework.security.authentication.event.AbstractAuthenticationFailureEvent`
+* `org.springframework.security.authentication.event.AuthenticationSuccessEvent`
 |===

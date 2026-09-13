@@ -1,0 +1,16 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`io.dbtower.workbench`
+|Bean references
+|* `i.d.r.RegistryService` (in Registry)
+* `i.d.r.ChangeTicketGate` (in Review)
+* `i.d.r.ConsoleCredentialService` (in Registry)
+* `i.d.o.DbmsOperatorFactory` (in Operator)
+* `i.d.i.SchemaDiffService` (in Insight)
+* `i.d.i.ComparisonService` (in Insight)
+* `i.d.s.SecretCipher` (in Security)
+* `i.d.a.AuditTrail` (in Audit)
+* `i.d.a.AiAnalyzer` (in Analysis)
+* `i.d.a.QueryMasker` (in Analysis)
+|===

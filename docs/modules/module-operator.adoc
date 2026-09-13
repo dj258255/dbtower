@@ -3,8 +3,10 @@
 |Base package
 |`io.dbtower.operator`
 |Spring components
-|* `i.d.o.ConnectionPools`
+|* `i.d.o.BackupArtifactCipher`
+* `i.d.o.ConnectionPools`
 * `i.d.o.DbmsOperatorFactory`
+* `i.d.o.VaultCredentials`
 |Events listened to
 |* `i.d.r.InstanceDeletedEvent` 
 |===

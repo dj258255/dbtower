@@ -40,7 +40,7 @@ DBTower는 그 문제 정의를 출발점으로 삼아, 1인이 검증 가능한
 그래도 막히면  분석 결과를 통째로 첨부해 버튼 한 번으로 DB팀 문의
 ```
 
-![웹 콘솔 대시보드 — 이기종 인스턴스를 한 화면에서(146절 새 디자인)](images/webui/96-glass-dashboard.jpg)
+![웹 콘솔 관제 모드 — 인스턴스, 작업면, AI 진단을 한 화면에서(149절 통합 화면)](images/webui/141-unified-monitor-3col.jpg)
 
 ## 3. 목표
 
@@ -128,7 +128,7 @@ CPU%와 Connections 그래프를 콘솔에 내장하고(Prometheus HTTP API 직�
 쿼리가 참조하는 테이블의 DDL, 크기 통계, 인덱스 카디널리티를 5기종 공통 화면으로 보여준다
 (VERIFICATION 66절). 실행계획을 읽을 때 "이 테이블에 어떤 인덱스가 있나"를 다른 창 없이 확인한다.
 
-![테이블 상세 — DDL·크기 통계·인덱스](images/webui/125-glass-table-detail-mysql.jpg)
+![테이블 상세 — 기본키·외래키·참조 방향, 접힌 DDL과 크기 통계](images/webui/148-table-detail-after.jpg)
 
 ## 6. 2단계 — 원인 분석
 
@@ -218,7 +218,7 @@ Discord 제약 때문에 음소거 이모지 반응으로 대응했다. 알림�
 
 ![봇의 진단 답글 — 도구 연쇄 근거를 나열](images/webui/52-bot-diagnosis-reply.png)
 
-![알림 속 딥링크 — 콘솔에서 질문 프리필](images/webui/128-glass-diagnose-deeplink.jpg)
+![통합 AI 칸 — 알림 딥링크의 질문을 이어받아 도구 호출 근거와 함께 진단](images/webui/142-unified-ai-diagnosing.jpg)
 
 ### 8.4 단계별 보안 3단계
 

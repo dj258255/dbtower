@@ -8,7 +8,7 @@ MySQL, PostgreSQL, SQL Server, Oracle, MongoDB를 한곳에서 관제하고 안�
 
 Java 21 + Spring Boot 4로 만들었으며 웹 콘솔은 별도 빌드 체인이 없는 정적 SPA입니다.
 
-![DBTower 대시보드](docs/images/webui/96-glass-dashboard.jpg)
+![DBTower 통합 관제 모드](docs/images/webui/141-unified-monitor-3col.jpg)
 
 ## 핵심 흐름
 
@@ -96,6 +96,22 @@ DBTOWER_WEBHOOK_URL="" DBTOWER_ADMIN_PASSWORD=devpass \
 DBTOWER_ENCRYPTION_KEY=$(openssl rand -base64 32) ./gradlew bootRun
 ```
 
+Apple Silicon의 Rosetta 없는 Colima에서는 amd64 전용 SQL Server 2022가 기동되지 않습니다.
+이 머신에서 `docker-compose.arm64.yml`의 Azure SQL Edge도 `S_SbtUnimplementedInstruction`로
+종료됐다. SQL Server까지 확인할 때는 Rosetta를 켠 별도 Colima 프로필에 실제 2022 이미지를 띄운다.
+
+```bash
+colima start mssql2022 --vm-type vz --vz-rosetta --cpu 4 --memory 6 --disk 20
+MSSQL_SA_PASSWORD='...' docker --context colima-mssql2022 run -d \
+  --name dbtower-mssql2022 --platform linux/amd64 \
+  -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD -p 14330:1433 \
+  mcr.microsoft.com/mssql/server:2022-latest
+```
+
+계정·데모 데이터 준비와 실제 SQL Server 2022 검증 결과는
+[VERIFICATION.md](docs/VERIFICATION.md) 132·164절에 기록했습니다. 이 실행은 Microsoft가
+지원하는 네이티브 ARM64 구성이 아니라 로컬 개발용 번역 환경이다.
+
 등록한 대상의 비밀번호를 다음 실행에서도 사용하려면 암호화 키를 고정해서
 보관해야 합니다.
 키 없이 로컬에서만 실행하려면 `SPRING_PROFILES_ACTIVE=dev`를 사용할 수 있습니다.
@@ -122,6 +138,8 @@ DBTOWER_ENCRYPTION_KEY=$(openssl rand -base64 32) ./gradlew bootRun
 표시하고, 최종 권한은 서버가 검사합니다.
 
 직접 역할을 바꿔 가며 확인하는 순서는 [역할별 수동 테스트](docs/MANUAL-TEST.md)에 있습니다.
+
+![DBTower 워크벤치 모드](docs/images/webui/143-unified-workbench-mode.jpg)
 
 ## 아키텍처
 
@@ -160,6 +178,7 @@ DBTOWER_ENCRYPTION_KEY=$(openssl rand -base64 32) ./gradlew bootRun
 - 운영·배포하기: [운영](docs/operations.md), [최소 권한](docs/least-privilege.md)
 - API 연동하기: [API 빠른 참조](docs/API.md)
 - 직접 눌러보기: [역할별 수동 테스트](docs/MANUAL-TEST.md)
+- 현재 화면 보기: [화면 갤러리](docs/SCREENSHOTS.md)
 - 근거 확인하기: [검증 기록](docs/VERIFICATION.md), [변경 이력](CHANGELOG.md)
 - 개발에 참여하기: [기여 가이드](CONTRIBUTING.md), [저장소 규칙](AGENTS.md)
 

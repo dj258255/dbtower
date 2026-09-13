@@ -23,6 +23,8 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class NetworkTimeoutAfterLoginIT {
 
+    private static final long MIN_COMPLETED_WAIT_MS = 6_500;
+
     private final ConnectionPools pools = new ConnectionPools(new VaultCredentials("", ""),
             15, 6, 5000, 600_000, 1_800_000, 30, 60_000);
 
@@ -56,7 +58,8 @@ class NetworkTimeoutAfterLoginIT {
             long ms = waitThrough(c, "WAITFOR DELAY '00:00:07'");
             System.out.println("[MSSQL 로그인 뒤 7초 서버 대기] elapsed_ms=" + ms + " networkTimeout=" + networkTimeout);
             assertEquals(0, networkTimeout, "로그인 뒤에는 읽기 제한을 풀어 둔다");
-            assertTrue(ms >= 7000, "서버 대기를 끝까지 받아야 한다: " + ms);
+            // 서버 대기와 클라이언트 단조 시계의 경계가 정확히 같지는 않다. 5초 제한 잔존과 구분되는 여유만 강제한다.
+            assertTrue(ms >= MIN_COMPLETED_WAIT_MS, "서버 대기를 끝까지 받아야 한다: " + ms);
         }
         assertTrue(op.health().up());
     }
@@ -71,7 +74,7 @@ class NetworkTimeoutAfterLoginIT {
             long ms = waitThrough(c, "BEGIN DBMS_SESSION.SLEEP(7); END;");
             System.out.println("[Oracle 로그인 뒤 7초 서버 대기] elapsed_ms=" + ms + " networkTimeout=" + networkTimeout);
             assertEquals(0, networkTimeout, "로그인 뒤에는 읽기 제한을 풀어 둔다");
-            assertTrue(ms >= 7000, "서버 대기를 끝까지 받아야 한다: " + ms);
+            assertTrue(ms >= MIN_COMPLETED_WAIT_MS, "서버 대기를 끝까지 받아야 한다: " + ms);
         }
         assertTrue(op.health().up());
     }

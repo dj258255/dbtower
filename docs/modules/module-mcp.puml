@@ -17,7 +17,9 @@ top to bottom direction
 
 System_Boundary("DbtowerApplication_boundary", "DbtowerApplication", $tags="") {
   Container_Boundary("DbtowerApplication.DbtowerApplication_boundary", "DbtowerApplication", $tags="") {
+    Component(DbtowerApplication.DbtowerApplication.Alert, "Alert", $techn="Module", $descr="", $tags="", $link="")
     Component(DbtowerApplication.DbtowerApplication.Mcp, "Mcp", $techn="Module", $descr="", $tags="", $link="")
+    Component(DbtowerApplication.DbtowerApplication.Audit, "Audit", $techn="Module", $descr="", $tags="", $link="")
     Component(DbtowerApplication.DbtowerApplication.Security, "Security", $techn="Module", $descr="", $tags="", $link="")
     Component(DbtowerApplication.DbtowerApplication.Registry, "Registry", $techn="Module", $descr="", $tags="", $link="")
     Component(DbtowerApplication.DbtowerApplication.Analysis, "Analysis", $techn="Module", $descr="", $tags="", $link="")
@@ -25,11 +27,16 @@ System_Boundary("DbtowerApplication_boundary", "DbtowerApplication", $tags="") {
 
 }
 
-Rel(DbtowerApplication.DbtowerApplication.Analysis, DbtowerApplication.DbtowerApplication.Registry, "depends on", $techn="", $tags="", $link="")
 Rel(DbtowerApplication.DbtowerApplication.Registry, DbtowerApplication.DbtowerApplication.Security, "depends on", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Alert, DbtowerApplication.DbtowerApplication.Registry, "listens to", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Alert, DbtowerApplication.DbtowerApplication.Registry, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Alert, DbtowerApplication.DbtowerApplication.Analysis, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Analysis, DbtowerApplication.DbtowerApplication.Registry, "depends on", $techn="", $tags="", $link="")
 Rel(DbtowerApplication.DbtowerApplication.Mcp, DbtowerApplication.DbtowerApplication.Security, "uses", $techn="", $tags="", $link="")
 Rel(DbtowerApplication.DbtowerApplication.Mcp, DbtowerApplication.DbtowerApplication.Analysis, "uses", $techn="", $tags="", $link="")
 Rel(DbtowerApplication.DbtowerApplication.Mcp, DbtowerApplication.DbtowerApplication.Registry, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Mcp, DbtowerApplication.DbtowerApplication.Audit, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Mcp, DbtowerApplication.DbtowerApplication.Alert, "uses", $techn="", $tags="", $link="")
 
 SHOW_LEGEND(true)
 hide stereotypes

@@ -63,6 +63,18 @@ public class MySqlOperator extends AbstractJdbcOperator {
 
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(MySqlOperator.class);
 
+    static final String ACTIVE_SESSIONS_SQL = """
+            SELECT p.ID AS pid, p.USER AS usr, p.COMMAND AS command, p.STATE AS state,
+                   p.TIME AS time_sec, p.INFO AS query,
+                   (SELECT w.blocking_pid FROM sys.innodb_lock_waits w
+                     WHERE w.waiting_pid = p.ID LIMIT 1) AS blocked_by
+            FROM information_schema.PROCESSLIST p
+            WHERE p.COMMAND NOT IN ('Sleep', 'Daemon')
+              AND p.ID <> CONNECTION_ID()
+            ORDER BY p.TIME DESC
+            LIMIT ?
+            """;
+
     private final HistogramSnapshotStore histogramStore;
 
     public MySqlOperator(DatabaseInstance instance, ConnectionPools pools, BackupTools backupTools,
@@ -937,24 +949,14 @@ public class MySqlOperator extends AbstractJdbcOperator {
      *
      * blocked_by는 상관 서브쿼리로 waiting_pid=이 세션인 첫 blocking_pid만 뽑는다 — 한 세션이 여러
      * 락을 기다리면 lock_waits에 여러 행이 생기는데, 조인하면 세션이 중복되므로 LIMIT 1로 눌렀다.
-     * COMMAND='Sleep'(놀고 있는 커넥션)은 제외한다. state=COMMAND(Query/Execute…),
-     * waitEvent=STATE(예: 'Waiting for table metadata lock')로 매핑한다.
+     * COMMAND='Sleep'(놀고 있는 커넥션)과 'Daemon'(event_scheduler 같은 서버 내부 작업)은 제외한다.
+     * Daemon의 TIME은 서버 기동 뒤 대기 시간이라 화면에 쿼리 경과로 내보내면 수일짜리 활성 쿼리처럼 보인다.
+     * state=COMMAND(Query/Execute…), waitEvent=STATE(예: 'Waiting for table metadata lock')로 매핑한다.
      */
     @Override
     public List<SessionInfo> activeSessions(int limit) {
-        String sql = """
-                SELECT p.ID AS pid, p.USER AS usr, p.COMMAND AS command, p.STATE AS state,
-                       p.TIME AS time_sec, p.INFO AS query,
-                       (SELECT w.blocking_pid FROM sys.innodb_lock_waits w
-                         WHERE w.waiting_pid = p.ID LIMIT 1) AS blocked_by
-                FROM information_schema.PROCESSLIST p
-                WHERE p.COMMAND <> 'Sleep'
-                  AND p.ID <> CONNECTION_ID()
-                ORDER BY p.TIME DESC
-                LIMIT ?
-                """;
         try {
-            return jdbc().query(sql,
+            return jdbc().query(ACTIVE_SESSIONS_SQL,
                     (rs, i) -> {
                         // wasNull()은 getLong 직후에 — 다른 컬럼을 먼저 읽으면 null 판정이 그 컬럼 기준이 된다
                         long blockedBy = rs.getLong("blocked_by");

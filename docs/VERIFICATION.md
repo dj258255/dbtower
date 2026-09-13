@@ -6050,7 +6050,7 @@ merge commit으로 한다(브랜치 커밋 이력을 그대로 남긴다).
 
 1. 데모 compose의 PostgreSQL에 HypoPG를 넣는다 — 136절에서 인덱스 제안이 `UNSUPPORTED`라 보내는 쪽 버튼을 대역 응답으로만 확인했다.
 2. 역할별 화면 확인을 CI의 실제 브라우저 테스트로 고정한다 — 136절 결함 둘은 사람이 눌러서야 나왔다.
-3. 보여주기: README 첫 화면 줄이기, 데모 GIF, 한 장 요약, 면접 예상 질문.
+3. 보여주기: README 첫 화면 줄이기, 데모 GIF, 한 장 요약, 기술 Q&A.
 
 ### 1. 데모 PostgreSQL = postgres:16 + HypoPG
 
@@ -6132,7 +6132,7 @@ ok   리뷰_카드의_승인_시각은_브라우저_시간대로_보이고_UTC_�
 - README 첫 화면에 "3분 요약"(무엇·누가·데모 GIF·실측 3개·링크)을 두고, 56줄 기능 표는 접었다.
 - `docs/images/demo-change-flow.gif` — 4절 흐름의 실제 화면 7장에 역할·단계 설명 띠를 붙여 합쳤다(1100x609, 7프레임, 690KB). 브라우저 확장의 GIF 내보내기는 파일 다운로드라 쓰지 않고, 저장한 스크린샷을 로컬(Pillow)에서 합쳤다.
 - `docs/PORTFOLIO-ONEPAGER.md` — DBMS 운영 관리 직무에 맞춘 사례 넷(승인된 변경만 실행, 권한 경계는 코드, 대상 하나가 폴러를 멈추지 않게, 사람별 입구)과 실측 표.
-- `docs/INTERVIEW-QA.md` — 설계·변경 안전·AI·검증·장애 대응 질문 13개, 답마다 근거 절.
+- `docs/TECHNICAL-QA.md` — 설계·변경 안전·AI·검증·장애 대응 질문 13개, 답마다 근거 절.
 
 ### 테스트
 
@@ -7555,12 +7555,12 @@ git ls-files 전수 NUL 검사        0 (이미지·jar 제외)
 
 값은 바뀌지 않는다(묶음 키는 여전히 NUL로 시작한다). 바뀐 것은 소스에 그 문자를 적는 방법뿐이다.
 
-## 155. 면접 문서 최신화 — 146~154절 사건을 질문 답으로 올림 (2026-09-12)
+## 155. 기술 Q&A 최신화 — 146~154절 사건을 질문 답으로 올림 (2026-09-12)
 
 ### 범위
 
-코드는 건드리지 않고 문서만 최신화했다. `docs/INTERVIEW-QA.md`가 71줄에서 멈춰 146~154절의 사건이 없던 것을 보강했다.
-특히 면접에서 바로 말할 수 있는 세 사건을 질문 답으로 올렸다.
+코드는 건드리지 않고 문서만 최신화했다. `docs/TECHNICAL-QA.md`가 71줄에서 멈춰 146~154절의 사건이 없던 것을 보강했다.
+특히 설계 판단을 짧게 확인할 수 있는 세 사건을 질문 답으로 올렸다.
 
 - 데모 외래키 티켓이 MySQL·SQL Server 변경 계정의 `REFERENCES` 권한에 막힌 것(151절)
 - 외래키를 추가했는데 실행 기록의 구조 비교가 `identical: true`로 남아 사실과 다르게 읽히던 것(151·153절)
@@ -7575,8 +7575,8 @@ git ls-files 전수 NUL 검사        0 (이미지·jar 제외)
 줄 수 확인:
 
 ```
-wc -l docs/INTERVIEW-QA.md docs/PORTFOLIO-AX.md docs/ROADMAP.md README.md
-      95 docs/INTERVIEW-QA.md
+wc -l docs/TECHNICAL-QA.md docs/PORTFOLIO-AX.md docs/ROADMAP.md README.md
+      95 docs/TECHNICAL-QA.md
      453 docs/PORTFOLIO-AX.md
      721 docs/ROADMAP.md
      574 README.md
@@ -8244,3 +8244,302 @@ btn btn-primary btn-small 진단             7.26   적용
 다른 네 기종은 경과를 SQL에서 이 방식으로 계산하지 않아 같은 함정이 없다.
 교훈은 138·146절과 같은 줄에 있다 — **화면 확인 사진은 미관만 보는 것이 아니다.**
 숫자가 상식에 어긋나면 그 자리가 결함이다.
+
+## 163. 문서가 다시 현재 구현을 가리키게 — 편집 원본, 모듈 문서, 역할별 수동 테스트 (2026-09-12)
+
+### 범위
+
+코드는 이미 Spring Modulith 16개 모듈, DBMS 5종, MCP 도구 19개, Flyway V41까지 왔지만
+설계 그림과 모듈 생성 문서는 이전 구조를 가리키고 있었다. 문서 진입점을 다음처럼 정리했다.
+
+- `INTERVIEW-QA.md`를 용도에 맞는 `TECHNICAL-QA.md`로 바꾸고 모든 내부 링크와 표현을 맞췄다.
+- 아키텍처, 데이터 도메인, 진단에서 실행까지, 배포 흐름을 Mermaid 원본 4장과 SVG 4장으로 뒀다.
+  손으로만 고칠 수 있는 SVG가 아니라 같은 CLI로 다시 만들 수 있다.
+- `ModularityTests`의 `Documenter`를 실제로 실행해 `review`와 `workbench`를 포함한 16개 모듈의
+  캔버스와 PlantUML 의존 관계를 전부 현재 코드에 맞췄다. 생성 순서가 실행마다 달라질 수 있는
+  PlantUML은 줄 집합을 정렬해 비교했고 내용 차이는 0이었다.
+- `MANUAL-TEST.md`에 다섯 역할의 준비, PostgreSQL 대상과 READ·WRITE 계정 등록, 요청자 -> 승인자
+  -> 운영자 티켓 흐름, 감사와 정리 순서를 한 경로로 적었다.
+
+수동 테스트 문서를 코드와 대조하면서 fresh PostgreSQL volume에는 `postgres-init.sql`만 자동
+적용되고 `workbench-postgres.sql`은 마운트되지 않는다는 것을 확인했다. 처음에는 데모 데이터와
+워크벤치 계정이 기본으로 준비된다고 잘못 적었으나, 멱등 스크립트를 명시 실행하는 준비 단계로
+고쳤다.
+
+### 그림과 링크 검증
+
+```
+./gradlew test --tests io.dbtower.ModularityTests
+  BUILD SUCCESSFUL · 생성 모듈 16개 · 모듈별 adoc/puml 32개
+
+mmdc --version                                      11.17.0
+mmdc -i <원본.mmd> -o <재생성.svg> && cmp ...       4장 모두 동일
+qlmanage -t -s 1800 ...                             4장 렌더 성공, 잘림 없음
+변경 Markdown 로컬 링크 검사                       누락 0
+docs/modules/all-docs.adoc include/plantuml 검사    누락 0
+git diff --check                                    오류 0
+```
+
+`insight-flow`는 처음 렌더했을 때 가로세로 비가 7.3:1이라 문서 폭에서 글자를 읽기 어려웠다.
+관측·요청과 승인·실행을 두 단계 묶음으로 나눠 두 줄로 다시 배치한 뒤 썸네일로 확인했다.
+
+### 필수 검증
+
+```
+./gradlew compileJava          BUILD SUCCESSFUL
+./scripts/check-conventions.sh 7개 전부 통과
+./gradlew test                 BUILD SUCCESSFUL in 4m 55s
+JUnit XML 합계                 890 tests · failures 0 · errors 0 · skipped 37
+```
+
+건너뛴 37건은 환경변수로 여는 역할별 브라우저 E2E 8건, 대상 DB IT 25건, CloudWatch·웹훅 등
+외부 환경 검증 4건이다. CI는 `DBTOWER_E2E=1`과 Playwright Chromium을 지정하고 역할별 E2E의
+`skipped=0`을 별도 게이트로 확인한다. 테스트 종료 때 일부 Spring 컨텍스트가 H2 테이블을 내린 뒤
+스케줄러가 한 번 더 접근해 `SHEDLOCK not found` 경고와 컨텍스트별 20초 종료 대기를 남겼지만,
+Gradle 최종 판정은 성공이고 실패·오류는 0이었다.
+
+### compose와 앱 기동
+
+첫 `docker compose up -d`는 MinIO에서 즉시 실패했다.
+
+```
+minio/minio:latest
+  pull access denied ... repository does not exist
+  exit 18
+```
+
+MinIO의 공식 Docker 예제가 쓰는 `quay.io/minio/minio`로 레지스트리를 바꾸고, 당시 `latest`와
+같은 `RELEASE.2025-09-07T16-13-09Z`를 고정했다. manifest에는 arm64·amd64·ppc64le가 있었고,
+다시 실행한 compose는 exit 0으로 MinIO까지 기동했다. 근거:
+[MinIO Docker Quickstart](https://github.com/minio/minio/blob/master/docs/docker/README.md).
+
+이 머신은 aarch64 Colima다. 기본 SQL Server 2022는 `Invalid mapping of address`로 종료됐고,
+arm64 보조 구성의 Azure SQL Edge도 두 번 모두 `S_SbtUnimplementedInstruction` SIGABRT로 종료됐다.
+그래서 5종 전부 기동 성공이라고 쓰지 않는다. MySQL·PostgreSQL·MongoDB·Oracle과 모니터링·MinIO는
+계속 실행 중이고, SQL Server 계열의 이 머신 한계는 README에서 `docker-compose.arm64.yml`과
+131~134절로 연결했다.
+
+SQL Server가 내려간 상태에서도 앱은 플랫폼 메타 DB와 나머지 대상 장애를 분리해 기동했다.
+
+```
+Spring Boot 시작                 5.937초
+Flyway                          41 migrations validated · schema version 41
+GET /actuator/health            {"groups":["liveness","readiness"],"status":"UP"}
+MySQL·PostgreSQL·MongoDB·Oracle 스냅샷 수집 완료
+SQL Server 계열                 connection refused를 대상 단위 경고로 남김
+```
+
+검증 앱은 health 확인 뒤 `Ctrl-C`로 종료했다. 기동 직후 보존 잡이 기존 14일 초과 백업 산출물
+6건을 정책대로 지워 96MB를 정리했다. compose 서비스는 그대로 두었고 SQL Server 컨테이너만
+위 충돌로 `Exited (1)` 상태다.
+
+## 164. Apple Silicon에서 실제 SQL Server 2022 경로 복구와 시간 경계 테스트 수정 (2026-09-14)
+
+### 실제 엔진 기동
+
+163절의 실패는 기본 aarch64 Colima 안에서 amd64 SQL Server를 직접 실행하거나, 지원 종료된
+Azure SQL Edge ARM64 이미지를 사용한 결과였다. 호스트에는 Rosetta가 설치돼 있었으므로 기존
+5종 스택을 건드리지 않고 별도 Colima 프로필을 만들었다.
+
+```
+colima start mssql2022 --vm-type vz --vz-rosetta --cpu 4 --memory 6 --disk 20
+MSSQL_SA_PASSWORD='...' docker --context colima-mssql2022 run -d \
+  --name dbtower-mssql2022 --platform linux/amd64 \
+  -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD -p 14330:1433 \
+  mcr.microsoft.com/mssql/server:2022-latest
+
+SERVERPROPERTY('ProductVersion')  16.0.4275.2
+SERVERPROPERTY('Edition')         Developer Edition (64-bit)
+SERVERPROPERTY('EngineEdition')   3
+```
+
+첫 `docker run` 호출은 클라이언트 쪽에서 25.4초 뒤 중단됐지만 외부 작업은 롤백되지 않았다.
+다시 확인하니 이미지 다운로드와 컨테이너 생성이 끝나 있었고 SQL Server는 24시간 연속 실행 중이었다.
+중단된 도구 호출을 재시도하기 전에 외부 상태부터 읽어야 한다는 사례다.
+
+새 컨테이너에는 시스템 DB만 있었으므로 비밀번호를 argv에 넣지 않고 `DB_PASSWORD` 환경변수와
+`scripts/ApplySql.java`를 사용했다. `docker/mssql-init.sql` 2/2 배치와
+`docker/workbench-mssql.sql` 10/10 배치가 성공해 `sample`, 모니터·조회·변경 계정과 데모 데이터를 준비했다.
+
+### 실제 SQL Server 통합 검증
+
+다른 DB 게이트를 닫고 SQL Server 관련 시나리오만 정확히 지정해 실행했다.
+
+```
+DBTOWER_MSSQL_IT=1 DBTOWER_MSSQL_PORT=14330 \
+DBTOWER_SCHEMA_READONLY_IT=1 DBTOWER_PLANSHAPE_IT=1 \
+DBTOWER_SCHEMA_IT_PASSWORD=... ./gradlew test \
+  --tests '*ChangeExecutionIT.SQLServer*' \
+  --tests '*ConsoleReadOnlyIT.SQLServer*' \
+  --tests '*NetworkTimeoutAfterLoginIT.SQLServer*' \
+  --tests '*SchemaDefinitionsReadOnlyIT.sqlServerCompatible' \
+  --tests '*PlanShapeReadOnlyIT.sqlServer'
+
+BUILD SUCCESSFUL in 11s
+5 tests · skipped 0 · failures 0 · errors 0
+```
+
+- 변경 드라이런·실행·되돌리기·드리프트·사본 불일치 롤백 통과
+- 조회 계정의 UPDATE가 실제 권한으로 거부됨
+- 스키마 정의 5개 테이블 조회, CHECK·트리거 상태 `AVAILABLE`
+- 상위 쿼리 5개 중 실행계획 shape 2개 복원
+- 로그인 뒤 `networkTimeout=0`, 7초 서버 대기 완료
+
+처음에는 `DBTOWER_CONSOLE_IT=1`도 함께 켜 10건을 실행했고 4건이 실패했다. SQL Server 시나리오는
+통과했으나 기존 프로필의 PostgreSQL·MongoDB·MySQL 접근이 타임아웃됐다. 처음에는 두 Colima 프로필의
+포트 전달 문제로 보았지만 최종 포트 점검에서 MongoDB가 내려간 것을 발견해 아래처럼 원인을 바로잡았다.
+
+### 7초 대기 테스트 경계
+
+`NetworkTimeoutAfterLoginIT`는 `WAITFOR DELAY '00:00:07'` 완료 시간을 정확히 7,000ms 이상으로
+강제했다. 실제 SQL Server는 요청을 정상 완료하고 연결의 `networkTimeout`도 0이었지만 클라이언트
+단조 시계 측정은 6,990ms여서 실패했다. 검증하려는 불변식은 로그인 단계의 5초 읽기 제한이 풀리는가다.
+따라서 5초와 충분히 떨어져 있으면서 서버·클라이언트 시계 경계 오차를 허용하는 6,500ms로 바꿨다.
+
+```
+수정 전  elapsed_ms=6990 networkTimeout=0  -> 임계값 7000에서 실패
+수정 후  elapsed_ms=6990 networkTimeout=0  -> 임계값 6500에서 통과
+```
+
+같은 불변식을 검사하는 Oracle 시나리오에도 공통 상수를 적용했다. 이 변경은 기다림을 빠르게 만든다는
+주장이 아니라, 5초 제한 잔존을 계속 잡으면서 측정 경계의 10ms 흔들림으로 실패하지 않게 한 테스트 수정이다.
+
+### 최종 회귀와 실행 상태
+
+```
+./gradlew compileJava          BUILD SUCCESSFUL
+./scripts/check-conventions.sh 7개 전부 통과
+./gradlew test                 BUILD SUCCESSFUL in 4m 59s
+JUnit XML 합계                 890 tests · failures 0 · errors 0 · skipped 37
+docker compose config --quiet  기본·arm64 병합 구성 모두 성공
+git diff --check              오류 0
+```
+
+전체 테스트 종료 때 163절과 같은 H2 테이블 정리 후 ShedLock 접근 경고와 20초 스케줄러 종료 대기가
+반복됐지만 최종 판정과 XML 실패·오류는 0이다. 별도 프로필 생성이 바꾼 Docker 기본 컨텍스트는
+`colima`로 복원했다. 기본 프로필의 MySQL·PostgreSQL·MongoDB·Oracle과 모니터링·MinIO는 실행 중이고,
+실제 SQL Server 2022는 `colima-mssql2022` 프로필의 14330 포트에서 계속 실행 중이다. 기본 프로필에
+남은 Azure SQL Edge 컨테이너는 위 호환성 실패를 보존한 `Exited (1)` 상태다.
+
+### SQL Edge 크래시 덤프가 만든 디스크 고갈과 5기종 재검증
+
+기본 Colima의 MongoDB는 겉으로 보았던 이전 `compose ps` 출력과 달리 exit 133이었다. 마지막 로그는
+`/data/db/diagnostic.data/metrics.interim.temp`를 쓰지 못한 `FileStreamFailed`였고 VM 루트는
+29GB 중 29GB 사용, 가용 200KB였다. 읽기 전용 계측 결과 SQL Edge 데이터 파일은 88MB였지만
+두 번의 SIGABRT가 `/var/opt/mssql/log/core.sqlservr*`에 크래시 덤프 3.3GB를 남겼다.
+
+DB 파일은 건드리지 않고 중단된 SQL Edge의 `core.sqlservr*` 진단 산출물만 삭제했다. 가용 공간은
+200KB에서 3.3GB로, 사용률은 100%에서 89%로 돌아왔다. MongoDB는 기존 데이터 볼륨 그대로 시작했고
+내부 `db.adminCommand({ping:1})`이 `ok: 1`, 호스트 17017 연결도 성공했다. 크래시 덤프 원본은 삭제돼
+복구할 수 없으며, 실패 서명과 로그는 163·164절에 남겼다.
+
+공간 복구 뒤 처음 실패했던 5기종 묶음을 같은 명령으로 다시 실행했다.
+
+```
+DBTOWER_CONSOLE_IT=1 DBTOWER_MSSQL_IT=1 DBTOWER_MSSQL_PORT=14330 \
+  ./gradlew test --tests '*ChangeExecutionIT' --tests '*ConsoleReadOnlyIT'
+
+BUILD SUCCESSFUL in 8s
+10 tests · skipped 0 · failures 0 · errors 0
+```
+
+따라서 최초 4건 실패 원인은 멀티 프로필 포트 충돌이 아니라 SQL Edge 덤프가 채운 기본 VM 디스크였다.
+최종 상태는 MySQL·PostgreSQL·MongoDB·Oracle과 별도 프로필의 실제 SQL Server 2022까지 다섯 포트가
+동시에 열리고 변경 실행·되돌리기와 조회 권한 경계 10건이 모두 통과한 상태다.
+
+## 165. 화면 값 불변식 QA와 현재 캡처 선별 (2026-09-14)
+
+### 5기종의 실제 표시 원천값
+
+화면이 열리는지만 확인하면 단위나 시계 의미가 틀린 값을 놓친다. 실제 다섯 DBMS에서 헬스 응답,
+쿼리 통계, 슬로우 쿼리, 세션, 테이블 통계, 레이턴시 백분위, 안티패턴 신호를 읽고 다음 불변식을
+공통 검사하는 `OperatorValueSanityReadOnlyIT` 5건을 추가했다.
+
+- 시간·지연·안티패턴 수치는 `NaN`·무한대가 아닌 유한수이며 0 이상
+- 누적 호출·행·바이트는 0 이상, 미확보 센티넬을 허용하는 필드는 -1 이상
+- p99는 p95 이상이고 값이 없는 `UNSUPPORTED`는 null과 출처를 함께 반환
+- 헬스 응답 시간은 0 이상이고 실제 대상은 up
+- 세션에는 MySQL 서버 데몬이 섞이지 않음
+
+```
+DBTOWER_VALUE_SANITY_IT=1 DBTOWER_SCHEMA_IT_PASSWORD=... DBTOWER_MSSQL_PORT=14330 \
+  ./gradlew test --tests '*OperatorValueSanityReadOnlyIT' --info
+
+BUILD SUCCESSFUL in 7s
+5 tests · skipped 0 · failures 0 · errors 0
+
+VALUE ORACLE      ping=678ms query=20 maxTotal=806.47ms slow=20 session=0 table=4 percentile=1 antiPattern=20
+VALUE MONGODB     ping=140ms query=13 maxTotal=106.00ms slow=20 session=6 maxElapsed=3797.58ms table=4 maxP99=8.19ms
+VALUE MYSQL       ping=186ms query=20 maxTotal=180271.78ms slow=5 session=0 table=4 maxP99=181970.09ms
+VALUE POSTGRESQL  ping=61ms query=20 maxTotal=1114.43ms slow=0 session=0 table=6 maxP99=18.00ms
+VALUE POSTGRESQL  runningQueryElapsed=53.32ms
+VALUE MSSQL       ping=100ms query=20 maxTotal=3518.90ms slow=20 session=0 table=5 maxP99=460.05ms
+```
+
+PostgreSQL은 평소 활성 세션이 0건이라 음수 경과 회귀를 검증할 행이 없었다. 별도 읽기 전용 연결에서
+`SELECT pg_sleep(2)`를 실행하고 다른 연결로 포착해 경과 53.32ms가 유한·비음수이고 2.5초보다 작은지
+검사했다. 따라서 162절의 `-7.84ms` 수정은 SQL 문자열만 본 것이 아니라 실제 실행 중 값으로 확인했다.
+
+MySQL의 `maxP99=181970.09ms`도 단위 오류인지 원시 뷰를 다시 읽었다. 같은 값의 원천은 13회 실행된
+`COMMIT`의 `QUANTILE_95/99`였고, 장시간 락 검증 이력이 누적된 실제 performance_schema 값이다.
+누적값임을 `NATIVE` 출처로 표기하는 현재 규약과 일치하므로 임의로 줄이지 않았다.
+
+### 값을 보다가 추가로 찾은 MySQL 활성 세션 오염
+
+첫 실행은 MySQL에서 `session=1 maxElapsed=173998000.00ms`를 냈다. 원시 PROCESSLIST를 확인하니
+사용자 쿼리가 아니라 아래 서버 내부 작업이었다.
+
+```
+USER             COMMAND  STATE                   TIME(sec)  INFO
+event_scheduler  Daemon   Waiting on empty queue  174017     null
+```
+
+세션 쿼리가 `Sleep`만 제외해 서버 기동 뒤 데몬 대기 시간을 쿼리 경과처럼 내보냈다. `Daemon`도 제외한
+뒤 같은 검증은 `session=0 maxElapsed=0.00ms`가 됐다. SQL에 두 제외 조건이 남는지 단위 테스트도 추가했다.
+
+프런트의 공용 숫자·바이트·워크로드 비교 포매터는 유한하지 않은 값과 음수 바이트를 `-` 또는 `미확보`로
+표시하도록 방어했다. 서버 쪽 실DB 불변식으로 원인을 잡되, 예상하지 못한 응답 하나가 화면에
+`NaN`·`Infinity`·`∞`로 새지 않게 한 마지막 표시 경계다.
+
+### 브라우저와 이미지
+
+```
+DBTOWER_E2E=1 ./gradlew test --tests '*PersonaUiE2ETest'
+BUILD SUCCESSFUL in 1m 37s
+9 tests · skipped 0 · failures 0 · errors 0
+
+docs/images 래스터 파일 sips 디코딩·크기 검사  165/165 성공 · 오류 0
+Markdown 로컬 문서·이미지 링크 검사           누락 0
+docs 루트 SVG xmllint 검사                     오류 0
+```
+
+기존 역할·권한·실시간 연결·좁은 화면 8건에 잘못된 표시값을 넣어 `NaN`·`Infinity`·음수 바이트가
+그대로 보이지 않는 브라우저 검증 1건을 더했다. 테스트용으로 닿지 않는 대상 DB를 등록하므로 종료 중
+대상 연결 실패와 H2 정리 뒤 ShedLock 경고가 남지만 Gradle 판정과 XML 9건은 모두 성공이다.
+
+README와 발표의 대시보드·테이블 상세·AI 진단 이미지는 통합 화면 이후 캡처로 바꾸고
+`SCREENSHOTS.md`에 현재 대표 화면만 선별했다. 과거 165개 이미지는 대부분 전후 비교와 결함 증거라
+덮어쓰지 않았다. 특히 `164-session-table.jpg`의 `-7.84ms`는 162절 결함 증거로만 남겨 현재 갤러리에서
+제외했다. `163-slo-card.jpg`의 `360,003.11ms`는 함께 찍힌 360초 부하 SQL의 실제 PostgreSQL 누적
+통계이며 화면에도 `추정` 출처가 표시돼 있어 값 오류가 아니다.
+
+### 최종 필수 게이트와 앱 기동
+
+```
+./gradlew compileJava          BUILD SUCCESSFUL
+./scripts/check-conventions.sh 7개 전부 통과
+./gradlew test                 BUILD SUCCESSFUL in 4m 55s
+JUnit XML 합계                 897 tests · failures 0 · errors 0 · skipped 43
+docker compose config --quiet  기본·arm64 병합 구성 모두 성공
+git diff --check              오류 0
+
+SPRING_PROFILES_ACTIVE=dev DBTOWER_WEBHOOK_URL="" ./gradlew bootRun
+Spring Boot                    5.764초
+Flyway                         41 migrations validated · schema version 41
+GET /actuator/health           {"groups":["liveness","readiness"],"status":"UP"}
+```
+
+기본 Colima의 MySQL·PostgreSQL·MongoDB·Oracle과 모니터링·MinIO는 `docker compose up -d`의
+서비스별 기동으로 모두 running을 확인했다. 알려진 SIGABRT가 크래시 덤프를 다시 만들지 않도록 Azure
+SQL Edge 서비스만 제외했고, 다섯 번째 대상은 별도 Rosetta 프로필의 실제 SQL Server 2022가 14330
+포트에서 running인 것을 확인했다. 앱은 health 확인 뒤 `Ctrl-C`로 정상 종료를 요청했다.

@@ -184,12 +184,16 @@ const toApiTime = (v) => new Date(v).toISOString();
 // API가 주는 시각 — 서버 LocalDateTime은 UTC 벽시계인데 오프셋 표기가 없어, 그대로 new Date()에 넣으면
 // 브라우저 로컬로 오파싱된다. Z를 붙여 진짜 instant로 만들고, 표시는 브라우저 로컬로 통일한다.
 const parseApiTime = (s) => new Date(/Z$|[+-]\d\d:?\d\d$/.test(s) ? s : s + "Z");
-const fmtNum = (v, digits = 2) => v == null ? "-" : Number(v).toLocaleString("ko-KR", { maximumFractionDigits: digits });
+const fmtNum = (v, digits = 2) => {
+  const n = Number(v);
+  return v == null || !Number.isFinite(n) ? "-" : n.toLocaleString("ko-KR", { maximumFractionDigits: digits });
+};
 
 // 바이트를 사람이 읽는 단위로 (파티션 크기 등). 1024 진법, 소수 한 자리.
 const fmtBytes = (v) => {
   if (v == null) return "-";
   let n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return "-";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let u = 0;
   while (n >= 1024 && u < units.length - 1) { n /= 1024; u += 1; }

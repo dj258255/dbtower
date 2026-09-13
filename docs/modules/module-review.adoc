@@ -1,15 +1,14 @@
 [%autowidth.stretch, cols="h,a"]
 |===
 |Base package
-|`io.dbtower.backup`
+|`io.dbtower.review`
 |Spring components
 |_Services_
 
-* `i.d.b.BackupFreshnessService`
+* `i.d.r.ChangeTicketGate`
 |Bean references
 |* `i.d.r.RegistryService` (in Registry)
 * `i.d.o.DbmsOperatorFactory` (in Operator)
-* `i.d.o.BackupArtifactCipher` (in Operator)
-|Events listened to
-|* `i.d.r.InstanceDeletedEvent`
+* `i.d.a.AiAnalyzer` (in Analysis)
+* `i.d.a.QueryMasker` (in Analysis)
 |===

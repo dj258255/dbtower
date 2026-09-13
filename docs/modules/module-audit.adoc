@@ -4,6 +4,7 @@
 |`io.dbtower.audit`
 |Spring components
 |* `i.d.a.AuditInterceptor`
+* `i.d.a.AuditTrail`
 |Events listened to
 |* `org.springframework.security.authentication.event.AbstractAuthenticationFailureEvent` 
 * `org.springframework.security.authentication.event.AuthenticationSuccessEvent` 

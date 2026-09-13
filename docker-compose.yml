@@ -155,7 +155,8 @@ services:
   # 백업 원격 보관 데모(3-2-1의 오프사이트) — S3 호환 API. 클라우드 계정 없이 로컬에서
   # "백업 -> 원격 업로드"를 실측하기 위한 것. 콘솔: http://localhost:19001
   minio:
-    image: minio/minio:latest
+    # MinIO 공식 컨테이너 배포 경로. Docker Hub의 minio/minio는 2026-09 현재 pull되지 않는다.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: dbtower-minio
     command: server /data --console-address ":9001"
     environment:

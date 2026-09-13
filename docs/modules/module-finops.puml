@@ -17,6 +17,7 @@ top to bottom direction
 
 System_Boundary("DbtowerApplication_boundary", "DbtowerApplication", $tags="") {
   Container_Boundary("DbtowerApplication.DbtowerApplication_boundary", "DbtowerApplication", $tags="") {
+    Component(DbtowerApplication.DbtowerApplication.Insight, "Insight", $techn="Module", $descr="", $tags="", $link="")
     Component(DbtowerApplication.DbtowerApplication.Advisor, "Advisor", $techn="Module", $descr="", $tags="", $link="")
     Component(DbtowerApplication.DbtowerApplication.Finops, "Finops", $techn="Module", $descr="", $tags="", $link="")
     Component(DbtowerApplication.DbtowerApplication.Registry, "Registry", $techn="Module", $descr="", $tags="", $link="")
@@ -26,11 +27,16 @@ System_Boundary("DbtowerApplication_boundary", "DbtowerApplication", $tags="") {
 }
 
 Rel(DbtowerApplication.DbtowerApplication.Operator, DbtowerApplication.DbtowerApplication.Registry, "listens to", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Insight, DbtowerApplication.DbtowerApplication.Registry, "listens to", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Insight, DbtowerApplication.DbtowerApplication.Operator, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Insight, DbtowerApplication.DbtowerApplication.Registry, "uses", $techn="", $tags="", $link="")
 Rel(DbtowerApplication.DbtowerApplication.Finops, DbtowerApplication.DbtowerApplication.Registry, "uses", $techn="", $tags="", $link="")
 Rel(DbtowerApplication.DbtowerApplication.Finops, DbtowerApplication.DbtowerApplication.Operator, "uses", $techn="", $tags="", $link="")
 Rel(DbtowerApplication.DbtowerApplication.Finops, DbtowerApplication.DbtowerApplication.Advisor, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Finops, DbtowerApplication.DbtowerApplication.Insight, "uses", $techn="", $tags="", $link="")
 Rel(DbtowerApplication.DbtowerApplication.Advisor, DbtowerApplication.DbtowerApplication.Registry, "uses", $techn="", $tags="", $link="")
 Rel(DbtowerApplication.DbtowerApplication.Advisor, DbtowerApplication.DbtowerApplication.Operator, "uses", $techn="", $tags="", $link="")
+Rel(DbtowerApplication.DbtowerApplication.Advisor, DbtowerApplication.DbtowerApplication.Insight, "uses", $techn="", $tags="", $link="")
 
 SHOW_LEGEND(true)
 hide stereotypes

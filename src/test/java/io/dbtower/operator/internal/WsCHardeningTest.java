@@ -36,6 +36,13 @@ class WsCHardeningTest {
                 .contains("MAX(DIGEST_TEXT)");              // 텍스트는 대표값
     }
 
+    @Test
+    void 세션_조회는_서버_데몬의_대기시간을_쿼리_경과로_보내지_않는다() {
+        assertThat(MySqlOperator.ACTIVE_SESSIONS_SQL)
+                .contains("p.COMMAND NOT IN ('Sleep', 'Daemon')")
+                .contains("p.ID <> CONNECTION_ID()");
+    }
+
     // ---------- C-4: Oracle 스키마 필터 절 ----------
 
     @Test

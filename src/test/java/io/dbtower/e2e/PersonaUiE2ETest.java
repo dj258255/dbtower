@@ -223,6 +223,34 @@ class PersonaUiE2ETest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void 유한하지_않거나_음수인_표시값은_깨진_숫자_대신_미확보로_보인다() {
+        Page page = loginAs("e2e-viewer");
+        page.locator("#user-chip .role-badge").waitFor();
+        List<String> rendered = (List<String>) page.evaluate("""
+                async () => {
+                  const { bytes } = await import('/workbench/table-detail.js');
+                  const { renderWorkload } = await import('/workbench/diff.js');
+                  const holder = document.createElement('div');
+                  holder.innerHTML = renderWorkload({
+                    baseFrom: '2026-09-01T00:00:00', baseTo: '2026-09-01T01:00:00',
+                    targetFrom: '2026-09-02T00:00:00', targetTo: '2026-09-02T01:00:00',
+                    result: {
+                      base: {avgLatencyMs: NaN, totalCalls: Infinity, totalRowsExamined: 1},
+                      target: {avgLatencyMs: Infinity, totalCalls: 2, totalRowsExamined: 3},
+                      avgLatencyChangePct: Infinity, newQueryCount: 0, queries: []
+                    }
+                  });
+                  return [fmtNum(NaN), fmtNum(Infinity), fmtBytes(-1), fmtBytes(Infinity),
+                    bytes(-1), bytes(Infinity), holder.textContent];
+                }
+                """);
+        assertThat(rendered.subList(0, 4)).containsExactly("-", "-", "-", "-");
+        assertThat(rendered.subList(4, 6)).containsExactly("미확보", "미확보");
+        assertThat(rendered.get(6)).doesNotContain("NaN", "Infinity", "∞");
+    }
+
+    @Test
     void 구조_정의는_좁은_화면에_맞고_미확보_경고와_이스케이프를_지킨다() {
         Page page = loginAs("e2e-requester");
         page.setContent("<link rel='stylesheet' href='/style.css'><link rel='stylesheet' href='/workbench.css'>"

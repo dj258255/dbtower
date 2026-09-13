@@ -88,6 +88,6 @@ Java 21, Spring Boot 4, Spring Modulith(모듈 16개, 경계는 빌드가 검사
 ## 링크
 
 - 코드: https://github.com/dj258255/dbtower
-- 역할과 화면: [README 사람별 입구](../README.md), 캡처 `docs/images/webui/79~91`
-- 면접 예상 질문: [INTERVIEW-QA](INTERVIEW-QA.md)
+- 역할과 화면: [README 사람별 입구](../README.md), [현재 화면 갤러리](SCREENSHOTS.md)
+- 기술 질문과 답: [TECHNICAL-QA](TECHNICAL-QA.md)
 - 5분 시연 순서: [DEMO-5MIN](DEMO-5MIN.md)

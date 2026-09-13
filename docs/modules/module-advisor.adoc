@@ -12,13 +12,15 @@ _Others_
 * `i.d.a.Advisor` (via `i.d.a.DuplicateIndexAdvisor`)
 * `i.d.a.Advisor` (via `i.d.a.internal.BloatAdvisor`)
 * `i.d.a.Advisor` (via `i.d.a.internal.DigestsSaturationAdvisor`)
+* `i.d.a.Advisor` (via `i.d.a.internal.DiskForecastAdvisor`)
 * `i.d.a.Advisor` (via `i.d.a.internal.MonitoringPrivilegeAdvisor`)
 * `i.d.a.Advisor` (via `i.d.a.internal.RiskyParameterAdvisor`)
 * `i.d.a.Advisor` (via `i.d.a.internal.SnapshotRetentionAdvisor`)
 * `i.d.a.Advisor` (via `i.d.a.internal.StaleStatisticsAdvisor`)
+* `i.d.a.Advisor` (via `i.d.a.internal.StatsCollectionAdvisor`)
 |Bean references
 |* `i.d.r.RegistryService` (in Registry)
 * `i.d.o.DbmsOperatorFactory` (in Operator)
-* `i.d.i.QuerySnapshotRepository` (in Insight)
-* `i.d.r.DatabaseInstanceRepository` (in Registry)
+* `i.d.i.HostDiskMetrics` (in Insight)
+* `i.d.i.ComparisonService` (in Insight)
 |===

@@ -37,17 +37,17 @@ include::module-slo.adoc[]
 plantuml::module-insight.puml[,,format=svg]
 include::module-insight.adoc[]
 
-== Mcp
-plantuml::module-mcp.puml[,,format=svg]
-include::module-mcp.adoc[]
+== Review
+plantuml::module-review.puml[,,format=svg]
+include::module-review.adoc[]
 
 == Advisor
 plantuml::module-advisor.puml[,,format=svg]
 include::module-advisor.adoc[]
 
-== Alert
-plantuml::module-alert.puml[,,format=svg]
-include::module-alert.adoc[]
+== Workbench
+plantuml::module-workbench.puml[,,format=svg]
+include::module-workbench.adoc[]
 
 == Finops
 plantuml::module-finops.puml[,,format=svg]
@@ -56,4 +56,12 @@ include::module-finops.adoc[]
 == Score
 plantuml::module-score.puml[,,format=svg]
 include::module-score.adoc[]
+
+== Alert
+plantuml::module-alert.puml[,,format=svg]
+include::module-alert.adoc[]
+
+== Mcp
+plantuml::module-mcp.puml[,,format=svg]
+include::module-mcp.adoc[]
 

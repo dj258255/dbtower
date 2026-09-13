@@ -12,22 +12,17 @@
 
 ## 2. 아키텍처
 
-> 아래 그림은 MVP 시점(모듈 5개·3기종)의 기록이다. 현재는 모듈 16개(workbench 추가)·5기종 —
-> 최신 그림은 [architecture-detail.svg](architecture-detail.svg), 모듈 경계는 docs/modules/ 참고.
+![DBTower 상세 아키텍처](architecture-detail.svg)
 
-```
-[Web/curl] ──REST──> [Spring Boot API]
-                        ├── registry   : 이기종 인스턴스 등록/헬스 (PG 'dbtower' DB에 메타 저장 — 자신도 관리 대상으로 등록)
-                        ├── operator   : DbmsOperator 인터페이스 + 기종별 어댑터
-                        ├── insight    : 스냅샷 수집 스케줄러 + 시점 비교
-                        ├── backup     : 백업 정책 + 폴러 + 실행 이력
-                        └── analysis   : 실행계획 규칙 기반 분석
-                              │
-              ┌───────────────┼────────────────┐
-        [MySQL 8.4]    [PostgreSQL 16]    [SQL Server 2022]
-        performance_    pg_stat_           dm_exec_query_stats
-        schema digest   statements         (플랜 캐시 DMV)
-```
+현재 구조의 기준은 Spring Modulith 16개 모듈, `DbmsOperator` 구현 5종, MCP 도구 19개,
+Flyway V41이다. 웹 콘솔과 MCP는 같은 서비스 코어와 호출자 권한을 사용하고, AI는 읽기와
+변경 요청까지만 참여한다. 대상 DB 변경은 `review`가 승인한 티켓을 `workbench` 실행 계층이
+검증할 때만 허용한다.
+
+- [데이터 도메인 지도](erd.svg): V1~V41에서 역할이 큰 테이블과 증거의 연결
+- [진단에서 실행까지](insight-flow.svg): AI와 사람의 책임, 승인·실행 불변식
+- [CI/CD와 런타임](deployment-flow.svg): 테스트 게이트, 이미지 게시, 셀프호스트와 대상 프로비저닝
+- [모듈 문서](modules/): Spring Modulith가 코드에서 생성한 실제 의존 관계
 
 ## 3. 핵심 결정과 이유
 

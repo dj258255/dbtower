@@ -13,5 +13,4 @@ _Others_
 |Bean references
 |* `i.d.r.RegistryService` (in Registry)
 * `i.d.o.DbmsOperatorFactory` (in Operator)
-* `i.d.r.DatabaseInstanceRepository` (in Registry)
 |===

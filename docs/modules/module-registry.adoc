@@ -5,6 +5,7 @@
 |Spring components
 |_Services_
 
+* `i.d.r.ConsoleCredentialService`
 * `i.d.r.RegistryService`
 
 _Repositories_

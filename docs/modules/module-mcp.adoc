@@ -5,5 +5,9 @@
 |Bean references
 |* `i.d.s.ApiTokenProvider` (in Security)
 * `i.d.a.AiAnalyzer` (in Analysis)
+* `i.d.a.QueryMasker` (in Analysis)
 * `i.d.r.RegistryService` (in Registry)
+* `i.d.a.AuditTrail` (in Audit)
+* `i.d.a.AlertMessageIndex` (in Alert)
+* `i.d.a.AlertMuter` (in Alert)
 |===
