@@ -8637,3 +8637,104 @@ linux/arm64    sha256:9c7fe918556a35844d7840d3a9e6ffb1563c52080ad02b6821a3ce5f63
 따라서 이 회차에서 "배포 완료"는 공개 GitHub Release와 GHCR 멀티아치 이미지 게시까지를 뜻한다.
 운영 서버 반영은 저장소가 소유한 배포 대상이 없어 실행하지 않았고, `operations.md`에 버전 고정 compose
 절차와 그 경계를 적었다.
+
+## 167. 실제 값 재검사, SQL 강조와 현재 이미지 재촬영 (2026-09-14)
+
+### 이미지 감사와 재촬영의 범위
+
+165절의 `165/165`는 모든 래스터 파일의 디코딩·크기 검사 수치였고, 165장을 모두 같은 날 다시
+촬영했다는 뜻은 아니었다. 과거 캡처 대부분은 결함 전후와 당시 실측의 증거라 덮어쓰면 검증 기록이
+사라진다. 이번에는 현재 문서에서 제품을 소개하는 화면 중 변경 영향을 받은 관제 대표 화면과 데모 GIF를
+다시 촬영하고, 스키마·티켓·SLO처럼 현재 구현과 같은 나머지 대표 화면은 유지했다.
+
+- `images/webui/165-unified-monitor-query-highlighted.jpg`: 1512x900, 147,841바이트. 격리한 실제 MySQL
+  8.4.11에서 Top Query 20행, SQL 토큰, Load 내림차순, 가로 넘침 없음을 Chromium으로 먼저 검증한 뒤 촬영.
+- `images/demo-change-flow-glass.gif`: 1100x709, 991,527바이트, 7프레임, 23.4초. 격리한 실제
+  PostgreSQL 16.15에서 요청자 제안 -> 티켓 -> 승인자 드라이런·승인 -> 운영자 실행 -> 전후 비교를
+  다시 촬영했다. 마지막에는 제품이 만든 역변경 티켓을 다시 승인·실행했고 실제 대상에는 기본키만 남았다.
+- README, `SCREENSHOTS.md`, `PRESENTATION.md`의 관제·Top Query 참조를 새 JPEG로 교체했다. 과거
+  `121-glass-top-query.jpg`, `141-unified-monitor-3col.jpg`와 결함 증거는 기존 절에서 보존한다.
+
+```
+DBTOWER_CAPTURE=1 DBTOWER_CAPTURE_INSTANCE_ID=... \
+  ./gradlew test --tests '*DocumentationScreenshotTest.Top_Query*'
+BUILD SUCCESSFUL
+
+DBTOWER_CAPTURE=1 DBTOWER_CAPTURE_FLOW=1 DBTOWER_CAPTURE_INSTANCE_ID=... \
+  ./gradlew test --tests '*DocumentationScreenshotTest.승인_실행_전후비교*'
+BUILD SUCCESSFUL in 48s
+
+python3 scripts/build-demo-gif.py build/capture-gif-frames \
+  docs/images/demo-change-flow-captions.json docs/images/demo-change-flow-glass.gif
+docs/images/demo-change-flow-glass.gif 7 frames
+
+ffprobe                                                   1100x709 · 7 frames · 23.400000s
+docs/images 래스터 sips 디코딩·크기 검사                 166/166 성공 · 오류 0
+Markdown 로컬 문서·이미지 링크 검사                      누락 0
+docs 루트 SVG xmllint 검사                                5/5 성공
+```
+
+캡처 환경은 기존 플랫폼 데이터와 분리한 메타 DB `dbtower_capture`, 임시 MySQL(호스트 13316), 임시
+PostgreSQL(호스트 15434)로 만들었다. 첫 PostgreSQL 컨테이너는 `pg_stat_statements`를 생성했어도 서버
+시작 시 preload하지 않아 통계를 제공하지 못했다. `shared_preload_libraries=pg_stat_statements`로 다시
+만든 뒤에만 캡처 대상으로 채택했다. 캡처 역할 프록시의 세션이 만료되면 화면이 401로 돌아오는 것도
+재현돼, 역할별 새 세션을 발급하고 권한을 다시 확인한 뒤 최종 흐름을 촬영했다.
+
+### Top Query 값과 SQL 표시
+
+사용자 제보 화면의 SQL이 단색이던 것은 당시 구현상 정상 동작이었지만, 상세 편집기에는 이미 안전한
+경량 토크나이저가 있어 표에만 빠진 일관성 결함이었다. 같은 토크나이저를 Top Query·시점 비교·Slow
+Query·이상·백분위·세션의 SQL 셀에 연결했다. 토큰마다 `esc()`를 거치는 기존 경계를 유지해 쿼리 문자열의
+HTML이 실행되지 않는다.
+
+밝은 표에서는 어두운 편집기 색을 재사용하지 않고 흰 배경 대비를 다시 계산했다. 키워드 7.42:1,
+함수 7.11:1, 문자열 5.00:1, 숫자 5.43:1, 식별자 10.35:1, 주석 4.97:1, 연산자 7.58:1로 모두
+4.5:1 이상이다. 실제 Chromium은 키워드 `rgb(52, 70, 197)`, 식별자 `rgb(51, 65, 85)`를 반환했고,
+SQL 안의 `<img ...>` 문자열은 DOM 요소가 되지 않은 채 원문 텍스트로 남았다.
+
+MySQL 실제 응답을 보다가 Load가 `26.84, 11.58, 7.87, 11.02, ...`로 중간에서 다시 커지는 것도
+찾았다. 누적 뷰는 DB가 정렬한 뒤 ResultSet을 읽는 사이에도 변하므로, 화면이 계산한 동일 응답 값의
+순서가 DB의 순간 정렬과 어긋날 수 있었다. 한 번 읽은 `totalTimeMs`로 서버에서 다시 내림차순 정렬한
+뒤 Load를 계산하도록 바꿨다. 최종 MySQL 캡처는 `30.69, 11.68, 10.32, 7.07, 5.66, ...` 순서이고,
+브라우저가 전 행의 비증가 조건을 함께 검사했다.
+
+전후 비교 GIF를 찍을 때는 딥링크가 시작한 자동 비교와 사용자가 넓힌 구간 비교가 겹쳐, 먼저 성공한
+표 위를 늦게 끝난 실패 요약이 덮는 경쟁 상태도 드러났다. 비교 요청에 순번을 붙여 마지막 요청의
+응답만 DOM에 반영하게 했다. 최종 7번 프레임은 실패 경고 없이 QPS·Latency·행 변화와 NEW 행을
+동시에 보여준다.
+
+### PostgreSQL 통계 SQL의 자격증명 마스킹
+
+실제 PostgreSQL QA에서 `pg_stat_statements`가 `CREATE ROLE ... PASSWORD '실값'` 유틸리티 문장을
+문자열 리터럴까지 원문으로 제공하는 것을 발견했다. `/query-stats`도 이를 그대로 내보내 플랫폼이
+접속 자격증명을 재노출할 수 있었다.
+
+API 응답과 `QuerySnapshot` 생성 시 `QueryMasker.maskLiterals`를 적용하고, 마스킹 도입 전에 저장된
+스냅샷도 getter 경계에서 다시 가렸다. 수정 후 실제 PostgreSQL API 94행은 Load 내림차순과 전 수치
+유한 조건을 만족했고, 원시 비밀번호 문자열은 0회, `PASSWORD ?`는 3회였다. 단위 테스트는
+`CREATE ROLE demo PASSWORD 'real-secret'` 입력이 `CREATE ROLE demo PASSWORD ?`로만 나가고 저장되는지
+검증한다.
+
+### 최종 게이트
+
+```
+node --check src/main/resources/static/app.js               exit 0
+./gradlew compileJava                                      BUILD SUCCESSFUL in 1s
+./scripts/check-conventions.sh                             7개 전부 통과
+변경 부위 테스트(QueryMasker·QuerySnapshot·queryStats)     8 tests · failures 0 · errors 0
+DBTOWER_E2E=1 ./gradlew test --tests '*PersonaUiE2ETest'   BUILD SUCCESSFUL in 1m 37s
+PersonaUiE2ETest                                            10 tests · skipped 0 · failures 0 · errors 0
+./gradlew test                                             BUILD SUCCESSFUL in 4m 54s
+JUnit XML 합계                                              902 tests · failures 0 · errors 0 · skipped 46
+./gradlew bootJar                                          BUILD SUCCESSFUL in 2s
+build/libs/dbtower-1.3.1.jar                               122MB · Implementation-Version 1.3.1
+docker compose config --quiet                              성공
+GET /actuator/health                                       {"groups":["liveness","readiness"],"status":"UP"}
+git diff --check                                            오류 0
+```
+
+전체 테스트 종료 때 앞 절과 같은 H2 테이블 정리 뒤 예약 작업·ShedLock 경고와 컨텍스트별 최대 30초
+종료 대기가 다시 나타났다. 테스트 본문은 902건 모두 끝났고 Gradle 최종 판정과 XML 실패·오류는 0이다.
+기본 Compose의 MySQL·PostgreSQL·MongoDB·Oracle과 모니터링 스택은 running이다. Apple Silicon에서
+이미 크래시 덤프를 만든 Azure SQL Edge는 재기동하지 않았고, 164·165절에서 검증한 별도 실제 SQL
+Server 2022 경로를 유지했다.

@@ -37,6 +37,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -90,11 +91,16 @@ public class InsightController {
 
     @GetMapping("/query-stats")
     public List<QueryStatView> queryStats(@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
-        List<QueryStat> stats = operatorFactory.create(registryService.findById(id)).queryStats(DbmsOperator.clampLimit(limit));
+        // performance_schema 같은 누적 뷰는 읽는 동안에도 값이 변한다. DB에서 정렬한 뒤 ResultSet을 읽는 사이
+        // 후순위 문장의 시간이 늘면 응답의 Load 순서가 뒤집힐 수 있으므로, 한 번 읽어 온 동일 값으로 다시 정렬한다.
+        List<QueryStat> stats = operatorFactory.create(registryService.findById(id)).queryStats(DbmsOperator.clampLimit(limit))
+                .stream()
+                .sorted(Comparator.comparingDouble(QueryStat::totalTimeMs).reversed())
+                .toList();
         double totalTime = stats.stream().mapToDouble(QueryStat::totalTimeMs).sum();
         Map<String, Double> qpsByQuery = baselineService.recentQps(id, LocalDateTime.now());
         return stats.stream()
-                .map(s -> new QueryStatView(s.queryId(), s.queryText(), s.calls(), s.totalTimeMs(),
+                .map(s -> new QueryStatView(s.queryId(), QueryMasker.maskLiterals(s.queryText()), s.calls(), s.totalTimeMs(),
                         s.rowsExamined(),
                         totalTime == 0 ? 0 : Math.round(s.totalTimeMs() / totalTime * 10000) / 100.0,
                         s.calls() == 0 ? 0 : s.totalTimeMs() / s.calls(),          // 평균 Latency(ms)

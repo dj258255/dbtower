@@ -9,6 +9,31 @@
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-09-14
+
+v1.3.0 공개 뒤 실제 MySQL·PostgreSQL 값과 승인 변경 흐름을 다시 읽고 촬영하며 발견한 표시·보안 결함을
+고친 패치 릴리즈다. 현재 소개 화면과 7장면 데모 GIF도 같은 실행 결과로 다시 만들었다.
+
+### Changed
+
+- Top Query·시점 비교·Slow Query·이상·백분위·세션 표의 SQL에 안전한 경량 구문 강조를 적용했다.
+  밝은 표 전용 색은 WCAG AA 대비 4.5:1 이상을 계산하고 브라우저에서 실제 색과 XSS 비실행을 검증했다.
+- 현재 README·스크린샷 갤러리·발표의 관제 대표 화면과 승인→실행→전후 비교 7장면 GIF를 실제
+  PostgreSQL 대상으로 다시 촬영했다. 과거 결함 증거 이미지는 검증 기록에 그대로 보존한다.
+
+### Fixed
+
+- 누적 통계가 ResultSet을 읽는 사이 변하면 MySQL Top Query의 Load가 내림차순이 아니게 보이던 문제를,
+  한 번 읽은 동일 값으로 다시 정렬해 고쳤다.
+- 딥링크 자동 비교와 사용자의 재조회가 겹칠 때 늦게 끝난 실패 응답이 성공 표 위를 덮던 경쟁 상태를
+  마지막 요청만 반영하도록 고쳤다.
+
+### Security
+
+- PostgreSQL `pg_stat_statements`가 `CREATE ROLE ... PASSWORD '실값'` 같은 유틸리티 SQL을 원문으로
+  제공할 수 있던 경로를 막았다. API 응답과 새 스냅샷 저장 시 리터럴을 가리고, 도입 전 저장된 행도
+  조회 경계에서 다시 마스킹한다.
+
 ## [1.3.0] - 2026-09-14
 
 두 갈래가 들어 있다. 하나는 HA 관측을 관제 plane의 경계 안에서 완성한 것이고(123절), 다른 하나는
@@ -313,7 +338,8 @@ v1.0.0으로 만들 만큼 만들었다 싶었는데, 실제로 쓰다 보니 �
 - **셀프호스트 제품화** — 배터리 포함 컨테이너 이미지(백업 CLI 번들), 원커맨드 docker compose,
   태그 push가 곧 게시인 GHCR 파이프라인.
 
-[Unreleased]: https://github.com/dj258255/dbtower/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/dj258255/dbtower/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/dj258255/dbtower/releases/tag/v1.3.1
 [1.3.0]: https://github.com/dj258255/dbtower/releases/tag/v1.3.0
 [1.2.0]: https://github.com/dj258255/dbtower/releases/tag/v1.2.0
 [1.1.0]: https://github.com/dj258255/dbtower/releases/tag/v1.1.0

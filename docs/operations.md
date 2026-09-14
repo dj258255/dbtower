@@ -202,15 +202,15 @@ Performance Insights도 부하가 높으면 샘플을 떨어뜨리는 쪽을 골
 정식 배포물은 `vX.Y.Z` 태그에서 만든 `ghcr.io/dj258255/dbtower` 멀티아치 이미지다.
 릴리즈 워크플로는 규약 검사, Playwright Chromium 역할별 E2E, 전체 테스트를 통과한 뒤
 `X.Y.Z`, `X.Y`, `X`, `latest` 태그와 GitHub Release를 함께 게시한다. 현재 정식 버전은
-`v1.3.0`이다.
+`v1.3.1`이다.
 
 운영에서는 `latest`를 그대로 추적하지 말고 `.env`의 `DBTOWER_TAG`를 정식 버전으로 고정한다.
 메타 DB와 백업 볼륨을 보존한 채 앱 이미지만 교체하는 기본 순서는 다음과 같다.
 
 ```bash
 # 먼저 메타 DB를 백업하고, 기존 DBTOWER_ENCRYPTION_KEY가 보존됐는지 확인한다.
-DBTOWER_TAG=1.3.0 docker compose -f docker-compose.app.yml pull dbtower
-DBTOWER_TAG=1.3.0 docker compose -f docker-compose.app.yml up -d dbtower
+DBTOWER_TAG=1.3.1 docker compose -f docker-compose.app.yml pull dbtower
+DBTOWER_TAG=1.3.1 docker compose -f docker-compose.app.yml up -d dbtower
 docker compose -f docker-compose.app.yml ps
 curl -fsS http://localhost:${DBTOWER_PORT:-8080}/actuator/health
 ```

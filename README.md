@@ -9,7 +9,7 @@ MySQL, PostgreSQL, SQL Server, Oracle, MongoDB를 한곳에서 관제하고 안�
 
 Java 21 + Spring Boot 4로 만들었으며 웹 콘솔은 별도 빌드 체인이 없는 정적 SPA입니다.
 
-![DBTower 통합 관제 모드](docs/images/webui/141-unified-monitor-3col.jpg)
+![DBTower 통합 관제 모드 — 실제 MySQL Top Query와 SQL 강조](docs/images/webui/165-unified-monitor-query-highlighted.jpg)
 
 ## 핵심 흐름
 
@@ -58,8 +58,8 @@ Java 21 + Spring Boot 4로 만들었으며 웹 콘솔은 별도 빌드 체인이
 ## 빠른 시작
 
 Docker와 Docker Compose만 있으면 앱과 전용 메타 DB를 실행할 수 있습니다.
-현재 정식 버전은 `v1.3.0`입니다. 운영에서는 재현 가능한 업그레이드를 위해 `latest` 대신
-`DBTOWER_TAG=1.3.0`처럼 버전을 고정하는 것을 권장합니다.
+현재 정식 버전은 `v1.3.1`입니다. 운영에서는 재현 가능한 업그레이드를 위해 `latest` 대신
+`DBTOWER_TAG=1.3.1`처럼 버전을 고정하는 것을 권장합니다.
 
 ```bash
 cp .env.example .env
@@ -70,7 +70,7 @@ cp .env.example .env
 ```dotenv
 DBTOWER_DB_PASSWORD=change-me-strong-password
 DBTOWER_ENCRYPTION_KEY=<openssl rand -base64 32 결과>
-DBTOWER_TAG=1.3.0
+DBTOWER_TAG=1.3.1
 ```
 
 그다음 컨테이너를 시작합니다.

@@ -40,7 +40,7 @@ DBTower는 그 문제 정의를 출발점으로 삼아, 1인이 검증 가능한
 그래도 막히면  분석 결과를 통째로 첨부해 버튼 한 번으로 DB팀 문의
 ```
 
-![웹 콘솔 관제 모드 — 인스턴스, 작업면, AI 진단을 한 화면에서(149절 통합 화면)](images/webui/141-unified-monitor-3col.jpg)
+![웹 콘솔 관제 모드 — 실제 MySQL Top Query와 SQL 강조를 한 화면에서(167절 재촬영)](images/webui/165-unified-monitor-query-highlighted.jpg)
 
 ## 3. 목표
 
@@ -70,7 +70,7 @@ Call/sec · Latency(ms) · Row Examined(Avg)를 기본 뷰로 보여준다 (VERI
 Call/sec은 누적 카운터라 단일 스냅샷으로는 낼 수 없어 최근 두 스냅샷의 차분으로 산출하고,
 이력이 부족하면 값을 지어내는 대신 "—"로 표기한다.
 
-![Top Query — Load·Call/sec·Latency·검사한 행(평균), 기종별 행 지표 이름(146절 재촬영, 데모 MySQL이라 플랫폼 수집 쿼리가 상위)](images/webui/121-glass-top-query.jpg)
+![Top Query — Load·Call/sec·Latency·검사한 행(평균), 실제 MySQL 값과 SQL 강조(167절 재촬영)](images/webui/165-unified-monitor-query-highlighted.jpg)
 
 ### 5.2 시점 비교
 

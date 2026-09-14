@@ -1,7 +1,7 @@
 name: Release
 
 # v1.2.3 형태의 태그를 push 하면 이미지를 빌드해 GHCR 에 게시하고 GitHub Release를 만든다.
-#   git tag -a v1.3.0 -m "DBTower v1.3.0" && git push origin v1.3.0
+#   git tag -a v1.3.1 -m "DBTower v1.3.1" && git push origin v1.3.1
 # 수동 실행은 이미 존재하는 SemVer 태그를 다시 게시할 때만 쓴다.
 on:
   push:

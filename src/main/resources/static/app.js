@@ -30,6 +30,7 @@ const state = {
   dragMode: null,      // 'target' | 'base'
   selections: {},      // {target: {from: Date, to: Date}, base: {...}}
   compareMode: false,  // 마지막 조회가 비교 조회였는지
+  compareSeq: 0,       // 겹친 비교 요청 중 마지막 응답만 화면에 반영
   currentQuery: null,  // 상세 패널에 열린 쿼리
   lastPlan: null,      // 마지막 EXPLAIN 실행계획 (문의 첨부용)
   lastFindings: [],    // 마지막 규칙 기반 지적
@@ -133,6 +134,12 @@ function highlightSql(sql) {
     out += esc(ch); i++;
   }
   return out;
+}
+
+// 표·카드에 SQL을 그릴 때도 상세 편집기와 같은 토큰화를 쓴다. highlightSql이 토큰마다 esc를 거치므로
+// API에서 받은 쿼리를 innerHTML에 넣어도 태그로 실행되지 않는다.
+function queryTextHtml(sql) {
+  return highlightSql(sql ?? "-");
 }
 
 // 오버레이 갱신 — 투명 textarea 뒤의 하이라이트 레이어를 현재 값으로 다시 그린다(마지막 줄이 보이게 개행 하나 덧붙임).
@@ -1210,7 +1217,7 @@ async function runQuery() {
   table.querySelector("tbody").innerHTML = stats.map((q, idx) => `
     <tr data-idx="${idx}">
       <td class="num">${fmtNum(q.loadPct)}%</td>
-      <td class="qtext" title="${esc(q.queryText)}">${esc(q.queryText)}</td>
+      <td class="qtext" title="${esc(q.queryText)}">${queryTextHtml(q.queryText)}</td>
       <td class="num">${q.callsPerSec == null ? '<span class="muted">—</span>' : fmtNum(q.callsPerSec)}</td>
       <td class="num">${fmtNum(q.avgLatencyMs, msDigits(q.avgLatencyMs))}</td>
       <td class="num">${fmtNum(q.rowsExaminedAvg, 0)}</td>
@@ -1221,6 +1228,7 @@ async function runQuery() {
 
 // ---------- Top Query: 비교 조회 (증감 + NEW) ----------
 async function runCompare() {
+  const requestSeq = ++state.compareSeq;
   const p = (id) => $(id).value;
   if (!p("#base-from") || !p("#base-to") || !p("#target-from") || !p("#target-to")) return;
   closeDetail();
@@ -1230,6 +1238,7 @@ async function runCompare() {
   try {
     result = await api(`/api/instances/${state.instance.id}/compare?${qs}`);
   } catch (e) {
+    if (requestSeq !== state.compareSeq) return;
     // 브라우저 경고창은 화면 밖으로 튀어나오고 맥락을 잃는다 — 실패한 자리에 그대로 적는다
     const sum = $("#compare-summary");
     sum.hidden = false;
@@ -1238,6 +1247,7 @@ async function runCompare() {
       + ` 구간을 넓히거나, 수집이 도는 동안 기다린 뒤 다시 조회하세요.</div></div>`;
     return;
   }
+  if (requestSeq !== state.compareSeq) return;
   state.compareMode = true;
 
   // 요약 스트립 — 표를 읽기 전에 "전반적으로 무엇이 변했는지"
@@ -1269,7 +1279,7 @@ async function runCompare() {
   table.querySelector("tbody").innerHTML = rows.map((q, idx) => `
     <tr data-idx="${idx}" class="${q.newQuery ? "new-query" : ""}">
       <td>${deltaCell(baseLoad(q), targetLoad(q), loadPctChange(baseLoad(q), targetLoad(q)))}</td>
-      <td class="qtext" title="${esc(q.queryText)}">${q.newQuery ? '<span class="badge-new">NEW</span>' : ""}${esc(q.queryText)}</td>
+      <td class="qtext" title="${esc(q.queryText)}">${q.newQuery ? '<span class="badge-new">NEW</span>' : ""}${queryTextHtml(q.queryText)}</td>
       <td>${deltaCell(q.baseQps, q.targetQps, q.qpsChangePct)}</td>
       <td>${deltaCell(q.baseAvgMs, q.targetAvgMs, q.latencyChangePct, msDigits(q.baseAvgMs, q.targetAvgMs))}</td>
       <td>${deltaCell(q.baseRowsPerCall, q.targetRowsPerCall, q.rowsPerCallChangePct, 0)}</td>
@@ -1781,7 +1791,7 @@ async function loadSlow() {
       <td class="num">${dash(q.rowsSent) ?? fmtNum(q.rowsSent, 0)}</td>
       <td class="num">${fmtNum(q.rowsExamined, 0)}</td>
       <td>${q.planSummary ? `<span class="plan-badge ${/COLLSCAN/i.test(q.planSummary) ? "plan-bad" : "plan-ok"}">${esc(q.planSummary)}</span>` : '<span class="muted">—</span>'}</td>
-      <td class="qtext" title="${esc(q.queryText)}">${esc(q.queryText)}</td>
+      <td class="qtext" title="${esc(q.queryText)}">${queryTextHtml(q.queryText)}</td>
     </tr>`).join("") : '<tr><td colspan="8" class="muted">슬로우 쿼리가 없습니다.</td></tr>';
   // Mongo 보존 창 정직 표기 — system.profile은 순환(capped) 컬렉션이라 오래된 항목이 덮어써진다.
   // 로그 파일 파싱 기반 도구와 보존 범위가 다름을 숨기지 않는다.
@@ -2078,7 +2088,7 @@ async function loadAnomalies() {
           `(평소 ${fmtNum(m.baselineMean)}±${fmtNum(m.baselineStddev)}, z=${fmtNum(m.zScore, 1)})</span>`
         ).join(" ");
         return `<div class="anomaly-item">
-          <div class="anomaly-q qtext" title="${esc(q.queryText)}">${esc(q.queryText)}</div>
+          <div class="anomaly-q qtext" title="${esc(q.queryText)}">${queryTextHtml(q.queryText)}</div>
           <div class="anomaly-metrics">${metrics}</div>
           <div class="hint">${q.dayOfWeek}요일 ${q.hour}시대 기준 · 관측 ${q.observations}회</div>
         </div>`;
@@ -2174,7 +2184,7 @@ async function loadLatencyPercentiles() {
       return `
       <tr>
         <td><span class="src-badge ${src.cls}" title="${esc(src.note)}">${src.label}</span></td>
-        <td class="qtext" title="${esc(r.queryText)}">${esc(r.queryText)}</td>
+        <td class="qtext" title="${esc(r.queryText)}">${queryTextHtml(r.queryText)}</td>
         <td class="num">${r.p95Ms != null ? fmtNum(r.p95Ms) : "-"}</td>
         <td class="num">${r.p99Ms != null ? fmtNum(r.p99Ms) : "-"}</td>
       </tr>`;
@@ -2319,7 +2329,7 @@ function renderSessionRows(rows) {
         <td title="${esc(s.waitEvent ?? "")}">${esc(s.waitEvent ?? "-")}</td>
         <td class="num">${s.blockedByPid != null ? `<span class="blocked-by">${esc(s.blockedByPid)}</span>` : "-"}</td>
         <td class="num">${fmtNum(s.elapsedMs)}</td>
-        <td class="qtext" title="${esc(s.query)}">${esc(s.query ?? "-")}</td>
+        <td class="qtext" title="${esc(s.query)}">${queryTextHtml(s.query)}</td>
         ${canKill ? `<td class="session-actions">
           <button class="btn btn-small" data-kill="${esc(s.pid)}" data-force="false">취소</button>
           <button class="btn btn-small btn-danger" data-kill="${esc(s.pid)}" data-force="true">강제종료</button>

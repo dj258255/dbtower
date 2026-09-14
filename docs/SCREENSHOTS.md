@@ -6,7 +6,7 @@ README와 발표·포트폴리오에서 사용할 현재 화면만 모았습니�
 
 ## 관제와 워크벤치
 
-![관제 모드 — 인스턴스, 작업면, AI 진단을 한 화면에서](images/webui/141-unified-monitor-3col.jpg)
+![관제 모드 — 실제 MySQL Top Query의 값과 SQL 강조를 함께 검증](images/webui/165-unified-monitor-query-highlighted.jpg)
 
 ![워크벤치 모드 — 스키마, 편집기와 결과, AI 보조를 함께](images/webui/143-unified-workbench-mode.jpg)
 

@@ -251,6 +251,39 @@ class PersonaUiE2ETest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void 쿼리_표는_SQL을_강조하되_태그를_실행하지_않는다() {
+        Page page = loginAs("e2e-viewer");
+        page.locator("#user-chip .role-badge").waitFor();
+        List<Object> rendered = (List<Object>) page.evaluate("""
+                () => {
+                  const holder = document.createElement('td');
+                  holder.className = 'qtext';
+                  holder.innerHTML = queryTextHtml(
+                    "SELECT COUNT(`id`), 'ok', 42 FROM `orders` WHERE note = '<img src=x onerror=alert(1)>'"
+                  );
+                  document.body.append(holder);
+                  const color = (selector) => getComputedStyle(holder.querySelector(selector)).color;
+                  return [
+                    holder.querySelectorAll('.t-kw').length,
+                    holder.querySelectorAll('.t-fn').length,
+                    holder.querySelectorAll('.t-id').length,
+                    holder.querySelectorAll('.t-str').length,
+                    holder.querySelectorAll('.t-num').length,
+                    holder.querySelector('img') === null,
+                    color('.t-kw'),
+                    color('.t-id'),
+                    holder.textContent
+                  ];
+                }
+                """);
+        assertThat(rendered.subList(0, 6)).containsExactly(3, 1, 2, 2, 1, true);
+        assertThat(rendered.subList(6, 8)).containsExactly("rgb(52, 70, 197)", "rgb(51, 65, 85)");
+        assertThat(rendered.get(8)).isEqualTo(
+                "SELECT COUNT(`id`), 'ok', 42 FROM `orders` WHERE note = '<img src=x onerror=alert(1)>'");
+    }
+
+    @Test
     void 구조_정의는_좁은_화면에_맞고_미확보_경고와_이스케이프를_지킨다() {
         Page page = loginAs("e2e-requester");
         page.setContent("<link rel='stylesheet' href='/style.css'><link rel='stylesheet' href='/workbench.css'>"

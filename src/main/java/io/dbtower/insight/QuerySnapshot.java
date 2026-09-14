@@ -1,5 +1,6 @@
 package io.dbtower.insight;
 
+import io.dbtower.analysis.QueryMasker;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -50,9 +51,16 @@ public class QuerySnapshot {
         this.instanceId = instanceId;
         this.capturedAt = capturedAt;
         this.queryId = queryId;
-        this.queryText = queryText;
+        // PostgreSQL은 CREATE ROLE 같은 유틸리티 문장의 PASSWORD 리터럴을 pg_stat_statements에 원문으로 남긴다.
+        // 통계 저장소가 자격증명 보관소가 되지 않도록 수집 경계에서 모든 리터럴을 정규화한다.
+        this.queryText = QueryMasker.maskLiterals(queryText);
         this.calls = calls;
         this.totalTimeMs = totalTimeMs;
         this.rowsExamined = rowsExamined;
+    }
+
+    /** 마스킹 도입 전 저장된 행도 API·비교·이상 탐지로 다시 나갈 때 리터럴을 노출하지 않는다. */
+    public String getQueryText() {
+        return QueryMasker.maskLiterals(queryText);
     }
 }
