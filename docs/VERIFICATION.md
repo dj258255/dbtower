@@ -8608,3 +8608,32 @@ docker compose config --quiet                  개발·arm64 병합·셀프호�
 전체 테스트 종료 때 163~165절에 기록한 H2 테이블 정리 뒤 ShedLock 접근 경고와 스케줄러 종료 대기가
 다시 나타났지만 Gradle 최종 판정과 XML 실패·오류는 0이다. E2E가 등록한 닿지 않는 MySQL 대상의 연결
 실패 로그도 같은 의도된 테스트 입력이며 화면 검증 9건은 모두 실행됐다.
+
+### 원격 게시 결과
+
+태그 전 게이트를 통과한 `ffca21add6171612631c241cd1cd77a5c163d7f7`을 `main`에 push하고 같은
+커밋에 주석 태그 `v1.3.0`을 만들었다. 원격 peeled tag도 이 커밋과 일치했다.
+
+```
+GitHub Actions Release run   34792242438
+시작                         2026-09-14 09:17:31 KST
+완료                         2026-09-14 09:41:37 KST
+규약·Chromium·전체 테스트·E2E skipped=0·QEMU·Buildx·GHCR·Release  전부 success
+GitHub Release               https://github.com/dj258255/dbtower/releases/tag/v1.3.0 (HTTP 200)
+```
+
+게시된 릴리즈 노트에서 `166개 절`, `897건`, `5기종 자원 압박 신호`가 CHANGELOG 본문과 같은 것도
+확인했다. GHCR 인덱스는 두 실행 플랫폼과 각 이미지의 attestation을 담는다.
+
+```
+ghcr.io/dj258255/dbtower:1.3.0
+index digest   sha256:2d8ee93c0c37205945f03901cb6a4b1008cb0169500d439ce5efc4737b4c98ff
+linux/amd64    sha256:d4961645c5c4dc377848a9a90d4d00c864598284653165b6e2a06c2366faebc2
+linux/arm64    sha256:9c7fe918556a35844d7840d3a9e6ffb1563c52080ad02b6821a3ce5f6358ce78
+
+태그 1.3.0 · 1.3 · 1 · latest   모두 같은 index digest
+```
+
+따라서 이 회차에서 "배포 완료"는 공개 GitHub Release와 GHCR 멀티아치 이미지 게시까지를 뜻한다.
+운영 서버 반영은 저장소가 소유한 배포 대상이 없어 실행하지 않았고, `operations.md`에 버전 고정 compose
+절차와 그 경계를 적었다.
