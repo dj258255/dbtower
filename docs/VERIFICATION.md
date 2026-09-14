@@ -8738,3 +8738,31 @@ git diff --check                                            오류 0
 기본 Compose의 MySQL·PostgreSQL·MongoDB·Oracle과 모니터링 스택은 running이다. Apple Silicon에서
 이미 크래시 덤프를 만든 Azure SQL Edge는 재기동하지 않았고, 164·165절에서 검증한 별도 실제 SQL
 Server 2022 경로를 유지했다.
+
+### 원격 게시 결과
+
+최종 게이트를 통과한 `c508939a0d51899200ae35726e292d25ef64d60c`을 `main`에 push하고 같은
+커밋에 주석 태그 `v1.3.1`을 만들었다. 원격 peeled tag도 이 커밋과 일치했다.
+
+```
+GitHub Actions Release run   34823620224
+시작                         2026-09-14 17:36:53 KST
+완료                         2026-09-14 18:02:41 KST
+규약·Chromium·전체 테스트·E2E skipped=0·QEMU·Buildx·GHCR·Release  전부 success
+GitHub Release               https://github.com/dj258255/dbtower/releases/tag/v1.3.1
+```
+
+Release는 draft나 prerelease가 아닌 공개 상태로 18:02:33 KST에 게시됐다. GHCR 인덱스는
+linux/amd64와 linux/arm64 이미지 및 각 플랫폼의 attestation을 담는다.
+
+```
+ghcr.io/dj258255/dbtower:1.3.1
+index digest   sha256:8746df9c8f24ea98473eb8c84194fe650331b528eabbe82282bee0a85d6843bd
+linux/amd64    sha256:f2684be024140a9a1aaaa4b8fd967fedb0d50488bc73c5259f942705c8269ba1
+linux/arm64    sha256:d204ac883590ea72e522a24fc840a20766511005a65b480d4adae71b82e9934b
+
+태그 1.3.1 · 1.3 · 1 · latest   모두 같은 index digest
+```
+
+따라서 이 회차의 배포 범위는 공개 GitHub Release와 GHCR 멀티아치 이미지 게시까지다. 저장소에는
+사용자가 지정한 운영 서버와 접속 자격증명이 없으므로 특정 운영 환경에는 반영하지 않았다.
