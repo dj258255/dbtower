@@ -8543,3 +8543,68 @@ GET /actuator/health           {"groups":["liveness","readiness"],"status":"UP"}
 서비스별 기동으로 모두 running을 확인했다. 알려진 SIGABRT가 크래시 덤프를 다시 만들지 않도록 Azure
 SQL Edge 서비스만 제외했고, 다섯 번째 대상은 별도 Rosetta 프로필의 실제 SQL Server 2022가 14330
 포트에서 running인 것을 확인했다. 앱은 health 확인 뒤 `Ctrl-C`로 정상 종료를 요청했다.
+
+## 166. v1.3.0 릴리즈와 배포 경로를 같은 게이트로 묶다 (2026-09-14)
+
+### 버전과 문서
+
+직전까지 `build.gradle`은 1.2.0인데 CHANGELOG의 Unreleased에는 123~165절이 한 덩어리로 남아 있었다.
+이를 1.3.0으로 올리고 2026-09-14 정식 릴리즈 절로 닫았다. README, `.env.example`, 운영 가이드에는
+운영 배포에서 `latest` 대신 `DBTOWER_TAG=1.3.0`을 고정하는 절차를 적었다. 메타 DB 백업과 기존
+`DBTOWER_ENCRYPTION_KEY` 보존이 이미지 교체보다 먼저라는 경계도 함께 명시했다.
+
+배포 흐름 Mermaid 원본에는 실제 릴리즈 경로를 반영하고 SVG를 같은 CLI로 다시 만들었다.
+
+```
+npx --yes @mermaid-js/mermaid-cli@11.17.0 -i docs/deployment-flow.mmd -o docs/deployment-flow.svg
+qlmanage -t -s 1800 docs/deployment-flow.svg   렌더 성공 · 잘림 없음
+xmllint --noout docs/deployment-flow.svg       오류 0
+Markdown 로컬 링크 검사                        누락 0
+git diff --check                               오류 0
+```
+
+### 릴리즈 파이프라인
+
+기존 `release.yml`은 태그에서 GHCR 이미지만 게시하고 GitHub Release를 만들지 않았으며, 전체 테스트도
+`DBTOWER_E2E`를 켜지 않아 화면 9건을 건너뛰었다. v1.3.0부터 다음 순서를 한 작업으로 묶었다.
+
+```
+SemVer 태그 또는 기존 태그 수동 재게시
+  -> 규약 검사
+  -> Playwright Chromium 설치
+  -> DBTOWER_E2E=1 전체 테스트
+  -> PersonaUiE2ETest skipped=0 확인
+  -> linux/amd64 + linux/arm64 이미지 게시
+  -> CHANGELOG의 해당 버전 본문으로 GitHub Release 생성
+```
+
+수동 실행은 임의 브랜치를 최신 이미지로 만들지 못하게 이미 존재하는 태그를 필수 입력으로 받는다.
+워크플로가 자동 게시하는 범위는 GitHub Release와 GHCR까지다. 특정 조직의 서버·Kubernetes·RDS는
+자격증명과 과금 권한이 필요한 별도 배포 경계라 자동 실행했다고 주장하지 않는다.
+
+정적 검사는 변경한 워크플로를 직접 지정해 통과했다.
+
+```
+ruby YAML.load_file(.github/workflows/release.yml)                            YAML OK
+go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 release.yml          오류 0
+CHANGELOG 1.3.0 본문 추출 + 빈 파일 방지                                 성공
+```
+
+### 태그 전 필수 게이트
+
+```
+./gradlew compileJava                         BUILD SUCCESSFUL
+./scripts/check-conventions.sh                7개 전부 통과
+./gradlew test                                BUILD SUCCESSFUL in 27m 56s
+JUnit XML 합계                                897 tests · failures 0 · errors 0 · skipped 43
+DBTOWER_E2E=1 ./gradlew test --tests '*PersonaUiE2ETest'
+                                               BUILD SUCCESSFUL in 1m 39s
+PersonaUiE2ETest XML                           9 tests · skipped 0 · failures 0 · errors 0
+./gradlew bootJar                              BUILD SUCCESSFUL
+build/libs/dbtower-1.3.0.jar                   122MB · Implementation-Version 1.3.0
+docker compose config --quiet                  개발·arm64 병합·셀프호스트 구성 모두 성공
+```
+
+전체 테스트 종료 때 163~165절에 기록한 H2 테이블 정리 뒤 ShedLock 접근 경고와 스케줄러 종료 대기가
+다시 나타났지만 Gradle 최종 판정과 XML 실패·오류는 0이다. E2E가 등록한 닿지 않는 MySQL 대상의 연결
+실패 로그도 같은 의도된 테스트 입력이며 화면 검증 9건은 모두 실행됐다.

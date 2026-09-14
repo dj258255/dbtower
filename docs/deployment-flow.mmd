@@ -25,13 +25,14 @@ flowchart TB
     guard -. 실패 .-> report
   end
 
-  subgraph release["Release · 태그 또는 수동 실행"]
+  subgraph release["Release · SemVer 태그 또는 기존 태그 수동 재게시"]
     direction LR
-    rtest["전체 테스트"]:::release
+    rtest["규약 + 전체 테스트<br/>Playwright E2E skipped=0"]:::release
     qemu["QEMU + Buildx"]:::release
     image["멀티스테이지 이미지<br/>JRE · UID 1001 · HEALTHCHECK"]:::release
     ghcr[("GHCR<br/>amd64 + arm64<br/>SemVer tags")]:::artifact
-    rtest --> qemu --> image --> ghcr
+    githubRelease["GitHub Release<br/>자동 생성"]:::artifact
+    rtest --> qemu --> image --> ghcr --> githubRelease
   end
 
   subgraph runtime["셀프호스트 런타임"]
@@ -58,7 +59,7 @@ flowchart TB
   end
 
   source --> ci
-  source -->|vX.Y.Z · workflow_dispatch| release
+  source -->|vX.Y.Z · 기존 태그 workflow_dispatch| release
   ghcr --> compose
   app -->|TLS · 최소 권한 계정| managed
 

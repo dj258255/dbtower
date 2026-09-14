@@ -33,7 +33,7 @@ README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. �
 
 | 문서 | 역할 |
 |---|---|
-| [operations.md](operations.md) | 수집, 통계, 알림, 배포 운영 시 주의점 |
+| [operations.md](operations.md) | 수집, 통계, 알림, 정식 이미지 배포·업그레이드 시 주의점 |
 | [least-privilege.md](least-privilege.md) | DBMS별 모니터링 계정 최소 권한 |
 | [API.md](API.md) | 인증 방식과 주요 REST·MCP 진입점 |
 | [MANUAL-TEST.md](MANUAL-TEST.md) | 역할별 계정과 변경 티켓 수동 테스트 |

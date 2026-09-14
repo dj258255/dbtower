@@ -1,6 +1,7 @@
 # <img src="docs/icon.svg" width="34" align="top"> DBTower
 
 [![CI](https://github.com/dj258255/dbtower/actions/workflows/ci.yml/badge.svg)](https://github.com/dj258255/dbtower/actions/workflows/ci.yml)
+[![Release](https://github.com/dj258255/dbtower/actions/workflows/release.yml/badge.svg)](https://github.com/dj258255/dbtower/actions/workflows/release.yml)
 
 MySQL, PostgreSQL, SQL Server, Oracle, MongoDB를 한곳에서 관제하고 안전하게 변경하는
 셀프호스트 DB 운영 플랫폼입니다. 기종별 차이는 `DbmsOperator` 뒤로 숨기고, 관제부터
@@ -57,6 +58,8 @@ Java 21 + Spring Boot 4로 만들었으며 웹 콘솔은 별도 빌드 체인이
 ## 빠른 시작
 
 Docker와 Docker Compose만 있으면 앱과 전용 메타 DB를 실행할 수 있습니다.
+현재 정식 버전은 `v1.3.0`입니다. 운영에서는 재현 가능한 업그레이드를 위해 `latest` 대신
+`DBTOWER_TAG=1.3.0`처럼 버전을 고정하는 것을 권장합니다.
 
 ```bash
 cp .env.example .env
@@ -67,6 +70,7 @@ cp .env.example .env
 ```dotenv
 DBTOWER_DB_PASSWORD=change-me-strong-password
 DBTOWER_ENCRYPTION_KEY=<openssl rand -base64 32 결과>
+DBTOWER_TAG=1.3.0
 ```
 
 그다음 컨테이너를 시작합니다.
