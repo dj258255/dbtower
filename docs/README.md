@@ -66,6 +66,7 @@ README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. �
 | [PRESENTATION.md](PRESENTATION.md) | 문제 정의부터 결과까지의 발표 원고 |
 | [TECHNICAL-QA.md](TECHNICAL-QA.md) | 설계·안전·검증에 관한 기술 질문과 답 |
 | [DEMO-5MIN.md](DEMO-5MIN.md) | 역할을 바꿔 가며 진행하는 짧은 시연 순서 |
+| [PI-POLICY.md](PI-POLICY.md) | Pi 로컬 에이전트의 도구·경로·명령·테스트 실행 정책 |
 
 ## 읽는 목적별 경로
 

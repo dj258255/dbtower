@@ -8766,3 +8766,40 @@ linux/arm64    sha256:d204ac883590ea72e522a24fc840a20766511005a65b480d4adae71b82
 
 따라서 이 회차의 배포 범위는 공개 GitHub Release와 GHCR 멀티아치 이미지 게시까지다. 저장소에는
 사용자가 지정한 운영 서버와 접속 자격증명이 없으므로 특정 운영 환경에는 반영하지 않았다.
+
+## 168. Pi 로컬 에이전트 실행 정책 — 모델 지침과 실행 경계를 분리
+
+### 배경과 설계
+
+`AGENTS.md`·`CLAUDE.md`는 모델에게 작업 방법을 알려 주지만, 모델이 틀린 도구 호출을 만들었을 때 그 자체로 실행을 막지는 못한다. Pi의 `tool_call` 사전 실행 훅에 DBTower 정책을 연결해 로컬 에이전트가 호출하는 도구를 경로·명령·승인·검증 상태로 다시 검사한다. Pi 확장은 전체 시스템 권한으로 실행될 수 있으므로, 이 정책은 DBTower 서버의 인증·읽기 전용·변경 티켓 게이트를 대체하지 않는 보조 방어선으로 명시했다.
+
+정책은 `readonly`와 `change` 두 가지다. `readonly`는 읽기 도구만, `change`는 작업공간 안의 파일 변경과 저장소 검증 명령만 허용한다. 파일 변경은 Pi 프로세스를 시작한 사람이 제공한 `DBTOWER_PI_APPROVAL_ID`가 있어야 하며, 셸에서 환경변수를 바꿔도 이미 로드된 확장의 승인값은 변하지 않는다. 작업공간 밖과 `.git`·`.env`·`backups`·`build`·`data`는 두 정책 모두 차단한다.
+
+### 실행 전 차단과 감사
+
+- `git push/reset/clean/checkout/commit`, `kubectl`, `helm`, `terraform apply/destroy`, Docker Compose 기동·삭제와 직접적인 운영 DB 클라이언트를 차단한다.
+- 셸 연결자·리다이렉션·명령 치환·줄바꿈을 차단해 허용 명령 뒤에 다른 동작을 붙이지 못하게 한다.
+- 셸 인자의 절대경로·상위경로·보호경로도 차단해 `find`·`git diff` 같은 읽기 명령으로 작업공간 밖을 가리키지 못하게 한다.
+- 파일 변경·검증 명령·차단 결과를 `.pi/policy-audit.ndjson`에 비밀값을 치환한 JSON Lines로 기록한다. 감사 파일은 `.gitignore`에 넣어 커밋하지 않는다.
+- 파일 변경 뒤 성공한 `test`·`check`·`verify`가 없으면 다음 에이전트 턴을 검증 요청으로 되돌린다. 테스트 후 다시 파일이 바뀌면 게이트를 초기화한다.
+
+### 순수 정책 검증
+
+```text
+node scripts/test-pi-policy.mjs
+Pi policy tests: 19 passed
+./scripts/check-conventions.sh
+규약 검사 전부 통과
+```
+
+검증 범위는 경로 이탈·보호 파일·승인 없는 수정·허용된 테스트·`git push`·`kubectl`·셸 연결자·미등록 명령 차단을 순수 함수로 확인하는 데 있다. Pi CLI와 실제 모델 공급자 호출은 로컬 환경 의존성이 있어 이 저장소의 자동 검증에 포함하지 않았다. 확장 자체를 거치지 않은 curl·MCP 요청이나 악성 Pi 확장은 막을 수 없으므로, 대상 DB 변경은 계속 DBTower의 서버 게이트를 통과해야 한다.
+
+### 실행 스모크
+
+```text
+docker compose up -d                                      대상 DB·모니터링 컨테이너 기동 완료
+SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun               Spring Boot 4.1.0 기동
+GET /actuator/health                                       {"groups":["liveness","readiness"],"status":"UP"}
+```
+
+개발 프로필로 앱을 기동해 PostgreSQL 메타 DB에 Flyway 41개 마이그레이션이 최신임을 확인하고 health 응답을 받은 뒤 프로세스를 종료했다. SQL Server Edge 컨테이너는 Apple Silicon에서 접속 불가 경보가 재현되어 기존 검증 범위(164·165절)대로 별도 SQL Server 2022 경로로 구분했다.

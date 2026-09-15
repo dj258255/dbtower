@@ -52,5 +52,8 @@ infra/k8s/*-secret.yml
 # 로컬 데이터 디렉터리(옛 H2 등) — 저장소에 넣지 않는다
 data/
 
+# Pi 로컬 실행 감사 로그 — 확장 코드는 추적하지만 실행 기록은 개인 환경에 남긴다
+.pi/policy-audit.ndjson
+
 # Playwright MCP 브라우저 산출물(스냅샷·콘솔 로그·임시 스크린샷)
 .playwright-mcp/
