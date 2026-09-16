@@ -31,12 +31,9 @@ body.mode-workbench #mode-workbench { flex: 1; min-height: 0; display: flex; fle
 /* ---------- 유리 판 — 좌·우는 콘텐츠 위에 뜨는 탐색·보조 계층이라 유리, 가운데 작업면은 불투명(AGENTS.md 화면 규칙) ---------- */
 .wb-left, .wb-right {
   background-color: var(--glass-fill);
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, .55) 0%, rgba(255, 255, 255, .14) 26%, rgba(255, 255, 255, 0) 52%);
   -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
   border: 1px solid rgba(255, 255, 255, .62);
   box-shadow: var(--glass-shine), 0 0 0 1px var(--glass-hairline), var(--glass-shadow);
-  /* 유리 위 보조 글자는 한 단계 진하게 — 광원이 가장 진한 자리에서도 4.5:1(138절 계산) */
-  --muted: #5b6475;
 }
 .wb-main {
   background: var(--panel); border: 1px solid rgba(15, 23, 42, .07);
@@ -61,7 +58,7 @@ body.mode-workbench #mode-workbench { flex: 1; min-height: 0; display: flex; fle
 }
 /* 회색 검색칸 위 안내 글자 — 유리 보조색(#5b6475)은 4.49:1로 기준에 모자라 한 단계 진하게(5.16:1) */
 .wb-search::placeholder { color: #525b6c; }
-.wb-search:focus { outline: none; background-color: rgba(255, 255, 255, .92); box-shadow: 0 0 0 3px rgba(79, 94, 247, .22); }
+.wb-search:focus { outline: none; background-color: rgba(255, 255, 255, .92); box-shadow: 0 0 0 3px rgba(10, 106, 168, .22); }
 
 .wb-schema { flex: 1 1 auto; min-height: 180px; }
 /* 트리는 내용만큼만 자란다 — 늘 끝까지 늘리면 테이블이 몇 개뿐일 때 사용법 안내가 사이드바 바닥으로 떨어진다 */
@@ -78,8 +75,8 @@ body.mode-workbench #mode-workbench { flex: 1; min-height: 0; display: flex; fle
 /* 표 아이콘 — 머리 줄이 진한 작은 격자. 글자와 같은 줄에서 테이블과 열을 한눈에 가른다 */
 .tree-name::before {
   content: ""; display: inline-block; width: 12px; height: 10px; margin-right: 7px; vertical-align: -1px;
-  border: 1px solid rgba(79, 94, 247, .55); border-radius: 3px;
-  background: linear-gradient(#4f5ef7, #4f5ef7) top / 100% 3px no-repeat, rgba(79, 94, 247, .12);
+  border: 1px solid rgba(10, 106, 168, .55); border-radius: 3px;
+  background: rgba(10, 106, 168, .12); box-shadow: inset 0 3px 0 #0a6aa8;
 }
 .tree-name:hover, .tree-col:hover span:first-child { color: var(--primary); }
 .tree-count { font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -95,7 +92,7 @@ body.mode-workbench #mode-workbench { flex: 1; min-height: 0; display: flex; fle
   padding: 0 7px; line-height: 17px; color: var(--muted); cursor: pointer; visibility: hidden;
 }
 .tree-row:hover .tree-detail, .tree-row:focus-within .tree-detail { visibility: visible; }
-.tree-detail:hover { color: var(--primary); border-color: rgba(79, 94, 247, .45); }
+.tree-detail:hover { color: var(--primary); border-color: rgba(10, 106, 168, .45); }
 
 /* 스키마 트리 깊이(150절) — 루트 줄, 테이블/뷰 묶음, 기본키 표시, 인덱스 노드 */
 .tree-root { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 0 6px 6px; min-width: 0; }
@@ -109,7 +106,7 @@ body.mode-workbench #mode-workbench { flex: 1; min-height: 0; display: flex; fle
 button.tree-group-head { cursor: pointer; }
 .tree-group-head[aria-expanded="true"] .wb-chevron { transform: rotate(45deg) translate(-1px, -1px); }
 /* 뷰 아이콘 — 테이블 격자를 점선으로. 글자 표기("뷰 · ")는 title에 */
-.tree-name.is-view::before { border-style: dashed; background: rgba(79, 94, 247, .04); }
+.tree-name.is-view::before { border-style: dashed; background: rgba(10, 106, 168, .04); }
 .tree-pk {
   display: inline-block; margin-left: 5px; padding: 0 4px; border-radius: 4px; vertical-align: 1px;
   font-size: 9.5px; font-weight: 700; line-height: 14px; color: #8a4400; background: #fff1e0;
@@ -152,7 +149,7 @@ button.tree-group-head { cursor: pointer; }
   padding: 3px 7px; min-width: 220px; color: var(--text); background: transparent;
 }
 .wb-title:hover { background: #f5f6fa; }
-.wb-title:focus { outline: none; background: #fff; border-color: rgba(79, 94, 247, .45); box-shadow: 0 0 0 3px rgba(79, 94, 247, .16); }
+.wb-title:focus { outline: none; background: #fff; border-color: rgba(10, 106, 168, .45); box-shadow: 0 0 0 3px rgba(10, 106, 168, .16); }
 .wb-version { font-size: 11.5px; color: #5b6475; background: #f2f3f7; border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
 
 .editor {
@@ -163,7 +160,7 @@ button.tree-group-head { cursor: pointer; }
 }
 /* 티켓을 검토할 때는 편집기를 줄여 전후 비교·실행 기록에 높이를 준다(main.js showPane) */
 .wb-main.is-reviewing .editor { height: 84px; min-height: 84px; }
-.editor:focus-within { border-color: rgba(79, 94, 247, .4); box-shadow: 0 0 0 3px rgba(79, 94, 247, .12); }
+.editor:focus-within { border-color: rgba(10, 106, 168, .4); box-shadow: 0 0 0 3px rgba(10, 106, 168, .12); }
 .editor-highlight, .editor-input {
   position: absolute; inset: 0; margin: 0; padding: 12px 14px; border: 0;
   font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace; font-size: 13px; line-height: 20px;
@@ -171,8 +168,8 @@ button.tree-group-head { cursor: pointer; }
 }
 .editor-highlight { color: var(--text); pointer-events: none; background: transparent; }
 .editor-input { background: transparent; color: transparent; caret-color: var(--text); resize: none; outline: none; }
-.editor-input::selection { background: rgba(79, 94, 247, .25); color: transparent; }
-.tk-kw { color: #4f5ef7; font-weight: 600; }
+.editor-input::selection { background: rgba(10, 106, 168, .25); color: transparent; }
+.tk-kw { color: #0a6aa8; font-weight: 600; }
 .tk-str { color: #137a4b; }
 .tk-num { color: #c2410c; }
 .tk-cmt { color: #6b7280; font-style: italic; }
@@ -181,20 +178,19 @@ button.tree-group-head { cursor: pointer; }
   font-size: 12.5px;
 }
 .autocomplete li { display: flex; justify-content: space-between; gap: 12px; padding: 4px 10px; border-radius: 8px; cursor: pointer; }
-.autocomplete li.active { background: rgba(79, 94, 247, .12); }
+.autocomplete li.active { background: rgba(10, 106, 168, .12); }
 .autocomplete li span:last-child { color: var(--muted); font-size: 11px; }
 
 .wb-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; flex-wrap: wrap; }
 .wb-toolbar select {
   padding: 4px 24px 4px 10px; border: 1px solid rgba(15, 23, 42, .1); border-radius: 999px; font: inherit; font-size: 12.5px; background-color: #fff;
 }
-/* 실행 버튼 — 광택 한 줄과 색 그림자로 화면의 주 동작임을 드러낸다. 흰 글자 대비는 아래쪽 색(#4350e0) 6.07:1, 위쪽(#5361f8) 4.74:1 */
+/* 실행 버튼 — 화면의 주 동작이라 이 한 개만 채운 색이다. 광택·색 그림자는 뺐다(175절). 흰 글자 대비 5.77:1, hover 7.32:1 */
 #wb-run {
   border: 0; border-radius: 999px; padding: 5px 18px; font-weight: 700; color: #fff;
-  background: linear-gradient(180deg, #5361f8 0%, #4350e0 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), 0 4px 12px rgba(79, 94, 247, .28);
+  background: #0a6aa8;
 }
-#wb-run:hover { filter: brightness(1.04); }
+#wb-run:hover { background: #085a8f; }
 #wb-run:disabled { filter: saturate(.5); box-shadow: none; }
 #wb-export { border-radius: 999px; }
 .wb-class { font-size: 12px; border-radius: 999px; padding: 2px 10px; }
@@ -216,7 +212,7 @@ button.tree-group-head { cursor: pointer; }
 }
 .wb-rtab:hover { color: var(--text); }
 .wb-rtab.active { background: #fff; color: var(--primary); box-shadow: 0 1px 3px rgba(30, 41, 59, .16), inset 0 1px 0 #fff; }
-.wb-rtab .wb-count { background: rgba(79, 94, 247, .12); color: #3340c9; }
+.wb-rtab .wb-count { background: rgba(10, 106, 168, .12); color: #075985; }
 .wb-pane { flex: 1; min-height: 0; overflow: auto; padding: 4px 14px 14px; }
 .wb-preview { position: relative; }
 .wb-overlay { position: absolute; left: 14px; right: 14px; top: 6px; z-index: 5; padding: 2px; }
@@ -237,7 +233,7 @@ table.grid td.null { color: var(--muted); font-style: italic; }
 table.grid .rownum { color: var(--muted); width: 1%; }
 /* 열 너비 끌기 손잡이 — 머리 칸 오른쪽 끝. 올리거나 끌 때만 색이 보인다 */
 .col-resize { position: absolute; top: 0; right: 0; width: 8px; height: 100%; cursor: col-resize; touch-action: none; }
-.col-resize:hover, .col-resize:active { background: rgba(79, 94, 247, .28); }
+.col-resize:hover, .col-resize:active { background: rgba(10, 106, 168, .28); }
 .th-label { display: block; overflow: hidden; text-overflow: ellipsis; }
 .col-filter { display: block; box-sizing: border-box; width: 100%; min-width: 72px; margin-top: 4px; padding: 2px 6px; border: 1px solid rgba(15, 23, 42, .14); border-radius: 6px; font: inherit; font-size: 11.5px; font-weight: 400; background: #fff; }
 .col-filter:disabled { background: #eef0f4; cursor: not-allowed; }
@@ -279,16 +275,8 @@ body.picking table.grid th:not(.rownum), body.picking .tree-name, body.picking .
 /* ---------- 우: AI 어시스턴트 ---------- */
 .wb-right { display: flex; flex-direction: column; overflow: hidden; }
 .wb-right-head { display: flex; align-items: center; gap: 10px; padding: 14px 14px 10px; }
-/* AI 표식 — 색이 도는 렌즈 한 알. 움직이지 않는다(운영 화면에서 계속 도는 장식은 시선을 뺏는다) */
-.wb-ai-mark {
-  position: relative; flex: none; width: 30px; height: 30px; border-radius: 10px;
-  background: conic-gradient(from 210deg, #6366f1, #22d3ee, #a855f7, #6366f1);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 4px 12px rgba(99, 102, 241, .28);
-}
-.wb-ai-mark::after {
-  content: ""; position: absolute; inset: 8px; border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #fff 0%, rgba(255, 255, 255, .78) 60%, rgba(255, 255, 255, .5) 100%);
-}
+/* AI 표식은 DBTower 로고다(175절) — 전에는 무지개색 렌즈였는데, 어느 제품인지 말해 주지 않는 장식이었다 */
+.wb-ai-mark { flex: none; width: 30px; height: 30px; border-radius: 9px; display: block; }
 .wb-right-titles { display: flex; flex-direction: column; min-width: 0; }
 .wb-right-titles .wb-side-title { font-size: 14px; color: var(--text); }
 .wb-right-sub { font-size: 11.5px; color: var(--muted); }
@@ -298,10 +286,10 @@ body.picking table.grid th:not(.rownum), body.picking .tree-name, body.picking .
 .wb-timeline { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 2px 2px 6px; }
 .wb-empty { color: var(--muted); font-size: 13px; line-height: 1.7; }
 .msg { font-size: 13.5px; line-height: 1.65; }
-/* 사람 말풍선 — 흰 글자 대비 4.91:1(#4f5ef7). AI 답은 읽는 콘텐츠라 유리 위에 불투명에 가까운 흰 카드로 */
+/* 사람 말풍선 — 흰 글자 대비 5.77:1(#0a6aa8). AI 답은 읽는 콘텐츠라 유리 위에 불투명에 가까운 흰 카드로 */
 .msg.user {
-  align-self: flex-end; max-width: 86%; background: #4f5ef7; color: #fff;
-  border-radius: 18px 18px 6px 18px; padding: 8px 13px; white-space: pre-wrap; box-shadow: 0 3px 10px rgba(79, 94, 247, .22);
+  align-self: flex-end; max-width: 86%; background: #0a6aa8; color: #fff;
+  border-radius: 18px 18px 6px 18px; padding: 8px 13px; white-space: pre-wrap; box-shadow: 0 3px 10px rgba(10, 106, 168, .22);
 }
 .msg.user .shared { display: block; font-size: 11px; color: #fff; opacity: .92; margin-top: 2px; }
 .msg.ai {
@@ -315,7 +303,7 @@ body.picking table.grid th:not(.rownum), body.picking .tree-name, body.picking .
 .msg.ai.pending .pending-stage { font-size: 12px; }
 .msg.ai.pending .pending-stage::before {
   content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%;
-  background: var(--primary, #4f5ef7); vertical-align: middle; animation: wb-pending 1.4s ease-in-out infinite;
+  background: var(--primary, #0a6aa8); vertical-align: middle; animation: wb-pending 1.4s ease-in-out infinite;
 }
 @keyframes wb-pending { 50% { opacity: .3; } }
 .msg.ai.pending .ai-text { color: var(--text); margin-top: 4px; }
@@ -347,14 +335,14 @@ body.picking table.grid th:not(.rownum), body.picking .tree-name, body.picking .
   display: flex; align-items: flex-start; gap: 10px; margin-top: 8px; padding: 10px 12px;
   border: 1px solid rgba(15, 23, 42, .08); border-radius: 14px; background: #fff;
 }
-.checkpoint.current { border-color: rgba(79, 94, 247, .6); box-shadow: 0 0 0 1px rgba(79, 94, 247, .6) inset; }
+.checkpoint.current { border-color: rgba(10, 106, 168, .6); box-shadow: 0 0 0 1px rgba(10, 106, 168, .6) inset; }
 .checkpoint .check { width: 18px; height: 18px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; flex: none; margin-top: 2px; }
 .cp-body { flex: 1; min-width: 0; }
 .cp-title { font-weight: 700; font-size: 13px; }
 .cp-meta { font-size: 11.5px; color: var(--muted); }
 .cp-actions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
 .cp-actions button { border: 1px solid rgba(15, 23, 42, .1); background: #fff; border-radius: 999px; font: inherit; font-size: 11.5px; padding: 2px 10px; cursor: pointer; }
-.cp-actions button:hover { border-color: rgba(79, 94, 247, .5); color: var(--primary); }
+.cp-actions button:hover { border-color: rgba(10, 106, 168, .5); color: var(--primary); }
 
 /* 입력창 — 대화 아래에 떠 있는 캡슐. 초점이 오면 빛 테두리로 어디에 쓰는지 드러낸다 */
 .wb-composer {
@@ -363,7 +351,7 @@ body.picking table.grid th:not(.rownum), body.picking .tree-name, body.picking .
   transition: box-shadow .15s ease, border-color .15s ease;
   --muted: #667085;
 }
-.wb-composer:focus-within { border-color: rgba(79, 94, 247, .45); box-shadow: inset 0 1px 0 #fff, 0 0 0 4px rgba(79, 94, 247, .14), 0 8px 24px rgba(30, 41, 59, .09); }
+.wb-composer:focus-within { border-color: rgba(10, 106, 168, .45); box-shadow: inset 0 1px 0 #fff, 0 0 0 4px rgba(10, 106, 168, .14), 0 8px 24px rgba(30, 41, 59, .09); }
 .wb-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip { display: inline-flex; align-items: center; gap: 4px; background: #eef0ff; color: #3340c9; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
 .chip button { border: 0; background: none; color: inherit; cursor: pointer; padding: 0; }
@@ -558,5 +546,4 @@ tr.df-removed td { background: #fdf1f2; }
 }
 @media (max-width: 640px) {
   .wb-shell { padding: 10px; gap: 10px; }
-  .topbar .brand-tag { display: none; }
 }
