@@ -439,22 +439,47 @@ public class DiagnosisService {
     static final int HISTORY_TURNS = 3;
     private static final int HISTORY_QUESTION_CAP = 300;
     private static final int HISTORY_ANSWER_CAP = 800;
+    /** 최근 3턴보다 앞선 질문을 한 줄로 접을 때의 상한 — 개수와 질문 길이. */
+    private static final int EARLIER_QUESTION_LIMIT = 10;
+    private static final int EARLIER_QUESTION_CAP = 80;
 
-    /** 앞선 대화를 참고용 맥락으로 — 비었으면 빈 문자열(예전 프롬프트와 글자 하나 다르지 않다) */
+    /**
+     * 앞선 대화를 참고용 맥락으로 — 비었으면 빈 문자열(예전 프롬프트와 글자 하나 다르지 않다).
+     *
+     * <p>최근 {@value #HISTORY_TURNS}턴은 질문과 답을 함께 싣고, 그보다 앞선 턴은 <b>질문만</b> 한 줄로 접어
+     * "[더 앞선 질문]"에 이어 붙인다. 앞선 답을 요약해 싣지 않는 이유 둘: 요약은 매 진단마다 모델 호출을 써서
+     * 비용이 붙고 요약 오류가 사실처럼 남으며, 애초에 이 진단은 앞선 답을 근거로 쓰지 않는다
+     * (근거는 도구로 다시 확인한다 — 아래 지시). 질문만 있으면 "그 쿼리"가 무엇을 가리키는지 풀기에 충분하다.
+     */
     static String historyBlock(List<PriorTurn> history) {
         if (history == null || history.isEmpty()) {
             return "";
         }
-        List<PriorTurn> recent = history.stream()
+        List<PriorTurn> all = history.stream()
                 .filter(t -> t != null && t.question() != null && !t.question().isBlank())
                 .toList();
-        recent = recent.subList(Math.max(0, recent.size() - HISTORY_TURNS), recent.size());
-        if (recent.isEmpty()) {
+        if (all.isEmpty()) {
             return "";
         }
+        int recentFrom = Math.max(0, all.size() - HISTORY_TURNS);
+        List<PriorTurn> recent = all.subList(recentFrom, all.size());
+        List<PriorTurn> earlier = all.subList(0, recentFrom);
+
         StringBuilder block = new StringBuilder()
                 .append("[앞선 대화] 같은 사람이 이 대상에 대해 방금 나눈 대화다. 후속 질문이 앞 대화를 가리키면(\"그 쿼리\", \"아까 그 시각\") ")
                 .append("뜻을 풀 때만 써라. 여기 적힌 수치·결론은 확인된 사실이 아니므로 근거로 인용하지 말고, 필요한 수치는 도구로 다시 확인하라.\n");
+        if (!earlier.isEmpty()) {
+            // 최근 쪽 10개만 남긴다 — 아주 옛 질문일수록 이번 질문과 이어질 가능성이 낮다
+            List<PriorTurn> head = earlier.subList(Math.max(0, earlier.size() - EARLIER_QUESTION_LIMIT), earlier.size());
+            block.append("[더 앞선 질문] ");
+            for (int i = 0; i < head.size(); i++) {
+                if (i > 0) {
+                    block.append(" / ");
+                }
+                block.append(oneLine(head.get(i).question(), EARLIER_QUESTION_CAP));
+            }
+            block.append('\n');
+        }
         int n = 1;
         for (PriorTurn t : recent) {
             block.append("앞 질문 ").append(n).append(": ").append(oneLine(t.question(), HISTORY_QUESTION_CAP)).append('\n');

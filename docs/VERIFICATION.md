@@ -9461,3 +9461,61 @@ PersonaUiE2ETest            tests 10  failures 0   (결과 XML 11:05:38 UTC)
 - **로고 색은 그대로다.** 검은 바탕에 보라 육각형이라 이제 화면에서 보라는 로고뿐이다. 브랜드 표식이라 사용자 결정으로 남겼다
 - **버튼 종류는 아직 줄이지 않았다.** `.btn-accent`·`.btn-dark`·`.btn-target`·`.btn-base`가 남아 있다. 구간 버튼 둘은 뜻이 있는 색이고, 나머지는 쓰는 화면을 정리하는 4·5단계에서 함께 본다
 - 좁은 화면은 이번에 재지 않았다(레이아웃은 바꾸지 않고 색·테두리·모서리만 바꿨다)
+
+## 176. 관제 AI 대화를 서버에 저장하고, AI로 나가던 슬로우 쿼리 값을 가린다 (2026-09-16)
+
+### 왜
+
+173절의 채팅은 대화를 브라우저 탭에만 두고 앞선 대화를 요청 본문 `history`로 받았다. 탭을 닫으면 사라지고, 브라우저가 보낸 글을
+그대로 프롬프트에 실었다. 또 화면에 "내부 쿼리의 값은 AI로 보내지 않는다"를 쓰기 전에 그 말이 사실인지 코드로 확인해야 했다.
+
+### 바꾼 것
+
+| 부분 | 내용 |
+|---|---|
+| 저장 | `V46__console_conversation.sql` — 대화(소유자·인스턴스·제목·마지막 대화 시각)와 턴(질문·답·근본원인·확신도·도구 호출·소요). 도구 호출은 결과 본문을 비워 저장 |
+| API | `GET/POST /api/instances/{id}/conversations`, `GET/PATCH/DELETE .../{cid}`. 남의 대화·다른 인스턴스 대화·팀 범위 밖은 모두 404 |
+| 진단 | 본문 `{question, conversationId?}`. `history` 필드는 없앴다(보내도 무시). 대화 id가 있으면 서버가 DB 턴으로 맥락을 만들고, AI가 실제로 답했을 때만 턴을 남긴다 |
+| 맥락 | 최근 3턴은 질문 300자·답 800자, 그 앞은 질문만 최대 10개·각 80자를 "[더 앞선 질문]" 한 줄로. AI 요약은 쓰지 않는다(턴마다 모델 호출, 요약 오류가 사실처럼 남음, 진단은 앞 답을 근거로 쓰지 않는다) |
+| 스트림 | 답을 보낸 뒤 턴 저장이 실패하면(진단 중 대화 삭제 등) 서버 로그에만 남긴다. 동기 경로는 실패를 그대로 올린다 |
+| 값 가리기 | `InsightController.slowQueries`에 `queryMasker.apply` |
+
+### 데이터 보호 — 도구별로 따라가 본 결과
+
+진단은 도구 결과를 가공 없이 AI 입력에 넣는다. 그래서 값이 새지 않으려면 도구 결과를 만드는 REST 응답에서 가려져야 한다.
+
+| 도구 | 가리는 곳 | 고치기 전 |
+|---|---|---|
+| sessions | `InsightController.sessions` `queryMasker.apply` | 가려짐 |
+| query_stats | `InsightController.queryStats` `QueryMasker.maskLiterals` | 가려짐 |
+| compare | `QuerySnapshot` 생성자 | 가려짐 |
+| **slow_queries** | **없었다** | **원문이 AI로 나감(MySQL slow_log·MongoDB profile)** |
+| explain | 인자(요청 SQL)만 가린다. 실행계획 결과는 일부러 안 가린다(rows·cost가 진단의 본체) | 결과에 리터럴이 되돌아올 수 있다 |
+
+`DiagnosisObservationMaskingTest`는 실제 `InsightController`를 태워, 대상이 `WHERE email = 'leak@example.com' AND id = 424242`를 돌려줄 때
+AI가 받은 입력에 `leak@example.com`이 없고 `email = ? AND id = ?`가 있음을 세션·상위 쿼리·슬로우 쿼리 경로에서 단언한다.
+
+알아 둘 비대칭: `dbtower.masking.enabled=false`로 끄면 `apply()`를 쓰는 sessions·slow_queries·live는 원문이 되지만,
+static `maskLiterals`를 쓰는 query_stats·compare는 계속 가린다. `mask-ai-prompt` 플래그는 진단 경로에 영향이 없다.
+
+화면 영향: 슬로우 쿼리 표의 문장이 이제 `?`로 보인다(사용자 결정 — 세션·Top Query와 같은 규칙). 이 표에는 행 클릭·복사·워크벤치로 열기가
+걸려 있지 않아(`app.js` `bindRowClicks` 호출은 상위 쿼리·비교 표 두 곳) 가려진 문장 때문에 막히는 조작은 없다. 코드를 읽어 확인했고 브라우저로 누르지는 않았다.
+
+### 테스트
+
+추가: `ConversationControllerTest` 11(소유·인스턴스·팀 범위 404, 제목 검증, 삭제 시 턴 삭제, 맥락 이어짐, 본문 history 무시, 도구 결과 본문 미저장, 대화 없는 진단 미저장),
+`ConversationServiceTest` 8, `DiagnosisTurnStorageTest` 4(AI 비활성·예외·답 없음이면 미저장, 스트림 중 삭제 시 error 이벤트 없음),
+`DiagnosisObservationMaskingTest` 2, `InsightControllerQueryStatsTest` 슬로우 쿼리 1.
+"스트림 중 삭제" 테스트는 고치기 전 코드로 돌리면 `event:result` 뒤에 `event:error`가 나와 실패하는 것을 확인했다.
+
+```text
+./scripts/check-conventions.sh   규약 검사 전부 통과
+./gradlew test                   테스트 1003, 실패 0, 오류 0, 건너뜀 50 (시작 11:47:25 UTC, 가장 늦은 결과 11:49:01 UTC)
+```
+
+### 정직하게 남기는 범위
+
+- **화면은 아직 이 API를 쓰지 않는다.** 다음 묶음(채팅 화면)까지 관제 채팅은 앞선 대화를 기억하지 못한다(본문 history를 더는 받지 않으므로)
+- 코드를 먼저 짚는 교차 검토 모델이 사용량 한도라 이번 묶음은 그 단계 없이, 메인 검토에서 diff를 직접 읽었다. 거기서 보고서와 코드가 다른 곳(답 없는 턴 저장)과 스트림 오류 이벤트를 찾아 고쳤다
+- 스트림 경로에서 턴 저장이 성공하는 경우는 SSE 테스트가 없다(동기 경로 테스트가 저장·맥락을 덮는다)
+- explain 결과의 리터럴, lakehouse 마트의 파라미터 값은 확인하지 않았다
