@@ -14,10 +14,15 @@
 
 ![DBTower 상세 아키텍처](architecture-detail.svg)
 
-현재 구조의 기준은 Spring Modulith 16개 모듈, `DbmsOperator` 구현 5종, MCP 도구 19개,
-Flyway V41이다. 웹 콘솔과 MCP는 같은 서비스 코어와 호출자 권한을 사용하고, AI는 읽기와
+현재 구조의 기준은 Spring Modulith 17개 모듈, `DbmsOperator` 구현 5종, MCP 도구 19개,
+Flyway V44다. 웹 콘솔과 MCP는 같은 서비스 코어와 호출자 권한을 사용하고, AI는 읽기와
 변경 요청까지만 참여한다. 대상 DB 변경은 `review`가 승인한 티켓을 `workbench` 실행 계층이
 검증할 때만 허용한다.
+
+사람이 화면 앞에 없어도 도는 경로는 `aiops` 모듈이 맡는다 — Slack·경보·스케줄이 만든 비동기 작업을
+같은 권한·사실·검증·감사로 처리하고, 큐·검색·알림은 플랫폼 밖 실행면(`integrations/ai-ops-gateway`)에 둔다.
+모델이 낸 수치는 플랫폼이 모은 사실과 대조해 어긋나면 "검증되지 않음"으로 남긴다
+([AI 운영 작업](AI-OPERATIONS-AUTOMATION.md)).
 
 - [데이터 도메인 지도](erd.svg): V1~V41에서 역할이 큰 테이블과 증거의 연결
 - [진단에서 실행까지](insight-flow.svg): AI와 사람의 책임, 승인·실행 불변식

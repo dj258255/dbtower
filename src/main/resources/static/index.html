@@ -285,6 +285,20 @@
 
         <!-- 진단 -->
         <div class="mon-group" data-group="diag" hidden>
+          <div class="monitor-card aiops-card">
+            <h3>AI 운영 작업 <span class="hint">(Slack·경보에서 시작된 비동기 진단 — 사실은 DBTower가 모으고 AI는 1차 소견만, 판단은 사람이 합니다)</span></h3>
+            <div class="aiops-bar">
+              <label class="aiops-scope"><input type="checkbox" id="aiops-all-instances"> 다른 대상 작업도 보기</label>
+              <span id="aiops-status" class="muted" role="status">조회 중...</span>
+            </div>
+            <div class="table-scroll">
+              <table class="qtable" id="aiops-table">
+                <thead><tr><th>상태</th><th>유형</th><th>대상</th><th>요청자</th><th>시작</th><th></th></tr></thead>
+                <tbody><tr><td colspan="6" class="muted">조회 중...</td></tr></tbody>
+              </table>
+            </div>
+            <div id="aiops-detail" class="aiops-detail" hidden></div>
+          </div>
           <div class="monitor-card advisors-card">
             <h3>Advisors <span class="hint">(자동 점검 — 읽고 조언만, 대상 DB는 바꾸지 않습니다 / 심각도별)</span></h3>
             <div id="advisors-summary" class="advisors-summary"></div>

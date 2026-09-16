@@ -506,6 +506,18 @@ function handleInstanceDeepLink(list) {
       runCompare();
     });
   }
+  // Slack 결과·경보가 건 링크(?aiop=작업id)로 들어오면 그 작업을 연다 — 링크가 JSON API를 가리키면 사람이 읽을 화면이 없다
+  const deepJob = params.get("aiop");
+  if (deepJob) {
+    ready.then(() => {
+      // 카드가 Monitoring 탭 안에 있다 — 그룹만 바꾸면 탭이 Top Query에 머물러 화면에 아무것도 안 뜬다(다른 딥링크와 같은 처리)
+      document.querySelector('.tab[data-tab="monitor"]').click();
+      showMonGroup("diag");
+      $("#aiops-all-instances").checked = true;
+      loadAiOperations().then(() => openAiOperation(deepJob));
+      document.querySelector(".aiops-card")?.scrollIntoView({ block: "start" });
+    });
+  }
   // 진단 입력은 늘 보이는 AI 칸에 있다(149절) — 모니터링 탭을 열 필요 없이 질문을 채운다
   if (deepQ) { const input = $("#diagnose-question"); input.value = deepQ; input.scrollIntoView({ block: "center" }); input.focus(); }
   if (deepView === "config-drift") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadConfigDrift(); $("#config-drift-result").scrollIntoView({ block: "center" }); }
@@ -533,7 +545,7 @@ async function selectInstance(instance, card) {
   live.history = [];
   drawLiveSpark();
   syncLive();
-  await Promise.all([loadOverview(), loadActivity(), loadMetrics(), loadBackupInfo(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks(), loadReviews()]);
+  await Promise.all([loadOverview(), loadActivity(), loadMetrics(), loadBackupInfo(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadAiOperations(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks(), loadReviews()]);
 }
 
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
@@ -586,6 +598,154 @@ async function loadAdvisors() {
         ${findings}${note}
       </div>`;
   }).join("");
+}
+
+// ---------- AI 운영 작업 (169절) — Slack·경보에서 시작된 비동기 진단을 사람이 보는 화면 ----------
+// 사실(DBTower가 모음)과 AI 소견(모델이 만듦)을 한 덩어리로 보여주지 않는다. 검증 안 된 수치가 있으면 소견보다 먼저 세운다.
+const AIOP_TYPE_LABEL = {
+  QUERY_DIAGNOSIS: "쿼리 진단", REGRESSION_EXPLANATION: "회귀 원인", BACKUP_RISK_REVIEW: "백업 위험",
+  SLO_RISK_REVIEW: "SLO 위험", ADVISOR_SUMMARY: "Advisor 요약", COST_REVIEW: "비용 검토",
+  INCIDENT_TRIAGE: "장애 초기 진단", DB_TEAM_INQUIRY: "DB팀 문의", PERIODIC_REPORT: "정기 리포트",
+};
+const AIOP_STATUS_LABEL = {
+  RECEIVED: "접수", AUTHORIZED: "선점", COLLECTING: "사실 수집", RETRIEVING: "자료 검색",
+  ANALYZING: "AI 분석", VERIFYING: "검증", COMPLETED: "완료", FAILED: "실패", CANCELLED: "취소",
+};
+const AIOP_TRIGGER_LABEL = { WEB: "웹", SLACK: "Slack", ALERT: "경보", SCHEDULE: "스케줄", API: "API" };
+const AIOP_ACTIVE = new Set(["RECEIVED", "AUTHORIZED", "COLLECTING", "RETRIEVING", "ANALYZING", "VERIFYING"]);
+const aiops = { jobs: [], openId: null, timer: null };
+
+async function loadAiOperations() {
+  const body = $("#aiops-table tbody");
+  if (!body) return;
+  let jobs;
+  try {
+    jobs = await api("/api/ai-operations?limit=30");
+  } catch (e) {
+    $("#aiops-status").textContent = `조회 실패: ${e.message}`;
+    body.innerHTML = `<tr><td colspan="6" class="muted">조회 실패</td></tr>`;
+    return;
+  }
+  aiops.jobs = jobs;
+  renderAiOperations();
+  scheduleAiOpsRefresh();
+}
+
+function renderAiOperations() {
+  const body = $("#aiops-table tbody");
+  const all = $("#aiops-all-instances")?.checked;
+  const rows = aiops.jobs.filter((j) => all || !state.instance || j.instanceId === state.instance.id);
+  const active = rows.filter((j) => AIOP_ACTIVE.has(j.status)).length;
+  $("#aiops-status").textContent = rows.length
+    ? `${rows.length}건 표시${active ? ` — 진행 중 ${active}건은 5초마다 갱신합니다` : ""}`
+    : "작업이 없습니다 — Slack에서 인스턴스 이름과 함께 물어보면 여기에 쌓입니다";
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="6" class="muted">표시할 작업이 없습니다</td></tr>`;
+    $("#aiops-detail").hidden = true;
+    return;
+  }
+  body.innerHTML = rows.map((j) => {
+    const name = j.instanceId ? (state.instances.find((i) => i.id === j.instanceId)?.name ?? `#${j.instanceId}`) : "범위 전체";
+    return `<tr class="aiop-row${j.jobId === aiops.openId ? " open" : ""}" data-job="${esc(j.jobId)}">
+      <td><span class="aiop-badge aiop-${esc(j.status)}">${esc(AIOP_STATUS_LABEL[j.status] ?? j.status)}</span></td>
+      <td>${esc(AIOP_TYPE_LABEL[j.type] ?? j.type)}</td>
+      <td>${esc(name)}</td>
+      <td>${esc(j.requester)} <span class="muted">(${esc(AIOP_TRIGGER_LABEL[j.trigger] ?? j.trigger)})</span></td>
+      <td>${esc(String(j.requestedAt).replace("T", " ").slice(0, 19))}</td>
+      <td><button type="button" class="btn btn-small aiop-open">보기</button></td>
+    </tr>`;
+  }).join("");
+  body.querySelectorAll(".aiop-row").forEach((tr) => {
+    tr.querySelector(".aiop-open").addEventListener("click", () => openAiOperation(tr.dataset.job));
+  });
+  if (aiops.openId && rows.some((j) => j.jobId === aiops.openId)) openAiOperation(aiops.openId, { quiet: true });
+}
+
+// 참고 자료 본문은 600자짜리 런북 발췌라 화면에서는 줄인다 — 전체는 API 응답에 그대로 있다
+const AIOP_ITEM_CAP = 240;
+const aiopList = (title, items, extra = "", cap = 0) => (items && items.length)
+  ? `<div class="aiop-block ${extra}"><h4>${esc(title)}</h4><ul>${items.map((i) => {
+      const text = cap && i.length > cap ? `${i.slice(0, cap)}...` : i;
+      return `<li${cap && i.length > cap ? ` title="${esc(i)}"` : ""}>${esc(text)}</li>`;
+    }).join("")}</ul></div>` : "";
+
+async function openAiOperation(jobId, opts = {}) {
+  const box = $("#aiops-detail");
+  aiops.openId = jobId;
+  if (!opts.quiet) { box.hidden = false; box.innerHTML = `<div class="muted">불러오는 중...</div>`; }
+  let job;
+  try {
+    job = await api(`/api/ai-operations/${encodeURIComponent(jobId)}`);
+  } catch (e) {
+    box.hidden = false;
+    box.innerHTML = `<div class="muted">작업을 열지 못했습니다: ${esc(e.message)}</div>`;
+    return;
+  }
+  const r = job.result;
+  const canRetry = job.status === "FAILED" && state.caps.has("TARGET_OPERATE");
+  const canCancel = AIOP_ACTIVE.has(job.status);
+  const head = `
+    <div class="aiop-detail-head">
+      <span class="aiop-badge aiop-${esc(job.status)}">${esc(AIOP_STATUS_LABEL[job.status] ?? job.status)}</span>
+      <strong>${esc(AIOP_TYPE_LABEL[job.type] ?? job.type)}</strong>
+      <span class="muted">작업 ${esc(job.jobId.slice(0, 8))} · 시도 ${esc(String(job.attempt))} · 구간 ${esc(String(job.windowFrom).slice(11, 19))}~${esc(String(job.windowTo).slice(11, 19))}</span>
+      <span class="aiop-actions">
+        ${canCancel ? `<button type="button" class="btn btn-small" id="aiop-cancel">취소</button>` : ""}
+        ${canRetry ? `<button type="button" class="btn btn-small" id="aiop-retry">재시도</button>` : ""}
+      </span>
+    </div>
+    <div class="aiop-prompt"><span class="muted">요청:</span> ${esc(job.prompt)}</div>`;
+  const failure = job.failureReason ? `<div class="aiop-block aiop-warn"><h4>실패 사유</h4><p>${esc(job.failureReason)}</p></div>` : "";
+  let result = "";
+  if (r) {
+    const opinion = r.aiOpinion
+      ? `<div class="aiop-block aiop-opinion"><h4>AI 1차 소견 <span class="muted">(판단은 사람이 합니다 · ${esc(r.backend ?? "")} · ${esc(r.promptVersion ?? "")})</span></h4><p>${esc(r.aiOpinion)}</p></div>`
+      : `<div class="aiop-block muted"><h4>AI 1차 소견</h4><p>없음 — 규칙 판정만 제공합니다</p></div>`;
+    result = [
+      aiopList("검증되지 않은 내용", r.unverifiedClaims, "aiop-warn"),
+      aiopList("규칙 판정", r.ruleFindings),
+      opinion,
+      aiopList("근거", r.evidence),
+      aiopList("불확실한 점", r.uncertainties),
+      aiopList("다음 조치", r.nextActions),
+      r.approvalRequired ? `<div class="aiop-block aiop-warn"><h4>승인</h4><p>대상 DB를 바꿀 수 있는 조치가 언급됐습니다. 실행은 워크벤치 변경 요청으로 승인을 받습니다.</p></div>` : "",
+      aiopList("DBTower가 모은 사실", r.facts),
+      aiopList("참고 자료 (과거 사례·런북 — 현재 사실이 아닙니다)", r.references, "", AIOP_ITEM_CAP),
+    ].join("");
+  } else if (AIOP_ACTIVE.has(job.status)) {
+    result = `<div class="aiop-block muted"><p>진행 중입니다. 사실을 모으고 분석이 끝나면 여기에 결과가 붙습니다.</p></div>`;
+  }
+  box.hidden = false;
+  box.innerHTML = head + failure + result;
+  $("#aiop-cancel")?.addEventListener("click", () => aiOperationAction(jobId, "cancel"));
+  $("#aiop-retry")?.addEventListener("click", () => aiOperationAction(jobId, "retry"));
+  document.querySelectorAll(".aiop-row").forEach((tr) => tr.classList.toggle("open", tr.dataset.job === jobId));
+}
+
+async function aiOperationAction(jobId, action) {
+  try {
+    await api(`/api/ai-operations/${encodeURIComponent(jobId)}/${action}`, { method: "POST" });
+  } catch (e) {
+    $("#aiops-status").textContent = `${action === "cancel" ? "취소" : "재시도"} 실패: ${e.message}`;
+    return;
+  }
+  await loadAiOperations();
+  openAiOperation(jobId);
+}
+
+// 진행 중 작업이 있고 이 카드가 실제로 보일 때만 갱신한다 — 안 보는 화면이 폴링을 계속하면 서버만 바쁘다
+function setupAiOperations() {
+  $("#aiops-all-instances")?.addEventListener("change", renderAiOperations);
+  document.addEventListener("visibilitychange", scheduleAiOpsRefresh);
+}
+
+function scheduleAiOpsRefresh() {
+  clearTimeout(aiops.timer);
+  const card = document.querySelector(".aiops-card");
+  const visible = document.visibilityState === "visible" && card && card.offsetParent !== null;
+  const active = aiops.jobs.some((j) => AIOP_ACTIVE.has(j.status));
+  if (!visible || !active) return;
+  aiops.timer = setTimeout(loadAiOperations, 5000);
 }
 
 // ---------- 비용/효율 FinOps (D6) — 낭비 후보를 종류별로, 신호까지만(절감액 산출 없음) ----------
@@ -3084,6 +3244,7 @@ function showMonGroup(name) {
   document.querySelectorAll(".mon-tab").forEach((t) => t.classList.toggle("active", t.dataset.mon === name));
   document.querySelectorAll(".mon-group").forEach((g) => { g.hidden = g.dataset.group !== name; });
   syncLive();
+  scheduleAiOpsRefresh();
 }
 
 function setupPresets() {
@@ -3182,6 +3343,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupTooltip();        // 네이티브 title을 예쁜 커스텀 툴팁으로 자동 승격(전역 위임)
   setupInstanceFilter(); // 검색·필터 이벤트 연결(검색·필터 구동 렌더)
   setupPresets();
+  setupAiOperations();
   // SQL 편집 시 하이라이트 레이어를 따라 갱신·스크롤 동기화(투명 textarea 오버레이)
   $("#detail-sql").addEventListener("input", updateSqlHl);
   $("#detail-sql").addEventListener("scroll", () => { const h = $("#detail-sql-hl"); if (h) { h.scrollTop = $("#detail-sql").scrollTop; h.scrollLeft = $("#detail-sql").scrollLeft; } });

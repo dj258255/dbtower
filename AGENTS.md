@@ -9,6 +9,8 @@
 ./scripts/check-conventions.sh # 규약 검사 (모듈 경계·Lombok·이모지·기종 분기 기준선)
 ./gradlew test                 # 테스트
 docker compose up -d           # 대상 DB 5종 + 모니터링 스택
+docker compose --profile aiops up -d aiops-redis aiops-vector   # AI 운영 작업 실행면을 쓸 때만(플랫폼은 Redis를 모른다)
+(cd integrations/ai-ops-gateway && .venv/bin/python -m pytest -q)  # 실행면 테스트(인프라 없으면 해당 항목 건너뜀)
 # 앱 기동 — 암호화 키는 필수다(프로필 미설정은 fail-closed. SecretCipher 주석 참고).
 # 키 없이 로컬에서 띄우려면 SPRING_PROFILES_ACTIVE=dev 를 준다.
 DBTOWER_ENCRYPTION_KEY=$(openssl rand -base64 32) DBTOWER_WEBHOOK_URL="" ./gradlew bootRun
@@ -21,8 +23,10 @@ DBTOWER_ENCRYPTION_KEY=$(openssl rand -base64 32) DBTOWER_WEBHOOK_URL="" ./gradl
 ## 저장소 구조
 
 ```text
-src/main/java/io/dbtower/    Spring Modulith 모듈 16개 (순환·internal 침범은 ModularityTests가,
+src/main/java/io/dbtower/    Spring Modulith 모듈 17개 (순환·internal 침범은 ModularityTests가,
                              레이어 규칙은 scripts/check-conventions.sh가 빌드에서 강제)
+├── aiops/       AI 운영 작업 — 진단 종류(쿼리·회귀·백업·SLO·Advisor·비용·장애·문의·리포트)를 한 작업 모델로,
+│                사실 수집·모델 호출·결과 검증·Outbox까지 (실행면은 integrations/ai-ops-gateway)
 ├── operator/    DbmsOperator 인터페이스 + 5기종 구현(MySQL/PostgreSQL/MSSQL/Oracle/MongoDB), 커넥션 풀/클라이언트 캐시
 ├── registry/    인스턴스 등록·헬스체크
 ├── insight/     스냅샷 수집, 시점 비교, 활동 그래프, 파라미터/스키마 diff
@@ -40,7 +44,10 @@ src/main/java/io/dbtower/    Spring Modulith 모듈 16개 (순환·internal 침�
 ├── slo/         SLO/에러 버짓
 └── workbench/   거버넌스 SQL 워크벤치 (조회 콘솔·AI 보조·승인 티켓 실행·행/구조/계획/인스턴스 간 전후 비교)
 src/main/resources/static/   웹 콘솔 (의존성 0 정적 SPA)
-docs/            DESIGN, VERIFICATION(실측 기록), PRESENTATION, ROADMAP, ai-analysis-rules
+integrations/    플랫폼 밖에서 도는 것들 — ai-ops-gateway(Slack 입구·Outbox 릴레이·LangGraph 실행기),
+                 n8n(완료 웹훅 워크플로). 권한·사실·검증은 여기 두지 않고 DBTower API를 거친다
+docs/            DESIGN, VERIFICATION(실측 기록), PRESENTATION, ROADMAP, ai-analysis-rules,
+                 AI-OPERATIONS-AUTOMATION(AI 운영 작업 설계)
 scripts/         dbtower-mcp.sh (MCP stdio 실행기)
 ```
 
@@ -71,6 +78,9 @@ scripts/         dbtower-mcp.sh (MCP stdio 실행기)
 - MCP·웹훅 등 채널 계층에 비즈니스 로직을 두지 않는다 — 전부 REST/서비스 코어에 위임. 위임의 주체는 호출자 그대로 둔다
   (서비스 토큰으로 바꿔 부르면 요청자·감사 기록이 사람을 잃는다 — McpHttpController 주석)
 - AI는 판단자가 아니라 1차 분석기다. 판단 기준은 docs/ai-analysis-rules.md에 사람이 정하고, AI는 그 위에서만 판정
+- 비동기 AI 작업(aiops)에서 틀렸을 때 손해가 큰 일은 플랫폼이 한다 — 권한·팀 범위, 사실 수집, 모델 호출, 결과 검증, 감사.
+  큐·재시도·검색·알림은 실행면(integrations)이 맡되, 실행면이 보낸 사실·상태를 그대로 믿지 않는다(리스 토큰·전이 표·수치 대조)
+- 모델이 낸 수치와 인용은 플랫폼이 모은 사실과 대조해 어긋나면 결과에 "검증되지 않음"으로 남긴다. 지우거나 조용히 고치지 않는다
 
 ## 코드 컨벤션
 

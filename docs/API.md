@@ -108,6 +108,59 @@ TLS가 필요한 대상은 `"useTls": true`를 추가합니다. 인증서 검증
 | `GET|POST /api/security/users` | 사용자 조회와 생성 |
 | `PATCH /api/security/users/{username}/role` | 사용자 역할 변경 |
 
+### AI 운영 작업 (169절)
+
+사람·게이트웨이가 쓰는 경로다. 범위는 호출자 기준으로 걸러진다(범위 밖은 404 — 다른 팀 작업의 존재를 드러내지 않는다).
+
+| 메서드 | 경로 | 권한 | 설명 |
+|---|---|---|---|
+| `POST` | `/api/ai-operations` | VIEWER | 작업 접수(202). 같은 `requestId`면 기존 작업을 그대로 돌려준다 |
+| `GET` | `/api/ai-operations?limit=30` | VIEWER | 최근 작업 목록(결과 본문 제외) |
+| `GET` | `/api/ai-operations/{jobId}` | VIEWER | 작업 상태와 결과(사실·규칙 판정·AI 소견·근거·검증 안 된 내용) |
+| `POST` | `/api/ai-operations/{jobId}/cancel` | 요청자 본인 또는 OPERATOR | 진행 중 작업 취소 |
+| `POST` | `/api/ai-operations/{jobId}/retry` | OPERATOR | 실패한 작업을 새 시도로 되돌린다(모델을 다시 쓰는 판단이라 운영자) |
+
+접수 본문. 로그인한 사람이 올리면 `requester`·`team`은 무시하고 인증 주체로 채운다 — 본문을 믿으면 요청자를 위조할 수 있다.
+
+```json
+{
+  "requestId": "slack:Ev123",
+  "type": "QUERY_DIAGNOSIS",
+  "instanceId": 2,
+  "windowMinutes": 30,
+  "prompt": "최근 30분 느려진 쿼리 봐줘",
+  "trigger": "SLACK",
+  "requester": "slack:T1:U1",
+  "team": "team-a",
+  "replyChannel": "C1",
+  "replyThread": "1789496747.218421"
+}
+```
+
+유형은 `QUERY_DIAGNOSIS`, `REGRESSION_EXPLANATION`, `BACKUP_RISK_REVIEW`, `SLO_RISK_REVIEW`,
+`ADVISOR_SUMMARY`, `COST_REVIEW`, `INCIDENT_TRIAGE`, `DB_TEAM_INQUIRY`, `PERIODIC_REPORT`.
+상태는 `RECEIVED → AUTHORIZED → COLLECTING → (RETRIEVING) → ANALYZING → VERIFYING → COMPLETED`이고,
+실패·취소는 각각 `FAILED`·`CANCELLED`다. 승인 대기 상태는 두지 않는다 — 변경 승인은 review 모듈이 단일 권위다.
+
+#### 릴레이·실행기 (서비스 토큰 전용)
+
+전부 ADMIN이며, 선점 이후 단계는 `X-Lease-Token` 헤더가 맞아야 한다. 사람이 이 경로로 단계를 건너뛰면 사실 수집 없이 소견이 붙는다.
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| `POST` | `/api/ai-operations/outbox/claim?limit=20` | 미발행 이벤트를 리스로 선점(조건부 UPDATE — 두 릴레이가 같은 행을 가져가지 않는다) |
+| `POST` | `/api/ai-operations/outbox/{eventId}/published` | 발행 완료. 선점 토큰이 다르면 409 |
+| `POST` | `/api/ai-operations/{jobId}/claim` | 작업 선점(`RECEIVED`에서만). 중복 배달은 409, 범위가 깨졌으면 작업을 실패로 만들고 알림 전용 토큰과 함께 409 |
+| `POST` | `/api/ai-operations/{jobId}/facts` | 유형이 정한 범위의 사실·규칙 판정 수집과 저장 |
+| `POST` | `/api/ai-operations/{jobId}/retrieving` | 참고 자료 검색 단계 표시 |
+| `POST` | `/api/ai-operations/{jobId}/analyze` | 저장된 사실 + 본문의 참고 자료로 모델 소견을 받고, 수치·인용을 대조한 뒤 완료 |
+| `POST` | `/api/ai-operations/{jobId}/fail` | 실행 실패 기록 |
+| `GET` | `/api/ai-operations/{jobId}/lease-view` | 재배달된 실행기가 이어갈 지점을 찾기 위한 조회 |
+| `POST` | `/api/ai-operations/{jobId}/notified` | 알림 완료 기록. 이미 보냈으면 `alreadyNotified: true` |
+
+성공한 실행기·릴레이 호출은 요청 단위 감사에서 빠진다(릴레이가 매초 폴링해 감사 로그를 덮었다 — 169절).
+대신 선점·사실 수집·완료·실패는 작업 id와 함께 감사에 남고, 거부(403)·충돌(409)은 그대로 기록된다.
+
 ## MCP
 
 Streamable HTTP 진입점은 `POST /mcp`입니다. stdio 실행기는 `scripts/dbtower-mcp.sh`를

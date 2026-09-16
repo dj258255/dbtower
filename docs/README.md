@@ -20,6 +20,7 @@ README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. �
 
 | 문서 | 역할 |
 |---|---|
+| [AI-OPERATIONS-AUTOMATION.md](AI-OPERATIONS-AUTOMATION.md) | AI 운영 작업 — Slack·경보·스케줄이 만든 작업을 사실 수집·모델 소견·결과 검증·알림으로 잇는 설계와 경계 |
 | [DESIGN.md](DESIGN.md) | 현재 아키텍처, 핵심 결정, 안전 원칙 |
 | [ai-analysis-rules.md](ai-analysis-rules.md) | 기종별 실행계획 판단 근거와 예외 |
 | [modules/](modules/) | Spring Modulith가 생성한 모듈 구조와 의존 관계 |
