@@ -329,7 +329,11 @@ dbtower:
   aiops:
     # AI 운영 작업(169절) — 접수는 DBTower, 실행은 외부 실행기(integrations/ai-ops-gateway). 플랫폼은 Redis를 모른다.
     max-active-per-requester: 3   # 요청자별 진행 중 작업 상한 — Slack에서 같은 질문을 연달아 올려도 모델 호출이 쌓이지 않게
-    lease-seconds: 300            # 실행기 리스 — 단계 전이마다 연장. 모델 한 번이 이보다 오래 걸리면 리퍼가 실패로 정리한다
+    # 실행기 리스 — 단계 전이마다 연장. 한 단계가 이보다 오래 걸리면 리퍼가 실패로 정리한다.
+    # 실행면의 단계별 HTTP 제한(AI_OPS_COLLECT_TIMEOUT_S 기본 180, AI_OPS_ANALYZE_TIMEOUT_S 기본 240)은
+    # 반드시 이 값보다 작아야 한다. 크면 실행기가 아직 기다리는 사이 리퍼가 작업을 닫고, 실행기의 다음 호출은
+    # 409를 받아 메시지를 확인 처리해 버린다 — 재배달이 없으니 실패 알림도 나가지 않는다(170절 2번과 같은 침묵)
+    lease-seconds: 300
     received-timeout-minutes: 30  # 접수 뒤 아무도 가져가지 않으면 실패로 드러낸다(릴레이·큐 정지 신호)
     outbox-claim-seconds: 60      # 릴레이 선점 리스 — 발행 완료를 못 알리고 죽으면 이 뒤 다시 발행된다(중복은 작업 선점이 흡수)
     default-window-minutes: 60    # 분석 구간 기본값(요청이 비웠을 때)
