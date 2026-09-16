@@ -286,7 +286,7 @@
         <!-- 진단 -->
         <div class="mon-group" data-group="diag" hidden>
           <div class="monitor-card aiops-card">
-            <h3>AI 운영 작업 <span class="hint">(Slack·경보에서 시작된 비동기 진단 — 사실은 DBTower가 모으고 AI는 1차 소견만, 판단은 사람이 합니다)</span></h3>
+            <h3>AI 운영 작업 <span class="hint">(Slack·경보·콘솔에서 시작된 비동기 진단 — 사실은 DBTower가 모으고 AI는 1차 소견만, 판단은 사람이 합니다)</span></h3>
             <div class="aiops-bar">
               <label class="aiops-scope"><input type="checkbox" id="aiops-all-instances"> 다른 대상 작업도 보기</label>
               <span id="aiops-status" class="muted" role="status">조회 중...</span>
@@ -519,7 +519,7 @@
       <span class="wb-ai-mark" aria-hidden="true"></span>
       <div class="ai-sheet-titles">
         <span class="ai-sheet-title">AI 어시스턴트</span>
-        <span class="ai-sheet-sub">자연어 근본원인 진단 · 대상 DB는 바꾸지 않습니다</span>
+        <span class="ai-sheet-sub">지금 보기: 자연어 진단 · 맡기기: 비동기 AI 운영 작업 — 대상 DB는 바꾸지 않습니다</span>
       </div>
     </div>
     <div class="diagnose-card">
@@ -528,6 +528,26 @@
         <input type="text" id="diagnose-question" class="diagnose-q" placeholder="예: 어제 오후에 왜 느려졌어?" spellcheck="false">
         <button id="btn-diagnose" class="btn btn-primary btn-small">진단</button>
       </div>
+      <div class="aiop-submit" role="group" aria-label="AI 운영 작업 맡기기">
+        <select id="aiop-new-type" class="aiop-select" aria-label="작업 유형">
+          <option value="QUERY_DIAGNOSIS">쿼리 진단</option>
+          <option value="REGRESSION_EXPLANATION">회귀 원인</option>
+          <option value="INCIDENT_TRIAGE">장애 초기 진단</option>
+          <option value="BACKUP_RISK_REVIEW">백업 위험</option>
+          <option value="SLO_RISK_REVIEW">SLO 위험</option>
+          <option value="ADVISOR_SUMMARY">Advisor 요약</option>
+          <option value="COST_REVIEW">비용 검토</option>
+          <option value="DB_TEAM_INQUIRY">DB팀 문의</option>
+        </select>
+        <select id="aiop-new-window" class="aiop-select" aria-label="분석 구간">
+          <option value="30">최근 30분</option>
+          <option value="60" selected>최근 1시간</option>
+          <option value="180">최근 3시간</option>
+          <option value="1440">최근 24시간</option>
+        </select>
+        <button id="btn-aiop-submit" class="btn btn-small">작업으로 맡기기</button>
+      </div>
+      <div id="aiop-submit-status" class="aiop-submit-status muted" role="status"></div>
       <p class="hint ai-sheet-note">ANTHROPIC_API_KEY 또는 claude CLI가 있어야 합니다. 질문과 도구 호출은 감사 기록에 남습니다.</p>
     </div>
   </aside>

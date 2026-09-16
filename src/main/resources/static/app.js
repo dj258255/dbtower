@@ -36,6 +36,7 @@ const state = {
   lastFindings: [],    // 마지막 규칙 기반 지적
   lastAi: null,        // 마지막 AI 분석
   role: null,          // 로그인 주체의 대표 역할(표시용)
+  username: null,      // 로그인 주체의 이름(/api/me username) — 내 작업에만 취소 버튼을 붙이는 판정에 쓴다
   caps: new Set(),     // 로그인 주체의 능력(/api/me capabilities) — 버튼·메뉴는 역할 이름이 아니라 이것으로 가른다
 };
 
@@ -683,7 +684,9 @@ async function openAiOperation(jobId, opts = {}) {
   }
   const r = job.result;
   const canRetry = job.status === "FAILED" && state.caps.has("TARGET_OPERATE");
-  const canCancel = AIOP_ACTIVE.has(job.status);
+  // 취소는 요청자 본인이나 운영자만 된다(서버가 403으로 막는다) — 눌러서 403을 받는 버튼을 만들지 않는다
+  const canCancel = AIOP_ACTIVE.has(job.status)
+    && (job.requester === state.username || state.caps.has("TARGET_OPERATE"));
   const head = `
     <div class="aiop-detail-head">
       <span class="aiop-badge aiop-${esc(job.status)}">${esc(AIOP_STATUS_LABEL[job.status] ?? job.status)}</span>
@@ -736,7 +739,41 @@ async function aiOperationAction(jobId, action) {
 // 진행 중 작업이 있고 이 카드가 실제로 보일 때만 갱신한다 — 안 보는 화면이 폴링을 계속하면 서버만 바쁘다
 function setupAiOperations() {
   $("#aiops-all-instances")?.addEventListener("change", renderAiOperations);
+  $("#btn-aiop-submit")?.addEventListener("click", submitAiOperation);
   document.addEventListener("visibilitychange", scheduleAiOpsRefresh);
+}
+
+// 같은 칸의 "지금 보기"(자연어 진단)와 달리, 여기서 만든 작업은 사실 수집·검증을 거쳐 나중에 결과가 붙는다.
+async function submitAiOperation() {
+  const status = $("#aiop-submit-status");
+  const btn = $("#btn-aiop-submit");
+  if (!state.instance) { status.textContent = "인스턴스를 먼저 선택하세요."; return; }
+  const prompt = $("#diagnose-question").value.trim();
+  if (!prompt) { status.textContent = "무엇을 봐 달라고 할지 적어 주세요. 위 입력칸을 함께 씁니다."; return; }
+  const type = $("#aiop-new-type").value;
+  btn.disabled = true;
+  status.textContent = "접수 중...";
+  let accepted = null;
+  try {
+    accepted = await api("/api/ai-operations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type, instanceId: state.instance.id,
+        windowMinutes: Number($("#aiop-new-window").value), prompt, trigger: "WEB" }),
+    });
+    status.textContent = `${AIOP_TYPE_LABEL[accepted.type] ?? accepted.type} 작업 ${String(accepted.jobId ?? "").slice(0, 8)}을 접수했습니다.`;
+    showMonGroup("diag");
+    document.querySelector('.tab[data-tab="monitor"]')?.click();
+    await loadAiOperations();
+    if (accepted.jobId) openAiOperation(accepted.jobId);
+  } catch (e) {
+    // 접수까지는 됐는데 그 뒤가 실패한 경우를 "접수 실패"로 적지 않는다 — 작업은 이미 만들어져 돌고 있다
+    status.textContent = accepted
+      ? `접수는 됐지만 목록을 갱신하지 못했습니다: ${e.message}`
+      : `접수하지 못했습니다: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function scheduleAiOpsRefresh() {
@@ -2093,6 +2130,7 @@ async function loadMe() {
   try {
     const me = await api("/api/me");
     state.role = me.role;
+    state.username = me.username;
     state.caps = new Set(me.capabilities || []);
     $("#user-chip").innerHTML =
       `${esc(me.username)}<span class="role-badge" title="${esc(me.role)}">${esc(ROLE_LABEL[me.role] || me.role)}</span>`;
