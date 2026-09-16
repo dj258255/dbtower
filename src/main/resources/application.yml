@@ -340,7 +340,14 @@ dbtower:
     alert-triggers:
       # 나간 경보(회귀 감지·운영 경보)를 AI 작업으로 이어 붙인다. 켜면 경보마다 모델 호출이 생겨 기본은 끈다
       enabled: ${DBTOWER_AIOPS_ALERT_TRIGGERS:false}
-      reply-channel: ${DBTOWER_AIOPS_ALERT_CHANNEL:}   # 결과를 붙일 Slack 채널 id(비우면 DBTower·n8n으로만 남는다)
+    channels:
+      # 결과를 돌려보낼 Slack 채널. 팀마다 보는 채널이 달라 표로 받는다 — 한 채널로 몰면 남의 팀 대상 결과가 섞인다
+      default: ${DBTOWER_AIOPS_CHANNEL:}
+      by-team: ${DBTOWER_AIOPS_CHANNELS_BY_TEAM:}      # team-a=C111,team-b=C222. 표에 없는 팀은 Slack으로 보내지 않는다(기본 채널은 팀이 없는 결과의 자리)
+    periodic-report:
+      # 주 1회 팀별 운영 요약. 켜면 주마다 팀 수만큼 모델 호출이 생겨 기본은 끈다
+      enabled: ${DBTOWER_AIOPS_PERIODIC_REPORT:false}
+      cron: ${DBTOWER_AIOPS_PERIODIC_REPORT_CRON:0 0 9 * * MON}
     inquiry-trigger:
       # DB팀 문의 뒤에 사실·규칙·AI 소견을 붙인다. 경보와 달리 사람이 직접 누른 한 건이라 기본으로 켠다
       enabled: ${DBTOWER_AIOPS_INQUIRY_TRIGGER:true}
