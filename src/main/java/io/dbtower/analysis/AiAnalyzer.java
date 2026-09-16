@@ -82,7 +82,9 @@ public class AiAnalyzer {
         /** D3 자연어 근본원인 진단 루프 (DiagnosisService) — 1건이 여러 호출이라 비용 구조가 다르다 */
         DIAGNOSE,
         /** 워크벤치 AI 보조 (WorkbenchAssistant) — 사람 대화 한 턴에 1회, SQL 제안만 한다 */
-        WORKBENCH;
+        WORKBENCH,
+        /** 비동기 AI 운영 작업 (aiops) — 큐로 들어온 작업 1건에 1회, 수집된 사실 위에서만 소견을 낸다 */
+        AIOPS;
 
         String tag() {
             return name().toLowerCase(Locale.ROOT);

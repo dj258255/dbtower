@@ -47,7 +47,8 @@ public class AuditInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
                                 Object handler, Exception ex) {
-        if (!AuditPolicy.shouldRecord(request.getMethod(), request.getRequestURI())) {
+        if (!AuditPolicy.shouldRecord(request.getMethod(), request.getRequestURI())
+                || AuditPolicy.recordedByService(request.getRequestURI(), response.getStatus())) {
             return;
         }
         // 여기 도달했다면 인가를 통과한 요청 — anyRequest().authenticated()라 인증 주체가 항상 있다

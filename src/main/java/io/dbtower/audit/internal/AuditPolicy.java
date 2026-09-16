@@ -17,6 +17,9 @@ public final class AuditPolicy {
 
     private static final Set<String> RECORDED_METHODS = Set.of("POST", "PUT", "DELETE");
     private static final Pattern INSTANCE_PATH = Pattern.compile("/api/(?:workbench/)?instances/(\\d+)(?:/.*)?");
+    /** AI 운영 작업의 릴레이·실행기 단계 경로(169절) */
+    private static final Pattern EXECUTOR_STEP = Pattern.compile(
+            "/api/ai-operations/(?:outbox/.*|[^/]+/(?:claim|facts|retrieving|analyze|fail|notified))");
 
     private AuditPolicy() {
     }
@@ -29,6 +32,17 @@ public final class AuditPolicy {
      */
     public static boolean shouldRecord(String method, String path) {
         return path != null && path.startsWith("/api/") && RECORDED_METHODS.contains(method);
+    }
+
+    /**
+     * 요청 단위로 남기지 않아도 되는 성공한 기계 호출인가 — AI 운영 작업의 릴레이·실행기 단계.
+     *
+     * <p>릴레이는 Outbox를 매초 선점해 본다. 요청 단위로 남기자 기동 20초 만에 빈 선점 기록 19행이 쌓였다(169절) — 하루면 8만 행이
+     * 감사 로그를 덮는다. 이 단계의 의미 있는 사건(선점·사실 수집·완료·실패)은 AiOperationWorkflow가 작업 id와 함께 직접 남긴다.
+     * 성공 응답만 뺀다: 거부(403)·충돌(409)·오류는 누가 기계 경로를 두드렸는지의 흔적이라 그대로 남긴다.</p>
+     */
+    public static boolean recordedByService(String path, int status) {
+        return status < 400 && path != null && EXECUTOR_STEP.matcher(path).matches();
     }
 
     /** /api/instances/{id}/... 또는 /api/workbench/instances/{id}/... 꼴이면 대상 인스턴스 id, 아니면 null — 인스턴스별 이력 추적용 */

@@ -1,6 +1,7 @@
 package io.dbtower.alert.internal.job;
 
 import io.dbtower.alert.internal.AlertEmbeds;
+import io.dbtower.alert.AlertRaisedEvent;
 import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.backup.BackupFreshness;
 import io.dbtower.backup.BackupFreshness.Status;
@@ -18,7 +19,9 @@ import io.dbtower.registry.InstanceDeletedEvent;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -59,6 +62,18 @@ public class OpsAlertDetector {
     private final ComparisonService comparisonService;
     private final BackupFreshnessService backupFreshnessService;
     private final WebhookNotifier notifier;
+
+    /** 운영 경보는 지금 상태 신호라 구간이 없다 — 후속 분석은 직전 1시간을 본다 */
+    private static final int OPERATIONS_WINDOW_MINUTES = 60;
+
+    // 전송에 성공한 경보를 다른 모듈에 알린다. 생성자가 아니라 주입 메서드로 받는 이유: 테스트가 생성자를 직접 부르고,
+    // 이벤트를 듣는 쪽이 없어도 감지는 그대로 돌아야 해서 기본값을 아무것도 안 하는 발행기로 둔다
+    private ApplicationEventPublisher events = event -> { };
+
+    @Autowired
+    void setEvents(ApplicationEventPublisher events) {
+        this.events = events;
+    }
 
     private final int idleTxnSeconds;
     private final int replicationLagSeconds;
@@ -204,6 +219,8 @@ public class OpsAlertDetector {
                 ha.clearPendingRole();
             } else if (notify(instance, findings)) {
                 cooldown.commit(now);
+                events.publishEvent(new AlertRaisedEvent(AlertRaisedEvent.Source.OPERATIONS, instance.getId(),
+                        instance.getName(), findings, OPERATIONS_WINDOW_MINUTES, now));
                 ha.commitPendingRole();
             } else {
                 // 전송 실패·레이트리밋 — 쿨다운도 역할 기준선도 확정하지 않는다. 다음 폴에서 같은 신호를

@@ -236,6 +236,15 @@ public class SecurityConfig {
                                 "/api/workbench/tickets/*/resolve").hasRole("OPERATOR")
                         // 워크벤치(조회 계정으로 대상 DB의 행 값 조회·AI 제안·워크시트)는 요청자부터 — 관제 지표와 달리 데이터를 보는 경로다
                         .requestMatchers("/api/workbench/**").hasRole("REQUESTER")
+                        // AI 운영 작업(169절) — 릴레이·실행기 경로는 서비스 토큰(ADMIN)만. 사람이 이 경로로 작업 단계를 건너뛰면
+                        // 사실 수집 없이 소견이 붙는다. 선점 뒤 단계는 리스 토큰까지 맞아야 해서 ADMIN 사람도 남의 작업을 진행시키지 못한다
+                        .requestMatchers(HttpMethod.POST, "/api/ai-operations/outbox/**", "/api/ai-operations/*/claim",
+                                "/api/ai-operations/*/facts", "/api/ai-operations/*/retrieving", "/api/ai-operations/*/analyze",
+                                "/api/ai-operations/*/fail", "/api/ai-operations/*/notified").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/ai-operations/*/lease-view").hasRole("ADMIN")
+                        // 재시도는 모델 호출을 다시 쓰는 운영 판단이라 운영자. 접수·조회·취소는 관제 사용자부터(범위·본인 여부는 서비스가 본다)
+                        .requestMatchers(HttpMethod.POST, "/api/ai-operations/*/retry").hasRole("OPERATOR")
+                        .requestMatchers("/api/ai-operations", "/api/ai-operations/**").hasRole("VIEWER")
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage("/login.html")

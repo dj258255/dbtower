@@ -326,6 +326,18 @@ dbtower:
       slo-at-risk: 10          # SLO 위험(AT_RISK) 감점
       backup-no-backup: 20     # 백업 없음(사각지대) 감점 — 데이터 부족이 아니라 실제 위험
       backup-stale: 12         # 백업 오래됨(STALE) 감점
+  aiops:
+    # AI 운영 작업(169절) — 접수는 DBTower, 실행은 외부 실행기(integrations/ai-ops-gateway). 플랫폼은 Redis를 모른다.
+    max-active-per-requester: 3   # 요청자별 진행 중 작업 상한 — Slack에서 같은 질문을 연달아 올려도 모델 호출이 쌓이지 않게
+    lease-seconds: 300            # 실행기 리스 — 단계 전이마다 연장. 모델 한 번이 이보다 오래 걸리면 리퍼가 실패로 정리한다
+    received-timeout-minutes: 30  # 접수 뒤 아무도 가져가지 않으면 실패로 드러낸다(릴레이·큐 정지 신호)
+    outbox-claim-seconds: 60      # 릴레이 선점 리스 — 발행 완료를 못 알리고 죽으면 이 뒤 다시 발행된다(중복은 작업 선점이 흡수)
+    default-window-minutes: 60    # 분석 구간 기본값(요청이 비웠을 때)
+    reaper-ms: 60000
+    alert-triggers:
+      # 나간 경보(회귀 감지·운영 경보)를 AI 작업으로 이어 붙인다. 켜면 경보마다 모델 호출이 생겨 기본은 끈다
+      enabled: ${DBTOWER_AIOPS_ALERT_TRIGGERS:false}
+      reply-channel: ${DBTOWER_AIOPS_ALERT_CHANNEL:}   # 결과를 붙일 Slack 채널 id(비우면 DBTower·n8n으로만 남는다)
   ai:
     model: claude-opus-4-8
     # AI 판단 기준 문서 — AGENTS.md의 "판단 기준은 사람이 정하고 AI는 그 위에서만 판정" 원칙의 원천.

@@ -2,6 +2,7 @@ package io.dbtower.alert.internal.job;
 
 import io.dbtower.alert.internal.AlertEmbeds;
 import io.dbtower.alert.internal.PlanChangeTracker;
+import io.dbtower.alert.AlertRaisedEvent;
 import io.dbtower.alert.internal.WebhookNotifier;
 import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.AiAnalyzer.CallSite;
@@ -15,7 +16,9 @@ import io.dbtower.registry.RegistryService;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -65,6 +68,15 @@ public class RegressionDetector {
 
     private final PlanChangeTracker planChangeTracker;
     private final DbmsOperatorFactory operators;
+
+    // 전송에 성공한 경보를 다른 모듈에 알린다. 생성자가 아니라 주입 메서드로 받는 이유: 테스트가 생성자를 직접 부르고,
+    // 이벤트를 듣는 쪽이 없어도 감지는 그대로 돌아야 해서 기본값을 아무것도 안 하는 발행기로 둔다
+    private ApplicationEventPublisher events = event -> { };
+
+    @Autowired
+    void setEvents(ApplicationEventPublisher events) {
+        this.events = events;
+    }
 
     public RegressionDetector(RegistryService registryService,
                               ComparisonService comparisonService,
@@ -119,6 +131,8 @@ public class RegressionDetector {
                 if (!findings.isEmpty()) {
                     if (notify(instance, findings)) {
                         commitCooldown(now);
+                        events.publishEvent(new AlertRaisedEvent(AlertRaisedEvent.Source.REGRESSION, instance.getId(),
+                                instance.getName(), findings, recentMinutes + baselineMinutes, now));
                     } else {
                         // 전송 실패·레이트리밋 — 쿨다운 미확정. 다음 폴에서 다시 감지해 재시도한다.
                         pendingCooldown.clear();
