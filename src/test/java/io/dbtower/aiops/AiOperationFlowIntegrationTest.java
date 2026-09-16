@@ -62,7 +62,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Outbox 선점은 실빈으로 태운다(IncidentReportIntegrationTest와 같은 방침). 모델은 목이다 — 로컬에 claude CLI가 있어
  * 실빈이면 실제 모델을 부른다. 실제 모델까지 이은 관통은 docs/VERIFICATION.md 169절에 따로 남긴다.</p>
  */
-@SpringBootTest(properties = {"dbtower.aiops.reaper-initial-delay-ms=3600000", "dbtower.aiops.max-active-per-requester=3"})
+@SpringBootTest(properties = {"dbtower.aiops.reaper-initial-delay-ms=3600000", "dbtower.aiops.max-active-per-requester=3",
+        "dbtower.aiops.max-active-alert-jobs=3"})
 @AutoConfigureMockMvc
 class AiOperationFlowIntegrationTest {
 
@@ -339,7 +340,28 @@ class AiOperationFlowIntegrationTest {
                 .formatted(teamA)).andExpect(status().isConflict());
     }
 
+    @Test
+    @WithMockUser(username = "api-token", roles = "ADMIN")
+    void 경보에서_시작된_작업은_요청자가_달라도_전체_상한에_묶이고_사람이_맡긴_작업은_막지_않는다() throws Exception {
+        // 경보의 요청자는 alert:<인스턴스>라 인스턴스마다 다르다 — 요청자별 상한(3)만으로는 넷째도 들어갔다(170절 5번)
+        for (int i = 0; i < 3; i++) {
+            submitAsAlert("alert:db-" + i).andExpect(status().isAccepted());
+        }
+        submitAsAlert("alert:db-3").andExpect(status().isConflict());
+
+        // 경보 상한은 경보에만 걸린다 — 같은 순간 사람이 게이트웨이로 맡긴 작업은 자리가 남아 있어야 한다
+        submitAsGateway("QUERY_DIAGNOSIS", "slack:U1");
+        assertThat(jdbc.queryForObject("select count(*) from ai_operation_job where trigger_source = 'ALERT'", Integer.class))
+                .isEqualTo(3);
+    }
+
     // ---- 도우미 ----
+
+    private Json submitAsAlert(String requester) throws Exception {
+        return submit("""
+                {"type": "INCIDENT_TRIAGE", "instanceId": %d, "prompt": "수집 정지 경보", "trigger": "ALERT",
+                 "requester": "%s", "team": "team-a"}""".formatted(teamA, requester));
+    }
 
     private String submitAsGateway(String type, String requester) throws Exception {
         return submit("""

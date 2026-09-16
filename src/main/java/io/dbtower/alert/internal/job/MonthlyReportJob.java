@@ -36,8 +36,14 @@ public class MonthlyReportJob {
         this.baseUrl = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
     }
 
-    /** 매월 1일 09:00(KST 기준 서버 시간). cron은 초 분 시 일 월 요일. */
-    @Scheduled(cron = "${dbtower.monthly-report.cron:0 0 9 1 * *}")
+    /**
+     * 매월 1일 09:00 KST. cron은 초 분 시 일 월 요일.
+     *
+     * <p>zone을 반드시 준다. 서버 시간이 KST라고 적혀 있었지만 DbtowerApplication이 JVM 기본 시간대를 UTC로
+     * 고정하므로(C-6) zone이 없으면 이 크론은 UTC로 해석돼 매월 1일 18시 KST에 돈다(170절 3번과 같은 함정).</p>
+     */
+    @Scheduled(cron = "${dbtower.monthly-report.cron:0 0 9 1 * *}",
+            zone = "${dbtower.monthly-report.zone:Asia/Seoul}")
     @SchedulerLock(name = "monthly-report", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void publish() {
         LocalDateTime to = LocalDateTime.now();

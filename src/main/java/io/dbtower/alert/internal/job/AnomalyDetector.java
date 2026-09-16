@@ -2,12 +2,14 @@ package io.dbtower.alert.internal.job;
 
 import io.dbtower.alert.internal.AlertEmbeds;
 import io.dbtower.alert.internal.WebhookNotifier;
+import io.dbtower.alert.internal.persistence.CooldownStore;
 import io.dbtower.insight.BaselineService;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -15,8 +17,6 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 베이스라인 이상 자동 감지 폴러 (Phase D1) — RegressionDetector의 "평소 대비" 동반자.
@@ -37,18 +37,8 @@ public class AnomalyDetector {
     private final BaselineService baselineService;
     private final WebhookNotifier notifier;
 
-    private final int cooldownMinutes;
-
-    /** key = instanceId:queryId, value = 마지막 알림 시각. RegressionDetector와 같은 인메모리 쿨다운(HA 한계도 동일) */
-    private final Map<String, LocalDateTime> lastAlerted = new ConcurrentHashMap<>();
-
-    /**
-     * 이번 인스턴스 패스에서 쿨다운을 통과한 키 — <b>전송이 실제로 성공해야 확정한다.</b>
-     * 예전에는 판정과 동시에 확정해서, 웹훅이 잠깐 죽거나 레이트리밋에 걸린 순간의 경보가
-     * 쿨다운 때문에 재감지조차 되지 않고 영구히 사라졌다. 폴러는 ShedLock으로 단일 흐름이다.
-     */
-    private final java.util.List<String> pendingCooldown = new java.util.ArrayList<>();
-
+    /** 쿼리별 쿨다운 — key = instanceId:queryId. 전송이 성공해야 확정한다(RegressionDetector와 같은 게이트) */
+    private final CooldownGate cooldown;
 
     public AnomalyDetector(RegistryService registryService,
                            BaselineService baselineService,
@@ -57,11 +47,17 @@ public class AnomalyDetector {
         this.registryService = registryService;
         this.baselineService = baselineService;
         this.notifier = notifier;
-        this.cooldownMinutes = cooldownMinutes;
+        this.cooldown = new CooldownGate(cooldownMinutes, "anomaly");
+    }
+
+    // 테스트가 생성자를 직접 부르므로 저장소는 세터로 받는다 — 기본은 인메모리, 운영은 메타 DB(재기동해도 쿨다운이 이어진다)
+    @Autowired
+    void setCooldownStore(CooldownStore store) {
+        cooldown.attach(store);
     }
 
     // HA 분산 락(Phase A5): SnapshotScheduler·RegressionDetector와 같은 이유로 한 시점에 한 노드만 돈다.
-    // 쿨다운 맵이 노드별 인메모리인 잔여 한계는 RegressionDetector 주석과 동일하다(중복 알림 최대 1회, 수용 가능).
+    // 쿨다운은 메타 DB에 둔다 — 락 보유 노드가 바뀌거나 재기동해도 이어진다(RegressionDetector 주석, 170절 4번).
     @Scheduled(fixedDelayString = "${dbtower.baseline.poll-ms:120000}")
     @SchedulerLock(name = "baseline-anomaly-detect", lockAtLeastFor = "PT110S", lockAtMostFor = "PT4M")
     public void detect() {
@@ -71,10 +67,10 @@ public class AnomalyDetector {
                 BaselineService.AnomalyScan scan = baselineService.detectAnomalies(instance.getId(), now);
                 if (!scan.anomalies().isEmpty()) {
                     if (notify(instance, scan, now)) {
-                        commitCooldown(now);
+                        cooldown.commit(now);
                     } else {
                         // 전송 실패·레이트리밋 — 쿨다운 미확정. 다음 폴에서 다시 감지해 재시도한다.
-                        pendingCooldown.clear();
+                        cooldown.clearPending();
                         log.warn("이상 감지 알림 전송 실패 instance={} — 쿨다운 미확정", instance.getName());
                     }
                 }
@@ -119,18 +115,7 @@ public class AnomalyDetector {
     }
 
     private boolean underCooldown(Long instanceId, String queryId, LocalDateTime now) {
-        String key = instanceId + ":" + queryId;
-        LocalDateTime last = lastAlerted.get(key);
-        if (last != null && last.plusMinutes(cooldownMinutes).isAfter(now)) {
-            return false;
-        }
-        pendingCooldown.add(key);   // 확정은 전송 성공 후(commitCooldown)
-        return true;
+        return cooldown.pass(instanceId + ":" + queryId, now);   // 확정은 전송 성공 후(cooldown.commit)
     }
 
-    /** 전송 성공 — 이번 패스에서 통과한 키들의 쿨다운을 그때 확정한다. */
-    private void commitCooldown(java.time.LocalDateTime now) {
-        pendingCooldown.forEach(k -> lastAlerted.put(k, now));
-        pendingCooldown.clear();
-    }
 }

@@ -1,6 +1,7 @@
 package io.dbtower.aiops.internal;
 
 import io.dbtower.advisor.AdvisorService;
+import io.dbtower.aiops.AiOperationTrigger;
 import io.dbtower.aiops.AiOperationType;
 import io.dbtower.backup.BackupFreshnessService;
 import io.dbtower.finops.FinOpsQuery;
@@ -18,6 +19,8 @@ import io.dbtower.score.ScoreQuery;
 import io.dbtower.slo.SloService;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -114,5 +117,39 @@ class FactCollectorTest {
                 .isTrue();
         assertThat(FactCollector.catalog(new QueryDiff("s", "SELECT @@session.transaction_isolation", 0, 0, null, 0, 0, null,
                 0, 0, null, false))).isTrue();
+    }
+
+    @Test
+    void 경보가_만든_회귀_작업은_감지기와_같은_창으로_다시_비교한_사실을_싣고_사람이_올린_작업에는_싣지_않는다() {
+        when(score.scoreFor(anyLong())).thenReturn(new HealthScoreView(2L, 49, "F", false));
+        when(waits.inWindow(anyLong(), any(), any(), anyInt())).thenReturn(List.of());
+        OffsetDateTime to = OffsetDateTime.parse("2026-09-16T06:34:49Z");
+        OffsetDateTime from = to.minusMinutes(20); // AlertTriggerListener가 넘기는 창 = 최근 5 + 직전 15
+        WindowSummary w = new WindowSummary(815, 1304.0, 1.6, 90000, 12);
+        // 170절 주입 회귀 — 조인 키에 인덱스 없는 자기조인. 경보는 이 쿼리를 QPS 0.35, rows/call 4000으로 보고했다
+        QueryDiff injected = new QueryDiff("4be7af9b", "SELECT COUNT(*) FROM sample.orders o1 JOIN sample.orders o2 ON o1.amount = o2.amount",
+                0.0, 0.35, null, 0.0, 1.2, null, 0.0, 4000.0, null, true);
+        // 감지기 창(직전 15분 -> 최근 5분)으로 불렸을 때만 그 쿼리를 준다. 20분 창 비교에서는 같은 쿼리가 초당 0.1로 희석된다
+        when(comparison.compare(anyLong(), any(), any(), any(), any())).thenAnswer(inv -> {
+            LocalDateTime baseFrom = inv.getArgument(1), baseTo = inv.getArgument(2);
+            LocalDateTime targetFrom = inv.getArgument(3), targetTo = inv.getArgument(4);
+            boolean detectorWindow = Duration.between(baseFrom, baseTo).toMinutes() == 15
+                    && Duration.between(targetFrom, targetTo).toMinutes() == 5 && baseTo.equals(targetFrom);
+            QueryDiff diluted = new QueryDiff("4be7af9b", injected.queryText(), 0.0, 0.1, null, 0.0, 1.2, null, 0.0, 4000.0, null, true);
+            return new CompareResult(w, w, 0.0, 20.8, 0.0, 1, List.of(detectorWindow ? injected : diluted));
+        });
+
+        var fromAlert = collector.collect(AiOperationType.REGRESSION_EXPLANATION, AiOperationTrigger.ALERT, List.of(instance), from, to);
+
+        assertThat(fromAlert.facts())
+                .anyMatch(f -> f.contains("[경보 기준: 최근 5분 vs 직전 15분]") && f.contains("쿼리 4be7af9b (새 쿼리)")
+                        && f.contains("초당 0.35") && f.contains("호출당 행 4000.0"))
+                // 원래 창의 사실도 그대로 남는다 — 경보 창이 대신하는 것이 아니라 덧붙는다
+                .anyMatch(f -> f.startsWith("[mysql-a] 쿼리 4be7af9b") && f.contains("초당 0.1"));
+        // 판정은 경보가 이미 냈다 — 창이 다른 판정을 하나 더 세우지 않는다
+        assertThat(fromAlert.ruleFindings()).noneMatch(r -> r.contains("경보 기준"));
+
+        var fromPerson = collector.collect(AiOperationType.REGRESSION_EXPLANATION, AiOperationTrigger.WEB, List.of(instance), from, to);
+        assertThat(fromPerson.facts()).noneMatch(f -> f.contains("경보 기준"));
     }
 }

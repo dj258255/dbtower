@@ -3,6 +3,7 @@ package io.dbtower.alert.internal.job;
 import io.dbtower.alert.internal.AlertEmbeds;
 import io.dbtower.alert.AlertRaisedEvent;
 import io.dbtower.alert.internal.WebhookNotifier;
+import io.dbtower.alert.internal.persistence.CooldownStore;
 import io.dbtower.backup.BackupFreshness;
 import io.dbtower.backup.BackupFreshness.Status;
 import io.dbtower.backup.BackupFreshnessService;
@@ -75,6 +76,13 @@ public class OpsAlertDetector {
         this.events = events;
     }
 
+    // 쿨다운 저장소도 같은 이유로 세터로 받는다 — 테스트는 인메모리 기본값으로 규칙만 보고, 운영은 메타 DB에 둬서
+    // 재기동해도 이미 알린 신호를 쿨다운 창 안에서 다시 알리지 않는다. split-brain 감지(HaObserver)가 같은 게이트를 쓴다
+    @Autowired
+    void setCooldownStore(CooldownStore store) {
+        cooldown.attach(store);
+    }
+
     private final int idleTxnSeconds;
     private final int replicationLagSeconds;
     private final int snapshotStallMinutes;
@@ -114,7 +122,7 @@ public class OpsAlertDetector {
         this.replicationLagSeconds = replicationLagSeconds;
         this.snapshotStallMinutes = snapshotStallMinutes;
         this.slotRetainedBytes = slotRetainedMb * 1024 * 1024;
-        this.cooldown = new CooldownGate(cooldownMinutes);
+        this.cooldown = new CooldownGate(cooldownMinutes, "ops");
         this.ha = new HaObserver(notifier, cooldown);
     }
 

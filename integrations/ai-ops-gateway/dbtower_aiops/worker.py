@@ -70,6 +70,7 @@ class Worker:
         self._consumer = consumer
         self._max_deliveries = max_deliveries
         self._claim_idle_ms = claim_idle_ms
+        self._concurrency = concurrency
         self._slots = asyncio.Semaphore(concurrency)
 
     async def handle(self, message_id: str, fields: dict[str, str]) -> str:
@@ -161,30 +162,50 @@ class Worker:
             finally:
                 beat.cancel()
 
-    async def poll_once(self, block_ms: int = BLOCK_MS) -> int:
-        tasks = []
-        # 다른 실행기가 죽었거나 일시 오류로 확인 못한 메시지를 먼저 가져온다
+    async def _fetch(self, count: int, block_ms: int) -> list[tuple[str, dict[str, str]]]:
+        """가져올 메시지 — 멈춘 것(다른 실행기가 죽었거나 일시 오류로 확인 못한 것)을 먼저, 그다음 새 것."""
         _, reclaimed, _ = await self._redis.xautoclaim(self._stream, self._group, self._consumer,
-                                                       min_idle_time=self._claim_idle_ms, start_id="0-0", count=10)
-        for message_id, fields in reclaimed:
-            if fields:
-                tasks.append(asyncio.create_task(self._run_one(message_id, fields)))
-        batches = await self._redis.xreadgroup(self._group, self._consumer, {self._stream: ">"}, count=10,
-                                               block=block_ms)
-        for _, messages in batches or []:
-            for message_id, fields in messages:
-                tasks.append(asyncio.create_task(self._run_one(message_id, fields)))
+                                                       min_idle_time=self._claim_idle_ms, start_id="0-0", count=count)
+        messages = [(message_id, fields) for message_id, fields in reclaimed if fields]
+        room = count - len(messages)
+        if room > 0:
+            batches = await self._redis.xreadgroup(self._group, self._consumer, {self._stream: ">"}, count=room,
+                                                   block=block_ms)
+            for _, batch in batches or []:
+                messages.extend(batch)
+        return messages
+
+    async def poll_once(self, block_ms: int = BLOCK_MS) -> int:
+        """한 번 읽어 그 메시지를 끝까지 처리하고 돌아온다 — 테스트와 단발 실행용. 운영 루프는 run_forever다."""
+        tasks = [asyncio.create_task(self._run_one(message_id, fields))
+                 for message_id, fields in await self._fetch(10, block_ms)]
         if tasks:
             await asyncio.gather(*tasks)
         return len(tasks)
 
-    async def run_forever(self) -> None:
+    async def run_forever(self, block_ms: int = BLOCK_MS) -> None:
+        """자리가 나는 대로 읽는다.
+
+        예전에는 poll_once를 돌려 한 배치의 메시지를 전부 기다린 뒤에야 다음을 읽었다. 동시 처리 상한(4)은 세마포어로
+        따로 있었지만 읽기가 배치 단위라, 느린 한 건이 끝날 때까지 새 메시지를 아예 읽지 않았다 — 170절에서 워커가 한 건만
+        돌리던 중 도착한 작업이 10.76초 늦게 선점됐다. 사실 수집 제한을 180초로 늘린 뒤로는 그 대기가 최대 180초가 된다.
+
+        비어 있는 자리만큼만 읽는다. 자리보다 많이 읽으면 남는 메시지가 세마포어를 기다리는 동안 심장박동이 없어
+        유휴 시간이 자라고, 다른 실행기가 아직 살아 있는 메시지를 재회수해 모델을 한 번 더 부른다.
+        """
         await ensure_group(self._redis, self._stream, self._group)
+        in_flight: set[asyncio.Task[None]] = set()
         while True:
             try:
-                await self.poll_once()
+                room = self._concurrency - len(in_flight)
+                if room <= 0:
+                    await asyncio.wait(in_flight, return_when=asyncio.FIRST_COMPLETED)
+                    continue
+                for message_id, fields in await self._fetch(room, block_ms):
+                    task = asyncio.create_task(self._run_one(message_id, fields))
+                    in_flight.add(task)
+                    task.add_done_callback(in_flight.discard)
             except (RedisError, ConnectionError, OSError) as exc:
                 # redis-py의 TimeoutError·ConnectionError는 내장 예외 계열이 아니다 — 내장 것만 잡자 첫 유휴 5초에 프로세스가 죽었다
                 log.warning("Redis 오류, 잠시 뒤 다시 시도: %s", exc)
                 await asyncio.sleep(2)
-
