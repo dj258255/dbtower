@@ -87,8 +87,9 @@ class DBTowerClient:
     async def claim(self, job_id: str, worker_id: str) -> dict[str, Any]:
         return await self._call("POST", f"/api/ai-operations/{job_id}/claim", json={"workerId": worker_id})
 
-    async def facts(self, job_id: str, lease: str) -> dict[str, Any]:
-        return await self._call("POST", f"/api/ai-operations/{job_id}/facts", lease=lease)
+    async def facts(self, job_id: str, lease: str, timeout: float) -> dict[str, Any]:
+        """사실 수집은 대상 DB를 직접 조회하는 단계라 호출자(그래프)가 제한을 정해 넘긴다 — 기본 30초로는 못 기다린다(170절 1번)"""
+        return await self._call("POST", f"/api/ai-operations/{job_id}/facts", lease=lease, timeout=timeout)
 
     async def retrieving(self, job_id: str, lease: str) -> dict[str, Any]:
         return await self._call("POST", f"/api/ai-operations/{job_id}/retrieving", lease=lease)

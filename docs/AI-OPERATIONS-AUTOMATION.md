@@ -201,6 +201,7 @@ dbtower.aiops:
   periodic-report:
     enabled: ${DBTOWER_AIOPS_PERIODIC_REPORT:false} # 주 1회 팀별 운영 요약(기본 꺼짐)
     cron: ${DBTOWER_AIOPS_PERIODIC_REPORT_CRON:0 0 9 * * MON}
+    zone: ${DBTOWER_AIOPS_PERIODIC_REPORT_ZONE:Asia/Seoul} # JVM이 UTC로 고정돼 있어(C-6) zone이 없으면 위 cron은 UTC 기준이다 — 09시가 18시 KST에 돈다
   metrics-refresh-ms: 15000   # 게이지 캐시 갱신 주기(Prometheus 스크레이프 주기와 맞춤)
 ```
 

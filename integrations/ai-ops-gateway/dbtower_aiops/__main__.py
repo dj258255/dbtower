@@ -43,6 +43,7 @@ async def run_worker(settings: Settings) -> None:
         if settings.knowledge_dsn else None
     leases = RedisLeaseStore(redis)
     graph = build_graph(client, notifier, leases, settings.consumer, store, settings.analyze_timeout_s,
+                        collect_timeout_s=settings.collect_timeout_s,
                         ingest_cases=os.environ.get("KNOWLEDGE_INGEST_CASES", "false").lower() == "true")
     worker = Worker(redis, client, graph, leases, stream=settings.stream, dead_letter_stream=settings.dead_letter_stream,
                     group=settings.group, consumer=settings.consumer, max_deliveries=settings.max_deliveries,

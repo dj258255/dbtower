@@ -43,7 +43,11 @@ class Settings:
     n8n_webhook_secret: str = ""
     knowledge_dsn: str = ""
     embedding_model: str = "intfloat/multilingual-e5-large"
+    # 모델 호출(analyze)과 사실 수집(facts)의 HTTP 제한을 따로 둔다. 사실 수집은 대상 DB 5종을 직접 조회하는
+    # 단계라(정기 리포트는 인스턴스 여러 대를 훑는다) 죽은 대상이 섞이면 30초를 넘긴다 — 170절에서 주간 리포트
+    # 3건이 90.5~90.8초를 못 기다리고 전부 실패했다. 늘리면 대상이 죽었을 때 워커 슬롯을 그만큼 오래 쥔다(동시 처리 상한 4)
     analyze_timeout_s: float = 240.0
+    collect_timeout_s: float = 180.0
 
     @staticmethod
     def from_env() -> "Settings":
@@ -69,4 +73,5 @@ class Settings:
             knowledge_dsn=e("KNOWLEDGE_DSN", ""),
             embedding_model=e("EMBEDDING_MODEL", "intfloat/multilingual-e5-large"),
             analyze_timeout_s=float(e("AI_OPS_ANALYZE_TIMEOUT_S", "240")),
+            collect_timeout_s=float(e("AI_OPS_COLLECT_TIMEOUT_S", "180")),
         )

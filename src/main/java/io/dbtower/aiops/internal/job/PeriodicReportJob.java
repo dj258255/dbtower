@@ -65,7 +65,10 @@ public class PeriodicReportJob {
         this.clock = clock;
     }
 
-    @Scheduled(cron = "${dbtower.aiops.periodic-report.cron:0 0 9 * * MON}")
+    // zone을 반드시 준다. JVM 기본 시간대를 UTC로 고정해 두었으므로(DbtowerApplication C-6) zone이 없으면
+    // 이 크론은 UTC로 해석돼 기본값이 월요일 18시 KST에 돈다 — 설정·문서가 말하는 시각과 9시간 어긋난다
+    @Scheduled(cron = "${dbtower.aiops.periodic-report.cron:0 0 9 * * MON}",
+            zone = "${dbtower.aiops.periodic-report.zone:Asia/Seoul}")
     @SchedulerLock(name = "aiops-periodic-report", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void scheduledRun() {
         run();

@@ -348,6 +348,9 @@ dbtower:
       # 주 1회 팀별 운영 요약. 켜면 주마다 팀 수만큼 모델 호출이 생겨 기본은 끈다
       enabled: ${DBTOWER_AIOPS_PERIODIC_REPORT:false}
       cron: ${DBTOWER_AIOPS_PERIODIC_REPORT_CRON:0 0 9 * * MON}
+      # JVM 기본 시간대를 UTC로 고정해 두었으므로(DbtowerApplication C-6) zone을 주지 않으면 위 cron은 UTC로
+      # 해석된다 — 기본값이 월요일 18시 KST에 돌아 문서·설정이 말하는 시각과 어긋났다(170절 3번)
+      zone: ${DBTOWER_AIOPS_PERIODIC_REPORT_ZONE:Asia/Seoul}
     inquiry-trigger:
       # DB팀 문의 뒤에 사실·규칙·AI 소견을 붙인다. 경보와 달리 사람이 직접 누른 한 건이라 기본으로 켠다
       enabled: ${DBTOWER_AIOPS_INQUIRY_TRIGGER:true}
