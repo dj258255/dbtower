@@ -381,15 +381,30 @@ function loadInstanceMeta(rendered) {
 function populateInstanceFilterOptions(list) {
   const opts = (id, placeholder, values) => {
     const sel = $(`#${id}`);
+    const distinct = [...new Set(values.filter((v) => v != null && v !== ""))].sort();
+    // 값이 없거나 하나뿐이면 고를 것이 없다 — 늘 "전체"만 보이는 필터는 동작하지 않는 것처럼 읽힌다(사용자 지적).
+    // 서로 다른 값이 둘 이상일 때만 보인다(같은 값뿐이면 "무엇인지"는 인스턴스 카드가 이미 말한다)
+    const show = distinct.length >= 2;
     sel.innerHTML = `<option value="">${placeholder}</option>`
-      + [...new Set(values.filter(Boolean))].sort().map((v) => `<option>${esc(v)}</option>`).join("");
+      + distinct.map((v) => `<option>${esc(v)}</option>`).join("");
+    if (!show && sel.value) sel.value = "";   // 감출 거면 걸려 있던 조건도 푼다
+    sel.hidden = !show;
+    // 커스텀 드롭다운(enhanceSelect)은 select를 .cs로 감싸므로 감추는 대상이 둘이다
+    const wrap = sel.closest(".cs");
+    if (wrap) wrap.hidden = !show;
     sel._csSync?.(); // 커스텀 드롭다운 버튼 텍스트 동기화
+    return show;
   };
-  opts("inst-engine", "기종 전체", list.map((i) => i.type));
-  opts("inst-env", "환경 전체", list.map((i) => i.environment));
-  opts("inst-region", "리전 전체", list.map((i) => i.region));
-  opts("inst-cluster", "클러스터 전체", list.map((i) => i.cluster));
-  opts("inst-team", "팀 전체", list.map((i) => i.teamLabel));
+  const shown = [
+    opts("inst-engine", "기종 전체", list.map((i) => i.type)),
+    opts("inst-env", "환경 전체", list.map((i) => i.environment)),
+    opts("inst-region", "리전 전체", list.map((i) => i.region)),
+    opts("inst-cluster", "클러스터 전체", list.map((i) => i.cluster)),
+    opts("inst-team", "팀 전체", list.map((i) => i.teamLabel)),
+  ];
+  // 다 감추면 필터 줄 자체를 감춘다 — 검색 칸은 남는다
+  const row = $(".instance-filter-row");
+  if (row) row.hidden = !shown.some(Boolean);
 }
 
 // 커스텀 호버 툴팁 — 네이티브 title은 느리고 스타일이 안 먹어 못생겼다. title을 전역에서 가로채
@@ -2253,14 +2268,36 @@ async function loadBackupInfo() {
 // 같은 코어의 목록을 세션 경로로 받는다(132절).
 async function loadMcpTools() {
   const box = $("#mcp-tools");
+  const toggle = $("#btn-mcp-tools");
   try {
     const tools = await api("/api/mcp/tools");
     box.classList.remove("muted");
     box.innerHTML = tools.map((t) => `
-      <div class="mcp-tool"><b>${esc(t.name)}</b><p>${esc(t.description)}</p></div>`).join("");
+      <button type="button" class="mcp-tool" aria-expanded="false"><b>${esc(t.name)}</b><p>${esc(t.description)}</p></button>`).join("");
+    toggle.dataset.label = `제공 도구 ${tools.length}개 보기`;
+    toggle.textContent = toggle.dataset.label;
   } catch (e) {
+    box.classList.remove("muted");
     box.textContent = `도구 목록 조회 실패: ${e.message}`;
+    toggle.textContent = toggle.dataset.label = "제공 도구 보기";
   }
+}
+
+// 제공 도구 접기/펴기 (B4) — 목록이 길어 카드가 화면을 다 먹었다. 항목을 누르면 그 항목의 설명만 펼쳐진다
+// (툴팁에 기대지 않는다: 설명이 길고, 키보드만으로도 읽을 수 있어야 한다)
+function setupMcpCard() {
+  const toggle = $("#btn-mcp-tools");
+  const box = $("#mcp-tools");
+  toggle.addEventListener("click", () => {
+    const open = toggle.getAttribute("aria-expanded") === "true";
+    toggle.setAttribute("aria-expanded", String(!open));
+    box.hidden = open;
+    toggle.textContent = open ? (toggle.dataset.label || "제공 도구 보기") : "접기";
+  });
+  box.addEventListener("click", (e) => {
+    const item = e.target.closest(".mcp-tool");
+    if (item) item.setAttribute("aria-expanded", String(item.getAttribute("aria-expanded") !== "true"));
+  });
 }
 
 // MCP 등록 명령 — ADMIN이면 서비스 토큰을 받아 실제 명령을 완성한다 (A1)
@@ -2272,6 +2309,8 @@ async function loadMcpCommand() {
     const { token } = await api("/api/security/mcp-token");
     $("#mcp-cmd-http").textContent =
       `claude mcp add --transport http dbtower http://localhost:8080/mcp --header "Authorization: Bearer ${token}"`;
+    // 명령에 토큰이 들어간 순간 보조 줄도 그 사실을 말해야 한다(공유 금지)
+    $("#mcp-http-note").textContent = "서비스 토큰이 들어 있습니다. 공유하지 마세요.";
   } catch { /* ADMIN이 아니면 — 헤더 없는 등록(OAuth 브라우저 로그인) 안내를 유지 */ }
 }
 
@@ -2295,47 +2334,104 @@ function handToWorkbench(kind, sql, reason = "") {
   setMode("workbench", { instance: state.instance.id, handoff: id });
 }
 
-// 사용자·역할 카드(ADMIN) — 역할은 인증 시 권한에 실리므로 바꾼 역할은 그 사용자의 다음 로그인부터 적용된다
+// 사용자·역할 카드(ADMIN). 역할은 인증 시 권한에 실리므로 바꾼 역할은 그 사용자의 다음 로그인부터 적용된다.
+//
+// select를 바꾸는 즉시 PATCH하지 않는다(B4): 되돌릴 수 없는 요청이 스크롤·오조작으로 나가도 화면에는 흔적이 남지 않는다.
+// 바꾼 행에만 "적용/취소"가 나타나고 적용을 눌러야 나간다. 취소는 목록을 다시 그려 원래 값으로 되돌린다.
+const USER_NAME_RE = /^[A-Za-z0-9._-]{3,50}$/;
+const USER_PASSWORD_MIN = 12;
+
+function setUsersMsg(text, isError) {
+  const msg = $("#users-msg");
+  msg.textContent = text;
+  msg.classList.toggle("is-error", !!isError);   // 실패는 채팅 오류와 같은 빨강 계열
+}
+
 async function loadUsers() {
   const tbody = $("#users-table tbody");
   let users;
   try {
     users = await api("/api/security/users");
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="3" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
     return;
   }
-  tbody.innerHTML = users.map((u) => `<tr>
+  // select의 영문 괄호는 뺀다 — 화면에는 역할 이름만(value는 그대로)
+  const options = (role) => Object.keys(ROLE_LABEL).map((r) =>
+    `<option value="${r}"${r === role ? " selected" : ""}>${esc(ROLE_LABEL[r])}</option>`).join("");
+  tbody.innerHTML = users.map((u) => `<tr data-user="${esc(u.username)}" data-role="${esc(u.role)}">
       <td>${esc(u.username)}</td>
-      <td><select data-user-role="${esc(u.username)}" aria-label="${esc(u.username)} 역할">${Object.keys(ROLE_LABEL).map((r) =>
-        `<option value="${r}"${r === u.role ? " selected" : ""}>${esc(ROLE_LABEL[r])} (${r})</option>`).join("")}</select></td>
+      <td><select data-user-role="${esc(u.username)}" aria-label="${esc(u.username)} 역할">${options(u.role)}</select></td>
       <td>${esc(u.teamLabel ?? "전역")}</td>
+      <td><span class="user-role-actions" hidden>
+        <span class="user-role-warn" hidden>내 관리자 권한이 없어집니다</span>
+        <button type="button" class="btn btn-primary btn-small" data-role-apply>적용</button>
+        <button type="button" class="btn btn-small" data-role-cancel>취소</button>
+      </span></td>
     </tr>`).join("");
-  tbody.querySelectorAll("[data-user-role]").forEach((sel) => sel.addEventListener("change", async () => {
-    const msg = $("#users-msg");
-    try {
-      await api(`/api/security/users/${encodeURIComponent(sel.dataset.userRole)}/role`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: sel.value }),
-      });
-      msg.textContent = `${sel.dataset.userRole}의 역할을 ${ROLE_LABEL[sel.value]}(으)로 바꿨습니다. 다음 로그인부터 적용됩니다.`;
-    } catch (e) {
-      msg.textContent = `역할을 바꾸지 못했습니다: ${e.message}`;
-    }
-    loadUsers();
-  }));
+  tbody.querySelectorAll("[data-user-role]").forEach((sel) => {
+    sel.addEventListener("change", () => markRoleDirty(sel));
+  });
+}
+
+/** select가 원래 값과 달라졌을 때만 그 행에 적용·취소를 보인다 */
+function markRoleDirty(sel) {
+  const tr = sel.closest("tr");
+  const changed = sel.value !== tr.dataset.role;
+  tr.querySelector(".user-role-actions").hidden = !changed;
+  // 자기 자신을 ADMIN에서 내리는 경우를 화면에서 먼저 알린다. 서버는 "마지막 ADMIN"만 막으므로
+  // (둘 이상이면 자기 강등이 실제로 된다) 이 경고가 그 자리를 메운다
+  const self = sel.dataset.userRole === state.username;
+  tr.querySelector(".user-role-warn").hidden =
+    !(changed && self && tr.dataset.role === "ADMIN" && sel.value !== "ADMIN");
+  return changed;
+}
+
+async function applyUserRole(sel) {
+  const username = sel.dataset.userRole;
+  try {
+    const r = await api(`/api/security/users/${encodeURIComponent(username)}/role`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: sel.value }),
+    });
+    setUsersMsg(`${username}의 역할을 ${ROLE_LABEL[r.role] ?? r.role}(으)로 바꿨습니다. 다음 로그인부터 적용됩니다.`, false);
+  } catch (e) {
+    setUsersMsg(`역할을 바꾸지 못했습니다: ${e.message}`, true);
+  }
+  loadUsers();
+}
+
+/** 이름·비밀번호가 서버 조건을 채우기 전에는 만들기 버튼을 누를 수 없다(눌러서 400을 받지 않는다) */
+function syncUserCreateButton() {
+  const name = $("#user-new-name").value.trim();
+  const password = $("#user-new-password").value;
+  $("#btn-user-create").disabled = !USER_NAME_RE.test(name) || password.length < USER_PASSWORD_MIN;
+}
+
+function setupUsersCard() {
+  const tbody = $("#users-table tbody");
+  // 목록을 다시 그려도 살아남게 tbody에 위임한다(innerHTML 교체는 tbody 자신을 갈지 않는다)
+  tbody.addEventListener("click", (e) => {
+    const tr = e.target.closest("tr");
+    if (!tr) return;
+    if (e.target.closest("[data-role-cancel]")) { loadUsers(); return; }
+    if (e.target.closest("[data-role-apply]")) applyUserRole(tr.querySelector("[data-user-role]"));
+  });
+  ["user-new-name", "user-new-password"].forEach((id) =>
+    $(`#${id}`).addEventListener("input", syncUserCreateButton));
+  syncUserCreateButton();
 }
 
 async function createUser() {
-  const msg = $("#users-msg");
   const body = { username: $("#user-new-name").value.trim(), password: $("#user-new-password").value, role: $("#user-new-role").value };
   try {
     await api("/api/security/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     $("#user-new-name").value = "";
     $("#user-new-password").value = "";
-    msg.textContent = `${body.username} 계정을 만들었습니다(${ROLE_LABEL[body.role]}).`;
+    setUsersMsg(`${body.username} 계정을 만들었습니다(${ROLE_LABEL[body.role]}).`, false);
+    syncUserCreateButton();
     loadUsers();
   } catch (e) {
-    msg.textContent = `만들지 못했습니다: ${e.message}`;
+    setUsersMsg(`만들지 못했습니다: ${e.message}`, true);
   }
 }
 
@@ -2363,7 +2459,8 @@ async function loadMe() {
 function setupCopyButtons() {
   document.querySelectorAll("[data-copy]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const text = $(`#${btn.dataset.copy}`).textContent.split("   (")[0].trim();
+      // code 안에는 명령만 있다(B4) — 괄호 설명을 함께 복사하지 않으려고 잘라내던 코드는 필요 없어졌다
+      const text = $(`#${btn.dataset.copy}`).textContent.trim();
       try {
         await navigator.clipboard.writeText(text);
         const old = btn.textContent;
@@ -2390,7 +2487,9 @@ const BK_STATUS_LABEL = { FRESH: "신선", STALE: "오래됨", NO_BACKUP: "백�
 async function loadOverview() {
   const box = $("#overview-card");
   if (!box) return;
-  box.hidden = false;
+  // 내용이 없는 빈 막대를 남기지 않는다(B4) — 전에는 먼저 펼치고 조회해, 응답이 오기 전까지 흰 줄만 보였다.
+  // 대상에 닿지 않는 인스턴스에서는 그 줄이 계속 남아 화면 결함처럼 읽혔다
+  box.hidden = true;
   try {
     const o = await api(`/api/instances/${state.instance.id}/overview`);
     const rep = o.replication || {};
@@ -2426,8 +2525,10 @@ async function loadOverview() {
         <span class="ov-sig"><span class="ov-sig-k">복제</span> ${esc(rep.role ?? "-")} · 지연 ${repLag}${rpo}</span>
         <span class="ov-sig"><span class="ov-sig-k">백업</span> ${bkStr}</span>
       </div>`;
+    box.hidden = false;
   } catch (e) {
     box.innerHTML = `<span class="muted">운영 종합 조회 실패: ${esc(e.message)}</span>`;
+    box.hidden = false;
   }
 }
 
@@ -2596,7 +2697,7 @@ async function loadLatencyPercentiles() {
       return `
       <tr>
         <td><span class="src-badge ${src.cls}" title="${esc(src.note)}">${src.label}</span></td>
-        <td class="qtext" title="${esc(r.queryText)}">${queryTextHtml(r.queryText)}</td>
+        <td class="qtext" data-sql-tip="${esc(r.queryText)}" tabindex="0" aria-describedby="sql-tip">${queryTextHtml(r.queryText)}</td>
         <td class="num">${r.p95Ms != null ? fmtNum(r.p95Ms) : "-"}</td>
         <td class="num">${r.p99Ms != null ? fmtNum(r.p99Ms) : "-"}</td>
       </tr>`;
@@ -2741,7 +2842,7 @@ function renderSessionRows(rows) {
         <td title="${esc(s.waitEvent ?? "")}">${esc(s.waitEvent ?? "-")}</td>
         <td class="num">${s.blockedByPid != null ? `<span class="blocked-by">${esc(s.blockedByPid)}</span>` : "-"}</td>
         <td class="num">${fmtNum(s.elapsedMs)}</td>
-        <td class="qtext" title="${esc(s.query)}">${queryTextHtml(s.query)}</td>
+        <td class="qtext" data-sql-tip="${esc(s.query)}" tabindex="0" aria-describedby="sql-tip">${queryTextHtml(s.query)}</td>
         ${canKill ? `<td class="session-actions">
           <button class="btn btn-small" data-kill="${esc(s.pid)}" data-force="false">취소</button>
           <button class="btn btn-small btn-danger" data-kill="${esc(s.pid)}" data-force="true">강제종료</button>
@@ -4118,6 +4219,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupChartDrag();
   setupCopyButtons();
   setupQueryDetail();
+  setupMcpCard();      // 제공 도구 접기(B4)
+  setupUsersCard();    // 역할 적용/취소·새 사용자 조건(B4)
   loadMcpTools();
   $("#btn-query").addEventListener("click", runQuery);
   $("#btn-compare").addEventListener("click", runCompare);

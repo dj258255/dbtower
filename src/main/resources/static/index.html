@@ -245,7 +245,7 @@
         <!-- 성능 -->
         <div class="mon-group" data-group="perf">
           <div class="monitor-card metric-card">
-            <h3>Metric <span class="hint">(Prometheus exporter 시계열 — CPU는 호스트 수준 node_exporter, Connections는 기종 exporter · 미수집은 사유를 그대로 표기)</span>
+            <h3>Metric <span class="hint">Prometheus 시계열입니다. 미수집은 사유를 그대로 표기합니다.</span>
               <a class="metric-full-link" href="http://localhost:13000" target="_blank" rel="noopener">전체 화면으로 보기 ↗</a></h3>
             <div class="metric-chart-box">
               <h4>CPU (%)</h4>
@@ -267,7 +267,7 @@
             <div id="command-charts" class="command-groups"></div>
           </div>
           <div class="monitor-card latency-card">
-            <h3>레이턴시 백분위 p95/p99 <span class="hint">(평균은 멀쩡한데 꼬리가 아프다 — 같은 지표라도 기종마다 원자료가 다르다)</span></h3>
+            <h3>레이턴시 백분위 p95/p99 <span class="hint">기종마다 원자료가 다릅니다 — 추정과 미지원을 섞지 않습니다.</span></h3>
             <p class="hint latency-legend">
               <span class="src-badge src-native">실측누적</span> MySQL QUANTILE(리셋 이후 누적) ·
               <span class="src-badge src-native">실측구간</span> MySQL 히스토그램 차분(최근 구간, 버킷 상한 근사) ·
@@ -284,12 +284,12 @@
             </div>
           </div>
           <div class="monitor-card slo-card">
-            <h3>SLO / 에러 버짓 <span class="hint">(사용자 경험 지표 — 인프라 지표(CPU)가 아니라 레이턴시·가용성 · Google SRE)</span></h3>
+            <h3>SLO / 에러 버짓 <span class="hint">CPU가 아니라 레이턴시·가용성으로 잽니다.</span></h3>
             <p class="hint">레이턴시 SLI는 D4a 백분위(source 표기) 우선, 미지원 기종은 평균 레이턴시로 폴백 · 가용성 SLI는 헬스 샘플 이력 · 버짓 산식은 응답 note에 명시</p>
             <div id="slo-result" class="slo-result muted">조회 중...</div>
           </div>
           <div class="monitor-card session-card">
-            <h3>세션 / 블로킹 <span class="hint">(지금 누가 누구를 막고 있나 — blockedBy가 있으면 강조)</span></h3>
+            <h3>세션 / 블로킹 <span class="hint">지금 누가 누구를 막고 있는지. 막는 쪽이 있으면 강조합니다.</span></h3>
             <div class="live-bar">
               <button type="button" class="btn btn-small live-toggle" id="live-toggle" aria-pressed="false">실시간 켜기</button>
               <span id="live-status" class="live-status" role="status">꺼짐 — 켜면 대상 조회 한 번을 보는 사람 모두가 나눠 받습니다</span>
@@ -307,7 +307,7 @@
         <!-- 진단 -->
         <div class="mon-group" data-group="diag" hidden>
           <div class="monitor-card aiops-card">
-            <h3>AI 운영 작업 <span class="hint">(Slack·경보·콘솔에서 시작된 비동기 진단 — 사실은 DBTower가 모으고 AI는 1차 소견만, 판단은 사람이 합니다)</span></h3>
+            <h3>AI 운영 작업 <span class="hint">사실은 플랫폼이 모으고 AI는 1차 소견만 냅니다.</span></h3>
             <div class="aiops-bar">
               <label class="aiops-scope"><input type="checkbox" id="aiops-all-instances"> 다른 대상 작업도 보기</label>
               <span id="aiops-status" class="muted" role="status">조회 중...</span>
@@ -321,24 +321,24 @@
             <div id="aiops-detail" class="aiops-detail" hidden></div>
           </div>
           <div class="monitor-card advisors-card">
-            <h3>Advisors <span class="hint">(자동 점검 — 읽고 조언만, 대상 DB는 바꾸지 않습니다 / 심각도별)</span></h3>
+            <h3>Advisors <span class="hint">읽고 조언만 합니다 — 대상 DB는 바꾸지 않습니다.</span></h3>
             <div id="advisors-summary" class="advisors-summary"></div>
             <div id="advisors-result" class="advisors-result muted">점검 중...</div>
           </div>
           <div class="monitor-card anomaly-card">
-            <h3>이상 감지 <span class="hint">(평소=이 요일·시간대 베이스라인 대비 z-score 이탈 — 고정 임계와 별개로 "평소와 다른가"를 본다)</span></h3>
+            <h3>이상 감지 <span class="hint">같은 요일·시간대 베이스라인 대비 이탈입니다.</span></h3>
             <div id="anomaly-result" class="anomaly-result muted">조회 중...</div>
           </div>
           <div class="monitor-card deadlock-card">
-            <h3>최근 데드락 <span class="hint">(DB가 이미 남긴 흔적을 설정 변경 0으로 읽음 — MSSQL system_health XE·MySQL INNODB STATUS. 롤링이라 "최근"만, PG는 카운터라 알림으로)</span></h3>
+            <h3>최근 데드락 <span class="hint">롤링 기록이라 최근만 보입니다 — PostgreSQL은 개별 사건이 없습니다.</span></h3>
             <div id="deadlock-result" class="anomaly-result muted">조회 중...</div>
           </div>
           <div class="monitor-card plan-change-card">
-            <h3>실행계획 변경 <span class="hint">("쿼리도 데이터도 그대로인데 느려짐 = 플랜 플립" — 회귀 감지된 쿼리만 계획을 떠서 비교, 첫 관측은 기준선)</span></h3>
+            <h3>실행계획 변경 <span class="hint">회귀 감지된 쿼리만 계획을 비교합니다. 첫 관측은 기준선입니다.</span></h3>
             <div id="plan-change-result" class="anomaly-result muted">조회 중...</div>
           </div>
           <div class="monitor-card">
-            <h3>Wait Events <span class="hint">(그 시간에 무엇을 기다렸나 — CPU/IO/Lock)</span></h3>
+            <h3>Wait Events <span class="hint">그 시간에 무엇을 기다렸는지 — CPU·IO·Lock.</span></h3>
             <div class="table-scroll">
               <table class="qtable" id="wait-table">
                 <thead></thead>
@@ -351,7 +351,7 @@
         <!-- 거버넌스 -->
         <div class="mon-group" data-group="gov" hidden>
           <div class="monitor-card review-gate-card">
-            <h3>스키마 변경 리뷰 게이트 <span class="hint">(배포 전 DDL/대량 DML을 규칙으로 자동 판정 + AI 소견 → 승인자가 승인 → 운영자가 워크벤치에서 드라이런·실행)</span></h3>
+            <h3>스키마 변경 리뷰 게이트 <span class="hint">규칙 판정 뒤 승인자가 승인하고 운영자가 실행합니다.</span></h3>
             <div class="review-submit" id="review-submit">
               <textarea id="review-sql" class="codeblock sql-edit" rows="4" spellcheck="false" placeholder="리뷰할 변경 SQL — 예: ALTER TABLE orders ADD COLUMN memo VARCHAR(64) NOT NULL"></textarea>
               <div class="review-submit-row">
@@ -363,7 +363,7 @@
             <div id="review-list" class="review-list muted">이 인스턴스의 리뷰 요청이 여기 표시됩니다.</div>
           </div>
           <div class="monitor-card config-drift-card">
-            <h3>설정 변경 이력 <span class="hint">(시간축 — 이 인스턴스의 파라미터가 언제부터 무엇이 어떻게 바뀌었나 · "누가"는 대상 DB 감사 로그의 몫 · 운영자·관리자)</span></h3>
+            <h3>설정 변경 이력 <span class="hint">파라미터 변경 이력. "누가"는 대상 DB 감사 로그 몫, 조회는 운영자부터.</span></h3>
             <div class="config-drift-controls">
               <button id="btn-config-drift" class="btn btn-primary btn-small">변경 이력 조회</button>
               <span class="hint">주기 수집이 직전 상태와 diff해 변경분만 기록 · 첫 수집은 기준선(변경 아님)</span>
@@ -371,7 +371,7 @@
             <div id="config-drift-result" class="config-drift-result muted">조회를 누르면 최근 설정 변경을 최신순으로 보여줍니다.</div>
           </div>
           <div class="monitor-card schema-diff-card">
-            <h3>Schema Diff <span class="hint">(같은 역할의 두 인스턴스 구조 비교 — 왜 저 장비만 다르지)</span></h3>
+            <h3>Schema Diff <span class="hint">두 인스턴스의 구조 차이만 표시합니다.</span></h3>
             <div class="schema-diff-controls">
               <select id="schema-left" class="schema-select"></select>
               <span class="schema-arrow">→</span>
@@ -383,7 +383,7 @@
             <div id="schema-diff-result" class="schema-diff-result muted">좌/우 인스턴스를 고르고 비교를 누르세요.</div>
           </div>
           <div class="monitor-card param-diff-card">
-            <h3>파라미터 드리프트 <span class="hint">(같은 역할 두 인스턴스 설정값 비교 — 왜 저 장비만 느리지)</span></h3>
+            <h3>파라미터 드리프트 <span class="hint">두 인스턴스의 설정값 차이만 표시합니다.</span></h3>
             <div class="schema-diff-controls">
               <select id="param-left" class="schema-select"></select>
               <span class="schema-arrow">→</span>
@@ -395,7 +395,7 @@
             <div id="param-diff-result" class="schema-diff-result muted">좌/우 인스턴스를 고르고 비교를 누르세요.</div>
           </div>
           <div class="monitor-card online-ddl-card">
-            <h3>온라인 스키마 변경 <span class="hint">(gh-ost · MySQL 전용 — 대형 테이블 ALTER를 락 최소화로)</span></h3>
+            <h3>온라인 스키마 변경 <span class="hint">MySQL 전용입니다. 기본은 dry-run(실제 테이블은 그대로).</span></h3>
             <div class="online-ddl-controls">
               <input type="text" id="ddl-table" class="ddl-input" placeholder="테이블 (예: orders)">
               <input type="text" id="ddl-alter" class="ddl-input ddl-alter" placeholder="ALTER 절 (예: ADD COLUMN memo VARCHAR(64) NULL)">
@@ -406,7 +406,7 @@
             <div id="ddl-result" class="ddl-result muted">테이블과 ALTER 절을 입력하고 dry-run으로 먼저 검증하세요.</div>
           </div>
           <div class="monitor-card audit-card">
-            <h3>감사 로그 <span class="hint">(누가 언제 무엇을 했나 — ADMIN 전용)</span></h3>
+            <h3>감사 로그 <span class="hint">누가 언제 무엇을 했는지. 조회는 ADMIN만.</span></h3>
             <div class="audit-filters">
               <input type="text" id="audit-principal" placeholder="사용자 (예: admin)">
               <input type="text" id="audit-action" placeholder="action 부분일치 (예: explain)">
@@ -426,7 +426,7 @@
         <!-- 백업·리포트 -->
         <div class="mon-group" data-group="backup" hidden>
           <div class="monitor-card backup-card">
-            <h3>백업 / 시점 복구 <span class="hint">(이력·복원 가능 창 — 실행은 API/폴러, 복원 문안 생성까지만: 실행은 사람이)</span></h3>
+            <h3>백업 / 시점 복구 <span class="hint">복원 문안까지 만듭니다 — 실행은 사람이 합니다.</span></h3>
             <div id="pitr-window" class="pitr-window muted">조회 중...</div>
             <details class="pitr-guide-box"><summary>복원 명령 문안 보기 (생성·안내 — 실행은 사람)</summary>
               <pre id="pitr-guide" class="codeblock"></pre></details>
@@ -438,7 +438,7 @@
             </div>
           </div>
           <div class="monitor-card incident-card">
-            <h3>인시던트 리포트 <span class="hint">(장애 구간을 주면 그 시간의 신호를 한 장으로 — 시점 비교·설정 변경·플랜 플립·대기·가용성 + AI 요약 · 신규 수집 0, 기존 신호 재구성 · 운영자·관리자)</span></h3>
+            <h3>인시던트 리포트 <span class="hint">기존 신호만 재구성합니다 — 신규 수집 없음, 생성은 운영자부터.</span></h3>
             <div class="incident-controls">
               <label class="hint">구간 시작 <input type="datetime-local" id="incident-from" class="incident-time"></label>
               <label class="hint">구간 끝 <input type="datetime-local" id="incident-to" class="incident-time"></label>
@@ -449,7 +449,7 @@
             <div id="incident-result" class="incident-result muted">구간을 고르고 리포트 생성을 누르세요.</div>
           </div>
           <div class="monitor-card monthly-card">
-            <h3>월간 점검 리포트 <span class="hint">(기간 전체의 건강을 한 장으로 — 헬스 스코어·백업 신선도·Advisor·용량 예측·낭비 신호·설정 변경 · 매월 자동 발행 + 수동 생성 · 운영자·관리자)</span></h3>
+            <h3>월간 점검 리포트 <span class="hint">기간 전체를 한 장으로. 매월 자동 발행, 생성은 운영자부터.</span></h3>
             <div class="incident-controls">
               <label class="hint">기간(일) <input type="number" id="monthly-days" class="incident-time" value="30" min="1" max="90" style="width:70px"></label>
               <button id="btn-monthly" class="btn btn-primary btn-small">리포트 생성</button>
@@ -463,13 +463,13 @@
         <!-- 비용·인프라 -->
         <div class="mon-group" data-group="infra" hidden>
           <div class="monitor-card finops-card">
-            <h3>비용/효율 (FinOps) <span class="hint">(낭비 후보를 신호로 — 절감액은 산출하지 않고 검토 지점까지, 대상 DB는 바꾸지 않습니다)</span></h3>
+            <h3>비용/효율 (FinOps) <span class="hint">낭비 후보까지 — 절감액은 산출하지 않습니다.</span></h3>
             <p class="hint">미사용 인덱스(사용 통계) · 중복·잉여 인덱스(D2 재사용) · 큰 테이블·과다 인덱싱 · 오버프로비저닝(연결·메모리) · 사용 통계 없는 기종은 미지원으로 정직 표기</p>
             <div id="finops-summary" class="advisors-summary"></div>
             <div id="finops-result" class="advisors-result muted">분석 중...</div>
           </div>
           <div class="monitor-card partition-card">
-            <h3>파티션 <span class="hint">(테이블이 어떻게 쪼개져 있고 각 조각이 얼마나 큰가 — 조회 전용)</span></h3>
+            <h3>파티션 <span class="hint">조회 전용 — 파티션을 만들거나 지우지 않습니다.</span></h3>
             <p class="hint">MySQL/PostgreSQL/Oracle/SQL Server는 각 카탈로그를 통합한 뷰 · MongoDB는 파티션 개념이 없어 미지원 · 파티션 없는 테이블/DB는 빈 결과</p>
             <div class="table-scroll">
               <table class="qtable" id="partition-table">
@@ -492,41 +492,50 @@
             </p>
           </div>
           <div class="monitor-card mcp-card">
-            <h3>MCP 연동 — AI 에이전트가 DBTower를 도구로 씁니다</h3>
-            <p class="muted">앱이 떠 있으면 준비 완료. 아래 명령 한 줄이면 Claude Code가 시점 비교·실행계획 분석을 직접 수행합니다.</p>
+            <h3>MCP 연동 <span class="hint">Claude Code 같은 AI 에이전트가 DBTower 읽기 도구를 씁니다.</span></h3>
+            <!-- code 안에는 명령만 둔다 — 복사 버튼이 code의 글자를 그대로 집어 가므로 설명이 섞이면 함께 복사된다 -->
             <div class="mcp-cmd-row">
-              <code id="mcp-cmd-http" class="mcp-cmd">claude mcp add --transport http dbtower http://localhost:8080/mcp   (이대로 등록하면 브라우저 로그인(OAuth)으로 내 역할만큼 도구를 씁니다 · ADMIN에게는 서비스 토큰 명령이 채워집니다)</code>
+              <code id="mcp-cmd-http" class="mcp-cmd">claude mcp add --transport http dbtower http://localhost:8080/mcp</code>
               <button class="btn btn-primary btn-small" data-copy="mcp-cmd-http">복사</button>
             </div>
+            <p id="mcp-http-note" class="hint">브라우저 로그인으로 내 역할만큼 도구를 씁니다.</p>
             <div class="mcp-cmd-row">
-              <code id="mcp-cmd-stdio" class="mcp-cmd">claude mcp add dbtower -- sh scripts/dbtower-mcp.sh   (stdio 방식 — 앱과 분리 실행)</code>
+              <code id="mcp-cmd-stdio" class="mcp-cmd">claude mcp add dbtower -- sh scripts/dbtower-mcp.sh</code>
               <button class="btn btn-small" data-copy="mcp-cmd-stdio">복사</button>
             </div>
-            <h3 class="mcp-tools-title">제공 도구 <span class="hint">(이 목록 자체가 MCP 코어의 tools/list 응답입니다)</span></h3>
-            <div id="mcp-tools" class="mcp-tools muted">불러오는 중...</div>
+            <p class="hint">앱과 따로 실행합니다.</p>
+            <button id="btn-mcp-tools" class="mcp-tools-toggle" type="button" aria-expanded="false" aria-controls="mcp-tools">제공 도구 보기</button>
+            <div id="mcp-tools" class="mcp-tools muted" hidden>불러오는 중...</div>
           </div>
           <div class="monitor-card users-card" id="users-card" hidden>
-            <h3>사용자·역할 <span class="hint">(쓰는 사람 기준 — 관제 · 요청자 · 승인자 · 운영자 · 관리자 · 역할 변경은 다음 로그인부터 · ADMIN)</span></h3>
-            <p class="hint">관제는 지표·리포트만, 요청자는 워크벤치 조회와 변경 요청, 승인자는 승인·반려와 드라이런, 운영자는 승인 티켓 실행·되돌리기와 백업·세션 종료, 관리자는 인스턴스·접속 계정·보안·감사까지. 승인자와 운영자는 서로의 일을 하지 못합니다.</p>
+            <h3>사용자·역할 <span class="hint">역할 변경은 다음 로그인부터 적용됩니다.</span></h3>
             <div class="table-scroll">
               <table class="qtable" id="users-table">
-                <thead><tr><th>사용자</th><th>역할</th><th>팀</th></tr></thead>
-                <tbody><tr><td colspan="3" class="muted">조회 중...</td></tr></tbody>
+                <thead><tr><th>사용자</th><th>역할</th><th>팀</th><th><span class="sr-only">변경</span></th></tr></thead>
+                <tbody><tr><td colspan="4" class="muted">조회 중...</td></tr></tbody>
               </table>
             </div>
-            <div class="review-submit-row">
-              <input type="text" id="user-new-name" class="ddl-input" placeholder="사용자 이름(영문·숫자·._- 3~50자)" autocomplete="off">
-              <input type="password" id="user-new-password" class="ddl-input" placeholder="비밀번호(12자 이상)" autocomplete="new-password">
-              <select id="user-new-role" aria-label="역할">
-                <option value="VIEWER">관제 (VIEWER)</option>
-                <option value="REQUESTER" selected>요청자 (REQUESTER)</option>
-                <option value="APPROVER">승인자 (APPROVER)</option>
-                <option value="OPERATOR">운영자 (OPERATOR)</option>
-                <option value="ADMIN">관리자 (ADMIN)</option>
+            <!-- 역할 설명은 표를 읽는 동안 늘 떠 있을 필요가 없다 — 필요할 때 펼친다 -->
+            <details class="users-roles">
+              <summary>역할별로 할 수 있는 일</summary>
+              <p class="hint">관제는 지표·리포트만, 요청자는 워크벤치 조회와 변경 요청, 승인자는 승인·반려와 드라이런, 운영자는 승인 티켓 실행·되돌리기와 백업·세션 종료, 관리자는 인스턴스·접속 계정·보안·감사까지. 승인자와 운영자는 서로의 일을 하지 못합니다.</p>
+            </details>
+            <div class="user-new-row">
+              <label class="user-field" for="user-new-name">사용자 이름</label>
+              <input type="text" id="user-new-name" placeholder="영문·숫자·._- 3~50자" autocomplete="off">
+              <label class="user-field" for="user-new-password">비밀번호</label>
+              <input type="password" id="user-new-password" placeholder="12자 이상" autocomplete="new-password">
+              <label class="user-field" for="user-new-role">역할</label>
+              <select id="user-new-role">
+                <option value="VIEWER">관제</option>
+                <option value="REQUESTER" selected>요청자</option>
+                <option value="APPROVER">승인자</option>
+                <option value="OPERATOR">운영자</option>
+                <option value="ADMIN">관리자</option>
               </select>
-              <button id="btn-user-create" class="btn btn-primary btn-small">사용자 만들기</button>
+              <button id="btn-user-create" class="btn btn-primary btn-small" disabled>사용자 만들기</button>
             </div>
-            <div id="users-msg" class="hint"></div>
+            <div id="users-msg" class="hint" role="status"></div>
           </div>
         </div>
       </div>
