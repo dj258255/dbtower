@@ -313,7 +313,7 @@ function renderInstanceMatches() {
   if (!shown.length) {
     box.innerHTML = anyFilter
       ? '<div class="inst-empty muted">일치하는 인스턴스가 없습니다.</div>'
-      : `<div class="inst-empty muted">총 <b>${total}</b>대 — 위에서 검색하거나 필터를 선택하면 여기 표시됩니다.</div>`;
+      : `<div class="inst-empty muted">위에서 검색하거나 필터를 선택하면 여기 표시됩니다.</div>`;
     return;
   }
   const capped = shown.slice(0, INSTANCE_RENDER_CAP);
@@ -514,7 +514,7 @@ function handleInstanceDeepLink(list) {
   // Slack 결과·경보가 건 링크(?aiop=작업id)로 들어오면 그 작업을 연다 — 링크가 JSON API를 가리키면 사람이 읽을 화면이 없다
   if (deepJob) ready.then(() => openDeepLinkJob(deepJob));
   // 진단 입력은 늘 보이는 AI 칸에 있다(149절) — 모니터링 탭을 열 필요 없이 질문을 채운다
-  if (deepQ) { const input = $("#diagnose-question"); input.value = deepQ; input.scrollIntoView({ block: "center" }); input.focus(); }
+  if (deepQ) { const input = $("#diagnose-question"); input.value = deepQ; autoGrowChatInput(); syncChatComposer(); input.scrollIntoView({ block: "center" }); input.focus(); }
   if (deepView === "config-drift") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadConfigDrift(); $("#config-drift-result").scrollIntoView({ block: "center" }); }
   if (deepView === "review") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadReviews(); $(".review-gate-card").scrollIntoView({ block: "center" }); }
   // 인시던트 리포트 웹훅 카드(IncidentController)와 월간 리포트의 입구 — 링크는 있었는데 처리하는 곳이 없었다(148절 감사)
@@ -538,6 +538,7 @@ function openDeepLinkJob(jobId) {
 async function selectInstance(instance, card) {
   state.instance = instance;
   renderInstanceMatches(); // 선택 반영 — 선택 카드를 맨 위 유지·상세 펼침·하이라이트
+  renderChat({ follow: true }); // AI 칸의 대화는 인스턴스마다 따로다 — 고른 대상의 대화로 바꾼다
   $("#time-panel").hidden = false;
   $("#result-panel").hidden = false;
 
@@ -753,14 +754,25 @@ function setupAiOperations() {
   document.addEventListener("visibilitychange", scheduleAiOpsRefresh);
 }
 
-// 같은 칸의 "지금 보기"(자연어 진단)와 달리, 여기서 만든 작업은 사실 수집·검증을 거쳐 나중에 결과가 붙는다.
+// 같은 칸의 채팅(자연어 진단)과 달리, 여기서 만든 작업은 사실 수집·검증을 거쳐 나중에 결과가 붙는다.
+// 결과는 대화에 한 줄로 남기고, 같은 문장을 화면 낭독기용 상태 영역에도 적는다(눈에는 한 번만 보인다).
 async function submitAiOperation() {
   const status = $("#aiop-submit-status");
   const btn = $("#btn-aiop-submit");
-  if (!state.instance) { status.textContent = "인스턴스를 먼저 선택하세요."; return; }
-  const prompt = $("#diagnose-question").value.trim();
-  if (!prompt) { status.textContent = "무엇을 봐 달라고 할지 적어 주세요. 위 입력칸을 함께 씁니다."; return; }
+  const input = $("#diagnose-question");
+  const inst = state.instance;
+  const prompt = input.value.trim();
+  if (!inst || !prompt || btn.dataset.busy) return;
+  const turns = chatTurns();
+  const say = (text, jobId) => {
+    status.textContent = text;
+    // 접수 도중 다른 인스턴스로 옮겨도 그 작업을 맡긴 대상의 대화에 남긴다
+    turns.push({ role: "system", text, jobId });
+    saveChat();
+    if (state.instance?.id === inst.id) renderChat({ follow: true });
+  };
   const type = $("#aiop-new-type").value;
+  btn.dataset.busy = "1";
   btn.disabled = true;
   status.textContent = "접수 중...";
   let accepted = null;
@@ -768,21 +780,25 @@ async function submitAiOperation() {
     accepted = await api("/api/ai-operations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type, instanceId: state.instance.id,
+      body: JSON.stringify({ type, instanceId: inst.id,
         windowMinutes: Number($("#aiop-new-window").value), prompt, trigger: "WEB" }),
     });
-    status.textContent = `${AIOP_TYPE_LABEL[accepted.type] ?? accepted.type} 작업 ${String(accepted.jobId ?? "").slice(0, 8)}을 접수했습니다.`;
+    turns.push({ role: "user", text: prompt });
+    input.value = "";
+    autoGrowChatInput();
+    say(`${AIOP_TYPE_LABEL[accepted.type] ?? accepted.type} 작업 ${String(accepted.jobId ?? "").slice(0, 8)}을 접수했습니다. 사실 수집과 검증이 끝나면 결과가 붙습니다.`, accepted.jobId);
     showMonGroup("diag");
     document.querySelector('.tab[data-tab="monitor"]')?.click();
     await loadAiOperations();
     if (accepted.jobId) openAiOperation(accepted.jobId);
   } catch (e) {
     // 접수까지는 됐는데 그 뒤가 실패한 경우를 "접수 실패"로 적지 않는다 — 작업은 이미 만들어져 돌고 있다
-    status.textContent = accepted
-      ? `접수는 됐지만 목록을 갱신하지 못했습니다: ${e.message}`
-      : `접수하지 못했습니다: ${e.message}`;
+    say(accepted
+      ? `접수는 됐지만 작업 목록을 갱신하지 못했습니다: ${e.message}`
+      : `작업을 접수하지 못했습니다: ${e.message}`, accepted?.jobId);
   } finally {
-    btn.disabled = false;
+    delete btn.dataset.busy;
+    syncChatComposer();
   }
 }
 
@@ -3107,27 +3123,14 @@ async function runOnlineDdl(execute) {
   box.innerHTML = `<strong>${esc(d.status)}</strong>${d.mode ? ` (${esc(d.mode)})` : ""}${ghost}<br>${esc(d.detail || "")}`;
 }
 
-// ---------- 자연어 근본원인 진단 (D3) ----------
-// 도구 호출 한 줄 — 진행 중 목록과 최종 결과가 같은 모양을 쓴다
-function diagnoseStepHtml(c, i) {
-  const badge = c.rejected
-    ? `<span class="sev-badge sev-CRITICAL">거부</span>`
-    : `<span class="src-badge src-native">${i + 1}</span>`;
-  return `
-    <div class="diagnose-step">
-      <div class="diagnose-step-head">${badge} <code>${esc(c.tool)}</code>
-        <span class="muted diagnose-step-args">${esc(c.arguments || "")}</span></div>
-      <div class="diagnose-step-reason">${esc(c.reason || "")}</div>
-    </div>`;
-}
-
 // 서버가 흘리는 SSE를 POST로 받는다(141절) — EventSource는 본문과 CSRF 헤더를 실을 수 없다. workbench/api.js streamEvents와 같은 규칙.
 // Accept에 text/event-stream을 싣지 않는다: 스트림을 열기 전 거절(404·503)은 JSON으로 오는데 그걸 못 받는다고 선언하면 406이 된다
-async function streamSse(path, body, onEvent) {
+async function streamSse(path, body, onEvent, signal) {
   const r = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-XSRF-TOKEN": csrfToken() },
     body: JSON.stringify(body),
+    signal,
   });
   if (r.status === 401) { location.href = "/login.html"; throw new Error("로그인이 필요합니다"); }
   if (!r.ok || !(r.headers.get("Content-Type") || "").startsWith("text/event-stream")) {
@@ -3163,86 +3166,253 @@ async function streamSse(path, body, onEvent) {
   }
 }
 
-async function runDiagnose() {
-  const box = $("#diagnose-result");
-  if (!state.instance) { box.className = "diagnose-result schema-warning"; box.textContent = "인스턴스를 먼저 선택하세요."; return; }
-  const question = $("#diagnose-question").value.trim();
-  if (!question) { box.className = "diagnose-result schema-warning"; box.textContent = "질문을 입력하세요."; return; }
+// ---------- AI 어시스턴트 채팅 (자연어 진단) ----------
+// 질문할 때마다 앞 답이 덮여 사라지던 결과 상자를 웹 채팅으로 바꿨다. 대화는 인스턴스마다 따로 둔다 — 앞 대화를 서버에
+// 참고용 맥락으로 함께 보내므로(DiagnosisService.historyBlock) 다른 DB의 대화가 섞이면 엉뚱한 대상의 맥락이 실린다.
+// 한 번에 한 진단만 돈다(진단은 100초를 넘기도 하고, 두 스트림이 같은 칸에 번갈아 그렸다 — 148절 감사).
+const chat = { byInstance: new Map(), running: null };
+const CHAT_HISTORY_TURNS = 3;
+const CHAT_CONFIDENCE = { high: "높음", medium: "보통", low: "낮음" };
+// 예시는 진단 도구로 실제로 답할 수 있는 것만 둔다(query_stats·compare, sessions, replication)
+const CHAT_SUGGESTIONS = ["최근 1시간 동안 느려진 쿼리가 있어?", "지금 락을 기다리는 세션이 있어?", "복제가 밀리고 있어?"];
 
-  // 진단은 100초 넘게 걸리기도 한다. 그동안 다시 누르거나 Enter를 치면 두 스트림이 같은 칸에 번갈아 그렸다(148절 감사)
-  if (state.diagnosing) return;
-  state.diagnosing = true;
-  const diagnoseBtn = $("#btn-diagnose");
-  if (diagnoseBtn) diagnoseBtn.disabled = true;
-
-  // 끝날 때까지 한 번에 기다리지 않고 스텝마다 흘려 받는다(141절) — 수십 초 동안 "진단 중"만 보이면 멈춘 것과 구분이 안 된다
-  box.className = "diagnose-result";
-  const progress = { steps: [], stage: "진단을 시작합니다", startedAt: Date.now() };
-  const drawProgress = () => {
-    box.innerHTML = `
-      <div class="diagnose-live" aria-live="polite"><span class="diagnose-live-stage">${esc(progress.stage)}</span>
-        <span class="muted" id="diagnose-elapsed"></span></div>
-      <div class="diagnose-steps">${progress.steps.map(diagnoseStepHtml).join("")}</div>`;
-    tickElapsed();
-  };
-  const tickElapsed = () => {
-    const el = $("#diagnose-elapsed");
-    if (el) el.textContent = `· ${Math.floor((Date.now() - progress.startedAt) / 1000)}초 경과`;
-  };
-  drawProgress();
-  const ticker = setInterval(tickElapsed, 1000);
-  let d = null;
+// 같은 탭에서는 새로고침해도 대화가 남게 한다 — 처음엔 메모리에만 둬서 새로고침 한 번에 대화가 사라졌다.
+// sessionStorage라 탭을 닫으면 지워지고 다른 사람·기기로 가지 않는다. 저장이 막힌 브라우저(사생활 모드 등)에서도 채팅은 돈다
+const CHAT_STORE_KEY = "dbtower.chat.v1";
+const CHAT_STORE_TURNS = 30;
+function saveChat() {
   try {
-    await streamSse(`/api/instances/${state.instance.id}/diagnose/stream`, { question }, (name, data) => {
+    const data = {};
+    for (const [id, turns] of chat.byInstance) {
+      data[id] = turns.filter((t) => t.status !== "running").slice(-CHAT_STORE_TURNS);
+    }
+    sessionStorage.setItem(CHAT_STORE_KEY, JSON.stringify(data));
+  } catch (e) { /* 저장 못 해도 지금 화면의 대화는 그대로다 */ }
+}
+function loadChat() {
+  try {
+    const data = JSON.parse(sessionStorage.getItem(CHAT_STORE_KEY) || "{}");
+    for (const [id, turns] of Object.entries(data)) {
+      if (Array.isArray(turns)) chat.byInstance.set(Number(id), turns);
+    }
+  } catch (e) { /* 깨진 저장값은 버리고 빈 대화로 시작한다 */ }
+}
+
+function chatTurns() {
+  const id = state.instance?.id;
+  if (id == null) return [];
+  if (!chat.byInstance.has(id)) chat.byInstance.set(id, []);
+  return chat.byInstance.get(id);
+}
+
+function chatToolHtml(c) {
+  return `
+    <div class="chat-tool${c.rejected ? " is-rejected" : ""}">
+      <div class="chat-tool-line"><span class="chat-tool-dot" aria-hidden="true"></span><code class="chat-tool-name">${esc(c.tool)}</code>
+        <span class="chat-tool-args" title="${esc(c.arguments || "")}">${esc(c.arguments || "")}</span></div>
+      <div class="chat-tool-why">${c.rejected ? "거부됨 · " : ""}${esc(c.reason || "")}</div>
+    </div>`;
+}
+
+function chatTurnHtml(t) {
+  if (t.role === "user") return `<div class="chat-msg chat-user"><div class="chat-bubble">${esc(t.text)}</div></div>`;
+  if (t.role === "system") {
+    const link = t.jobId ? ` <button class="chat-link" type="button" data-job="${esc(t.jobId)}">결과 보기</button>` : "";
+    return `<div class="chat-msg chat-system">${esc(t.text)}${link}</div>`;
+  }
+  const tools = t.steps.length ? `<div class="chat-tools-used">${t.steps.map(chatToolHtml).join("")}</div>` : "";
+  const secs = (ms) => `${Math.round(ms / 100) / 10}초`;
+  let body = "";
+  if (t.status === "running") {
+    // 글자를 한 덩어리로 감싼다 — flex 줄에서는 글자 조각마다 gap이 끼어 "20 초"처럼 벌어졌다
+    body = `<div class="chat-stage"><span class="chat-stage-dot" aria-hidden="true"></span><span>${esc(t.stage)} · <span data-elapsed>${Math.floor((Date.now() - t.startedAt) / 1000)}</span>초</span></div>`;
+  } else if (t.status === "done") {
+    const d = t.result;
+    if (!d.aiEnabled) {
+      body = `<div class="chat-note">${esc(d.note || "AI 진단을 쓸 수 없습니다")}</div>`;
+    } else {
+      body = `
+        ${d.rootCause ? `<p class="chat-root"><span class="chat-root-k">근본원인</span>${esc(stripEmoji(d.rootCause))}</p>` : ""}
+        <div class="chat-text">${esc(stripEmoji(d.answer) || "(답변 없음)")}</div>
+        <div class="chat-meta">확신도 ${esc(CHAT_CONFIDENCE[d.confidence] || d.confidence || "-")} · ${esc(d.backend || "")} · 도구 ${d.toolCallCount}개 · ${secs(t.took)}</div>
+        ${d.note ? `<div class="chat-note">${esc(d.note)}</div>` : ""}`;
+    }
+  } else if (t.status === "stopped") {
+    body = `<div class="chat-meta">화면에서 중지했습니다 · ${secs(t.took)}</div>`;
+  } else if (t.status === "error") {
+    body = `<div class="chat-error">진단하지 못했습니다: ${esc(t.error)}</div>`;
+  }
+  return `<div class="chat-msg chat-ai">${tools}${body}</div>`;
+}
+
+function renderChat({ follow = false } = {}) {
+  const log = $("#chat-log");
+  if (!log) return;
+  const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+  const turns = chatTurns();
+  const inst = state.instance;
+  if (!inst) {
+    log.innerHTML = `<div class="chat-empty"><p>왼쪽에서 인스턴스를 고르면 그 DB에 물어볼 수 있습니다.</p></div>`;
+  } else if (!turns.length) {
+    log.innerHTML = `
+      <div class="chat-empty">
+        <p><strong>${esc(inst.name)}</strong>에 무엇이든 물어보세요.</p>
+        <p class="chat-empty-sub">AI는 읽기 도구로 근거를 모으고, 근거가 없으면 모른다고 답합니다. 대상 DB는 바꾸지 않습니다.</p>
+        <div class="chat-suggest">${CHAT_SUGGESTIONS.map((q) => `<button type="button" class="chat-chip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>
+      </div>`;
+  } else {
+    log.innerHTML = turns.map(chatTurnHtml).join("");
+  }
+  // 새 줄이 붙으면 맨 아래로 — 단 위로 올려 앞 대화를 읽는 중이면 끌어내리지 않는다
+  if (follow || nearBottom) log.scrollTop = log.scrollHeight;
+  syncChatComposer();
+}
+
+function syncChatComposer() {
+  const input = $("#diagnose-question");
+  const send = $("#btn-diagnose");
+  const delegate = $("#btn-aiop-submit");
+  const target = $("#chat-target");
+  const newChat = $("#chat-new");
+  if (!input) return;
+  const inst = state.instance;
+  const runningHere = chat.running && inst && chat.running.instanceId === inst.id;
+  const runningElsewhere = chat.running && !runningHere;
+  const hasText = input.value.trim().length > 0;
+  input.disabled = !inst;
+  input.placeholder = inst ? "무엇이 궁금한가요?" : "왼쪽에서 인스턴스를 고르면 물어볼 수 있습니다";
+  target.hidden = !inst;
+  target.textContent = inst ? inst.name : "";
+  newChat.hidden = !inst || !chatTurns().length;
+  newChat.disabled = !!runningHere;
+  send.classList.toggle("is-stop", !!runningHere);
+  send.setAttribute("aria-label", runningHere ? "중지" : "보내기");
+  send.title = runningElsewhere ? "다른 인스턴스의 진단이 끝나면 보낼 수 있습니다" : "";
+  // 진행 중에는 같은 버튼이 중지가 된다 — 그래서 빈 입력이어도 누를 수 있어야 한다
+  send.disabled = runningHere ? false : (!inst || !hasText || !!runningElsewhere);
+  if (delegate && !delegate.dataset.busy) delegate.disabled = !inst || !hasText;
+}
+
+function autoGrowChatInput() {
+  const input = $("#diagnose-question");
+  input.style.height = "auto";
+  input.style.height = `${Math.min(input.scrollHeight, 148)}px`;
+  // 최대 높이 전에는 스크롤을 숨긴다 — 한 줄인데도 1~2px 차이로 회색 스크롤바가 떠 있었다
+  input.style.overflowY = input.scrollHeight > 148 ? "auto" : "hidden";
+}
+
+async function runDiagnose() {
+  const input = $("#diagnose-question");
+  const inst = state.instance;
+  const question = input.value.trim();
+  if (!inst || !question || chat.running) return;
+
+  const turns = chatTurns();
+  // 서버에 보낼 앞 대화 — 끝난 진단만. 중지·실패한 턴의 질문은 답이 없어 맥락이 되지 못한다
+  const history = [];
+  for (let i = 0; i < turns.length - 1; i++) {
+    const q = turns[i], a = turns[i + 1];
+    if (q.role === "user" && a.role === "ai" && a.status === "done" && a.result?.aiEnabled) {
+      const answer = [a.result.rootCause, a.result.answer].filter(Boolean).join(" / ");
+      history.push({ question: q.text, answer });
+    }
+  }
+
+  turns.push({ role: "user", text: question });
+  const turn = { role: "ai", status: "running", stage: "진단을 시작합니다", steps: [], startedAt: Date.now() };
+  turns.push(turn);
+  input.value = "";
+  autoGrowChatInput();
+
+  const controller = new AbortController();
+  chat.running = { instanceId: inst.id, controller };
+  renderChat({ follow: true });
+  // 경과 초만 1초마다 고친다 — 전체를 다시 그리면 읽던 자리의 선택·스크롤이 흔들린다
+  const ticker = setInterval(() => {
+    if (state.instance?.id !== inst.id) return;
+    const el = document.querySelector("#chat-log [data-elapsed]");
+    if (el) el.textContent = Math.floor((Date.now() - turn.startedAt) / 1000);
+  }, 1000);
+  const redraw = () => { if (state.instance?.id === inst.id) renderChat(); };
+
+  try {
+    let result = null;
+    await streamSse(`/api/instances/${inst.id}/diagnose/stream`, { question, history: history.slice(-CHAT_HISTORY_TURNS) }, (name, data) => {
       if (name === "thinking") {
-        progress.stage = data.synthesis ? "도구 호출 상한에 도달해 지금까지의 근거로 답을 정리하는 중" : `AI가 ${data.step}번째 판단을 내리는 중`;
+        turn.stage = data.synthesis ? "도구 호출 상한에 도달해 지금까지의 근거로 답을 정리하는 중" : `${data.step}번째 판단 중`;
       } else if (name === "tool") {
-        progress.steps.push(data);
-        progress.stage = data.rejected ? `요청한 도구가 거부됐습니다: ${data.tool}` : `${data.tool} 결과를 받았습니다`;
+        turn.steps.push(data);
+        turn.stage = data.rejected ? `요청한 도구가 거부됐습니다: ${data.tool}` : `${data.tool} 결과를 받았습니다`;
       } else if (name === "result") {
-        d = data;
+        result = data;
         return;
       } else if (name === "error") {
         throw new Error(data.message);
       }
-      drawProgress();
-    });
-    if (!d) throw new Error("진단 결과가 끝까지 오지 않았습니다(연결 끊김)");
+      redraw();
+    }, controller.signal);
+    if (!result) throw new Error("답이 끝까지 오지 않았습니다(연결 끊김)");
+    turn.status = "done";
+    turn.result = result;
+    turn.steps = result.toolCalls || turn.steps;
   } catch (e) {
-    box.className = "diagnose-result schema-warning";
-    box.textContent = `진단 실패: ${e.message}`;
-    return;
+    if (e.name === "AbortError") {
+      turn.status = "stopped";
+    } else {
+      turn.status = "error";
+      turn.error = e.message;
+    }
   } finally {
+    turn.took = Date.now() - turn.startedAt;
     clearInterval(ticker);
-    state.diagnosing = false;
-    if (diagnoseBtn) diagnoseBtn.disabled = false;
+    chat.running = null;
+    saveChat();
+    redraw();
+    syncChatComposer();
   }
+}
 
-  if (!d.aiEnabled) {
-    box.innerHTML = `<div class="diagnose-note muted">${esc(d.note || "AI 진단 비활성")}</div>`;
-    return;
-  }
-
-  // 사용한 도구(투명성) — 어떤 도구를 왜 불렀나, 거부된 요청도 표시
-  const calls = (d.toolCalls || []).map(diagnoseStepHtml).join("");
-  const took = Math.round((Date.now() - progress.startedAt) / 100) / 10;
-
-  const conf = esc(d.confidence || "");
-  box.innerHTML = `
-    <div class="diagnose-answer">
-      <div class="diagnose-answer-head">
-        <strong>근본원인</strong>
-        <span class="src-badge conf-${conf}">확신도 ${conf}</span>
-        <span class="muted">${esc(d.backend || "")} · 사용 도구 ${d.toolCallCount}개 · ${took}초</span>
-      </div>
-      ${d.rootCause ? `<div class="diagnose-rootcause">${esc(stripEmoji(d.rootCause))}</div>` : ""}
-      <div class="diagnose-text">${esc(stripEmoji(d.answer) || "(답변 없음)")}</div>
-    </div>
-    <div class="diagnose-steps">
-      <div class="diagnose-steps-head muted">AI가 부른 도구 (근거·투명성)</div>
-      ${calls || '<div class="muted">호출한 도구 없음</div>'}
-    </div>
-    ${d.note ? `<div class="diagnose-note muted">${esc(d.note)}</div>` : ""}`;
+function wireChat() {
+  const form = $("#chat-form");
+  const input = $("#diagnose-question");
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (chat.running && chat.running.instanceId === state.instance?.id) chat.running.controller.abort();
+    else runDiagnose();
+  });
+  input.addEventListener("keydown", (e) => {
+    // 한글은 조합 중에도 Enter가 온다 — 그때 보내면 마지막 글자가 덜 쳐진 채 나간다
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    if (!chat.running) runDiagnose();
+  });
+  input.addEventListener("input", () => { autoGrowChatInput(); syncChatComposer(); });
+  $("#chat-new").addEventListener("click", () => {
+    if (chat.running && chat.running.instanceId === state.instance?.id) return;
+    chat.byInstance.set(state.instance.id, []);
+    saveChat();
+    renderChat();
+    input.focus();
+  });
+  $("#chat-log").addEventListener("click", (e) => {
+    const chip = e.target.closest(".chat-chip");
+    if (chip) {
+      input.value = chip.dataset.q;
+      autoGrowChatInput();
+      syncChatComposer();
+      input.focus();
+      return;
+    }
+    const job = e.target.closest(".chat-link[data-job]");
+    if (job) {
+      document.querySelector('.tab[data-tab="monitor"]')?.click();
+      showMonGroup("diag");
+      loadAiOperations().then(() => openAiOperation(job.dataset.job));
+      document.querySelector(".aiops-card")?.scrollIntoView({ block: "start" });
+    }
+  });
+  loadChat();
+  renderChat();
 }
 
 // ---------- 감사 로그 검색 (Specification 동적 필터) ----------
@@ -3443,8 +3613,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   incidentDefaults();
   $("#btn-ddl-noop").addEventListener("click", () => runOnlineDdl(false));
   $("#btn-ddl-exec").addEventListener("click", () => runOnlineDdl(true));
-  $("#btn-diagnose").addEventListener("click", runDiagnose);
-  $("#diagnose-question").addEventListener("keydown", (e) => { if (e.key === "Enter") runDiagnose(); });
+  wireChat();
   $("#audit-search-btn").addEventListener("click", loadAudit);
   $("#audit-reset-btn").addEventListener("click", () => {
     ["audit-principal", "audit-action", "audit-outcome"].forEach((id) => { $(`#${id}`).value = ""; });

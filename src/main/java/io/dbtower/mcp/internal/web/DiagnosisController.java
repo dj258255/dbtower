@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -53,14 +54,16 @@ public class DiagnosisController {
         this.streams = streams;
     }
 
-    public record DiagnoseRequest(@NotBlank String question) {
+    /** history는 채팅 화면이 보내는 앞선 대화(없어도 된다). 서비스가 최근 몇 턴만 잘라 참고용 맥락으로 싣는다 */
+    public record DiagnoseRequest(@NotBlank String question, List<DiagnosisService.PriorTurn> history) {
     }
 
     @PostMapping("/diagnose")
     public DiagnosisService.DiagnosisResult diagnose(@PathVariable Long id,
                                                      @RequestBody DiagnoseRequest req) {
         DatabaseInstance instance = registryService.findById(id); // 없는 인스턴스면 여기서 404
-        return diagnosisService.diagnose(id, instance.getType().name(), instance.getName(), req.question());
+        return diagnosisService.diagnose(id, instance.getType().name(), instance.getName(), req.question(),
+                req.history(), DiagnosisService.DiagnosisListener.NONE);
     }
 
     /**
@@ -77,7 +80,7 @@ public class DiagnosisController {
         boolean started = streams.trySubmit(() -> {
             try {
                 DiagnosisService.DiagnosisResult result = diagnosisService.diagnose(id, instance.getType().name(),
-                        instance.getName(), req.question(), new DiagnosisListener() {
+                        instance.getName(), req.question(), req.history(), new DiagnosisListener() {
                             @Override
                             public void thinking(int step, boolean synthesis) {
                                 send(emitter, "thinking", Map.of("step", step, "synthesis", synthesis));
