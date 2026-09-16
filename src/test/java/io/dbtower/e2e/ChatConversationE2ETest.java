@@ -148,6 +148,9 @@ class ChatConversationE2ETest {
         assertThat(log).containsText(QUESTION_LATEST);
         assertThat(log).containsText("주문 상태별로 세어 보세요");
         assertThat(page.locator("#chat-switch-label")).hasText(TITLE_LATEST);
+        // 부제: 이름과 고정 문구 사이에 간격이 있어야 한다 — 붙어 있으면 "이름· 문구"로 읽힌다(B3 2차)
+        org.assertj.core.api.Assertions.assertThat(subtitleWordGap(page)).as("이름과 고정 문구가 붙어 있다")
+                .isGreaterThan(0.0);
         screenshot(page, "chat-conversation.png");
 
         // 2) 답 서식 — 목록은 ul/li, 인라인 코드는 code. 그리고 esc가 먼저라 태그가 살아나지 않는다
@@ -236,6 +239,13 @@ class ChatConversationE2ETest {
     /** 넘친 폭(px). 0 이하면 잘리지 않았다는 뜻이다. */
     private static int clipped(Locator locator) {
         return ((Number) locator.evaluate("el => el.scrollWidth - el.clientWidth")).intValue();
+    }
+
+    /** 부제에서 이름 끝과 고정 문구 시작 사이의 간격(px). 문구 앞 공백에 기대면 flex 경계에서 0이 된다. */
+    private static double subtitleWordGap(Page page) {
+        Locator name = page.locator("#chat-sub .chat-sub-name");
+        Locator fixed = page.locator("#chat-sub .chat-sub-fixed");
+        return fixed.boundingBox().x - (name.boundingBox().x + name.boundingBox().width);
     }
 
     private Conversation conversationOf(String title, LocalDateTime updatedAt) {

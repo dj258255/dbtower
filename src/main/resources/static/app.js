@@ -429,6 +429,60 @@ function setupTooltip() {
   window.addEventListener("resize", hide);
 }
 
+// 표의 SQL 툴팁 (B3) — 셀은 말줄임이라 전체 문장이 안 보이는데, 네이티브 title은 강조 없는 한 줄이라
+// "SELECT가 어디부터 어디까지인가"가 읽히지 않는다(사용자 지적). 문서에 하나만 두고 재사용한다 —
+// 여러 개가 겹쳐 뜨는 것을 구조적으로 막고, 한 번에 하나만 뜬다.
+const SQL_TIP_DELAY_MS = 300;
+function setupSqlTip() {
+  const tip = document.createElement("div");
+  tip.id = "sql-tip"; tip.className = "sql-tip"; tip.hidden = true;
+  tip.setAttribute("role", "tooltip");
+  document.body.appendChild(tip);
+  let cell = null, timer = null;
+
+  const hide = () => {
+    clearTimeout(timer); timer = null;
+    if (!tip.hidden) { tip.hidden = true; tip.innerHTML = ""; }
+    cell = null;
+  };
+  const place = (el) => {
+    const r = el.getBoundingClientRect(), t = tip.getBoundingClientRect();
+    let top = r.bottom + 8;
+    if (top + t.height > window.innerHeight - 8) top = Math.max(8, r.top - t.height - 8);
+    tip.style.top = `${top}px`;
+    tip.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - t.width - 8))}px`;
+  };
+  const show = (el) => {
+    const sql = el.getAttribute("data-sql-tip");
+    if (!sql) return;
+    tip.innerHTML = highlightSql(formatSql(sql));
+    tip.hidden = false;
+    place(el);
+  };
+  document.addEventListener("mouseover", (e) => {
+    if (tip.contains(e.target)) return;          // 툴팁 위(스크롤바 포함)에 있으면 유지 — 안에서 스크롤할 수 있어야 한다
+    const el = e.target.closest?.("[data-sql-tip]");
+    if (!el) { hide(); return; }
+    if (el === cell) return;
+    clearTimeout(timer);
+    cell = el;
+    timer = setTimeout(() => show(el), SQL_TIP_DELAY_MS);
+  });
+  // 키보드 초점으로도 뜬다 — 마우스만 있는 툴팁은 키보드 사용자에게 없는 정보다(셀에 tabindex를 준 이유)
+  document.addEventListener("focusin", (e) => {
+    const el = e.target.closest?.("[data-sql-tip]");
+    if (el) { clearTimeout(timer); cell = el; show(el); }
+  });
+  document.addEventListener("focusout", (e) => {
+    if (e.target.closest?.("[data-sql-tip]")) hide();
+  });
+  // 스크롤·리사이즈로 자리가 어긋나면 숨긴다. 툴팁 안 스크롤은 툴팁의 것이라 닫지 않는다
+  window.addEventListener("scroll", (e) => { if (!tip.contains(e.target)) hide(); }, true);
+  window.addEventListener("resize", hide);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+  tip.addEventListener("mouseleave", hide);
+}
+
 // 검색·필터 이벤트 → 재렌더(입력·선택할 때만 매칭분을 그린다). 앱 로딩 시 한 번 연결.
 function setupInstanceFilter() {
   ["inst-search", "inst-engine", "inst-env", "inst-region", "inst-cluster", "inst-team"].forEach((id) => {
@@ -1442,7 +1496,7 @@ async function runQuery() {
   table.querySelector("tbody").innerHTML = stats.map((q, idx) => `
     <tr data-idx="${idx}">
       <td class="num">${fmtNum(q.loadPct)}%</td>
-      <td class="qtext" title="${esc(q.queryText)}">${queryTextHtml(q.queryText)}</td>
+      <td class="qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${queryTextHtml(q.queryText)}</td>
       <td class="num">${q.callsPerSec == null ? '<span class="muted">—</span>' : fmtNum(q.callsPerSec)}</td>
       <td class="num">${fmtNum(q.avgLatencyMs, msDigits(q.avgLatencyMs))}</td>
       <td class="num">${fmtNum(q.rowsExaminedAvg, 0)}</td>
@@ -1504,7 +1558,7 @@ async function runCompare() {
   table.querySelector("tbody").innerHTML = rows.map((q, idx) => `
     <tr data-idx="${idx}" class="${q.newQuery ? "new-query" : ""}">
       <td>${deltaCell(baseLoad(q), targetLoad(q), loadPctChange(baseLoad(q), targetLoad(q)))}</td>
-      <td class="qtext" title="${esc(q.queryText)}">${q.newQuery ? '<span class="badge-new">NEW</span>' : ""}${queryTextHtml(q.queryText)}</td>
+      <td class="qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${q.newQuery ? '<span class="badge-new">NEW</span>' : ""}${queryTextHtml(q.queryText)}</td>
       <td>${deltaCell(q.baseQps, q.targetQps, q.qpsChangePct)}</td>
       <td>${deltaCell(q.baseAvgMs, q.targetAvgMs, q.latencyChangePct, msDigits(q.baseAvgMs, q.targetAvgMs))}</td>
       <td>${deltaCell(q.baseRowsPerCall, q.targetRowsPerCall, q.rowsPerCallChangePct, 0)}</td>
@@ -1513,6 +1567,90 @@ async function runCompare() {
 }
 
 // ---------- 쿼리 상세 (EXPLAIN + AI) ----------
+// 보기 버튼 다섯은 토글이다(B3). 예전에는 여덟 개가 늘 같은 무게로 떠 있었고, 누르는 순간 섹션이 열리며 조회가 나가
+// 무엇이 켜져 있는지와 무엇이 아직 안 돌았는지가 화면에 없었다. 지금은 켜짐/꺼짐이 보이고, 조회는
+// "아직 결과가 없거나 SQL이 바뀌었을 때"만 나간다 — 다시 켜면 보관된 결과를 조회 없이 보여준다.
+const DETAIL_RUN = {
+  explain: () => runExplain(),
+  schema: () => runReferencedSchema(),
+  ai: () => runAiAnalysis(),
+  advisor: () => runIndexAdvisor(),
+  antipattern: () => runAntiPatterns(),
+};
+const DETAIL_VIEWS = {
+  explain: "plan-section", schema: "schema-section", ai: "ai-section",
+  advisor: "advisor-section", antipattern: "antipattern-section",
+};
+// 어느 SQL의 결과인지 — 토글이 다시 조회할지 판단하는 근거다
+const detailView = { open: {}, sql: {} };
+
+function detailSql() { return $("#detail-sql").value.trim(); }
+
+/**
+ * 조회가 끝났다 — 그 결과가 어느 SQL의 것인지 기록하고 "다시 조회"를 보인다.
+ * 토글이 다시 조회할지 판단하는 근거가 이 기록이고, 한 번도 조회하지 않은 섹션에 "다시 조회"가
+ * 떠 있으면 무엇을 다시 조회하는지 알 수 없다(B3 2차).
+ */
+function markDetailFresh(key) {
+  detailView.sql[key] = detailSql();
+  const btn = document.querySelector(`[data-refresh="${key}"]`);
+  if (btn) btn.hidden = false;
+}
+
+/** 토글 상태를 화면에 반영한다(섹션 열기/닫기 + aria-pressed) */
+function setDetailView(key, on) {
+  detailView.open[key] = on;
+  $("#btn-" + key).setAttribute("aria-pressed", String(on));
+  $("#" + DETAIL_VIEWS[key]).hidden = !on;
+}
+
+function toggleDetailView(key) {
+  const on = !detailView.open[key];
+  setDetailView(key, on);
+  if (!on) return;
+  const stale = detailView.sql[key] !== detailSql();
+  // 인덱스 제안만 사람의 입력(후보 컬럼)이 필요하다 — 토글이 대신 실행하지 않고 입력칸으로 보낸다.
+  // 대신 SQL이 바뀌었으면 옛 결과는 그 SQL의 것이 아니므로 버린다
+  if (key === "advisor") {
+    if (stale) resetAdvisor();
+    $("#advisor-columns").focus();
+    return;
+  }
+  if (stale) DETAIL_RUN[key]();
+}
+
+/** "다시 조회" — 보관된 결과를 버리고 같은 SQL로 새로 조회한다(같은 문장이라도 통계는 변한다) */
+function refreshDetailView(key) {
+  detailView.sql[key] = "";
+  DETAIL_RUN[key]();
+}
+
+function resetAdvisor() {
+  $("#advisor-columns").value = "";
+  $("#advisor-result").innerHTML = "";
+  detailView.sql.advisor = "";
+}
+
+// 더보기 메뉴 — 드물게 쓰는 둘(심층 진단·문의)을 접어 둔다. 항목은 실행하지 않고 섹션만 연다:
+// 전에는 누르는 즉시 쿼리를 실제로 실행하거나 문의를 보냈고, 비고 칸은 보낸 뒤에야 나타났다
+function openDetailMore() {
+  $("#detail-more-menu").hidden = false;
+  $("#btn-detail-more").setAttribute("aria-expanded", "true");
+}
+function closeDetailMore(refocus = false) {
+  const menu = $("#detail-more-menu");
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  $("#btn-detail-more").setAttribute("aria-expanded", "false");
+  if (refocus) $("#btn-detail-more").focus();
+}
+
+function openDetailSection(id) {
+  closeDetailMore();
+  $(id).hidden = false;
+  $(id).scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
 function bindRowClicks(rows) {
   $("#top-table").querySelectorAll("tbody tr").forEach((tr) => {
     tr.addEventListener("click", () => {
@@ -1542,25 +1680,34 @@ function openDetail(query, tr) {
   $("#btn-to-workbench").hidden = !can("WORKBENCH");
   $("#query-detail").hidden = false;
   if (tr) placeDetailUnder(tr);
-  $("#detail-qid").textContent = `SQL ID: ${query.queryId}`;
+  // SQL ID는 64자(MySQL digest)나 20자리(PG queryid)라 통째로 보이면 값이 이상해 보인다(사용자 지적).
+  // 짧게 보이고, 전체 값은 title에 남기고 복사 버튼이 그 값을 집어 간다 — 줄이되 숨기지 않는다
+  const qid = String(query.queryId ?? "");
+  $("#detail-qid").textContent = qid ? shortQueryId(qid) : "—";
+  $("#detail-qid").title = qid;
+  $("#btn-copy-qid").disabled = !qid;
+  // 인덱스 제안은 PostgreSQL의 HypoPG 전용이다 — 눌러서 "지원하지 않습니다"를 읽게 하지 않고 감춘다(159절)
+  $("#btn-advisor").hidden = state.instance?.type !== "POSTGRESQL";
   const formatted = formatSql(query.queryText);
   $("#detail-sql").value = formatted;
   $("#detail-sql").rows = Math.min(24, Math.max(5, formatted.split("\n").length + 1)); // 포매팅 줄 수에 맞춰 높이 자동
   updateSqlHl(); // SQL 구문 강조 레이어 갱신
 
-  $("#plan-section").hidden = true;
-  $("#schema-section").hidden = true;
+  // 쿼리를 새로 열면 보기 토글도 전부 꺼짐으로 되돌리고, 직전 쿼리의 결과는 첨부 대상이 아니다 — 비운다.
+  // "다시 조회"도 함께 감춘다: 결과가 없는 섹션에 그 버튼만 떠 있으면 무엇을 다시 조회하는지 알 수 없다
+  Object.keys(DETAIL_VIEWS).forEach((key) => setDetailView(key, false));
+  Object.keys(DETAIL_RUN).forEach((key) => { detailView.sql[key] = ""; });
+  $("#query-detail").querySelectorAll(".section-refresh").forEach((b) => { b.hidden = true; });
   $("#schema-result").innerHTML = "";
-  $("#ai-section").hidden = true;
-  $("#advisor-section").hidden = true;
   $("#advisor-columns").value = "";
   $("#advisor-result").innerHTML = "";
+  $("#antipattern-result").innerHTML = "";
   $("#deep-section").hidden = true;
   $("#deep-result").innerHTML = "";
   $("#inquiry-section").hidden = true;
   $("#inquiry-note").value = "";
   $("#inquiry-result").innerHTML = "";
-  // 쿼리를 새로 열면 직전 쿼리의 분석 결과는 첨부 대상이 아니다 — 비운다
+  closeDetailMore();
   state.lastPlan = null;
   state.lastFindings = [];
   state.lastAi = null;
@@ -1570,6 +1717,7 @@ function openDetail(query, tr) {
 function closeDetail() {
   const detail = $("#query-detail");
   detail.hidden = true;
+  closeDetailMore();
   // 인라인 호스트 행에서 빼내 원위치(테이블 밖 tab-top)로 되돌린다 — 표를 다시 그려도 상세 엘리먼트가 살아남게
   $("#tab-top").appendChild(detail);
   const host = $("#top-table").querySelector("tbody tr.detail-host");
@@ -1585,6 +1733,9 @@ async function runExplain() {
   try {
     let data;
     $("#plan-section").hidden = false;
+    // "다시 조회"는 결과를 버리고 새로 조회하는 것이다 — 옛 계획이 남아 있으면 새 결과와 구분되지 않는다
+    $("#detail-plan").innerHTML = "";
+    $("#detail-findings").innerHTML = "";
     try {
       data = await api(`/api/instances/${state.instance.id}/explain`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
@@ -1600,7 +1751,10 @@ async function runExplain() {
       '<div class="muted">규칙 기반 지적 없음 — 비효율 신호가 발견되지 않았습니다.</div>';
     state.lastPlan = data.plan;
     state.lastFindings = data.findings ?? [];
-  } finally { btn.classList.remove("loading"); }
+  } finally {
+    btn.classList.remove("loading");
+    markDetailFresh("explain");   // 실패해도 "이 SQL로 조회했다" — 다시 켤 때 같은 요청을 반복하지 않는다
+  }
 }
 
 // 안티패턴 신호 (158절) — 느림의 크기가 아니라 성질. 축은 5기종 공통이지만 원천 지표 이름은 기종이 답한다.
@@ -1616,7 +1770,10 @@ async function runAntiPatterns() {
     box.innerHTML = renderAntiPatterns(rows);
   } catch (e) {
     box.innerHTML = `<div class="finding-item">조회 실패: ${esc(e.message)}</div>`;
-  } finally { btn.classList.remove("loading"); }
+  } finally {
+    btn.classList.remove("loading");
+    markDetailFresh("antipattern");
+  }
 }
 
 // 정규화 쿼리 식별자를 사람이 읽을 길이로 줄인다. PostgreSQL queryid는 부호 있는 64비트라 음수로 찍히는데,
@@ -1636,17 +1793,31 @@ function renderAntiPatterns(rows) {
   if (rows.length === 1 && rows[0].source === "UNSUPPORTED") {
     return `<div class="finding-item muted">판정 불가: ${esc(rows[0].note ?? "")}</div>`;
   }
-  // 지금 보고 있는 쿼리를 먼저 — 통계 뷰의 식별자가 쿼리 상세와 같은 기종에서만 맞아떨어진다
+  // 지금 보고 있는 쿼리를 먼저 — 통계 뷰의 식별자가 쿼리 상세와 같은 기종에서만 맞아떨어진다.
+  // 나머지는 접어 둔다(B3): 20행이 펼쳐져 있으면 지금 쿼리의 신호가 그 벽에 묻힌다
   const current = state.currentQuery ? String(state.currentQuery.queryId) : null;
-  const sorted = [...rows].sort((a, b) => (String(b.queryId) === current) - (String(a.queryId) === current));
+  const mine = current ? rows.find((q) => String(q.queryId) === current) : null;
+  const others = rows.filter((q) => q !== mine).slice(0, 9);
+  const head = mine
+    ? apRow(mine, true)
+    : '<div class="finding-item muted">이 쿼리의 신호는 통계 상위 20개에 없습니다.</div>';
+  const tail = others.length
+    ? `<div id="ap-others" hidden>${others.map((q) => apRow(q, false)).join("")}</div>
+       <button type="button" class="ap-more" data-more="${others.length}" aria-expanded="false" aria-controls="ap-others">다른 쿼리 ${others.length}개 보기</button>`
+    : "";
+  // 같은 기종이면 note가 모든 행에 같다 — 행마다 반복하지 않고 목록 아래 한 번만 적는다
+  return head + tail + (rows[0].note ? `<div class="ap-note muted">${esc(rows[0].note)}</div>` : "");
+}
+
+function apRow(q, isCurrent) {
   const axis = (m) => {
     if (!m || m.value == null) return '<b class="ap-none">미확보</b>';
     const v = m.value >= 100 ? fmtNum(m.value, 0) : fmtNum(m.value, 2);
     return `<b>${v}</b> <span class="muted">${esc(m.unit ?? "")}</span>`;
   };
   const src = (m) => (m ? `<div class="ap-src">${esc(m.sourceName ?? "")}</div>` : "");
-  return sorted.slice(0, 10).map((q) => `
-    <div class="finding-item ap-row${current && String(q.queryId) === current ? " ap-current" : ""}">
+  return `
+    <div class="finding-item ap-row${isCurrent ? " ap-current" : ""}">
       <div class="ap-head"><b title="${esc(String(q.queryId ?? ""))}">${esc(shortQueryId(q.queryId))}</b>
         <span class="muted">실행 ${fmtNum(q.calls, 0)}회</span></div>
       ${q.queryText ? `<div class="ap-text muted">${esc(q.queryText.replace(/\s+/g, " ").slice(0, 120))}</div>` : ""}
@@ -1655,9 +1826,7 @@ function renderAntiPatterns(rows) {
         <div><span class="muted">디스크로 넘침</span><span class="ap-val">${axis(q.diskSpill)}</span>${src(q.diskSpill)}</div>
         <div><span class="muted">행당 읽은 양</span><span class="ap-val">${axis(q.examinedPerRow)}</span>${src(q.examinedPerRow)}</div>
       </div>
-    </div>`).join("")
-    // 같은 기종이면 note가 모든 행에 같다 — 행마다 반복하지 않고 목록 아래 한 번만 적는다
-    + (sorted[0].note ? `<div class="ap-note muted">${esc(sorted[0].note)}</div>` : "");
+    </div>`;
 }
 
 // 관련 테이블 구조 — 쿼리가 참조하는 테이블의 컬럼·인덱스·대략 행수. 문의 시 서버가 자동 첨부하지만,
@@ -1681,7 +1850,10 @@ async function runReferencedSchema() {
       return;
     }
     box.innerHTML = renderReferencedSchema(data);
-  } finally { btn.classList.remove("loading"); }
+  } finally {
+    btn.classList.remove("loading");
+    markDetailFresh("schema");
+  }
 }
 
 // 펼친 상세가 이 목록의 열(타입·NULL)을 다시 쓴다 — 테이블 상세 API는 열 목록을 주지 않는다
@@ -1804,7 +1976,10 @@ async function runAiAnalysis() {
   } catch (e) {
     out.textContent = `실패: ${e.message}`;
     stage.textContent = "";
-  } finally { btn.classList.remove("loading"); }
+  } finally {
+    btn.classList.remove("loading");
+    markDetailFresh("ai");
+  }
 }
 
 // 인덱스 어드바이저 — 후보 컬럼으로 가상 인덱스를 만들었을 때 플랜 비용이 어떻게 바뀌는지 시뮬레이션.
@@ -1856,7 +2031,10 @@ async function runIndexAdvisor() {
       const qid = state.currentQuery ? ` SQL ID ${state.currentQuery.queryId}` : "";
       handToWorkbench("draft", data.suggestedIndex, `대시보드 인덱스 제안(HypoPG)${qid}${cost}`);
     });
-  } finally { btn.classList.remove("loading"); }
+  } finally {
+    btn.classList.remove("loading");
+    markDetailFresh("advisor");
+  }
 }
 
 // 심층 원인 진단 (D9) — 실제 실행 계획으로 카디널리티 괴리·근본원인을 짚는다.
@@ -1876,7 +2054,7 @@ async function runDeepDiagnose() {
       + `위 SQL 편집칸에서 실제 값으로 바꾼 뒤 다시 눌러 주세요(추정만 하는 "실행계획 보기"는 그대로 됩니다).</div></div>`;
     return;
   }
-  const btn = $("#btn-deep");
+  const btn = $("#btn-deep-run");
   btn.classList.add("loading");
   $("#deep-section").hidden = false;
   const result = $("#deep-result");
@@ -1956,7 +2134,7 @@ async function runDeepDiagnose() {
 async function runInquiry() {
   const sql = $("#detail-sql").value.trim();
   if (!sql) return;
-  const btn = $("#btn-inquiry");
+  const btn = $("#btn-inquiry-send");
   btn.classList.add("loading");
   $("#inquiry-section").hidden = false;
   const result = $("#inquiry-result");
@@ -2017,7 +2195,7 @@ async function loadSlow() {
         <td class="num">${dash(q.rowsSent) ?? fmtNum(q.rowsSent, 0)}</td>
         <td class="num">${fmtNum(q.rowsExamined, 0)}</td>
         <td>${q.planSummary ? `<span class="plan-badge ${/COLLSCAN/i.test(q.planSummary) ? "plan-bad" : "plan-ok"}">${esc(q.planSummary)}</span>` : '<span class="muted">—</span>'}</td>
-        <td class="qtext" title="${esc(q.queryText)}">${queryTextHtml(q.queryText)}</td>
+        <td class="qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${queryTextHtml(q.queryText)}</td>
       </tr>`).join("") : '<tr><td colspan="8" class="muted">슬로우 쿼리가 없습니다.</td></tr>';
   } catch (e) {
     // 형제 로더(top·sessions·latency·partitions·deadlocks)와 같은 모양 — 실패를 이 카드에 적고 끝낸다.
@@ -2322,7 +2500,7 @@ async function loadAnomalies() {
           `(평소 ${fmtNum(m.baselineMean)}±${fmtNum(m.baselineStddev)}, z=${fmtNum(m.zScore, 1)})</span>`
         ).join(" ");
         return `<div class="anomaly-item">
-          <div class="anomaly-q qtext" title="${esc(q.queryText)}">${queryTextHtml(q.queryText)}</div>
+          <div class="anomaly-q qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${queryTextHtml(q.queryText)}</div>
           <div class="anomaly-metrics">${metrics}</div>
           <div class="hint">${q.dayOfWeek}요일 ${q.hour}시대 기준 · 관측 ${q.observations}회</div>
         </div>`;
@@ -3353,9 +3531,13 @@ function renderChat({ follow = false } = {}) {
     const parts = [];
     if (cs.error) parts.push(`<div class="chat-error">${esc(cs.error)}</div>`);
     if (!cs.turns.length) {
-      parts.push(cs.status === "loading"
-        ? `<div class="chat-empty"><p class="chat-empty-sub">대화를 불러오는 중입니다.</p></div>`
-        : `<div class="chat-empty">
+      // 불러오는 중에도 빈 대화 화면을 함께 보여준다 — 로딩 문구만 남으면 사람은 기다릴지 새로 고를지 알 수 없다.
+      // 서버가 느릴 때(대상 조회가 몰리면 대화 목록 조회가 그 뒤에 줄을 선다) 실제로 십여 초가 걸린다
+      const loading = cs.status === "loading"
+        ? `<p class="chat-empty-sub">대화를 불러오는 중입니다.</p>` : "";
+      parts.push(`
+          <div class="chat-empty">
+            ${loading}
             <p><strong>${esc(inst.name)}</strong>에 무엇이든 물어보세요.</p>
             <p class="chat-empty-sub">근거가 없으면 모른다고 답합니다.</p>
             <div class="chat-suggest">${CHAT_SUGGESTIONS.map((q) => `<button type="button" class="chat-chip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>
@@ -3379,9 +3561,10 @@ function syncChatHeader() {
   const label = $("#chat-switch-label");
   const sw = $("#chat-switch");
   if (sub) {
-    // 이름과 고정 문구를 분리한다 — 좁아지면 이름만 줄어들고 "· 읽기 도구로만 답합니다"는 끝까지 남는다
+    // 이름과 고정 문구를 분리한다 — 좁아지면 이름만 줄어들고 "· 읽기 도구로만 답합니다"는 끝까지 남는다.
+    // 문구 사이의 공백은 글자에 넣지 않고 CSS 여백으로 준다(flex 항목 경계에서 앞 공백이 사라진다)
     sub.innerHTML = inst
-      ? `<span class="chat-sub-name">${esc(inst.name)}</span><span class="chat-sub-fixed"> · 읽기 도구로만 답합니다</span>`
+      ? `<span class="chat-sub-name">${esc(inst.name)}</span><span class="chat-sub-fixed">· 읽기 도구로만 답합니다</span>`
       : `<span class="chat-sub-name">왼쪽에서 인스턴스를 고르세요</span>`;
   }
   if (label) label.textContent = cs?.title || "새 대화";
@@ -3925,6 +4108,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupMonitorNav();
   setupLive();
   setupTooltip();        // 네이티브 title을 예쁜 커스텀 툴팁으로 자동 승격(전역 위임)
+  setupSqlTip();         // 표의 SQL 셀은 강조된 전용 툴팁을 쓴다(B3) — title을 쓰지 않는다
   setupInstanceFilter(); // 검색·필터 이벤트 연결(검색·필터 구동 렌더)
   setupPresets();
   setupAiOperations();
@@ -3933,33 +4117,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#detail-sql").addEventListener("scroll", () => { const h = $("#detail-sql-hl"); if (h) { h.scrollTop = $("#detail-sql").scrollTop; h.scrollLeft = $("#detail-sql").scrollLeft; } });
   setupChartDrag();
   setupCopyButtons();
+  setupQueryDetail();
   loadMcpTools();
   $("#btn-query").addEventListener("click", runQuery);
   $("#btn-compare").addEventListener("click", runCompare);
-  $("#btn-explain").addEventListener("click", runExplain);
-  $("#btn-schema").addEventListener("click", runReferencedSchema);
-  $("#btn-antipattern").addEventListener("click", runAntiPatterns);
-  $("#btn-ai").addEventListener("click", runAiAnalysis);
-  // "인덱스 제안" 버튼은 섹션을 펼치고, 섹션 안의 "시뮬레이션" 버튼이 실제 호출한다(후보 컬럼 입력이 필요해서)
-  $("#btn-advisor").addEventListener("click", () => {
-    $("#advisor-section").hidden = false;
-    // 가상 인덱스(HypoPG)는 PostgreSQL 전용이다 — 눌러서 UNSUPPORTED를 받기 전에 미리 알린다(159절)
-    const hint = $("#advisor-unsupported");
-    const pg = state.instance && state.instance.type === "POSTGRESQL";
-    hint.hidden = pg;
-    if (!pg && state.instance) {
-      hint.textContent = `${state.instance.type}는 가상 인덱스 시뮬레이션을 지원하지 않습니다 — `
-        + "실제 인덱스를 만들어야 계획을 비교할 수 있고, 그건 대상 DB를 바꾸는 일이라 이 기능의 범위 밖입니다. "
-        + "대신 실행계획 보기와 안티패턴 신호로 후보를 좁히세요.";
-    }
-    $("#advisor-columns").focus();
-  });
-  $("#btn-advisor-run").addEventListener("click", runIndexAdvisor);
   // 관제에서 본 쿼리를 요청자가 워크벤치의 새 워크시트로 가져간다(행 값 조회는 워크벤치의 조회 계정·마스킹을 거친다)
   $("#btn-to-workbench").addEventListener("click", () => handToWorkbench("sql", $("#detail-sql").value.trim()));
   $("#btn-user-create").addEventListener("click", createUser);
-  $("#btn-deep").addEventListener("click", runDeepDiagnose);
-  $("#btn-inquiry").addEventListener("click", runInquiry);
   $("#btn-schema-diff").addEventListener("click", runSchemaDiff);
   $("#btn-param-diff").addEventListener("click", runParamDiff);
   $("#btn-config-drift").addEventListener("click", loadConfigDrift);
@@ -3978,3 +4142,52 @@ document.addEventListener("DOMContentLoaded", async () => {
     loadAudit();
   });
 });
+
+// 쿼리 상세의 조작 계층 (B3) — 토글 다섯·더보기 메뉴·다시 조회·SQL ID 복사·안티패턴 접기.
+// 버튼은 id로 하나씩 잡는다: 토글 묶음이 헤더에서 줄바꿈돼도 리스너는 그대로 살아 있다.
+function setupQueryDetail() {
+  Object.keys(DETAIL_VIEWS).forEach((key) => {
+    $("#btn-" + key).addEventListener("click", () => toggleDetailView(key));
+  });
+  // 섹션 제목의 "다시 조회"는 위임으로 잡는다 — 결과를 다시 그려도 버튼이 새로 생기지 않는다
+  $("#query-detail").addEventListener("click", (e) => {
+    const refresh = e.target.closest("[data-refresh]");
+    if (refresh) refreshDetailView(refresh.dataset.refresh);
+  });
+  // 더보기 — 항목은 실행이 아니라 섹션 열기다(실행은 그 안의 주 버튼이 한다)
+  $("#btn-detail-more").addEventListener("click", () => {
+    if ($("#detail-more-menu").hidden) openDetailMore(); else closeDetailMore();
+  });
+  $("#btn-deep").addEventListener("click", () => openDetailSection("#deep-section"));
+  $("#btn-inquiry").addEventListener("click", () => openDetailSection("#inquiry-section"));
+  $("#btn-deep-run").addEventListener("click", runDeepDiagnose);
+  $("#btn-inquiry-send").addEventListener("click", runInquiry);
+  document.addEventListener("click", (e) => {
+    if (!$("#detail-more-menu").hidden && !e.target.closest(".detail-more-wrap")) closeDetailMore();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("#detail-more-menu").hidden) closeDetailMore(true);
+  });
+  $("#btn-advisor-run").addEventListener("click", runIndexAdvisor);
+  // 안티패턴 "다른 쿼리 N개 보기" — 결과를 다시 그리므로 위임으로 잡는다
+  $("#antipattern-result").addEventListener("click", (e) => {
+    const more = e.target.closest(".ap-more");
+    if (!more) return;
+    const box = document.getElementById(more.getAttribute("aria-controls"));
+    const open = more.getAttribute("aria-expanded") === "true";
+    more.setAttribute("aria-expanded", String(!open));
+    box.hidden = open;
+    more.textContent = open ? `다른 쿼리 ${more.dataset.more}개 보기` : "접기";
+  });
+  // SQL ID 복사 — 화면에 보이는 것은 짧은 값이라 전체 값은 상태에서 꺼낸다
+  $("#btn-copy-qid").addEventListener("click", async () => {
+    const full = state.currentQuery ? String(state.currentQuery.queryId ?? "") : "";
+    const btn = $("#btn-copy-qid");
+    if (!full) return;
+    try {
+      await navigator.clipboard.writeText(full);
+      btn.textContent = "복사됨";
+      setTimeout(() => { btn.textContent = "복사"; }, 1500);
+    } catch (e) { /* http 컨텍스트 등 클립보드 불가 환경 — 버튼은 그대로 둔다 */ }
+  });
+}

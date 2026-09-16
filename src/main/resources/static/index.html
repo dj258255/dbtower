@@ -139,62 +139,84 @@
             <tbody></tbody>
           </table>
         </div>
-        <!-- 쿼리 상세: EXPLAIN + AI 분석 -->
+        <!-- 쿼리 상세: 실행계획·AI 분석·인덱스 제안을 한 자리에서. 버튼은 토글이다 — 늘 여덟 개가 떠 있으면
+             무엇이 열려 있는지 알 수 없고 누르는 즉시 실행되는 것과 섞인다(B3) -->
         <div id="query-detail" class="detail" hidden>
           <div class="detail-head">
-            <span id="detail-qid" class="qid"></span>
-            <span class="detail-actions">
-              <button id="btn-explain" class="btn btn-primary btn-small">실행계획 보기</button>
-              <button id="btn-schema" class="btn btn-small">관련 테이블 구조</button>
-              <button id="btn-ai" class="btn btn-dark btn-small">AI 분석</button>
-              <button id="btn-advisor" class="btn btn-small">인덱스 제안</button>
-              <button id="btn-antipattern" class="btn btn-small">안티패턴 신호</button>
-              <button id="btn-deep" class="btn btn-small">심층 진단</button>
-              <button id="btn-to-workbench" class="btn btn-small" hidden>워크벤치에서 열기</button>
-              <button id="btn-inquiry" class="btn btn-small">DB팀에 문의</button>
+            <span class="detail-id">
+              <span class="qid-label">SQL ID</span>
+              <span id="detail-qid" class="qid"></span>
+              <button id="btn-copy-qid" class="qid-copy" type="button">복사</button>
+            </span>
+            <div class="detail-views" role="group" aria-label="쿼리 분석 보기">
+              <button id="btn-explain" class="seg-btn" type="button" aria-pressed="false">실행계획</button>
+              <button id="btn-schema" class="seg-btn" type="button" aria-pressed="false">테이블 구조</button>
+              <button id="btn-ai" class="seg-btn" type="button" aria-pressed="false">AI 분석</button>
+              <button id="btn-advisor" class="seg-btn" type="button" aria-pressed="false">인덱스 제안</button>
+              <button id="btn-antipattern" class="seg-btn" type="button" aria-pressed="false">안티패턴</button>
+            </div>
+            <span class="detail-tail">
+              <button id="btn-to-workbench" class="btn btn-small" type="button" hidden>워크벤치에서 열기</button>
+              <span class="detail-more-wrap">
+                <button id="btn-detail-more" class="btn btn-small detail-more" type="button" aria-label="더보기" aria-haspopup="true" aria-expanded="false" aria-controls="detail-more-menu">
+                  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="3" cy="7" r="1.3" fill="currentColor"/><circle cx="7" cy="7" r="1.3" fill="currentColor"/><circle cx="11" cy="7" r="1.3" fill="currentColor"/></svg>
+                </button>
+                <!-- 드물게 쓰는 둘. 누르는 즉시 실행하지 않는다 — 섹션만 열고 실행은 그 안의 주 버튼이 한다 -->
+                <div id="detail-more-menu" class="detail-more-menu" hidden>
+                  <button id="btn-deep" type="button">심층 진단</button>
+                  <button id="btn-inquiry" type="button">DB팀에 문의</button>
+                </div>
+              </span>
             </span>
           </div>
           <div class="detail-section">
-            <h3>SQL 쿼리 <span class="hint">(통계의 정규화 텍스트 — 파라미터 자리(?, $1)는 실제 값으로 고쳐서 실행계획을 확인하세요)</span></h3>
+            <h3>SQL 쿼리 <span class="hint">통계의 정규화 문장입니다. ?, $1 자리는 실제 값으로 바꿔 실행계획을 보세요.</span></h3>
             <div class="sql-editor">
               <pre id="detail-sql-hl" class="sql-hl" aria-hidden="true"></pre>
               <textarea id="detail-sql" class="codeblock sql-edit" rows="7" spellcheck="false"></textarea>
             </div>
           </div>
           <div class="detail-section" id="plan-section" hidden>
-            <h3>실행계획 결과</h3>
+            <h3>실행계획 결과 <button class="section-refresh" type="button" hidden data-refresh="explain">다시 조회</button></h3>
             <pre id="detail-plan" class="codeblock"></pre>
             <div id="detail-findings" class="findings"></div>
           </div>
           <div class="detail-section" id="advisor-section" hidden>
-            <h3>인덱스 제안 <span class="hint">(PostgreSQL만 — HypoPG 가상 인덱스로 실제 생성 없이 before/after 비용 비교. 타 기종은 미지원)</span></h3>
+            <h3>인덱스 제안 <span class="hint">HypoPG 가상 인덱스로 만들지 않고 비용을 비교합니다.</span>
+              <button class="section-refresh" type="button" hidden data-refresh="advisor">다시 조회</button></h3>
             <div class="advisor-input">
               <input id="advisor-columns" class="advisor-cols" placeholder="후보 인덱스 컬럼 — 예: users(category)" spellcheck="false" />
               <button id="btn-advisor-run" class="btn btn-primary btn-small">시뮬레이션</button>
             </div>
-            <div id="advisor-unsupported" class="hint advisor-unsupported" hidden></div>
             <div id="advisor-result" class="findings"></div>
           </div>
           <div class="detail-section" id="antipattern-section" hidden>
-            <h4>안티패턴 신호 <span class="hint">통계 뷰만 읽는다 — 실행계획을 뜨지 않는 값싼 후보 좁히기</span></h4>
+            <h3>안티패턴 신호 <span class="hint">통계 뷰만 읽습니다. 실행계획을 뜨지 않는 빠른 후보 좁히기.</span>
+              <button class="section-refresh" type="button" hidden data-refresh="antipattern">다시 조회</button></h3>
             <div id="antipattern-result" class="findings"></div>
           </div>
           <div class="detail-section" id="schema-section" hidden>
-            <h3>관련 테이블 구조 <span class="hint">(쿼리가 참조하는 테이블의 컬럼·인덱스·대략 행수 — 조인 컬럼 인덱스·타입 불일치 진단용. 문의 시 자동 첨부됩니다)</span></h3>
+            <h3>테이블 구조 <span class="hint">쿼리가 참조하는 테이블의 컬럼·인덱스·대략 행 수. 문의에 자동 첨부됩니다.</span>
+              <button class="section-refresh" type="button" hidden data-refresh="schema">다시 조회</button></h3>
             <div id="schema-result" class="findings"></div>
           </div>
           <div class="detail-section" id="ai-section" hidden>
-            <h3>AI 1차 분석 <span class="hint">(docs/ai-analysis-rules.md 판단 기준 기반)</span></h3>
+            <h3>AI 분석 <span class="hint">docs/ai-analysis-rules.md 기준</span>
+              <button class="section-refresh" type="button" hidden data-refresh="ai">다시 조회</button></h3>
             <div id="ai-stage" class="hint ai-stage" role="status"></div>
             <pre id="detail-ai" class="codeblock ai"></pre>
           </div>
           <div class="detail-section" id="deep-section" hidden>
-            <h3>심층 원인 진단 <span class="hint">(실제 실행 계획으로 "왜 인덱스를 못 타나"를 짚습니다 — 쿼리를 실제 실행하므로 운영자·관리자, 타임아웃 적용. 파라미터 자리는 실제 값으로 채우세요)</span></h3>
+            <h3>심층 진단</h3>
+            <p class="hint">쿼리를 실제로 실행해 계획을 봅니다. 운영자 이상만, 시간 제한이 걸립니다. 파라미터 자리(?, $1)는 실제 값으로 바꾸세요.</p>
+            <div class="section-run"><button id="btn-deep-run" class="btn btn-primary btn-small" type="button">진단 실행</button></div>
             <div id="deep-result" class="findings"></div>
           </div>
           <div class="detail-section" id="inquiry-section" hidden>
-            <h3>DB팀 문의 <span class="hint">(현재 패널의 쿼리·실행계획·규칙 지적·AI 분석을 함께 첨부합니다)</span></h3>
+            <h3>DB팀에 문의</h3>
             <textarea id="inquiry-note" class="codeblock" rows="3" placeholder="비고 (선택): 상황·요청 사항을 적어주세요"></textarea>
+            <p class="hint">함께 첨부됩니다: 쿼리 · 실행계획 · 규칙 지적 · AI 분석</p>
+            <div class="section-run"><button id="btn-inquiry-send" class="btn btn-primary btn-small" type="button">문의 보내기</button></div>
             <div id="inquiry-result" class="findings"></div>
           </div>
         </div>
