@@ -57,3 +57,9 @@ data/
 
 # Playwright MCP 브라우저 산출물(스냅샷·콘솔 로그·임시 스크린샷)
 .playwright-mcp/
+# AI 운영 작업 실행면(integrations/ai-ops-gateway) 로컬 산출물 — 가상환경과 임베딩 모델 캐시는 수백 MB다
+__pycache__/
+*.pyc
+.venv/
+integrations/**/.venv/
+.fastembed_cache/

@@ -1,0 +1,15 @@
+# 실측에 쓴 버전(169절). Python 3.12에서 확인했다.
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+httpx==0.28.1
+redis==8.1.0
+langgraph==1.2.11
+
+# 참고 자료 검색 — 없으면 KNOWLEDGE_DSN을 비우고 검색 없이 돌릴 수 있다.
+# fastembed는 로컬 ONNX 추론이라 운영 문장이 외부 API로 나가지 않는다(모델 파일은 처음 한 번 내려받는다).
+psycopg[binary]==3.3.5
+pgvector==0.5.0
+fastembed==0.8.0
+
+pytest==9.1.1
+pytest-asyncio==1.4.0

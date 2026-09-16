@@ -168,6 +168,33 @@ services:
     volumes:
       - minio-data:/data
 
+  # AI 운영 작업 실행면(169절) — 플랫폼은 Redis·pgvector를 모른다. 실행면을 쓸 때만 켠다:
+  #   docker compose --profile aiops up -d aiops-redis aiops-vector
+  aiops-redis:
+    image: redis:7.4-alpine
+    container_name: dbtower-aiops-redis
+    profiles: ["aiops"]
+    # AOF — 확인 안 된 메시지와 리스 토큰이 재기동에 살아남아야 재배달·이어가기가 된다
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "16379:6379"
+    volumes:
+      - aiops-redis-data:/data
+
+  aiops-vector:
+    # 플랫폼 메타 DB와 분리한 지식 저장소 — 운영 문서에서 다시 만들 수 있는 파생 데이터라 플랫폼 DB에 vector 확장을 들이지 않는다
+    image: pgvector/pgvector:pg16
+    container_name: dbtower-aiops-vector
+    profiles: ["aiops"]
+    environment:
+      POSTGRES_DB: knowledge
+      POSTGRES_USER: knowledge
+      POSTGRES_PASSWORD: knowledge
+    ports:
+      - "15434:5432"
+    volumes:
+      - aiops-vector-data:/var/lib/postgresql/data
+
 volumes:
   mysql-data:
   postgres-data:
@@ -175,3 +202,5 @@ volumes:
   mongo-data:
   oracle-data:
   minio-data:
+  aiops-redis-data:
+  aiops-vector-data:

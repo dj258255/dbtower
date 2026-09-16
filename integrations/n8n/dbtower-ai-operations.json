@@ -1,0 +1,140 @@
+{
+  "name": "DBTower AI 운영 작업 알림",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dbtower-ai",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook",
+      "name": "DBTower 웹훅",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-160, 0],
+      "webhookId": "dbtower-ai-operations"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 서명 확인 — 웹훅 URL만 알면 누구나 POST할 수 있다. 서명이 없으면 가짜 \"승인 필요\" 알림을 외부에서 만들 수 있다.\n// 서명 대상은 파싱된 JSON이 아니라 받은 그대로의 본문이다(키 순서가 바뀌면 같은 내용도 다른 서명이 된다).\nconst crypto = require('crypto');\nconst secret = $env.DBTOWER_N8N_SECRET;\nif (!secret) {\n  throw new Error('DBTOWER_N8N_SECRET이 없습니다 — 서명을 확인할 수 없어 처리하지 않습니다');\n}\nconst item = $input.first();\nconst headers = item.json.headers || {};\nconst raw = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst timestamp = headers['x-dbtower-timestamp'];\nconst signature = headers['x-dbtower-signature'];\nif (!timestamp || !signature) {\n  throw new Error('서명 헤더가 없습니다');\n}\nconst age = Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp));\nif (!Number.isFinite(age) || age > 300) {\n  throw new Error('만료된 요청입니다(5분 초과) — 재생 공격 차단');\n}\nconst expected = 'sha256=' + crypto.createHmac('sha256', secret).update(Buffer.concat([Buffer.from(timestamp + '.'), raw])).digest('hex');\nconst ok = expected.length === signature.length && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));\nif (!ok) {\n  throw new Error('서명이 일치하지 않습니다');\n}\nconst body = JSON.parse(raw.toString('utf8'));\n// 라우팅 값은 DBTower가 확정한 것만 쓴다 — 본문의 다른 문장으로 분기하지 않는다\nreturn [{ json: {\n  jobId: body.jobId,\n  type: body.type,\n  status: body.status,\n  requester: body.requester,\n  scopeTeam: body.scopeTeam,\n  instanceId: body.instanceId,\n  approvalRequired: body.approvalRequired === true,\n  ruleFindings: body.ruleFindings || [],\n  unverifiedClaimCount: body.unverifiedClaimCount || 0,\n  failureReason: body.failureReason || null,\n  url: body.url,\n  route: body.status !== 'COMPLETED' ? 'failed' : (body.approvalRequired === true ? 'approval' : 'informational'),\n} }];"
+      },
+      "id": "verify",
+      "name": "서명 확인과 라우팅 값 추출",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [60, 0]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {"caseSensitive": true, "version": 2},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "approval",
+                    "operator": {"type": "string", "operation": "equals"}
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "승인 필요"
+            },
+            {
+              "conditions": {
+                "options": {"caseSensitive": true, "version": 2},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "failed",
+                    "operator": {"type": "string", "operation": "equals"}
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "작업 실패"
+            }
+          ]
+        },
+        "options": {"fallbackOutput": "extra", "renameFallbackOutput": "참고"}
+      },
+      "id": "route",
+      "name": "결과에 따라 나눈다",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [280, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DBTOWER_TICKET_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ title: 'DB 변경 검토: ' + $json.type + ' (' + $json.jobId.slice(0, 8) + ')', team: $json.scopeTeam, instanceId: $json.instanceId, findings: $json.ruleFindings, source: $json.url, note: 'DBTower AI 작업이 변경을 수반할 수 있는 조치를 제안했습니다. 실행은 DBTower 변경 요청 티켓에서 승인 후 진행합니다.' }) }}",
+        "options": {}
+      },
+      "id": "ticket",
+      "name": "변경 검토 티켓 생성",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, -140],
+      "notesInFlow": true,
+      "notes": "Jira·Linear 노드로 바꿔 쓰는 자리. 승인과 실행 자체는 DBTower가 한다"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DBTOWER_ONCALL_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'warning', summary: 'DBTower AI 작업 실패: ' + $json.type, reason: $json.failureReason, team: $json.scopeTeam, url: $json.url }) }}",
+        "options": {}
+      },
+      "id": "oncall",
+      "name": "온콜 알림",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 20],
+      "notesInFlow": true,
+      "notes": "PagerDuty·Opsgenie 노드로 바꿔 쓰는 자리"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DBTOWER_DIGEST_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jobId: $json.jobId, type: $json.type, team: $json.scopeTeam, ruleFindings: $json.ruleFindings, unverifiedClaimCount: $json.unverifiedClaimCount, url: $json.url }) }}",
+        "options": {}
+      },
+      "id": "digest",
+      "name": "주간 요약함에 적재",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 180],
+      "notesInFlow": true,
+      "notes": "승인이 필요 없는 결과 — 스프레드시트·문서 노드로 바꿔 쓰는 자리"
+    }
+  ],
+  "connections": {
+    "DBTower 웹훅": {"main": [[{"node": "서명 확인과 라우팅 값 추출", "type": "main", "index": 0}]]},
+    "서명 확인과 라우팅 값 추출": {"main": [[{"node": "결과에 따라 나눈다", "type": "main", "index": 0}]]},
+    "결과에 따라 나눈다": {
+      "main": [
+        [{"node": "변경 검토 티켓 생성", "type": "main", "index": 0}],
+        [{"node": "온콜 알림", "type": "main", "index": 0}],
+        [{"node": "주간 요약함에 적재", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {"executionOrder": "v1"},
+  "active": false,
+  "pinData": {},
+  "meta": {"instanceId": "dbtower-ai-operations"}
+}
