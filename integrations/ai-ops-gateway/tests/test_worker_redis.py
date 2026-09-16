@@ -1,4 +1,6 @@
 """실제 Redis(docker compose --profile aiops)로 확인·재시도·격리 규칙을 본다. Redis가 없으면 건너뛴다."""
+import asyncio
+import contextlib
 import uuid
 
 import pytest
@@ -100,3 +102,78 @@ async def test_릴레이는_식별자만_스트림에_넣는다(redis, fake_dbto
     assert await relay_once(client, redis, stream) == 1
     [(_, fields)] = await redis.xrange(stream)
     assert fields == {"eventId": "e1", "jobId": "j1", "type": "SLO_RISK_REVIEW", "attempt": "2"}
+
+
+class GatedGraph:
+    """"slow" 작업은 문이 열릴 때까지 붙잡히고, 나머지는 바로 끝난다."""
+
+    def __init__(self):
+        self.gate = asyncio.Event()
+        self.slow_started = asyncio.Event()
+        self.finished: list[str] = []
+
+    async def ainvoke(self, state):
+        if state["job_id"] == "slow":
+            self.slow_started.set()
+            await self.gate.wait()
+        self.finished.append(state["job_id"])
+        return {"outcome": "completed"}
+
+
+@pytest.mark.asyncio
+async def test_느린_작업이_도는_동안에도_새_메시지를_읽어_처리한다(redis, fake_dbtower):
+    # 170절 7번 — 예전 루프는 한 배치를 전부 기다린 뒤에야 다음을 읽어, 느린 한 건이 끝날 때까지 새 작업을 선점하지 못했다
+    graph = GatedGraph()
+    worker, stream = await make_worker(redis, graph, fake_dbtower)
+    loop = asyncio.create_task(worker.run_forever(block_ms=50))
+    try:
+        await redis.xadd(stream, {"jobId": "slow", "attempt": "1"})
+        await asyncio.wait_for(graph.slow_started.wait(), timeout=5)
+
+        await redis.xadd(stream, {"jobId": "fast", "attempt": "1"})
+        for _ in range(100):
+            if "fast" in graph.finished:
+                break
+            await asyncio.sleep(0.05)
+
+        assert graph.finished == ["fast"], "느린 작업이 아직 도는 중인데 빠른 작업이 끝나야 한다"
+        assert not graph.gate.is_set()
+    finally:
+        graph.gate.set()
+        loop.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await loop
+
+
+@pytest.mark.asyncio
+async def test_자리가_다_차면_더_읽지_않는다(redis, fake_dbtower):
+    # 자리보다 많이 읽으면 남는 메시지가 세마포어를 기다리는 동안 심장박동이 없어 다른 실행기가 재회수한다
+    graph = GatedGraph()
+    stream = f"test:aiops:{uuid.uuid4().hex}"
+    await ensure_group(redis, stream, "g")
+    client = DBTowerClient("http://dbtower.test", "t", transport=fake_dbtower.transport())
+
+    class AllSlow(GatedGraph):
+        async def ainvoke(self, state):
+            self.slow_started.set()
+            await self.gate.wait()
+            self.finished.append(state["job_id"])
+            return {"outcome": "completed"}
+
+    graph = AllSlow()
+    worker = Worker(redis, client, graph, RedisLeaseStore(redis), stream=stream, dead_letter_stream=stream + ":dead",
+                    group="g", consumer="c1", max_deliveries=3, claim_idle_ms=60_000, concurrency=2)
+    loop = asyncio.create_task(worker.run_forever(block_ms=50))
+    try:
+        for i in range(5):
+            await redis.xadd(stream, {"jobId": f"j{i}", "attempt": "1"})
+        await asyncio.wait_for(graph.slow_started.wait(), timeout=5)
+        await asyncio.sleep(0.5)  # 루프가 더 읽으려 했다면 이 사이에 읽었을 것이다
+
+        pending = await redis.xpending(stream, "g")
+        assert pending["pending"] == 2, "동시 처리 상한(2)만큼만 가져가야 한다"
+    finally:
+        graph.gate.set()
+        loop.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await loop

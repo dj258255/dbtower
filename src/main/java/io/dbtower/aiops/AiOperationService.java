@@ -115,6 +115,13 @@ public class AiOperationService {
             throw new IllegalStateException("진행 중인 AI 작업이 " + settings.maxActivePerRequester()
                     + "건입니다. 끝난 뒤 다시 요청하세요");
         }
+        if (request.trigger() == AiOperationTrigger.ALERT
+                && jobs.countByTriggerAndStatusIn(AiOperationTrigger.ALERT, ACTIVE) >= settings.maxActiveAlertJobs()) {
+            // 요청자가 alert:<인스턴스>라 요청자별 상한은 인스턴스마다 따로 센다. 재기동 직후 모든 대상에서 수집 정지 경보가
+            // 한꺼번에 나면 대상 수만큼 모델 호출이 몰렸다(170절 5번 — 5건·4건 재현). 경보 자체는 이미 나갔으므로 막는 것은 후속 분석뿐이다
+            throw new IllegalStateException("경보에서 시작된 AI 작업이 이미 " + settings.maxActiveAlertJobs()
+                    + "건 진행 중입니다. 이 경보의 후속 분석은 건너뜁니다");
+        }
 
         int minutes = request.windowMinutes() == null ? settings.defaultWindowMinutes()
                 : Math.max(WINDOW_MIN, Math.min(WINDOW_MAX, request.windowMinutes()));

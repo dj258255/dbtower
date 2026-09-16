@@ -4,6 +4,7 @@ import io.dbtower.alert.internal.AlertEmbeds;
 import io.dbtower.alert.internal.PlanChangeTracker;
 import io.dbtower.alert.AlertRaisedEvent;
 import io.dbtower.alert.internal.WebhookNotifier;
+import io.dbtower.alert.internal.persistence.CooldownStore;
 import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.AiAnalyzer.CallSite;
 import io.dbtower.analysis.QueryMasker;
@@ -27,8 +28,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 쿼리 회귀 자동 감지 (확장3) — 시점 비교의 자동화 버전.
@@ -53,17 +52,12 @@ public class RegressionDetector {
 
     private final int recentMinutes;
     private final int baselineMinutes;
-    private final int cooldownMinutes;
-
-    /** key = instanceId:queryId:종류, value = 마지막 알림 시각 */
-    private final Map<String, LocalDateTime> lastAlerted = new ConcurrentHashMap<>();
 
     /**
-     * 이번 인스턴스 패스에서 쿨다운을 통과한 키 — <b>전송이 실제로 성공해야 확정한다.</b>
-     * 예전에는 판정과 동시에 확정해서, 웹훅이 잠깐 죽거나 레이트리밋에 걸린 순간의 경보가
-     * 쿨다운 때문에 재감지조차 되지 않고 영구히 사라졌다. 폴러는 ShedLock으로 단일 흐름이다.
+     * 쿼리별 쿨다운 — key = instanceId:queryId:종류. <b>전송이 실제로 성공해야 확정한다</b>(CooldownGate 규율).
+     * 예전에는 이 감지기가 같은 맵·pending을 따로 들고 있었다 — 운영 경보와 같은 게이트로 모아 저장소를 한 번에 바꾼다.
      */
-    private final java.util.List<String> pendingCooldown = new java.util.ArrayList<>();
+    private final CooldownGate cooldown;
 
 
     private final PlanChangeTracker planChangeTracker;
@@ -76,6 +70,12 @@ public class RegressionDetector {
     @Autowired
     void setEvents(ApplicationEventPublisher events) {
         this.events = events;
+    }
+
+    // 쿨다운 저장소도 같은 이유로 세터로 받는다 — 테스트는 인메모리 기본값으로 규칙만 보고, 운영은 메타 DB에 둔다
+    @Autowired
+    void setCooldownStore(CooldownStore store) {
+        cooldown.attach(store);
     }
 
     public RegressionDetector(RegistryService registryService,
@@ -98,7 +98,7 @@ public class RegressionDetector {
         this.operators = operators;
         this.recentMinutes = recentMinutes;
         this.baselineMinutes = baselineMinutes;
-        this.cooldownMinutes = cooldownMinutes;
+        this.cooldown = new CooldownGate(cooldownMinutes, "regression");
         this.baseUrl = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
     }
 
@@ -108,15 +108,12 @@ public class RegressionDetector {
     // lockAtMostFor=PT4M — detect는 인스턴스별 비교(DB 조회) + AI 1차 분석(외부 호출) + 웹훅 전송이라
     //   느려질 수 있어, 정상 실행 중 다른 노드가 끼어들지 않도록 실제 소요보다 넉넉한 크래시 상한을 둔다.
     //
-    // [쿨다운의 HA 잔여 한계 — 정직한 명시]
-    // lastAlerted 쿨다운 맵은 여전히 "노드별 인메모리"라 노드 간 공유되지 않는다. 분산 락은 detect의
-    // 동시 실행을 막을 뿐, 쿨다운 상태를 공유해 주지는 않는다. 접근 (a)를 택한 이유와 잔여 리스크:
-    //   - 정상 운영에선 위 lockAtLeastFor(110s)와 fixedDelay 특성상 한 노드가 락을 연속으로 이겨
-    //     그 노드의 쿨다운 맵이 계속 유지되므로, 실질 중복 알림은 크게 준다.
-    //   - 그러나 락 보유 노드가 바뀌면(장애 조치·재시작·틱 타이밍 역전) 새 승자의 맵에는 쿨다운
-    //     기록이 없어, 이미 알린 회귀를 쿨다운 창 안에서 한 번 더 알릴 수 있다(쿨다운 누수).
-    //   - 완전 해소는 쿨다운을 메타 DB 테이블로 외부화하는 접근 (b)가 필요하다(추가 마이그레이션). 여기서는
-    //     시간 대비 (a)+한계 명시를 택했고, 이 잔여 리스크는 "중복 알림 1회" 수준이라 수용 가능하다고 판단했다.
+    // [쿨다운의 HA — 접근 (b)로 옮겼다]
+    // 예전에는 쿨다운 맵이 노드별 인메모리였고(접근 (a)), 락 보유 노드가 바뀌거나 재기동하면 이미 알린 회귀를
+    // 쿨다운 창 안에서 한 번 더 알렸다. 그때는 "중복 알림 1회" 수준이라 수용했다. 경보가 AI 운영 작업을 만들게 된 뒤로는
+    // 그 1회가 모델 호출이 되어 전제가 바뀌었다 — 170절에서 재기동 직후 같은 신규 쿼리 경보가 다시 나고 작업까지
+    // 다시 만들어졌다. 그래서 쿨다운을 메타 DB(alert_cooldown, V45)로 외부화했다. 분산 락은 여전히 동시 실행을 막고,
+    // 쿨다운 상태는 이제 노드와 재기동을 넘어 이어진다.
     @Scheduled(fixedDelayString = "${dbtower.regression.poll-ms:120000}")
     @SchedulerLock(name = "regression-detect", lockAtLeastFor = "PT110S", lockAtMostFor = "PT4M")
     public void detect() {
@@ -130,12 +127,12 @@ public class RegressionDetector {
                 List<String> findings = evaluate(instance, result, now);
                 if (!findings.isEmpty()) {
                     if (notify(instance, findings)) {
-                        commitCooldown(now);
+                        cooldown.commit(now);
                         events.publishEvent(new AlertRaisedEvent(AlertRaisedEvent.Source.REGRESSION, instance.getId(),
                                 instance.getName(), findings, recentMinutes + baselineMinutes, now));
                     } else {
                         // 전송 실패·레이트리밋 — 쿨다운 미확정. 다음 폴에서 다시 감지해 재시도한다.
-                        pendingCooldown.clear();
+                        cooldown.clearPending();
                         log.warn("회귀 감지 알림 전송 실패 instance={} — 쿨다운 미확정", instance.getName());
                     }
                 }
@@ -206,19 +203,9 @@ public class RegressionDetector {
 
     private boolean underCooldown(DatabaseInstance instance, QueryDiff d, String kind, LocalDateTime now) {
         String key = instance.getId() + ":" + d.queryId() + ":" + kind;
-        LocalDateTime last = lastAlerted.get(key);
-        if (last != null && last.plusMinutes(cooldownMinutes).isAfter(now)) {
-            return false;
-        }
-        pendingCooldown.add(key);   // 확정은 전송 성공 후(commitCooldown)
-        return true;
+        return cooldown.pass(key, now);   // 확정은 전송 성공 후(cooldown.commit)
     }
 
-    /** 전송 성공 — 이번 패스에서 통과한 키들의 쿨다운을 그때 확정한다. */
-    private void commitCooldown(java.time.LocalDateTime now) {
-        pendingCooldown.forEach(k -> lastAlerted.put(k, now));
-        pendingCooldown.clear();
-    }
 
     private boolean notify(DatabaseInstance instance, List<String> findings) {
         StringBuilder message = new StringBuilder();

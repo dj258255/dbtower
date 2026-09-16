@@ -1,6 +1,7 @@
 package io.dbtower.aiops.internal.persistence;
 
 import io.dbtower.aiops.AiOperationStatus;
+import io.dbtower.aiops.AiOperationTrigger;
 import io.dbtower.aiops.internal.domain.AiOperationJob;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -17,6 +18,11 @@ public interface AiOperationJobRepository extends JpaRepository<AiOperationJob, 
     Optional<AiOperationJob> findByRequestId(String requestId);
 
     long countByRequesterAndStatusIn(String requester, Collection<AiOperationStatus> statuses);
+
+    /** 출처별 진행 중 작업 수 — 경보는 인스턴스마다 요청자가 달라 요청자별 상한이 전체를 묶지 못한다 */
+    @Query("select count(j) from AiOperationJob j where j.trigger = :trigger and j.status in :statuses")
+    long countByTriggerAndStatusIn(@Param("trigger") AiOperationTrigger trigger,
+                                   @Param("statuses") Collection<AiOperationStatus> statuses);
 
     /** 목록 — 전역 주체는 전부, 팀 사용자는 자기 요청과 자기 팀 범위 작업. visible()과 같은 규칙을 쿼리로 옮긴 것이다 */
     @Query("""

@@ -120,7 +120,7 @@ public class AiOperationWorkflow {
             return jobs.saveAndFlush(j);
         });
         List<DatabaseInstance> instances = targets(job);
-        FactCollector.Collected collected = collector.collect(job.getType(), instances,
+        FactCollector.Collected collected = collector.collect(job.getType(), job.getTrigger(), instances,
                 job.getWindowFrom(), job.getWindowTo());
         return write(() -> {
             AiOperationJob j = load(jobId);

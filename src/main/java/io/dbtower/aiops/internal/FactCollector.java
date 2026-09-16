@@ -5,6 +5,7 @@ import io.dbtower.advisor.AdvisorFinding;
 import io.dbtower.advisor.AdvisorService;
 import io.dbtower.advisor.InstanceAdvisorReport;
 import io.dbtower.advisor.Severity;
+import io.dbtower.aiops.AiOperationTrigger;
 import io.dbtower.aiops.AiOperationType;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.backup.BackupFreshness;
@@ -20,6 +21,8 @@ import io.dbtower.score.HealthScoreView;
 import io.dbtower.score.ScoreQuery;
 import io.dbtower.slo.SloReport;
 import io.dbtower.slo.SloService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -95,10 +98,27 @@ class FactCollector {
     private final SloService sloService;
     private final AdvisorService advisorService;
     private final FinOpsQuery finOps;
+    // 경보가 쓴 비교 창. 감지기(RegressionDetector)는 alert의 internal이라 값을 공유하지 못해 같은 설정 키를 읽는다 —
+    // 위 임계 상수와 같은 이유다. 한쪽 창만 바꾸면 경보의 수치와 작업의 사실이 다시 갈린다(170절 6번)
+    private final int alertRecentMinutes;
+    private final int alertBaselineMinutes;
 
+    /** 테스트용 — 감지기 기본 창(최근 5분 대 직전 15분)을 쓴다 */
     FactCollector(ScoreQuery scoreQuery, ComparisonService comparisonService, WaitEventHistoryService waitEvents,
                   BaselineService baselineService, BackupFreshnessService backupFreshness, SloService sloService,
                   AdvisorService advisorService, FinOpsQuery finOps) {
+        this(scoreQuery, comparisonService, waitEvents, baselineService, backupFreshness, sloService, advisorService,
+                finOps, 5, 15);
+    }
+
+    @Autowired
+    FactCollector(ScoreQuery scoreQuery, ComparisonService comparisonService, WaitEventHistoryService waitEvents,
+                  BaselineService baselineService, BackupFreshnessService backupFreshness, SloService sloService,
+                  AdvisorService advisorService, FinOpsQuery finOps,
+                  @Value("${dbtower.regression.recent-minutes:5}") int alertRecentMinutes,
+                  @Value("${dbtower.regression.baseline-minutes:15}") int alertBaselineMinutes) {
+        this.alertRecentMinutes = alertRecentMinutes;
+        this.alertBaselineMinutes = alertBaselineMinutes;
         this.scoreQuery = scoreQuery;
         this.comparisonService = comparisonService;
         this.waitEvents = waitEvents;
@@ -111,7 +131,14 @@ class FactCollector {
 
     Collected collect(AiOperationType type, List<DatabaseInstance> instances,
                       OffsetDateTime windowFrom, OffsetDateTime windowTo) {
+        return collect(type, null, instances, windowFrom, windowTo);
+    }
+
+    Collected collect(AiOperationType type, AiOperationTrigger trigger, List<DatabaseInstance> instances,
+                      OffsetDateTime windowFrom, OffsetDateTime windowTo) {
         Buffer out = new Buffer();
+        // 경보가 만든 회귀 작업만 — 사람이 올린 회귀 질문에는 "경보가 본 창"이 없다
+        boolean alertWindow = trigger == AiOperationTrigger.ALERT && type == AiOperationType.REGRESSION_EXPLANATION;
         Set<Section> sections = SECTIONS.get(type);
         boolean multi = instances.size() > 1;
         if (instances.isEmpty()) {
@@ -131,6 +158,14 @@ class FactCollector {
                     collectSection(section, instance, who, windowFrom, windowTo, out);
                 } catch (RuntimeException e) {
                     out.uncertainty(who + " " + label(section) + " 수집 실패: " + brief(e));
+                }
+            }
+            if (alertWindow) {
+                try {
+                    collectAlertWindow(instance.getId(), who, local(windowTo), out);
+                } catch (RuntimeException e) {
+                    out.uncertainty(who + " 경보 기준 비교(최근 " + alertRecentMinutes + "분 vs 직전 " + alertBaselineMinutes
+                            + "분)를 다시 만들지 못했습니다: " + brief(e));
                 }
             }
         }
@@ -235,8 +270,30 @@ class FactCollector {
                         + num(ROWS_SURGE_PCT) + "%)");
             }
         }
-        // 순서: 업무 쿼리 먼저, 그 안에서 새 쿼리 먼저, 그다음 부하 증가량. 새 쿼리는 부하가 작아도 첫 후보인데
-        // 부하 순으로만 자르자 규칙이 "새 쿼리 2개"를 말하면서 사실에는 그 쿼리가 없었다(169절)
+        renderTopQueries(who, result, out);
+    }
+
+    /**
+     * 경보가 본 창 그대로 다시 비교한다 — 감지기는 "최근 5분 vs 직전 15분"으로 재고, 작업의 쿼리 비교는 분석 구간(20분)
+     * 전체를 앞의 같은 길이와 비교한다. 170절에서 같은 쿼리가 경보에서는 QPS 0.35, 사실에서는 0.1로 갈려 모델이
+     * "경보의 수치를 근거로 쓰지 않았다"고 했다. 경보 문장을 요청 본문으로 받아 사실로 옮기지 않는 이유는, 그러면
+     * 자동화 주체가 사실을 만들어 넣을 수 있기 때문이다 — 같은 비교를 플랫폼 데이터로 다시 만든다.
+     *
+     * <p>회귀 규칙 판정은 다시 내지 않는다. 그 판정은 경보가 이미 냈고, 창이 다른 판정이 둘 서면 모순으로 읽힌다.</p>
+     */
+    private void collectAlertWindow(long id, String who, LocalDateTime to, Buffer out) {
+        LocalDateTime recentFrom = to.minusMinutes(alertRecentMinutes);
+        LocalDateTime baseFrom = recentFrom.minusMinutes(alertBaselineMinutes);
+        ComparisonService.CompareResult result = comparisonService.compare(id, baseFrom, recentFrom, recentFrom, to);
+        String label = who + " [경보 기준: 최근 " + alertRecentMinutes + "분 vs 직전 " + alertBaselineMinutes + "분]";
+        out.fact(label + " 직전 구간 호출 " + result.base().totalCalls() + "회, 평균 " + num(result.base().avgLatencyMs())
+                + "ms / 최근 구간 호출 " + result.target().totalCalls() + "회, 평균 " + num(result.target().avgLatencyMs()) + "ms");
+        renderTopQueries(label, result, out);
+    }
+
+    /** 부하 상위 쿼리를 사실로 적는다. 순서: 업무 쿼리 먼저, 그 안에서 새 쿼리 먼저, 그다음 부하 증가량 */
+    private static void renderTopQueries(String who, ComparisonService.CompareResult result, Buffer out) {
+        // 새 쿼리는 부하가 작아도 첫 후보인데 부하 순으로만 자르자 규칙이 "새 쿼리 2개"를 말하면서 사실에는 그 쿼리가 없었다(169절)
         List<QueryDiff> top = result.queries().stream()
                 .sorted(Comparator.comparing(FactCollector::catalog)
                         .thenComparing(QueryDiff::newQuery, Comparator.reverseOrder())
