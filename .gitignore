@@ -63,3 +63,4 @@ __pycache__/
 .venv/
 integrations/**/.venv/
 .fastembed_cache/
+.commandcode/
