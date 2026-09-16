@@ -24,7 +24,7 @@ README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. �
 | [DESIGN.md](DESIGN.md) | 현재 아키텍처, 핵심 결정, 안전 원칙 |
 | [ai-analysis-rules.md](ai-analysis-rules.md) | 기종별 실행계획 판단 근거와 예외 |
 | [modules/](modules/) | Spring Modulith가 생성한 모듈 구조와 의존 관계 |
-| [architecture-detail.svg](architecture-detail.svg) | 16개 모듈, 5개 DBMS, 신뢰 경계를 한 장으로 본 구조도 |
+| [architecture-detail.svg](architecture-detail.svg) | 16개 모듈, 5개 DBMS, 신뢰 경계를 한 장으로 본 구조도(AI 운영 작업 모듈은 아직 이 그림에 없다) |
 | [erd.svg](erd.svg) | Flyway V41 기준 핵심 데이터 도메인과 증거 관계 |
 | [insight-flow.svg](insight-flow.svg) | 발견, AI 분석, 승인, 실행, 검증의 책임 흐름 |
 | [deployment-flow.svg](deployment-flow.svg) | CI 게이트, 멀티아키텍처 이미지, 런타임과 IaC 범위 |

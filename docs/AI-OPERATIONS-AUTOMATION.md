@@ -187,11 +187,29 @@ python -m dbtower_aiops worker                                    # Redis -> 분
 n8n 워크플로는 `integrations/n8n/dbtower-ai-operations.json`을 가져와 쓴다. 웹훅은 서명(HMAC)과 5분 만료를
 n8n 안에서 다시 확인하고, 분기는 DBTower가 확정한 값(`status`, `approvalRequired`)으로만 한다.
 
+채널·트리거·주기 실행은 `dbtower.aiops` 설정으로 조정한다(실제 키는 `src/main/resources/application.yml`에 있다).
+
+```yaml
+dbtower.aiops:
+  channels:
+    default: ${DBTOWER_AIOPS_CHANNEL:}              # 팀이 없는 결과의 자리
+    by-team: ${DBTOWER_AIOPS_CHANNELS_BY_TEAM:}     # team-a=C111,team-b=C222. 표에 없는 팀은 Slack으로 보내지 않는다
+  alert-triggers:
+    enabled: ${DBTOWER_AIOPS_ALERT_TRIGGERS:false}  # 경보 -> AI 작업(기본 꺼짐, 경보마다 모델 호출이 생긴다)
+  inquiry-trigger:
+    enabled: ${DBTOWER_AIOPS_INQUIRY_TRIGGER:true}  # DB팀 문의 뒤 사실·규칙·소견 첨부(기본 켜짐)
+  periodic-report:
+    enabled: ${DBTOWER_AIOPS_PERIODIC_REPORT:false} # 주 1회 팀별 운영 요약(기본 꺼짐)
+    cron: ${DBTOWER_AIOPS_PERIODIC_REPORT_CRON:0 0 9 * * MON}
+  metrics-refresh-ms: 15000   # 게이지 캐시 갱신 주기(Prometheus 스크레이프 주기와 맞춤)
+```
+
+`alert-triggers.reply-channel`은 `channels`로 대체됐다 — 릴리즈 전 변경이라 호환 처리는 없다.
+
 ## 13. 하지 않은 것 · 남은 것
 
 - **Vertex AI 백엔드**: 모델 호출은 `AiAnalyzer` 한 곳을 거치므로 백엔드를 늘리는 자리는 분명하지만, GCP 자격증명이 없어 구현·검증하지 않았다.
 - **실제 Slack 워크스페이스**: 서명·중복·스레드 응답은 로컬 서명 요청과 기록 서버로 검증했다. 실 워크스페이스 발사는 등록이 생기면 같은 코드로 연결된다(88절과 같은 모델).
-- **n8n 실행 검증**: 워크플로 정의와 서명 계약까지 만들었고, 컨테이너에서 가져와 활성화한 실행은 검증하지 못했다(169절에 사유 기록).
+- **n8n 실행 검증**: n8n 1.79.3 컨테이너에 워크플로를 가져와 활성화하고 요청 4건을 보냈다 — 위조 서명 1건은 분기 실행 없이
+  거부되고, 정상 서명 3건은 `approvalRequired`·`COMPLETED`·`FAILED`로 갈렸다(실행 이력 error 2, success 3). 169절.
 - **검색 품질**: 상위 3개 중 관련 절이 11/27이다. 절을 더 잘게 나누거나 사람이 고른 런북을 따로 두는 쪽이 다음 후보다.
-- **정기 리포트 스케줄러**: 유형과 사실 수집은 있으나 주기 실행은 아직 없다(웹·API로는 접수된다).
-- **팀별 Slack 채널 매핑**: 경보 후속 작업의 회신 채널이 하나다. 팀별 채널 표는 게이트웨이 설정과 같은 모양으로 넓히면 된다.
