@@ -338,6 +338,9 @@ dbtower:
       # 나간 경보(회귀 감지·운영 경보)를 AI 작업으로 이어 붙인다. 켜면 경보마다 모델 호출이 생겨 기본은 끈다
       enabled: ${DBTOWER_AIOPS_ALERT_TRIGGERS:false}
       reply-channel: ${DBTOWER_AIOPS_ALERT_CHANNEL:}   # 결과를 붙일 Slack 채널 id(비우면 DBTower·n8n으로만 남는다)
+    inquiry-trigger:
+      # DB팀 문의 뒤에 사실·규칙·AI 소견을 붙인다. 경보와 달리 사람이 직접 누른 한 건이라 기본으로 켠다
+      enabled: ${DBTOWER_AIOPS_INQUIRY_TRIGGER:true}
   ai:
     model: claude-opus-4-8
     # AI 판단 기준 문서 — AGENTS.md의 "판단 기준은 사람이 정하고 AI는 그 위에서만 판정" 원칙의 원천.

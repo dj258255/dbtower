@@ -1,5 +1,6 @@
 package io.dbtower.alert.internal;
 
+import io.dbtower.alert.InquiryRaisedEvent;
 import io.dbtower.alert.internal.ReferencedSchemaService.RefTable;
 import io.dbtower.alert.internal.ReferencedSchemaService.ReferencedSchema;
 import io.dbtower.alert.internal.WebhookNotifier.Embed;
@@ -7,16 +8,23 @@ import io.dbtower.alert.internal.WebhookNotifier.Embed.Field;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 /**
  * DB팀 문의 채널 — 분석 결과(쿼리·실행계획·규칙 지적·AI 분석)를 사람이 읽기 좋은 메시지로 묶어
@@ -32,11 +40,23 @@ import java.util.Locale;
 @Service
 public class InquiryService {
 
+    private static final Logger log = LoggerFactory.getLogger(InquiryService.class);
+
     private final RegistryService registryService;
     private final WebhookNotifier notifier;
     private final ReferencedSchemaService referencedSchema;
     private final QueryMasker queryMasker;
     private final String baseUrl;
+
+    // 문의가 나간 뒤 다른 모듈이 후속 분석을 붙일 수 있게 알린다. 생성자가 아니라 주입 메서드인 이유:
+    // 테스트가 이 서비스를 직접 생성하고, 듣는 쪽이 없어도 문의는 그대로 나가야 한다.
+    // public인 이유: 검증 테스트가 io.dbtower.alert 패키지에 있어 internal의 패키지 전용 메서드에 닿지 못한다
+    private ApplicationEventPublisher events = event -> { };
+
+    @Autowired
+    public void setEvents(ApplicationEventPublisher events) {
+        this.events = events;
+    }
 
     public InquiryService(RegistryService registryService, WebhookNotifier notifier,
                           ReferencedSchemaService referencedSchema, QueryMasker queryMasker,
@@ -77,7 +97,31 @@ public class InquiryService {
                 req.plan(), req.findings(), req.aiAnalysis(), req.note());
         notifier.sendEmbed(format(instance, masked, principal, schemaSummary), instance.getId(),
                 buildEmbed(instance, masked, principal, schema));
+        // 웹훅 전송 성공 여부와 무관하게 발행한다 — 사람이 이미 문의를 눌렀고, 후속 분석은 웹훅이 막혀도 가치가 있다
+        LocalDateTime raisedAt = LocalDateTime.now();
+        try {
+            events.publishEvent(new InquiryRaisedEvent(
+                    inquiryId(instance.getId(), principal, masked.sql(), masked.note(), raisedAt),
+                    instance.getId(), instance.getName(), principal, masked.sql(), masked.findings(),
+                    masked.note(), raisedAt));
+        } catch (RuntimeException e) {
+            // 구독자 하나가 문의를 깨뜨리지 않게 한다 — 문의는 이미 나갔다
+            log.warn("문의 후속 이벤트 발행 실패 instance={} cause={}", instance.getName(), e.getMessage());
+        }
         return new InquiryResult(true, null);
+    }
+
+    /**
+     * 문의 식별자 — 같은 사람이 같은 대상에 같은 내용을 연달아 보내면(더블클릭·재시도) 한 건으로 묶는다.
+     * 분 단위로 끊는 이유: 내용만으로 묶으면 내일 같은 질문을 다시 해도 어제 작업이 돌아온다.
+     * 테스트가 고정 시각으로 직접 부를 수 있게 패키지 전용으로 둔다 — 실제 시각에 기대면 분 경계에서 흔들린다.
+     */
+    static String inquiryId(Long instanceId, String principal, String sql, String note,
+                            LocalDateTime raisedAt) {
+        String seed = String.join("\n", String.valueOf(instanceId), principal,
+                sql == null ? "" : sql, note == null ? "" : note,
+                raisedAt.truncatedTo(ChronoUnit.MINUTES).toString());
+        return UUID.nameUUIDFromBytes(seed.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     private ReferencedSchema safeSchema(Long instanceId, String sql) {
