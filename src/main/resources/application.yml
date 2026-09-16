@@ -329,15 +329,35 @@ dbtower:
   aiops:
     # AI 운영 작업(169절) — 접수는 DBTower, 실행은 외부 실행기(integrations/ai-ops-gateway). 플랫폼은 Redis를 모른다.
     max-active-per-requester: 3   # 요청자별 진행 중 작업 상한 — Slack에서 같은 질문을 연달아 올려도 모델 호출이 쌓이지 않게
-    lease-seconds: 300            # 실행기 리스 — 단계 전이마다 연장. 모델 한 번이 이보다 오래 걸리면 리퍼가 실패로 정리한다
+    # 실행기 리스 — 단계 전이마다 연장. 한 단계가 이보다 오래 걸리면 리퍼가 실패로 정리한다.
+    # 실행면의 단계별 HTTP 제한(AI_OPS_COLLECT_TIMEOUT_S 기본 180, AI_OPS_ANALYZE_TIMEOUT_S 기본 240)은
+    # 반드시 이 값보다 작아야 한다. 크면 실행기가 아직 기다리는 사이 리퍼가 작업을 닫고, 실행기의 다음 호출은
+    # 409를 받아 메시지를 확인 처리해 버린다 — 재배달이 없으니 실패 알림도 나가지 않는다(170절 2번과 같은 침묵)
+    lease-seconds: 300
     received-timeout-minutes: 30  # 접수 뒤 아무도 가져가지 않으면 실패로 드러낸다(릴레이·큐 정지 신호)
     outbox-claim-seconds: 60      # 릴레이 선점 리스 — 발행 완료를 못 알리고 죽으면 이 뒤 다시 발행된다(중복은 작업 선점이 흡수)
     default-window-minutes: 60    # 분석 구간 기본값(요청이 비웠을 때)
     reaper-ms: 60000
+    # 게이지 캐시 갱신 주기 — Prometheus 기본 스크레이프 주기(15초)와 맞춘다. 스크레이프마다 DB를 때리면
+    # 관측이 곧 부하가 되므로 갱신에서 한 번만 읽고, 게이지는 캐시한 숫자를 노출한다
+    metrics-refresh-ms: 15000
     alert-triggers:
       # 나간 경보(회귀 감지·운영 경보)를 AI 작업으로 이어 붙인다. 켜면 경보마다 모델 호출이 생겨 기본은 끈다
       enabled: ${DBTOWER_AIOPS_ALERT_TRIGGERS:false}
-      reply-channel: ${DBTOWER_AIOPS_ALERT_CHANNEL:}   # 결과를 붙일 Slack 채널 id(비우면 DBTower·n8n으로만 남는다)
+    channels:
+      # 결과를 돌려보낼 Slack 채널. 팀마다 보는 채널이 달라 표로 받는다 — 한 채널로 몰면 남의 팀 대상 결과가 섞인다
+      default: ${DBTOWER_AIOPS_CHANNEL:}
+      by-team: ${DBTOWER_AIOPS_CHANNELS_BY_TEAM:}      # team-a=C111,team-b=C222. 표에 없는 팀은 Slack으로 보내지 않는다(기본 채널은 팀이 없는 결과의 자리)
+    periodic-report:
+      # 주 1회 팀별 운영 요약. 켜면 주마다 팀 수만큼 모델 호출이 생겨 기본은 끈다
+      enabled: ${DBTOWER_AIOPS_PERIODIC_REPORT:false}
+      cron: ${DBTOWER_AIOPS_PERIODIC_REPORT_CRON:0 0 9 * * MON}
+      # JVM 기본 시간대를 UTC로 고정해 두었으므로(DbtowerApplication C-6) zone을 주지 않으면 위 cron은 UTC로
+      # 해석된다 — 기본값이 월요일 18시 KST에 돌아 문서·설정이 말하는 시각과 어긋났다(170절 3번)
+      zone: ${DBTOWER_AIOPS_PERIODIC_REPORT_ZONE:Asia/Seoul}
+    inquiry-trigger:
+      # DB팀 문의 뒤에 사실·규칙·AI 소견을 붙인다. 경보와 달리 사람이 직접 누른 한 건이라 기본으로 켠다
+      enabled: ${DBTOWER_AIOPS_INQUIRY_TRIGGER:true}
   ai:
     model: claude-opus-4-8
     # AI 판단 기준 문서 — AGENTS.md의 "판단 기준은 사람이 정하고 AI는 그 위에서만 판정" 원칙의 원천.

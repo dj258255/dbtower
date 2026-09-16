@@ -147,6 +147,8 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: dbtower1234
     volumes:
       - ./docker/grafana-datasource.yml:/etc/grafana/provisioning/datasources/prometheus.yml
+      - ./docker/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dbtower.yml
+      - ./docker/grafana-dashboard-aiops.json:/var/lib/grafana/dashboards/aiops.json
     ports:
       - "13000:3000"
     depends_on:

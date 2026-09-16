@@ -11,6 +11,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
@@ -120,5 +121,30 @@ class InquiryServiceTest {
         assertFalse(msg.contains("실행계획:"));
         assertFalse(msg.contains("규칙 지적:"));
         assertFalse(msg.contains("AI 분석:"));
+    }
+
+    @Test
+    void 문의가_나가면_후속_분석용_이벤트를_마스킹된_본문으로_한_번_발행한다() {
+        stubInstance();
+        when(notifier.isConfigured()).thenReturn(true);
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("alice", "n/a", List.of()));
+        ApplicationEventPublisher events = Mockito.mock(ApplicationEventPublisher.class);
+        service.setEvents(events);
+
+        service.submit(1L, new InquiryService.InquiryRequest(
+                "SELECT * FROM orders WHERE user_id = 42", null, List.of("풀 테이블 스캔 의심"), null,
+                "주문 조회가 느립니다"));
+
+        ArgumentCaptor<InquiryRaisedEvent> captor = ArgumentCaptor.forClass(InquiryRaisedEvent.class);
+        verify(events).publishEvent(captor.capture());
+        InquiryRaisedEvent raised = captor.getValue();
+        // 문의 창의 SQL은 사람이 직접 친 원문이라, 모듈 밖으로 나가는 이벤트에는 마스킹본이 실린다
+        assertTrue(raised.maskedSql().contains("user_id = ?"));
+        assertFalse(raised.maskedSql().contains("42"), "원문 리터럴은 실려 나가지 않는다");
+        assertEquals("prod-orders", raised.instanceName());
+        assertEquals("alice", raised.requester());
+        assertEquals(List.of("풀 테이블 스캔 의심"), raised.findings());
+        assertEquals("주문 조회가 느립니다", raised.note());
     }
 }

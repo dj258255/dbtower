@@ -29,15 +29,15 @@ public class AlertTriggerListener {
     private final AiOperationService service;
     private final RegistryService registry;
     private final boolean enabled;
-    private final String replyChannel;
+    private final AiOperationChannels channels;
 
     public AlertTriggerListener(AiOperationService service, RegistryService registry,
                                 @Value("${dbtower.aiops.alert-triggers.enabled:false}") boolean enabled,
-                                @Value("${dbtower.aiops.alert-triggers.reply-channel:}") String replyChannel) {
+                                AiOperationChannels channels) {
         this.service = service;
         this.registry = registry;
         this.enabled = enabled;
-        this.replyChannel = replyChannel == null || replyChannel.isBlank() ? null : replyChannel.trim();
+        this.channels = channels;
     }
 
     @EventListener
@@ -52,11 +52,11 @@ public class AlertTriggerListener {
                 + event.raisedAt().truncatedTo(ChronoUnit.MINUTES);
         String prompt = "방금 나간 경보의 원인을 분석해줘. 경보 내용: " + String.join(" / ", event.findings());
         try {
-            // 범위는 인스턴스의 담당 팀이다 — 그 팀 사람만 결과를 본다
+            // 범위는 인스턴스의 담당 팀이다 — 그 팀 사람만 결과를 본다. 회신 채널도 그 팀이 보는 채널로 고른다
             String team = registry.findOptional(event.instanceId()).map(i -> i.getTeamLabel()).orElse(null);
             service.submit(new AiOperationRequest(requestId, type, event.instanceId(), event.windowMinutes(),
                     prompt.length() > AiOperationRequest.PROMPT_MAX ? prompt.substring(0, AiOperationRequest.PROMPT_MAX) : prompt,
-                    AiOperationTrigger.ALERT, "alert:" + event.instanceName(), team, replyChannel, null));
+                    AiOperationTrigger.ALERT, "alert:" + event.instanceName(), team, channels.forTeam(team), null));
         } catch (RuntimeException e) {
             log.warn("경보 후속 AI 작업 접수 실패 instance={} source={}: {}", event.instanceName(), event.source(),
                     e.getMessage());

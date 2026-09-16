@@ -9,6 +9,44 @@
 
 ## [Unreleased]
 
+이번 회차는 AI를 화면 앞의 사람에게서 떼어낸다. 지금까지 AI(회귀 1차 분석·워크벤치 보조·자연어 진단·실행계획 분석)는
+사람이 화면 앞에 있어야만 돌았고, "이 소견이 어떤 사실을 보고 한 말인가"를 되짚을 방법도, 모델이 지어낸 수치를
+거를 방법도 없었다. 진단 종류 9종을 **하나의 작업 모델**로 묶어 Slack·웹 콘솔·경보·DB팀 문의 어디서 시작하든
+같은 권한·사실·검증·감사를 거치게 했다. 모듈 17개, 테스트 960건(실패 0, 건너뜀 46), 실행면 테스트 32건.
+라이브 실측은 [VERIFICATION 169절](docs/VERIFICATION.md).
+
+### Added
+
+- **AI 운영 작업 모듈(`aiops`)**(169절): 쿼리 진단·회귀 원인·백업 위험·SLO 위험·Advisor 요약·비용 검토·장애 초기 진단·DB팀 문의·정기
+  리포트 9종을 한 작업 모델로 묶는다. 상태는 `RECEIVED -> AUTHORIZED -> COLLECTING -> (RETRIEVING) -> ANALYZING -> VERIFYING -> COMPLETED`
+  이며 전이는 `AiOperationStatus` 한 곳에 둔다. 승인 대기 상태는 두지 않았다 — 변경 승인은 review 모듈이 단일 권위라, 결과에
+  `approvalRequired`만 남기고 기존 변경 요청 티켓으로 보낸다. 유형이 곧 수집 범위라 요청 문장으로 범위를 넓히지 않는다.
+- **모델 소견 검증기(`ClaimVerifier`)**: 소견의 수치와 인용을 플랫폼이 모은 사실·규칙 판정·참고 자료·요청 문장과 글자로 대조해
+  어긋나면 `unverifiedClaims`로 남긴다. 거부하지 않고 표시한다 — Slack·콘솔은 이 목록을 소견보다 먼저 보여준다. 실측에서
+  시각 오탐 6건과 단위 붙은 수치 누락을 잡아 고쳤다.
+- **입구 넷**: Slack 한 문장(멘션·슬래시 명령), 웹 콘솔 AI 칸의 "작업으로 맡기기"(유형·구간 선택), 경보 자동 트리거(기본 꺼짐),
+  DB팀 문의 뒤 사실·규칙·AI 소견 첨부(기본 켜짐). 접수 주체는 위조를 막기 위해 본문이 아니라 인증 주체로 기록한다.
+- **실행면(`integrations/ai-ops-gateway`)**: 게이트웨이(Slack 서명·허용 채널 확인·접수·스레드 답글), 릴레이(Outbox 선점 -> Redis
+  Streams), LangGraph 실행기(선점·사실·검색·분석·알림). 권한·사실·검증·감사는 플랫폼이, 큐·재시도·참고 자료 검색·알림은
+  실행면이 맡는다 — 플랫폼은 Redis를 모른다. Slack 서명 확인 응답 65.6ms, 결과 도착 31.7초.
+- **n8n 완료 웹훅 워크플로**: `integrations/n8n/dbtower-ai-operations.json`. 서명(HMAC)과 5분 만료를 n8n 안에서 다시 확인하고,
+  분기는 DBTower가 확정한 `status`·`approvalRequired`로만 한다. 컨테이너에 가져와 활성화하고 위조 서명이 분기를 타지 않는 것까지 확인했다.
+- **웹 콘솔 AI 운영 작업 카드와 접수**: 진단 탭에 작업 카드를 넣어 상태(사실 수집 -> AI 분석 -> 완료)와 결과를 보여주고,
+  결과 링크를 `/?aiop=<작업id>` 딥링크로 바꿨다. 관제 오른쪽 AI 칸에서 유형·구간을 골라 접수한다.
+- **운영 지표와 Grafana 대시보드**: `dbtower_aiops_jobs_active{status}`·`dbtower_aiops_outbox_unpublished`·
+  `dbtower_aiops_jobs_stalled_seconds`·`dbtower_aiops_jobs_finished_total{type,status}`·`dbtower_aiops_jobs_duration_seconds_*`.
+  게이지는 스크레이프마다 DB를 때리지 않고 캐시 갱신 주기로만 읽는다.
+- **정기 리포트와 팀별 채널 표**: 주 1회 팀별 운영 요약(`periodic-report`, 기본 꺼짐), 결과를 돌려보낼 채널을 팀 표로 받는다
+  (`channels.default`·`channels.by-team`). 표에 없는 팀은 Slack으로 보내지 않는다.
+- **참고 자료 검색(실행면, pgvector)**: 운영 문서를 절 단위로 적재해 벡터 유사도와 문자 2-gram을 섞어 순위를 매긴다. 1차 거름은
+  점수가 아니라 메타데이터(문서 용도·절의 기종)다.
+- **마이그레이션 V42~V44**: `ai_operation_job`, `ai_operation_result`, `ai_operation_outbox`.
+
+### Changed
+
+- **`dbtower.aiops` 설정**: `alert-triggers.reply-channel`을 `channels.default`·`channels.by-team`으로 대체했다. 릴리즈 전
+  변경이라 호환 처리는 없다. 게이지 갱신 주기는 `metrics-refresh-ms`(기본 15000)로 맞춘다.
+
 ## [1.3.1] - 2026-09-14
 
 v1.3.0 공개 뒤 실제 MySQL·PostgreSQL 값과 승인 변경 흐름을 다시 읽고 촬영하며 발견한 표시·보안 결함을

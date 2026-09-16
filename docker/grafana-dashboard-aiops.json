@@ -1,0 +1,204 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "진행 중 AI 운영 작업 (status별)",
+      "description": "지금 파이프라인 안에 있는 작업 수. RECEIVED가 쌓이면 릴레이·큐가, COLLECTING·ANALYZING이 쌓이면 실행기가 멈춘 것이다.",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "fillOpacity": 20,
+            "showPoints": "never",
+            "stacking": { "mode": "normal" }
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (dbtower_aiops_jobs_active)",
+          "legendFormat": "{{status}}",
+          "datasource": "Prometheus"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "큐로 나가지 못한 이벤트",
+      "description": "Outbox에 남아 있는 미발행 이벤트 수. 0에서 자라면 릴레이가 멈춘 것이다(dbtower.aiops.outbox.unpublished).",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(dbtower_aiops_outbox_unpublished)",
+          "legendFormat": "미발행",
+          "datasource": "Prometheus"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "가장 오래 멈춘 작업의 정체 시간",
+      "description": "진행 중 작업이 마지막으로 진전한 뒤(updatedAt) 지난 최대 초. 계속 자라면 그 작업이 어느 단계에서 멈춘 것이다 — 재시도해도 접수 시각이 아니라 진전 시각을 보므로 밀린 큐만 드러난다(reaper의 미선점 한도 30분이 이 값의 기준선이다).",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (instance) (dbtower_aiops_jobs_stalled_seconds)",
+          "legendFormat": "{{instance}}",
+          "datasource": "Prometheus"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "완료·실패 (5분 비율)",
+      "description": "분당 처리량. failed가 올라가면 리스 만료·모델 실패·범위 확인 실패 중 하나다(finished_total의 status 태그).",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "reqps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(dbtower_aiops_jobs_finished_total[5m]))",
+          "legendFormat": "{{status}}",
+          "datasource": "Prometheus"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "작업 소요 시간(평균)",
+      "description": "접수에서 끝까지 걸린 초 — 큐 대기·사실 수집·모델 호출이 모두 들어간 요청자 체감 시간이다. 평균은 5분 창의 합/횟수이고, max는 그 창의 최댓값. 취소·리스 만료로 끝난 작업도 status 태그로 함께 드러난다.",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(dbtower_aiops_jobs_duration_seconds_sum[5m])) by (status) / sum(rate(dbtower_aiops_jobs_duration_seconds_count[5m])) by (status)",
+          "legendFormat": "{{status}} 평균",
+          "datasource": "Prometheus"
+        },
+        {
+          "refId": "B",
+          "expr": "max(dbtower_aiops_jobs_duration_seconds_max) by (status)",
+          "legendFormat": "{{status}} 최대",
+          "datasource": "Prometheus"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["dbtower", "aiops"],
+  "templating": {
+    "list": []
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "DBTower AI 운영 작업",
+  "uid": "dbtower-aiops",
+  "version": 1
+}

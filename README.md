@@ -28,6 +28,7 @@ Java 21 + Spring Boot 4로 만들었으며 웹 콘솔은 별도 빌드 체인이
 |---|---|
 | 관제 | 쿼리 통계, 활동 그래프, 시점 비교, Wait Event, 세션·블로킹, 복제·백업 상태 |
 | 진단 | 실행계획 규칙 분석, AI 1차 분석, 심층 원인 진단, 플랜 변경·이상·데드락 감지 |
+| AI 운영 작업 | Slack 한 문장·웹 콘솔·경보·DB팀 문의에서 시작된 비동기 진단. 사실은 DBTower가 모으고 모델은 1차 소견만 내며, 소견의 수치는 사실과 대조해 어긋나면 "검증되지 않음"으로 남깁니다 |
 | 운영 | 통합 헬스 스코어, SLO·에러 버짓, Advisors, FinOps 신호, 백업·복원 검증 |
 | 변경 관리 | 읽기 전용 워크벤치, 마스킹, 변경 리뷰, 승인 티켓 실행·되돌리기 |
 | 연동 | 웹 콘솔, MCP stdio·HTTP, Discord·Slack 웹훅, K8s·Terraform·Ansible |
@@ -147,7 +148,7 @@ MSSQL_SA_PASSWORD='...' docker --context colima-mssql2022 run -d \
 
 ## 아키텍처
 
-플랫폼은 Spring Modulith 기반 16개 모듈로 나뉩니다. 다른 모듈은 공개 서비스와 DTO만
+플랫폼은 Spring Modulith 기반 17개 모듈로 나뉩니다. 다른 모듈은 공개 서비스와 DTO만
 사용하며 구현, 엔티티, 저장소는 각 모듈의 `internal` 패키지에 숨깁니다. 순환 의존과
 레이어 위반은 테스트와 규약 검사에서 실패합니다.
 
@@ -168,9 +169,10 @@ MSSQL_SA_PASSWORD='...' docker --context colima-mssql2022 run -d \
 | 같은 부하의 인덱스 티켓 전후 평균 지연 | 46.378 ms | 0.521 ms |
 | 무응답 대상이 폴러 전체를 막던 시간 | 25초 초과 | 약 2초 |
 | 세션 화면 10명의 30초간 대상 조회 | 150회 | 14회 |
+| Slack 한 문장에서 검증된 소견까지(라이브) | 확인 응답 65.6 ms | 결과 도착 31.7초 |
 
 측정 환경, 명령, 원문 출력은 [VERIFICATION.md](docs/VERIFICATION.md)의 9, 132, 134,
-140절에 있습니다.
+140, 169절에 있습니다.
 
 ## 문서
 
@@ -178,7 +180,7 @@ MSSQL_SA_PASSWORD='...' docker --context colima-mssql2022 run -d \
 목적별 읽기 순서와 기록 위치를 정리했습니다.
 
 - 처음 둘러보기: [한 장 요약](docs/PORTFOLIO-ONEPAGER.md), [5분 시연](docs/DEMO-5MIN.md)
-- 설계 이해하기: [설계](docs/DESIGN.md), [AI 판단 규칙](docs/ai-analysis-rules.md)
+- 설계 이해하기: [설계](docs/DESIGN.md), [AI 판단 규칙](docs/ai-analysis-rules.md), [AI 운영 자동화](docs/AI-OPERATIONS-AUTOMATION.md)
 - 운영·배포하기: [운영](docs/operations.md), [최소 권한](docs/least-privilege.md)
 - API 연동하기: [API 빠른 참조](docs/API.md)
 - 직접 눌러보기: [역할별 수동 테스트](docs/MANUAL-TEST.md)

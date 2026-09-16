@@ -1,6 +1,7 @@
 package io.dbtower.aiops.internal.job;
 
 import io.dbtower.aiops.AiOperationStatus;
+import io.dbtower.aiops.internal.AiOperationMetrics;
 import io.dbtower.aiops.internal.AiOperationSettings;
 import io.dbtower.aiops.internal.domain.AiOperationJob;
 import io.dbtower.aiops.internal.persistence.AiOperationJobRepository;
@@ -36,13 +37,15 @@ public class AiOperationReaper {
     private final AiOperationJobRepository jobs;
     private final AiOperationSettings settings;
     private final AuditTrail auditTrail;
+    private final AiOperationMetrics metrics;
     private final TransactionTemplate tx;
 
     public AiOperationReaper(AiOperationJobRepository jobs, AiOperationSettings settings, AuditTrail auditTrail,
-                             PlatformTransactionManager transactionManager) {
+                             AiOperationMetrics metrics, PlatformTransactionManager transactionManager) {
         this.jobs = jobs;
         this.settings = settings;
         this.auditTrail = auditTrail;
+        this.metrics = metrics;
         this.tx = new TransactionTemplate(transactionManager);
     }
 
@@ -79,6 +82,7 @@ public class AiOperationReaper {
                 }
                 job.fail(reason, OffsetDateTime.now());
                 jobs.saveAndFlush(job);
+                metrics.recordFinished(job.getType(), job.getStatus(), job.getRequestedAt());
                 auditTrail.record("AI 운영 작업 정리 jobId=" + jobId + " reason=" + reason, job.getInstanceId(), 1);
                 return true;
             }));

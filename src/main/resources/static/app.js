@@ -36,6 +36,7 @@ const state = {
   lastFindings: [],    // 마지막 규칙 기반 지적
   lastAi: null,        // 마지막 AI 분석
   role: null,          // 로그인 주체의 대표 역할(표시용)
+  username: null,      // 로그인 주체의 이름(/api/me username) — 내 작업에만 취소 버튼을 붙이는 판정에 쓴다
   caps: new Set(),     // 로그인 주체의 능력(/api/me capabilities) — 버튼·메뉴는 역할 이름이 아니라 이것으로 가른다
 };
 
@@ -485,9 +486,13 @@ function handleInstanceDeepLink(list) {
   // 워크벤치 모드로 열렸으면 관제 화면의 대상 조회(로더 18개)를 돌리지 않는다 — 관제로 돌아올 때 그 인스턴스를 연다(setMode)
   if (params.get("mode") === "workbench") return;
   const target = params.get("instance") ? list.find((i) => String(i.id) === params.get("instance")) : null;
+  const deepJob = params.get("aiop");
   if (!target) {
     // 월간 점검 요약(MonthlyReportJob)은 인스턴스 없이 함대 전체를 가리킨다 — 전에는 처리하는 곳이 없어 빈 첫 화면만 열렸다(148절 감사)
     if (params.get("view") === "monthly") $("#score-summary")?.scrollIntoView({ block: "start" });
+    // 결과 알림의 딥링크는 대상이 없는 작업도 가리킨다(정기 리포트는 범위 전체를 덮는다) — 그래서 링크에 instance를
+    // 싣지 않고, 화면이 대상 없는 주소를 처리한다. 대상이 지워진 뒤 눌린 링크도 여기로 온다(170절 9번)
+    if (deepJob) openDeepLinkJob(deepJob);
     return;
   }
   state.instance = target;
@@ -507,17 +512,7 @@ function handleInstanceDeepLink(list) {
     });
   }
   // Slack 결과·경보가 건 링크(?aiop=작업id)로 들어오면 그 작업을 연다 — 링크가 JSON API를 가리키면 사람이 읽을 화면이 없다
-  const deepJob = params.get("aiop");
-  if (deepJob) {
-    ready.then(() => {
-      // 카드가 Monitoring 탭 안에 있다 — 그룹만 바꾸면 탭이 Top Query에 머물러 화면에 아무것도 안 뜬다(다른 딥링크와 같은 처리)
-      document.querySelector('.tab[data-tab="monitor"]').click();
-      showMonGroup("diag");
-      $("#aiops-all-instances").checked = true;
-      loadAiOperations().then(() => openAiOperation(deepJob));
-      document.querySelector(".aiops-card")?.scrollIntoView({ block: "start" });
-    });
-  }
+  if (deepJob) ready.then(() => openDeepLinkJob(deepJob));
   // 진단 입력은 늘 보이는 AI 칸에 있다(149절) — 모니터링 탭을 열 필요 없이 질문을 채운다
   if (deepQ) { const input = $("#diagnose-question"); input.value = deepQ; input.scrollIntoView({ block: "center" }); input.focus(); }
   if (deepView === "config-drift") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadConfigDrift(); $("#config-drift-result").scrollIntoView({ block: "center" }); }
@@ -525,6 +520,19 @@ function handleInstanceDeepLink(list) {
   // 인시던트 리포트 웹훅 카드(IncidentController)와 월간 리포트의 입구 — 링크는 있었는데 처리하는 곳이 없었다(148절 감사)
   if (deepView === "incident") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("backup"); $("#incident-result").scrollIntoView({ block: "center" }); }
   if (deepView === "monthly") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("backup"); $("#monthly-result").scrollIntoView({ block: "center" }); }
+}
+
+// 결과 알림이 건 ?aiop=작업id 딥링크로 그 작업을 펼친다. 카드가 Monitoring 탭의 진단 그룹 안에 있어 탭까지 옮겨야
+// 화면에 뜬다(그룹만 바꾸면 탭이 Top Query에 머문다). 다른 대상의 작업도 보여야 그 작업이 어디서나 열린다
+function openDeepLinkJob(jobId) {
+  // 카드는 #result-panel 안에 있고 그 패널은 대상을 고르기 전에는 hidden이다 — 대상 없는 작업(정기 리포트)의
+  // 알림 링크도 이 카드를 보여줘야 하므로 여기서 연다. 시간대 패널(#time-panel)은 대상 조회용이라 열지 않는다
+  $("#result-panel").hidden = false;
+  document.querySelector('.tab[data-tab="monitor"]').click();
+  showMonGroup("diag");
+  $("#aiops-all-instances").checked = true;
+  loadAiOperations().then(() => openAiOperation(jobId));
+  document.querySelector(".aiops-card")?.scrollIntoView({ block: "start" });
 }
 
 async function selectInstance(instance, card) {
@@ -545,7 +553,10 @@ async function selectInstance(instance, card) {
   live.history = [];
   drawLiveSpark();
   syncLive();
-  await Promise.all([loadOverview(), loadActivity(), loadMetrics(), loadBackupInfo(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadAiOperations(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks(), loadReviews()]);
+  // 로더 하나가 실패해도 이 약속은 깨지지 않는다. 딥링크(?aiop=·compareAt)가 이 약속에 .then으로 걸려 있어,
+  // 한 로더의 502가 Promise.all을 reject시키면 화면은 아무 일도 하지 않은 채 조용히 끝난다(170절 9번).
+  // 실패는 각 로더가 자기 카드에 적는다 — 여기서는 "대상의 첫 조회가 끝났다"만 알린다
+  await Promise.allSettled([loadOverview(), loadActivity(), loadMetrics(), loadBackupInfo(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadAiOperations(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks(), loadReviews()]);
 }
 
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
@@ -683,7 +694,9 @@ async function openAiOperation(jobId, opts = {}) {
   }
   const r = job.result;
   const canRetry = job.status === "FAILED" && state.caps.has("TARGET_OPERATE");
-  const canCancel = AIOP_ACTIVE.has(job.status);
+  // 취소는 요청자 본인이나 운영자만 된다(서버가 403으로 막는다) — 눌러서 403을 받는 버튼을 만들지 않는다
+  const canCancel = AIOP_ACTIVE.has(job.status)
+    && (job.requester === state.username || state.caps.has("TARGET_OPERATE"));
   const head = `
     <div class="aiop-detail-head">
       <span class="aiop-badge aiop-${esc(job.status)}">${esc(AIOP_STATUS_LABEL[job.status] ?? job.status)}</span>
@@ -736,7 +749,41 @@ async function aiOperationAction(jobId, action) {
 // 진행 중 작업이 있고 이 카드가 실제로 보일 때만 갱신한다 — 안 보는 화면이 폴링을 계속하면 서버만 바쁘다
 function setupAiOperations() {
   $("#aiops-all-instances")?.addEventListener("change", renderAiOperations);
+  $("#btn-aiop-submit")?.addEventListener("click", submitAiOperation);
   document.addEventListener("visibilitychange", scheduleAiOpsRefresh);
+}
+
+// 같은 칸의 "지금 보기"(자연어 진단)와 달리, 여기서 만든 작업은 사실 수집·검증을 거쳐 나중에 결과가 붙는다.
+async function submitAiOperation() {
+  const status = $("#aiop-submit-status");
+  const btn = $("#btn-aiop-submit");
+  if (!state.instance) { status.textContent = "인스턴스를 먼저 선택하세요."; return; }
+  const prompt = $("#diagnose-question").value.trim();
+  if (!prompt) { status.textContent = "무엇을 봐 달라고 할지 적어 주세요. 위 입력칸을 함께 씁니다."; return; }
+  const type = $("#aiop-new-type").value;
+  btn.disabled = true;
+  status.textContent = "접수 중...";
+  let accepted = null;
+  try {
+    accepted = await api("/api/ai-operations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type, instanceId: state.instance.id,
+        windowMinutes: Number($("#aiop-new-window").value), prompt, trigger: "WEB" }),
+    });
+    status.textContent = `${AIOP_TYPE_LABEL[accepted.type] ?? accepted.type} 작업 ${String(accepted.jobId ?? "").slice(0, 8)}을 접수했습니다.`;
+    showMonGroup("diag");
+    document.querySelector('.tab[data-tab="monitor"]')?.click();
+    await loadAiOperations();
+    if (accepted.jobId) openAiOperation(accepted.jobId);
+  } catch (e) {
+    // 접수까지는 됐는데 그 뒤가 실패한 경우를 "접수 실패"로 적지 않는다 — 작업은 이미 만들어져 돌고 있다
+    status.textContent = accepted
+      ? `접수는 됐지만 목록을 갱신하지 못했습니다: ${e.message}`
+      : `접수하지 못했습니다: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function scheduleAiOpsRefresh() {
@@ -1935,26 +1982,34 @@ function fmtSlowTime(s) {
 }
 
 async function loadSlow() {
-  const rows = await api(`/api/instances/${state.instance.id}/slow-queries?limit=20`);
   const table = $("#slow-table");
   // 기종별로 확보 가능한 필드가 달라 미확보는 "—"로 표기(MySQL: User@host·Lock·Rows_sent, Mongo: Plan)
   table.querySelector("thead").innerHTML = `
     <tr><th>Captured <span class="muted" title="브라우저 시간대로 변환 표시 — 원문(UTC)은 툴팁">(로컬)</span></th><th>User@host</th><th class="num">Query(ms)</th><th class="num">Lock(ms)</th>
         <th class="num">Rows_sent</th><th class="num">Rows_examined</th><th>Plan</th><th>Query</th></tr>`;
   const dash = (v) => (v == null || v < 0) ? '<span class="muted">—</span>' : null;
-  table.querySelector("tbody").innerHTML = rows.length ? rows.map((q) => `
-    <tr>
-      <td class="num">${fmtSlowTime(q.capturedAt)}</td>
-      <td>${q.userHost ? esc(q.userHost) : '<span class="muted">—</span>'}</td>
-      <td class="num">${fmtNum(q.elapsedMs)}</td>
-      <td class="num">${dash(q.lockMs) ?? fmtNum(q.lockMs)}</td>
-      <td class="num">${dash(q.rowsSent) ?? fmtNum(q.rowsSent, 0)}</td>
-      <td class="num">${fmtNum(q.rowsExamined, 0)}</td>
-      <td>${q.planSummary ? `<span class="plan-badge ${/COLLSCAN/i.test(q.planSummary) ? "plan-bad" : "plan-ok"}">${esc(q.planSummary)}</span>` : '<span class="muted">—</span>'}</td>
-      <td class="qtext" title="${esc(q.queryText)}">${queryTextHtml(q.queryText)}</td>
-    </tr>`).join("") : '<tr><td colspan="8" class="muted">슬로우 쿼리가 없습니다.</td></tr>';
+  try {
+    const rows = await api(`/api/instances/${state.instance.id}/slow-queries?limit=20`);
+    table.querySelector("tbody").innerHTML = rows.length ? rows.map((q) => `
+      <tr>
+        <td class="num">${fmtSlowTime(q.capturedAt)}</td>
+        <td>${q.userHost ? esc(q.userHost) : '<span class="muted">—</span>'}</td>
+        <td class="num">${fmtNum(q.elapsedMs)}</td>
+        <td class="num">${dash(q.lockMs) ?? fmtNum(q.lockMs)}</td>
+        <td class="num">${dash(q.rowsSent) ?? fmtNum(q.rowsSent, 0)}</td>
+        <td class="num">${fmtNum(q.rowsExamined, 0)}</td>
+        <td>${q.planSummary ? `<span class="plan-badge ${/COLLSCAN/i.test(q.planSummary) ? "plan-bad" : "plan-ok"}">${esc(q.planSummary)}</span>` : '<span class="muted">—</span>'}</td>
+        <td class="qtext" title="${esc(q.queryText)}">${queryTextHtml(q.queryText)}</td>
+      </tr>`).join("") : '<tr><td colspan="8" class="muted">슬로우 쿼리가 없습니다.</td></tr>';
+  } catch (e) {
+    // 형제 로더(top·sessions·latency·partitions·deadlocks)와 같은 모양 — 실패를 이 카드에 적고 끝낸다.
+    // 여기서 던지면 selectInstance의 Promise.all이 깨지고, 그 약속에 걸린 딥링크(?aiop=·compareAt)까지 함께 사라진다(170절 9번)
+    table.querySelector("tbody").innerHTML =
+      `<tr><td colspan="8" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+  }
   // Mongo 보존 창 정직 표기 — system.profile은 순환(capped) 컬렉션이라 오래된 항목이 덮어써진다.
-  // 로그 파일 파싱 기반 도구와 보존 범위가 다름을 숨기지 않는다.
+  // 로그 파일 파싱 기반 도구와 보존 범위가 다름을 숨기지 않는다. 조회가 실패해도 이 문구는 지금 대상의 것이라
+  // 성공 경로에만 두면 다른 대상의 설명이 남는다
   const note = $("#slow-source-note");
   if (note) {
     note.textContent = state.instance.type === "MONGODB"
@@ -2093,6 +2148,7 @@ async function loadMe() {
   try {
     const me = await api("/api/me");
     state.role = me.role;
+    state.username = me.username;
     state.caps = new Set(me.capabilities || []);
     $("#user-chip").innerHTML =
       `${esc(me.username)}<span class="role-badge" title="${esc(me.role)}">${esc(ROLE_LABEL[me.role] || me.role)}</span>`;

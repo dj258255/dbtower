@@ -50,7 +50,7 @@ _RETRIEVAL_SKIP = {"PERIODIC_REPORT"}
 
 def build_graph(client: DBTowerClient, notifier: Notifier, leases: LeaseStore, worker_id: str,
                 retriever: Retriever | None = None, analyze_timeout_s: float = 240.0,
-                ingest_cases: bool = False):
+                collect_timeout_s: float = 180.0, ingest_cases: bool = False):
 
     async def start(state: JobState) -> JobState:
         token = await leases.get(state["job_id"], state["attempt"])
@@ -87,7 +87,7 @@ def build_graph(client: DBTowerClient, notifier: Notifier, leases: LeaseStore, w
         return {"lease": claimed["leaseToken"], "job": claimed["job"], "next": "collect"}
 
     async def collect(state: JobState) -> JobState:
-        facts = await client.facts(state["job_id"], state["lease"])
+        facts = await client.facts(state["job_id"], state["lease"], collect_timeout_s)
         return {"facts": facts, "job": facts["job"],
                 "next": "analyze" if retriever is None or facts["job"]["type"] in _RETRIEVAL_SKIP else "retrieve"}
 

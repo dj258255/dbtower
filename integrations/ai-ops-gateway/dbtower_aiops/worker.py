@@ -3,7 +3,8 @@
 확인(XACK) 규칙:
   - 끝남·다른 실행기의 작업·옛 시도 -> 확인
   - 일시 오류(DBTower 5xx·연결 실패·알림 실패) -> 확인하지 않는다. 멈춘 메시지는 XAUTOCLAIM으로 다시 가져와 이어간다
-  - 배달 횟수가 상한을 넘거나 재시도해도 같은 결과인 오류(4xx) -> 작업을 실패로 기록하고 사망 스트림으로 옮긴 뒤 확인
+  - 배달 횟수가 상한을 넘거나 재시도해도 같은 결과인 오류(4xx) -> 작업을 실패로 기록하고 사망 스트림으로 옮긴 뒤 확인.
+    배달 상한으로 닫을 때는 묻기 전에 실패 알림을 한 번 보낸다(묻으면 재배달이 없어 알림 경로가 사라진다 — 170절 2번)
 
 재시도가 처음부터가 아니라 이어서 되는 이유는 리스 토큰을 Redis에 남기기 때문이다(graph.start 참고).
 """
@@ -99,7 +100,13 @@ class Worker:
             if deliveries < self._max_deliveries:
                 log.warning("일시 오류로 재시도 대기 job=%s delivery=%d: %s", job_id, deliveries, exc)
                 return "retry"
-            await self._fail_job(job_id, attempt, f"배달 {deliveries}회 뒤에도 실패: {exc}")
+            failed = await self._fail_job(job_id, attempt, f"배달 {deliveries}회 뒤에도 실패: {exc}")
+            # 작업이 FAILED로 기록됐을 때만 알린다. 리스가 없어 기록이 안 된 경우(선점 전 실패)에 그래프를 부르면
+            # start가 claim으로 가 작업을 새로 선점해 버린다 — 알릴 것도 없다
+            if failed:
+                # 묻기 전에 알린다. _bury는 XACK이라 재배달이 없고, 그래프의 알림은 재배달(start의 FAILED -> notify)로만
+                # 나가므로 여기서 부르지 않으면 리퍼가 닫은 작업만 온콜에 닿는다(170절 2번)
+                await self._notify_failed(job_id, attempt)
             await self._bury(message_id, fields, str(exc))
             return "dead"
 
@@ -107,15 +114,29 @@ class Worker:
         pending = await self._redis.xpending_range(self._stream, self._group, min=message_id, max=message_id, count=1)
         return int(pending[0]["times_delivered"]) if pending else 1
 
-    async def _fail_job(self, job_id: str, attempt: int, reason: str) -> None:
+    async def _fail_job(self, job_id: str, attempt: int, reason: str) -> bool:
+        """작업을 FAILED로 기록한다. 기록했으면 True — 실패 알림을 부를지는 여기에 달렸다."""
         token = await self._leases.get(job_id, attempt)
         if not token:
-            return  # 선점 전에 실패했다 — 작업은 RECEIVED로 남고 리퍼가 미선점으로 드러낸다
+            return False  # 선점 전에 실패했다 — 작업은 RECEIVED로 남고 리퍼가 미선점으로 드러낸다
         try:
             await self._client.fail(job_id, token, reason)
+            return True
         except DBTowerError as exc:
             # 이미 끝난 작업(알림만 실패)이거나 DBTower가 아직 내려가 있다 — 사망 스트림 기록이 흔적으로 남는다
             log.warning("작업 실패 기록 못함 job=%s: %s", job_id, exc)
+            return False
+
+    async def _notify_failed(self, job_id: str, attempt: int) -> None:
+        """FAILED로 기록된 작업의 실패 알림을 한 번 보낸다 — 그래프의 start가 FAILED -> notify로 보낸다.
+
+        알림 문안·수신자 결정은 실행면과 플랫폼에 한 곳씩만 있어야 하므로(notifier·채널 표) 여기서 새로 만들지 않는다.
+        알림이 실패해도 예외를 올리지 않는다 — 올리면 handle()을 타고 배달 상한을 넘겨 재시도가 무한해진다.
+        """
+        try:
+            await self._graph.ainvoke({"job_id": job_id, "attempt": attempt})
+        except Exception as exc:  # noqa: BLE001 - 알림 실패가 무한 재시도가 되면 안 된다
+            log.warning("실패 알림을 보내지 못함 job=%s: %s", job_id, exc)
 
     async def _bury(self, message_id: str, fields: dict[str, str], reason: str) -> None:
         await self._redis.xadd(self._dead, {**fields, "sourceId": message_id, "reason": reason[:500]})
