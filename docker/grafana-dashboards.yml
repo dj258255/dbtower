@@ -1,0 +1,13 @@
+apiVersion: 1
+
+# 대시보드 프로비저닝 — 파일로만 관리한다(화면에서 고친 것은 다음 기동에 되돌아간다).
+# datasource와 같은 방식으로 마운트한다: docker-compose.yml의 grafana volumes 참고.
+providers:
+  - name: dbtower
+    orgId: 1
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards

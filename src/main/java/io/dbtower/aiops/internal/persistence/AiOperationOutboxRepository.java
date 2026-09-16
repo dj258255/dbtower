@@ -40,4 +40,8 @@ public interface AiOperationOutboxRepository extends JpaRepository<AiOperationOu
             """)
     int markPublished(@Param("eventId") String eventId, @Param("token") String token,
                       @Param("now") OffsetDateTime now);
+
+    /** 아직 큐로 나가지 못한 이벤트 수 — 릴레이가 멈추면 이 값이 자란다 */
+    @Query("select count(o) from AiOperationOutbox o where o.status <> 'PUBLISHED'")
+    long countUnpublished();
 }

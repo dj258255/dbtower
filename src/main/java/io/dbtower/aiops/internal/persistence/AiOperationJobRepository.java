@@ -32,4 +32,12 @@ public interface AiOperationJobRepository extends JpaRepository<AiOperationJob, 
 
     /** 리퍼 — 접수된 뒤 어떤 실행기도 가져가지 않은 작업 */
     List<AiOperationJob> findByStatusAndUpdatedAtBefore(AiOperationStatus status, OffsetDateTime before);
+
+    /** 상태별 작업 수 — 게이지 갱신용. 전체 행을 읽지 않고 DB에서 센다 */
+    @Query("select j.status, count(j) from AiOperationJob j where j.status in :statuses group by j.status")
+    List<Object[]> countByStatuses(@Param("statuses") Collection<AiOperationStatus> statuses);
+
+    /** 진행 중 작업이 마지막으로 진전한 시각 중 가장 오래된 것 — 큐·실행기가 멈추면 이 값이 자란다 */
+    @Query("select min(j.updatedAt) from AiOperationJob j where j.status in :statuses")
+    OffsetDateTime oldestProgressAt(@Param("statuses") Collection<AiOperationStatus> statuses);
 }

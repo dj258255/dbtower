@@ -334,6 +334,9 @@ dbtower:
     outbox-claim-seconds: 60      # 릴레이 선점 리스 — 발행 완료를 못 알리고 죽으면 이 뒤 다시 발행된다(중복은 작업 선점이 흡수)
     default-window-minutes: 60    # 분석 구간 기본값(요청이 비웠을 때)
     reaper-ms: 60000
+    # 게이지 캐시 갱신 주기 — Prometheus 기본 스크레이프 주기(15초)와 맞춘다. 스크레이프마다 DB를 때리면
+    # 관측이 곧 부하가 되므로 갱신에서 한 번만 읽고, 게이지는 캐시한 숫자를 노출한다
+    metrics-refresh-ms: 15000
     alert-triggers:
       # 나간 경보(회귀 감지·운영 경보)를 AI 작업으로 이어 붙인다. 켜면 경보마다 모델 호출이 생겨 기본은 끈다
       enabled: ${DBTOWER_AIOPS_ALERT_TRIGGERS:false}

@@ -1,5 +1,6 @@
 package io.dbtower.aiops;
 
+import io.dbtower.aiops.internal.AiOperationMetrics;
 import io.dbtower.aiops.internal.AiOperationSettings;
 import io.dbtower.aiops.internal.Callers;
 import io.dbtower.aiops.internal.Callers.Caller;
@@ -51,6 +52,7 @@ public class AiOperationService {
     private final Callers callers;
     private final JobViews views;
     private final AiOperationSettings settings;
+    private final AiOperationMetrics metrics;
     private final Clock clock;
 
     // 생성자가 둘이라 스프링이 고를 쪽을 표시한다 — 시계 주입 생성자는 테스트가 시각을 고정하는 시임이다
@@ -58,14 +60,14 @@ public class AiOperationService {
     public AiOperationService(AiOperationJobRepository jobs, AiOperationResultRepository results,
                               AiOperationOutboxRepository outbox, RegistryService registry, AuditTrail auditTrail,
                               Callers callers, JobViews views,
-                              AiOperationSettings settings) {
-        this(jobs, results, outbox, registry, auditTrail, callers, views, settings, Clock.systemDefaultZone());
+                              AiOperationSettings settings, AiOperationMetrics metrics) {
+        this(jobs, results, outbox, registry, auditTrail, callers, views, settings, metrics, Clock.systemDefaultZone());
     }
 
     AiOperationService(AiOperationJobRepository jobs, AiOperationResultRepository results,
                        AiOperationOutboxRepository outbox, RegistryService registry, AuditTrail auditTrail,
                        Callers callers, JobViews views,
-                       AiOperationSettings settings, Clock clock) {
+                       AiOperationSettings settings, AiOperationMetrics metrics, Clock clock) {
         this.jobs = jobs;
         this.results = results;
         this.outbox = outbox;
@@ -74,6 +76,7 @@ public class AiOperationService {
         this.callers = callers;
         this.views = views;
         this.settings = settings;
+        this.metrics = metrics;
         this.clock = clock;
     }
 
@@ -154,6 +157,7 @@ public class AiOperationService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "요청자 본인이나 운영자만 취소할 수 있습니다");
         }
         job.cancel(OffsetDateTime.now(clock));
+        metrics.recordFinished(job.getType(), job.getStatus(), job.getRequestedAt());
         auditTrail.record("AI 운영 작업 취소 jobId=" + jobId, job.getInstanceId(), 0);
         return views.view(job, null);
     }

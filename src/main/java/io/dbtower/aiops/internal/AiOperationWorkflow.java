@@ -11,7 +11,6 @@ import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.audit.AuditTrail;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.RegistryService;
-import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
@@ -27,7 +26,6 @@ import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -67,14 +65,14 @@ public class AiOperationWorkflow {
     private final JobViews views;
     private final AiOperationSettings settings;
     private final TransactionTemplate tx;
-    private final MeterRegistry meters;
+    private final AiOperationMetrics metrics;
     private final Path rulesPath;
     private final Clock clock = Clock.systemDefaultZone();
 
     public AiOperationWorkflow(AiOperationJobRepository jobs, AiOperationResultRepository results,
                                RegistryService registry, FactCollector collector, AiAnalyzer analyzer,
                                AuditTrail auditTrail, JobViews views, AiOperationSettings settings,
-                               PlatformTransactionManager transactionManager, MeterRegistry meters,
+                               PlatformTransactionManager transactionManager, AiOperationMetrics metrics,
                                @Value("${dbtower.ai.rules-path:docs/ai-analysis-rules.md}") String rulesPath) {
         this.jobs = jobs;
         this.results = results;
@@ -85,7 +83,7 @@ public class AiOperationWorkflow {
         this.views = views;
         this.settings = settings;
         this.tx = new TransactionTemplate(transactionManager);
-        this.meters = meters;
+        this.metrics = metrics;
         this.rulesPath = Path.of(rulesPath);
     }
 
@@ -102,7 +100,7 @@ public class AiOperationWorkflow {
                 String notifyOnly = UUID.randomUUID().toString();
                 job.grantNotificationLease(notifyOnly);
                 jobs.saveAndFlush(job);
-                finished(job);
+                metrics.recordFinished(job.getType(), job.getStatus(), job.getRequestedAt());
                 auditTrail.record("AI 운영 작업 범위 확인 실패 jobId=" + jobId, job.getInstanceId(), 1);
                 return new Claimed(views.view(job, null), notifyOnly, null);
             }
@@ -222,7 +220,7 @@ public class AiOperationWorkflow {
             j.complete(now);
             jobs.saveAndFlush(j);
             results.save(result);
-            finished(j);
+            metrics.recordFinished(j.getType(), j.getStatus(), j.getRequestedAt());
             auditTrail.record("AI 운영 작업 완료 jobId=" + jobId + " opinion=" + (opinion != null)
                     + " unverified=" + unverified.size() + " approvalRequired=" + approval, j.getInstanceId(), 0);
             return views.view(j, result);
@@ -235,7 +233,7 @@ public class AiOperationWorkflow {
             job.requireLease(token);
             job.fail(reason, now());
             jobs.saveAndFlush(job);
-            finished(job);
+            metrics.recordFinished(job.getType(), job.getStatus(), job.getRequestedAt());
             auditTrail.record("AI 운영 작업 실패 jobId=" + jobId + " reason=" + brief(reason), job.getInstanceId(), 1);
             return views.view(job, null);
         });
@@ -323,11 +321,6 @@ public class AiOperationWorkflow {
         } catch (IOException e) {
             return "";
         }
-    }
-
-    private void finished(AiOperationJob job) {
-        meters.counter("dbtower.aiops.jobs.finished", "type", job.getType().name().toLowerCase(Locale.ROOT),
-                "status", job.getStatus().name().toLowerCase(Locale.ROOT)).increment();
     }
 
     private AiOperationJob load(String jobId) {
