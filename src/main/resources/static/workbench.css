@@ -363,7 +363,12 @@ body.picking table.grid th:not(.rownum), body.picking .tree-name, body.picking .
 .wb-share { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
 .wb-share-note { margin: 0 6px; font-size: 11.5px; }
 .wb-share-note:empty { display: none; }
-.wb-policy { margin: 0 6px; font-size: 11px; line-height: 1.5; }
+/* 대화 맨 위의 시스템 안내 한 줄 — 입력창 아래에 있던 .wb-policy를 이 자리로 옮겼다(chat.js renderTimeline).
+   말풍선이 아니라 이 칸의 규칙이라 왼쪽 선을 하나 두고 대화보다 작게 둔다. 대비: #52697d/흰 5.71:1 */
+.wb-chat-policy {
+  padding: 2px 0 2px 9px; border-left: 2px solid rgba(10, 106, 168, .28);
+  font-size: 11px; line-height: 1.6; color: var(--muted); word-break: keep-all;
+}
 
 .wb-modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 50; }
 .wb-dialog { padding: 18px 20px; width: min(460px, 92vw); }

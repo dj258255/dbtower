@@ -17,7 +17,8 @@ const api = (path, opts = {}) => {
   return fetch(path, { ...opts, headers }).then((r) => {
     if (r.status === 401) { location.href = "/login.html"; throw new Error("로그인이 필요합니다"); }
     if (!r.ok) return r.text().then((t) => { throw new Error(`${r.status} ${t}`); });
-    return r.json();
+    // 204 No Content(대화 삭제 등)에는 본문이 없다 — r.json()이 던지면 성공이 실패로 보인다
+    return r.status === 204 ? null : r.json();
   });
 };
 
@@ -538,7 +539,7 @@ function openDeepLinkJob(jobId) {
 async function selectInstance(instance, card) {
   state.instance = instance;
   renderInstanceMatches(); // 선택 반영 — 선택 카드를 맨 위 유지·상세 펼침·하이라이트
-  renderChat({ follow: true }); // AI 칸의 대화는 인스턴스마다 따로다 — 고른 대상의 대화로 바꾼다
+  renderChat({ follow: true }); // AI 칸은 잠시 그대로 — 아래 로더가 서버에서 그 인스턴스 대화를 다시 읽어 그린다
   $("#time-panel").hidden = false;
   $("#result-panel").hidden = false;
 
@@ -557,7 +558,7 @@ async function selectInstance(instance, card) {
   // 로더 하나가 실패해도 이 약속은 깨지지 않는다. 딥링크(?aiop=·compareAt)가 이 약속에 .then으로 걸려 있어,
   // 한 로더의 502가 Promise.all을 reject시키면 화면은 아무 일도 하지 않은 채 조용히 끝난다(170절 9번).
   // 실패는 각 로더가 자기 카드에 적는다 — 여기서는 "대상의 첫 조회가 끝났다"만 알린다
-  await Promise.allSettled([loadOverview(), loadActivity(), loadMetrics(), loadBackupInfo(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadAiOperations(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks(), loadReviews()]);
+  await Promise.allSettled([loadOverview(), loadActivity(), loadMetrics(), loadBackupInfo(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadAiOperations(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks(), loadReviews(), loadConversationsAndOpenLatest(instance.id)]);
 }
 
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
@@ -756,6 +757,7 @@ function setupAiOperations() {
 
 // 같은 칸의 채팅(자연어 진단)과 달리, 여기서 만든 작업은 사실 수집·검증을 거쳐 나중에 결과가 붙는다.
 // 결과는 대화에 한 줄로 남기고, 같은 문장을 화면 낭독기용 상태 영역에도 적는다(눈에는 한 번만 보인다).
+// 이 접수 줄은 서버 대화에 저장되지 않는다 — 화면 메모리에만 있고 대화를 바꾸면 사라진다(결과는 진단 탭 카드에 남는다).
 async function submitAiOperation() {
   const status = $("#aiop-submit-status");
   const btn = $("#btn-aiop-submit");
@@ -768,7 +770,6 @@ async function submitAiOperation() {
     status.textContent = text;
     // 접수 도중 다른 인스턴스로 옮겨도 그 작업을 맡긴 대상의 대화에 남긴다
     turns.push({ role: "system", text, jobId });
-    saveChat();
     if (state.instance?.id === inst.id) renderChat({ follow: true });
   };
   const type = $("#aiop-new-type").value;
@@ -786,6 +787,7 @@ async function submitAiOperation() {
     turns.push({ role: "user", text: prompt });
     input.value = "";
     autoGrowChatInput();
+    closeAiOpPopover();
     say(`${AIOP_TYPE_LABEL[accepted.type] ?? accepted.type} 작업 ${String(accepted.jobId ?? "").slice(0, 8)}을 접수했습니다. 사실 수집과 검증이 끝나면 결과가 붙습니다.`, accepted.jobId);
     showMonGroup("diag");
     document.querySelector('.tab[data-tab="monitor"]')?.click();
@@ -3167,42 +3169,114 @@ async function streamSse(path, body, onEvent, signal) {
 }
 
 // ---------- AI 어시스턴트 채팅 (자연어 진단) ----------
-// 질문할 때마다 앞 답이 덮여 사라지던 결과 상자를 웹 채팅으로 바꿨다. 대화는 인스턴스마다 따로 둔다 — 앞 대화를 서버에
-// 참고용 맥락으로 함께 보내므로(DiagnosisService.historyBlock) 다른 DB의 대화가 섞이면 엉뚱한 대상의 맥락이 실린다.
+// 대화는 서버에 남는다(V46·176절): 인스턴스를 고르면 가장 최근 대화를 열어 턴을 그대로 그리고, 첫 질문을 보낼 때
+// 새 대화를 만든다(빈 대화가 목록에 쌓이지 않게). 앞선 맥락은 서버가 그 대화의 DB 턴에서만 만든다 — 화면은
+// conversationId만 보낸다. 예전에는 브라우저가 만든 history를 보냈고, 그건 위조할 수 있는 입력이었다.
 // 한 번에 한 진단만 돈다(진단은 100초를 넘기도 하고, 두 스트림이 같은 칸에 번갈아 그렸다 — 148절 감사).
-const chat = { byInstance: new Map(), running: null };
-const CHAT_HISTORY_TURNS = 3;
+const chat = { byInstance: new Map(), running: null, confirmId: null };
 const CHAT_CONFIDENCE = { high: "높음", medium: "보통", low: "낮음" };
 // 예시는 진단 도구로 실제로 답할 수 있는 것만 둔다(query_stats·compare, sessions, replication)
 const CHAT_SUGGESTIONS = ["최근 1시간 동안 느려진 쿼리가 있어?", "지금 락을 기다리는 세션이 있어?", "복제가 밀리고 있어?"];
 
-// 같은 탭에서는 새로고침해도 대화가 남게 한다 — 처음엔 메모리에만 둬서 새로고침 한 번에 대화가 사라졌다.
-// sessionStorage라 탭을 닫으면 지워지고 다른 사람·기기로 가지 않는다. 저장이 막힌 브라우저(사생활 모드 등)에서도 채팅은 돈다
-const CHAT_STORE_KEY = "dbtower.chat.v1";
-const CHAT_STORE_TURNS = 30;
-function saveChat() {
-  try {
-    const data = {};
-    for (const [id, turns] of chat.byInstance) {
-      data[id] = turns.filter((t) => t.status !== "running").slice(-CHAT_STORE_TURNS);
-    }
-    sessionStorage.setItem(CHAT_STORE_KEY, JSON.stringify(data));
-  } catch (e) { /* 저장 못 해도 지금 화면의 대화는 그대로다 */ }
-}
-function loadChat() {
-  try {
-    const data = JSON.parse(sessionStorage.getItem(CHAT_STORE_KEY) || "{}");
-    for (const [id, turns] of Object.entries(data)) {
-      if (Array.isArray(turns)) chat.byInstance.set(Number(id), turns);
-    }
-  } catch (e) { /* 깨진 저장값은 버리고 빈 대화로 시작한다 */ }
+// 인스턴스별 대화 상태. 화면 메모리에만 있고 서버가 진실이다 — sessionStorage에 두던 시절에는 새로고침 뒤
+// 화면과 서버가 어긋났고, 브라우저마다 다른 대화가 목록처럼 보였다.
+function chatState() {
+  const id = state.instance?.id;
+  if (id == null) return null;
+  if (!chat.byInstance.has(id)) {
+    chat.byInstance.set(id, { conversationId: null, title: "", turns: [], list: [], status: "idle", error: null });
+  }
+  return chat.byInstance.get(id);
 }
 
 function chatTurns() {
-  const id = state.instance?.id;
-  if (id == null) return [];
-  if (!chat.byInstance.has(id)) chat.byInstance.set(id, []);
-  return chat.byInstance.get(id);
+  return chatState()?.turns ?? [];
+}
+
+/** 그 인스턴스의 진단이 지금 돌고 있나 — 도는 동안 대화를 갈아치우면 진행 중 턴이 화면에서 사라진다 */
+function chatRunningHere(instanceId) {
+  return !!chat.running && chat.running.instanceId === instanceId;
+}
+
+/** 서버 턴 한 건 = 질문 한 줄 + 답 한 덩어리. 저장된 도구 호출에는 결과 본문이 없다(176절) — 화면은 원래 그리지 않는다 */
+function chatTurnsFromServer(turns) {
+  return (turns || []).flatMap((t) => [
+    { role: "user", text: t.question },
+    { role: "ai", status: "done", took: t.tookMs, steps: t.toolCalls || [], result: {
+      aiEnabled: true, answer: t.answer, rootCause: t.rootCause, confidence: t.confidence,
+      backend: t.backend, toolCallCount: (t.toolCalls || []).filter((c) => !c.rejected).length,
+      toolCalls: t.toolCalls || [], note: null } },
+  ]);
+}
+
+/** 목록의 짧은 시각 — 오늘이면 "오후 3:12", 아니면 "9월 14일". 서버 시각은 UTC라 브라우저 시간대로 옮긴다 */
+function chatListTime(iso) {
+  if (!iso) return "";
+  const d = parseApiTime(String(iso));
+  if (Number.isNaN(d.getTime())) return "";
+  const now = new Date();
+  if (d.getFullYear() !== now.getFullYear() || d.getMonth() !== now.getMonth() || d.getDate() !== now.getDate()) {
+    return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+  }
+  const h = d.getHours();
+  return `${h < 12 ? "오전" : "오후"} ${h % 12 === 0 ? 12 : h % 12}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// 답 서식 — 모델이 실제로 쓰는 것만 그린다: 빈 줄로 나뉜 문단, - / * / 1. 목록, `코드`, ``` 울타리 블록, **굵게**.
+// 그 밖(표·#제목·링크)은 글자 그대로 둔다: 링크를 만들면 모델이 쓴 주소를 사람이 누르게 되어 피싱 경로가 되고,
+// 표·제목은 지금 프롬프트 규약("JSON 하나만 출력")에서 실제로 나오지 않는다.
+// 순서가 중요하다 — esc를 먼저 걸고 토큰만 감싼다. 뒤집으면 답에 섞인 태그가 그대로 실행된다.
+function chatInline(escaped) {
+  return escaped.replace(/`([^`]+)`|\*\*([^*]+)\*\*/g,
+    (m, code, bold) => (code != null ? `<code>${code}</code>` : `<strong>${bold}</strong>`));
+}
+
+const CHAT_SQL_START = /^\s*(select|with|update|insert|delete|explain)\b/i;
+
+function chatCodeHtml(code, lang) {
+  // highlightSql도 토큰마다 esc를 거친다 — 서버가 준 SQL을 innerHTML에 넣어도 태그로 실행되지 않는다
+  const sql = /^sql$/i.test(lang || "") || CHAT_SQL_START.test(code);
+  return sql ? `<pre class="chat-sql"><code>${highlightSql(code)}</code></pre>`
+             : `<pre><code>${esc(code)}</code></pre>`;
+}
+
+function chatAnswerHtml(text) {
+  const src = stripEmoji(text ?? "");
+  if (!src.trim()) return "";
+  const lines = src.replace(/\r\n?/g, "\n").split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.trim().startsWith("```")) {
+      const lang = line.trim().slice(3).trim();
+      const buf = [];
+      i++;
+      while (i < lines.length && !lines[i].trim().startsWith("```")) { buf.push(lines[i]); i++; }
+      i++; // 닫는 울타리 — 없으면 끝까지가 블록이다
+      out.push(chatCodeHtml(buf.join("\n"), lang));
+      continue;
+    }
+    if (line.trim() === "") { i++; continue; }
+    const ordered = /^\s*\d+\.\s/.test(line);
+    if (ordered || /^\s*[-*]\s/.test(line)) {
+      const items = [];
+      while (i < lines.length) {
+        const m = ordered ? lines[i].match(/^\s*\d+\.\s+(.*)$/) : lines[i].match(/^\s*[-*]\s+(.*)$/);
+        if (!m) break;
+        items.push(chatInline(esc(m[1])));
+        i++;
+      }
+      out.push(ordered ? `<ol>${items.map((x) => `<li>${x}</li>`).join("")}</ol>`
+                       : `<ul>${items.map((x) => `<li>${x}</li>`).join("")}</ul>`);
+      continue;
+    }
+    const para = [];
+    while (i < lines.length && lines[i].trim() !== "" && !lines[i].trim().startsWith("```")
+           && !/^\s*(\d+\.|[-*])\s/.test(lines[i])) { para.push(lines[i]); i++; }
+    out.push(`<p>${chatInline(esc(para.join("\n")))}</p>`);
+  }
+  return out.join("");
 }
 
 function chatToolHtml(c) {
@@ -3214,13 +3288,30 @@ function chatToolHtml(c) {
     </div>`;
 }
 
-function chatTurnHtml(t) {
+/** 메타 줄의 도구 표기 — 중복 제거, 호출 순서. 한 번이라도 거부된 도구는 이름 뒤에 (거부) */
+function chatToolNames(steps) {
+  const names = [];
+  for (const s of steps || []) {
+    if (!s || !s.tool) continue;
+    const found = names.find((n) => n.tool === s.tool);
+    if (found) { found.rejected = found.rejected || !!s.rejected; continue; }
+    names.push({ tool: s.tool, rejected: !!s.rejected });
+  }
+  return names;
+}
+
+function chatTurnHtml(t, idx) {
   if (t.role === "user") return `<div class="chat-msg chat-user"><div class="chat-bubble">${esc(t.text)}</div></div>`;
   if (t.role === "system") {
     const link = t.jobId ? ` <button class="chat-link" type="button" data-job="${esc(t.jobId)}">결과 보기</button>` : "";
     return `<div class="chat-msg chat-system">${esc(t.text)}${link}</div>`;
   }
-  const tools = t.steps.length ? `<div class="chat-tools-used">${t.steps.map(chatToolHtml).join("")}</div>` : "";
+  const steps = t.steps || [];
+  // 진행 중에는 펼친 채로 쌓는다(그 순간 무엇을 보고 있는지가 정보) — 끝난 답은 기본으로 접는다
+  const open = t.status === "running" || !!t.toolsOpen;
+  const tools = steps.length
+    ? `<div id="chat-tools-${idx}" class="chat-tools-used"${open ? "" : " hidden"}>${steps.map(chatToolHtml).join("")}</div>`
+    : "";
   const secs = (ms) => `${Math.round(ms / 100) / 10}초`;
   let body = "";
   if (t.status === "running") {
@@ -3231,10 +3322,15 @@ function chatTurnHtml(t) {
     if (!d.aiEnabled) {
       body = `<div class="chat-note">${esc(d.note || "AI 진단을 쓸 수 없습니다")}</div>`;
     } else {
+      const names = chatToolNames(steps);
+      // backend(cli/api)는 메타 줄에서 뺀다 — 사용자가 판단에 쓸 값이 아니다(저장은 그대로 남는다)
+      const toolsMeta = names.length
+        ? ` · <button type="button" class="chat-meta-tools" data-idx="${idx}" aria-expanded="${open}" aria-controls="chat-tools-${idx}">도구 ${names.length}개 (${esc(names.map((n) => `${n.tool}${n.rejected ? " (거부)" : ""}`).join(", "))})</button>`
+        : "";
       body = `
         ${d.rootCause ? `<p class="chat-root"><span class="chat-root-k">근본원인</span>${esc(stripEmoji(d.rootCause))}</p>` : ""}
-        <div class="chat-text">${esc(stripEmoji(d.answer) || "(답변 없음)")}</div>
-        <div class="chat-meta">확신도 ${esc(CHAT_CONFIDENCE[d.confidence] || d.confidence || "-")} · ${esc(d.backend || "")} · 도구 ${d.toolCallCount}개 · ${secs(t.took)}</div>
+        <div class="chat-text">${chatAnswerHtml(d.answer) || "<p>(답변 없음)</p>"}</div>
+        <div class="chat-meta">확신도 ${esc(CHAT_CONFIDENCE[d.confidence] || d.confidence || "-")} · ${secs(t.took)}${toolsMeta}</div>
         ${d.note ? `<div class="chat-note">${esc(d.note)}</div>` : ""}`;
     }
   } else if (t.status === "stopped") {
@@ -3249,48 +3345,237 @@ function renderChat({ follow = false } = {}) {
   const log = $("#chat-log");
   if (!log) return;
   const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
-  const turns = chatTurns();
   const inst = state.instance;
-  if (!inst) {
+  const cs = chatState();
+  if (!inst || !cs) {
     log.innerHTML = `<div class="chat-empty"><p>왼쪽에서 인스턴스를 고르면 그 DB에 물어볼 수 있습니다.</p></div>`;
-  } else if (!turns.length) {
-    log.innerHTML = `
-      <div class="chat-empty">
-        <p><strong>${esc(inst.name)}</strong>에 무엇이든 물어보세요.</p>
-        <p class="chat-empty-sub">AI는 읽기 도구로 근거를 모으고, 근거가 없으면 모른다고 답합니다. 대상 DB는 바꾸지 않습니다.</p>
-        <div class="chat-suggest">${CHAT_SUGGESTIONS.map((q) => `<button type="button" class="chat-chip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>
-      </div>`;
   } else {
-    log.innerHTML = turns.map(chatTurnHtml).join("");
+    const parts = [];
+    if (cs.error) parts.push(`<div class="chat-error">${esc(cs.error)}</div>`);
+    if (!cs.turns.length) {
+      parts.push(cs.status === "loading"
+        ? `<div class="chat-empty"><p class="chat-empty-sub">대화를 불러오는 중입니다.</p></div>`
+        : `<div class="chat-empty">
+            <p><strong>${esc(inst.name)}</strong>에 무엇이든 물어보세요.</p>
+            <p class="chat-empty-sub">근거가 없으면 모른다고 답합니다.</p>
+            <div class="chat-suggest">${CHAT_SUGGESTIONS.map((q) => `<button type="button" class="chat-chip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>
+          </div>`);
+    } else {
+      parts.push(cs.turns.map(chatTurnHtml).join(""));
+    }
+    log.innerHTML = parts.join("");
   }
   // 새 줄이 붙으면 맨 아래로 — 단 위로 올려 앞 대화를 읽는 중이면 끌어내리지 않는다
   if (follow || nearBottom) log.scrollTop = log.scrollHeight;
   syncChatComposer();
+  syncChatHeader();
+}
+
+/** 헤더 — 부제는 대상, 전환 버튼 글자는 지금 대화 제목(없으면 "새 대화") */
+function syncChatHeader() {
+  const inst = state.instance;
+  const cs = chatState();
+  const sub = $("#chat-sub");
+  const label = $("#chat-switch-label");
+  const sw = $("#chat-switch");
+  if (sub) {
+    // 이름과 고정 문구를 분리한다 — 좁아지면 이름만 줄어들고 "· 읽기 도구로만 답합니다"는 끝까지 남는다
+    sub.innerHTML = inst
+      ? `<span class="chat-sub-name">${esc(inst.name)}</span><span class="chat-sub-fixed"> · 읽기 도구로만 답합니다</span>`
+      : `<span class="chat-sub-name">왼쪽에서 인스턴스를 고르세요</span>`;
+  }
+  if (label) label.textContent = cs?.title || "새 대화";
+  if (sw) sw.disabled = !inst;
+}
+
+function renderChatList() {
+  const box = $("#chat-list-items");
+  const cs = chatState();
+  if (!box) return;
+  if (!cs || !cs.list.length) {
+    box.innerHTML = `<div class="chat-list-empty">아직 대화가 없습니다</div>`;
+    return;
+  }
+  box.innerHTML = cs.list.map((c) => {
+    // 삭제는 그 자리에서 한 번 더 묻는다 — window.confirm은 무엇을 지우는지 화면에서 사라진다
+    if (chat.confirmId === c.id) {
+      return `<div class="chat-list-confirm">
+        <span>삭제할까요?</span>
+        <button type="button" class="chat-list-yes" data-del="${esc(c.id)}">삭제</button>
+        <button type="button" class="chat-list-no" data-cancel="1">취소</button>
+      </div>`;
+    }
+    const sel = c.id === cs.conversationId ? " sel" : "";
+    return `<div class="chat-list-row${sel}">
+      <button type="button" class="chat-list-item" data-open="${esc(c.id)}">
+        <span class="chat-list-title">${esc(c.title)}</span>
+        <span class="chat-list-time">${esc(chatListTime(c.updatedAt))}</span>
+      </button>
+      <button type="button" class="chat-list-del" data-confirm="${esc(c.id)}" aria-label="대화 삭제">
+        <svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true">
+          <path d="M3 4h8M5.6 4V3h2.8v1M4.2 4l.5 7h4.6l.5-7" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>`;
+  }).join("");
+}
+
+function openChatList() {
+  const list = $("#chat-list");
+  const sw = $("#chat-switch");
+  if (!list || !sw) return;
+  chat.confirmId = null;
+  renderChatList();
+  list.hidden = false;
+  sw.setAttribute("aria-expanded", "true");
+}
+
+function closeChatList() {
+  const list = $("#chat-list");
+  const sw = $("#chat-switch");
+  if (!list || !sw || list.hidden) return;
+  list.hidden = true;
+  sw.setAttribute("aria-expanded", "false");
+  chat.confirmId = null;
+}
+
+/** 목록만 다시 받는다(첫 턴이 서버에서 제목을 바꾼다). 실패는 대화 칸 한 줄로 — 화면 전체를 막지 않는다 */
+async function loadConversations() {
+  const inst = state.instance;
+  const cs = chatState();
+  if (!inst || !cs) return;
+  try {
+    const list = await api(`/api/instances/${inst.id}/conversations`);
+    if (state.instance?.id !== inst.id) return;
+    cs.list = list;
+    const mine = cs.conversationId == null ? null : list.find((c) => c.id === cs.conversationId);
+    if (mine) cs.title = mine.title;
+    cs.error = null;
+  } catch (e) {
+    if (state.instance?.id !== inst.id) return;
+    cs.error = `대화 목록을 불러오지 못했습니다: ${e.message}`;
+  }
+  renderChat();
+  renderChatList();
+}
+
+/** 인스턴스를 고를 때 — 그 인스턴스의 대화를 서버에서 다시 읽는다(있으면 열던 대화, 없으면 가장 최근) */
+async function loadConversationsAndOpenLatest(instanceId) {
+  const cs = chatState();
+  if (!cs || chatRunningHere(instanceId)) return;
+  cs.status = "loading";
+  cs.error = null;
+  renderChat();
+  await loadConversations();
+  if (state.instance?.id !== instanceId) return;
+  if (cs.conversationId != null) {
+    await openConversation(cs.conversationId);
+  } else if (cs.list.length) {
+    await openConversation(cs.list[0].id);
+  } else {
+    cs.status = "idle";
+    renderChat();
+  }
+}
+
+async function openConversation(cid) {
+  const inst = state.instance;
+  const cs = chatState();
+  if (!inst || !cs || chatRunningHere(inst.id)) return;
+  closeChatList();
+  cs.status = "loading";
+  cs.error = null;
+  cs.conversationId = cid;
+  cs.title = "";
+  cs.turns = [];
+  renderChat();
+  let detail;
+  try {
+    detail = await api(`/api/instances/${inst.id}/conversations/${cid}`);
+  } catch (e) {
+    if (state.instance?.id !== inst.id) return;
+    cs.status = "idle";
+    if (/^404\b/.test(e.message)) {
+      // 지워진 대화다 — 오류가 아니라 빈 대화로 돌아간다
+      cs.conversationId = null;
+      cs.list = cs.list.filter((c) => c.id !== cid);
+    } else {
+      cs.error = `대화를 열지 못했습니다: ${e.message}`;
+    }
+    renderChat();
+    renderChatList();
+    return;
+  }
+  if (state.instance?.id !== inst.id) return;
+  cs.status = "idle";
+  cs.title = detail.title;
+  cs.turns = chatTurnsFromServer(detail.turns);
+  renderChat({ follow: true });
+  renderChatList();
+}
+
+/** 새 대화 — 서버에는 아직 만들지 않는다. 첫 질문을 보낼 때 POST한다(빈 대화가 목록에 쌓이지 않게) */
+function newConversation() {
+  const inst = state.instance;
+  const cs = chatState();
+  if (!inst || !cs || chatRunningHere(inst.id)) return;
+  closeChatList();
+  cs.conversationId = null;
+  cs.title = "";
+  cs.turns = [];
+  cs.error = null;
+  cs.status = "idle";
+  renderChat();
+  renderChatList();
+  $("#diagnose-question").focus();
+}
+
+async function deleteConversation(cid) {
+  const inst = state.instance;
+  const cs = chatState();
+  if (!inst || !cs) return;
+  chat.confirmId = null;
+  try {
+    await api(`/api/instances/${inst.id}/conversations/${cid}`, { method: "DELETE" });
+  } catch (e) {
+    if (!/^404\b/.test(e.message)) {
+      cs.error = `대화를 지우지 못했습니다: ${e.message}`;
+      renderChat();
+      renderChatList();
+      return;
+    }
+  }
+  if (state.instance?.id !== inst.id) return;
+  cs.list = cs.list.filter((c) => c.id !== cid);
+  if (cs.conversationId === cid) {
+    cs.conversationId = null;
+    cs.title = "";
+    cs.turns = [];
+  }
+  cs.error = null;
+  renderChat();
+  renderChatList();
 }
 
 function syncChatComposer() {
   const input = $("#diagnose-question");
   const send = $("#btn-diagnose");
-  const delegate = $("#btn-aiop-submit");
-  const target = $("#chat-target");
-  const newChat = $("#chat-new");
+  const openBtn = $("#btn-aiop-open");
+  const submit = $("#btn-aiop-submit");
   if (!input) return;
   const inst = state.instance;
-  const runningHere = chat.running && inst && chat.running.instanceId === inst.id;
+  const runningHere = inst && chatRunningHere(inst.id);
   const runningElsewhere = chat.running && !runningHere;
   const hasText = input.value.trim().length > 0;
   input.disabled = !inst;
   input.placeholder = inst ? "무엇이 궁금한가요?" : "왼쪽에서 인스턴스를 고르면 물어볼 수 있습니다";
-  target.hidden = !inst;
-  target.textContent = inst ? inst.name : "";
-  newChat.hidden = !inst || !chatTurns().length;
-  newChat.disabled = !!runningHere;
   send.classList.toggle("is-stop", !!runningHere);
   send.setAttribute("aria-label", runningHere ? "중지" : "보내기");
   send.title = runningElsewhere ? "다른 인스턴스의 진단이 끝나면 보낼 수 있습니다" : "";
   // 진행 중에는 같은 버튼이 중지가 된다 — 그래서 빈 입력이어도 누를 수 있어야 한다
   send.disabled = runningHere ? false : (!inst || !hasText || !!runningElsewhere);
-  if (delegate && !delegate.dataset.busy) delegate.disabled = !inst || !hasText;
+  if (openBtn) openBtn.disabled = !inst || !hasText;
+  if (submit && !submit.dataset.busy) submit.disabled = !inst || !hasText;
 }
 
 function autoGrowChatInput() {
@@ -3304,25 +3589,17 @@ function autoGrowChatInput() {
 async function runDiagnose() {
   const input = $("#diagnose-question");
   const inst = state.instance;
+  const cs = chatState();
   const question = input.value.trim();
-  if (!inst || !question || chat.running) return;
+  if (!inst || !cs || !question || chat.running) return;
 
-  const turns = chatTurns();
-  // 서버에 보낼 앞 대화 — 끝난 진단만. 중지·실패한 턴의 질문은 답이 없어 맥락이 되지 못한다
-  const history = [];
-  for (let i = 0; i < turns.length - 1; i++) {
-    const q = turns[i], a = turns[i + 1];
-    if (q.role === "user" && a.role === "ai" && a.status === "done" && a.result?.aiEnabled) {
-      const answer = [a.result.rootCause, a.result.answer].filter(Boolean).join(" / ");
-      history.push({ question: q.text, answer });
-    }
-  }
-
+  const turns = cs.turns;
   turns.push({ role: "user", text: question });
   const turn = { role: "ai", status: "running", stage: "진단을 시작합니다", steps: [], startedAt: Date.now() };
   turns.push(turn);
   input.value = "";
   autoGrowChatInput();
+  closeChatList();
 
   const controller = new AbortController();
   chat.running = { instanceId: inst.id, controller };
@@ -3336,21 +3613,31 @@ async function runDiagnose() {
   const redraw = () => { if (state.instance?.id === inst.id) renderChat(); };
 
   try {
+    // 첫 질문을 보낼 때 대화를 만든다 — 들어가기만 해도 대화가 생기면 목록이 빈 대화로 찬다
+    if (cs.conversationId == null) {
+      const created = await api(`/api/instances/${inst.id}/conversations`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+      });
+      cs.conversationId = created.id;
+      cs.title = created.title;
+    }
     let result = null;
-    await streamSse(`/api/instances/${inst.id}/diagnose/stream`, { question, history: history.slice(-CHAT_HISTORY_TURNS) }, (name, data) => {
-      if (name === "thinking") {
-        turn.stage = data.synthesis ? "도구 호출 상한에 도달해 지금까지의 근거로 답을 정리하는 중" : `${data.step}번째 판단 중`;
-      } else if (name === "tool") {
-        turn.steps.push(data);
-        turn.stage = data.rejected ? `요청한 도구가 거부됐습니다: ${data.tool}` : `${data.tool} 결과를 받았습니다`;
-      } else if (name === "result") {
-        result = data;
-        return;
-      } else if (name === "error") {
-        throw new Error(data.message);
-      }
-      redraw();
-    }, controller.signal);
+    // 본문에 history를 싣지 않는다 — 앞선 맥락은 서버가 이 대화의 턴에서 만든다(위조 방지, 176절)
+    await streamSse(`/api/instances/${inst.id}/diagnose/stream`,
+      { question, conversationId: cs.conversationId }, (name, data) => {
+        if (name === "thinking") {
+          turn.stage = data.synthesis ? "도구 호출 상한에 도달해 지금까지의 근거로 답을 정리하는 중" : `${data.step}번째 판단 중`;
+        } else if (name === "tool") {
+          turn.steps.push(data);
+          turn.stage = data.rejected ? `요청한 도구가 거부됐습니다: ${data.tool}` : `${data.tool} 결과를 받았습니다`;
+        } else if (name === "result") {
+          result = data;
+          return;
+        } else if (name === "error") {
+          throw new Error(data.message);
+        }
+        redraw();
+      }, controller.signal);
     if (!result) throw new Error("답이 끝까지 오지 않았습니다(연결 끊김)");
     turn.status = "done";
     turn.result = result;
@@ -3366,10 +3653,40 @@ async function runDiagnose() {
     turn.took = Date.now() - turn.startedAt;
     clearInterval(ticker);
     chat.running = null;
-    saveChat();
     redraw();
     syncChatComposer();
+    // 첫 턴이 저장되면 서버가 제목을 질문 앞 40자로 바꾼다 — 목록을 다시 받아 그 제목을 보여준다
+    if (state.instance?.id === inst.id) loadConversations();
   }
+}
+
+/** 도구 줄 접기/펴기 — 다시 그리지 않고 그 자리만 바꾼다(누른 버튼에 초점이 남는다) */
+function toggleChatTools(button) {
+  const body = document.getElementById(button.getAttribute("aria-controls"));
+  if (!body) return;
+  const wasOpen = button.getAttribute("aria-expanded") === "true";
+  button.setAttribute("aria-expanded", String(!wasOpen));
+  body.hidden = wasOpen;
+  const turn = chatTurns()[Number(button.dataset.idx)];
+  if (turn) turn.toolsOpen = !wasOpen;
+}
+
+function openAiOpPopover() {
+  const popover = $("#aiop-popover");
+  const openBtn = $("#btn-aiop-open");
+  if (!popover || popover.hidden === false) return;
+  popover.hidden = false;
+  openBtn.setAttribute("aria-expanded", "true");
+  $("#aiop-new-type").focus();
+}
+
+function closeAiOpPopover(refocus = false) {
+  const popover = $("#aiop-popover");
+  const openBtn = $("#btn-aiop-open");
+  if (!popover || popover.hidden) return;
+  popover.hidden = true;
+  openBtn.setAttribute("aria-expanded", "false");
+  if (refocus) openBtn.focus();
 }
 
 function wireChat() {
@@ -3387,13 +3704,32 @@ function wireChat() {
     if (!chat.running) runDiagnose();
   });
   input.addEventListener("input", () => { autoGrowChatInput(); syncChatComposer(); });
-  $("#chat-new").addEventListener("click", () => {
-    if (chat.running && chat.running.instanceId === state.instance?.id) return;
-    chat.byInstance.set(state.instance.id, []);
-    saveChat();
-    renderChat();
-    input.focus();
+
+  $("#chat-switch").addEventListener("click", () => {
+    if ($("#chat-list").hidden) { openChatList(); loadConversations(); }
+    else closeChatList();
   });
+  $("#chat-new").addEventListener("click", newConversation);
+  $("#chat-list").addEventListener("click", (e) => {
+    // 목록 안의 클릭은 여기서 끝낸다. 삭제 확인으로 목록을 다시 그리면 누른 요소가 DOM에서 떨어져
+    // 바깥 클릭 판정(e.target.closest)이 "바깥"으로 읽고 패널을 닫아 버린다
+    e.stopPropagation();
+    const open = e.target.closest("[data-open]");
+    if (open) { openConversation(Number(open.dataset.open)); return; }
+    const ask = e.target.closest("[data-confirm]");
+    if (ask) { chat.confirmId = Number(ask.dataset.confirm); renderChatList(); return; }
+    if (e.target.closest("[data-cancel]")) { chat.confirmId = null; renderChatList(); return; }
+    const yes = e.target.closest("[data-del]");
+    if (yes) deleteConversation(Number(yes.dataset.del));
+  });
+  // 바깥 클릭·Esc로 닫힌다. Esc는 초점을 전환 버튼으로 돌려준다(키보드로 연 사람이 길을 잃지 않게)
+  document.addEventListener("click", (e) => {
+    if (!$("#chat-list").hidden && !e.target.closest("#chat-list") && !e.target.closest("#chat-switch")) closeChatList();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("#chat-list").hidden) { closeChatList(); $("#chat-switch").focus(); }
+  });
+
   $("#chat-log").addEventListener("click", (e) => {
     const chip = e.target.closest(".chat-chip");
     if (chip) {
@@ -3401,6 +3737,11 @@ function wireChat() {
       autoGrowChatInput();
       syncChatComposer();
       input.focus();
+      return;
+    }
+    const toggle = e.target.closest(".chat-meta-tools");
+    if (toggle) {
+      toggleChatTools(toggle);
       return;
     }
     const job = e.target.closest(".chat-link[data-job]");
@@ -3411,8 +3752,25 @@ function wireChat() {
       document.querySelector(".aiops-card")?.scrollIntoView({ block: "start" });
     }
   });
-  loadChat();
+
+  // 작업 맡기기 팝오버 — 늘 떠 있던 선택 상자 둘을 여기로 접었다(무엇인지 알 수 없었다)
+  $("#btn-aiop-open").addEventListener("click", openAiOpPopover);
+  $("#btn-aiop-cancel").addEventListener("click", () => closeAiOpPopover(true));
+  $("#aiop-popover").addEventListener("keydown", (e) => { if (e.key === "Escape") closeAiOpPopover(true); });
+
+  // 데이터 보호 한 줄 — hover만 있는 네이티브 title은 키보드 사용자에게 없는 정보가 된다
+  const privacy = $("#chat-privacy");
+  const privacyTip = $("#chat-privacy-tip");
+  const showTip = () => { privacyTip.hidden = false; };
+  const hideTip = () => { privacyTip.hidden = true; };
+  privacy.addEventListener("mouseenter", showTip);
+  privacy.addEventListener("mouseleave", hideTip);
+  privacy.addEventListener("focus", showTip);
+  privacy.addEventListener("blur", hideTip);
+  privacy.addEventListener("keydown", (e) => { if (e.key === "Escape") hideTip(); });
+
   renderChat();
+  renderChatList();
 }
 
 // ---------- 감사 로그 검색 (Specification 동적 필터) ----------

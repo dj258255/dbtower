@@ -512,14 +512,27 @@
 
   </main>
 
-  <!-- 우: AI 어시스턴트 — 자연어 진단을 채팅으로. 질문할 때마다 앞 답이 덮여 사라지던 결과 상자를, 대화가 위로 쌓이고
-       입력창이 늘 맨 아래 있는 웹 채팅 모양으로 바꿨다. AI가 부른 도구는 부르는 순간마다 대화 안에 한 줄씩 쌓인다(근거를 보인다).
-       대화는 인스턴스마다 따로이고, 서버에 최근 몇 턴을 참고용 맥락으로 함께 보내 후속 질문이 통한다(DiagnosisService.historyBlock) -->
+  <!-- 우: AI 어시스턴트 — 자연어 진단을 채팅으로. 대화는 서버에 남는다(V46): 인스턴스를 고르면 가장 최근 대화를 열고,
+       첫 질문을 보낼 때 새 대화를 만든다. 앞선 맥락은 서버가 DB 턴에서만 만든다 — 화면은 conversationId만 보낸다 -->
   <aside class="ai-sheet" aria-label="AI 어시스턴트">
     <div class="chat-head">
-      <span class="chat-title">AI 어시스턴트</span>
-      <span id="chat-target" class="chat-target" hidden></span>
-      <button id="chat-new" class="chat-new" type="button" hidden>새 대화</button>
+      <div class="chat-head-row">
+        <img class="chat-mark" src="favicon.svg" alt="" width="30" height="30">
+        <span class="chat-title">AI 어시스턴트</span>
+        <div class="chat-switch-wrap">
+          <button id="chat-switch" class="chat-switch" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="chat-list">
+            <span id="chat-switch-label" class="chat-switch-label">새 대화</span>
+            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 4l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <!-- 대화 목록 — 헤더 버튼 아래로 뜨는 드롭다운(떠 있는 계층이라 유리 재질) -->
+          <div id="chat-list" class="chat-list" hidden>
+            <button id="chat-new" class="chat-list-new" type="button">새 대화</button>
+            <div id="chat-list-items" class="chat-list-items"></div>
+          </div>
+        </div>
+      </div>
+      <!-- 부제는 전환 버튼과 다른 줄이다 — 같은 줄에 두면 버튼이 폭을 먹어 뒷부분("읽기 도구로만 답합니다")이 잘린다(B2 2차) -->
+      <p id="chat-sub" class="chat-sub"></p>
     </div>
     <div id="chat-log" class="chat-log" role="log" aria-label="대화"></div>
     <form id="chat-form" class="chat-composer" autocomplete="off">
@@ -532,9 +545,25 @@
           <svg class="chat-send-stop" viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><rect x="5" y="5" width="10" height="10" rx="2" fill="currentColor"/></svg>
         </button>
       </div>
-      <!-- 같은 입력창의 글을 비동기 작업으로 맡기는 두 번째 길. 결과는 사실 수집·검증을 거쳐 진단 탭 카드에 붙는다 -->
-      <div class="chat-tools" role="group" aria-label="AI 운영 작업 맡기기">
-        <select id="aiop-new-type" class="aiop-select" aria-label="작업 유형">
+      <!-- 같은 입력창의 글을 비동기 작업으로 맡기는 두 번째 길. 선택 상자 둘이 늘 떠 있으면 무엇인지 알 수 없어
+           팝오버로 접었다. 결과는 사실 수집·검증을 거쳐 진단 탭 카드에 붙는다 -->
+      <div class="chat-foot">
+        <span class="chat-privacy" id="chat-privacy" tabindex="0" aria-describedby="chat-privacy-tip">
+          <svg class="chat-lock" viewBox="0 0 14 14" width="12" height="12" aria-hidden="true">
+            <rect x="2.6" y="6.2" width="8.8" height="6" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.2"/>
+            <path d="M4.8 6.2V4.6a2.2 2.2 0 0 1 4.4 0v1.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+          쿼리 속 값은 ?로 가려서 보냅니다
+        </span>
+        <button id="btn-aiop-open" class="chat-delegate" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="aiop-popover" disabled>작업으로 맡기기</button>
+        <div id="chat-privacy-tip" class="chat-tip" role="tooltip" hidden>세션·Top Query·슬로우 쿼리의 SQL 문장은 값(리터럴)을 ?로 바꾼 뒤 AI에 넘깁니다. 대상 DB는 읽기만 하고 바꾸지 않습니다.</div>
+      </div>
+      <!-- 작업 맡기기 — 접수 폼은 필요할 때만 뜬다(유리 재질: 떠 있는 계층) -->
+      <div id="aiop-popover" class="aiop-popover" role="dialog" aria-label="작업으로 맡기기" hidden>
+        <p class="aiop-popover-title">작업으로 맡기기</p>
+        <p class="aiop-popover-desc">입력창의 글을 작업 설명으로 보냅니다. 사실 수집과 검증을 거친 결과가 진단 탭에 붙습니다.</p>
+        <label class="aiop-field" for="aiop-new-type">작업 유형</label>
+        <select id="aiop-new-type" class="aiop-select">
           <option value="QUERY_DIAGNOSIS">쿼리 진단</option>
           <option value="REGRESSION_EXPLANATION">회귀 원인</option>
           <option value="INCIDENT_TRIAGE">장애 초기 진단</option>
@@ -544,13 +573,17 @@
           <option value="COST_REVIEW">비용 검토</option>
           <option value="DB_TEAM_INQUIRY">DB팀 문의</option>
         </select>
-        <select id="aiop-new-window" class="aiop-select" aria-label="분석 구간">
+        <label class="aiop-field" for="aiop-new-window">분석할 구간 <span class="aiop-hint">지금 시각에서 거꾸로</span></label>
+        <select id="aiop-new-window" class="aiop-select">
           <option value="30">최근 30분</option>
           <option value="60" selected>최근 1시간</option>
           <option value="180">최근 3시간</option>
           <option value="1440">최근 24시간</option>
         </select>
-        <button id="btn-aiop-submit" class="chat-delegate" type="button" disabled>작업으로 맡기기</button>
+        <div class="aiop-popover-actions">
+          <button id="btn-aiop-submit" class="btn btn-primary btn-small" type="button" disabled>맡기기</button>
+          <button id="btn-aiop-cancel" class="btn btn-small" type="button">취소</button>
+        </div>
       </div>
       <!-- 접수 결과는 대화에 한 줄로 남는다. 이 영역은 화면 낭독기에 같은 문장을 알린다(눈에는 대화 줄 하나만 보인다) -->
       <div id="aiop-submit-status" class="sr-only" role="status"></div>
@@ -675,7 +708,6 @@
         </div>
       </div>
       <div id="wb-share-note" class="hint wb-share-note"></div>
-      <p class="hint wb-policy">조회는 조회 전용 계정·읽기 전용 트랜잭션으로 즉시 실행되고, 변경은 승인 티켓으로, 위험한 문장은 차단됩니다. 모든 실행과 대화는 기록됩니다.</p>
     </div>
   </aside>
 </div>
