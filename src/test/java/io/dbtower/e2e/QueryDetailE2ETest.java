@@ -130,7 +130,7 @@ class QueryDetailE2ETest {
         Page page = consoleAs(USER);
 
         // 1) 표의 SQL 셀 — 네이티브 title 대신 강조된 툴팁이 뜬다(셀은 말줄임이라 전체 문장이 안 보인다)
-        assertThat(page.locator("#top-table tbody tr").first()).containsText("orders");
+        assertThat(page.locator("#top-table tbody tr[data-idx]").first()).containsText("orders");
         // title이 남아 있으면 네이티브 툴팁과 우리 툴팁이 겹쳐 뜬다
         assertThat(page.locator("#top-table td[data-sql-tip]").first().getAttribute("title")).isNull();
         Locator cell = page.locator("#top-table td[data-sql-tip]").first();
@@ -147,7 +147,7 @@ class QueryDetailE2ETest {
         assertThat(page.locator("#sql-tip")).isHidden();
 
         // 2) 상세를 연다 — 행 아무 칸이나 누르면 열린다(Load 칸을 눌러 툴팁과 겹치지 않게)
-        page.locator("#top-table tbody tr").first().locator("td").first().click();
+        page.locator("#top-table tbody tr[data-idx]").first().locator("td").first().click();
         assertThat(page.locator("#query-detail")).isVisible();
 
         // 머리줄에는 토글과 워크벤치·더보기만 있다 — 심층 진단·문의는 메뉴 안으로 들어갔다
@@ -245,7 +245,7 @@ class QueryDetailE2ETest {
     @Test
     void 워크벤치로_넘기면_출처_한_줄과_돌아가는_길이_보인다() {
         Page page = consoleAs(USER);
-        page.locator("#top-table tbody tr").first().locator("td").first().click();
+        page.locator("#top-table tbody tr[data-idx]").first().locator("td").first().click();
         page.locator("#btn-to-workbench").click();
 
         Locator origin = page.locator("#wb-origin");
@@ -293,7 +293,7 @@ class QueryDetailE2ETest {
         page.click("button[type=submit]");
         page.waitForURL(Pattern.compile("^(?!.*/login).*$"));
         page.navigate(base() + "/?instance=" + instance.getId());
-        page.locator("#top-table tbody tr").first().waitFor();
+        page.locator("#top-table tbody tr[data-idx]").first().waitFor();
         return page;
     }
 

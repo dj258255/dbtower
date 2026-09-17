@@ -46,7 +46,7 @@ class DocumentationScreenshotTest {
             page.waitForURL(Pattern.compile("^(?!.*\\/login).*$"));
 
             page.navigate(baseUrl + "/?instance=" + instanceId);
-            Locator rows = page.locator("#top-table tbody tr");
+            Locator rows = page.locator("#top-table tbody tr[data-idx]");
             rows.first().waitFor();
             assertThat(rows.count()).isGreaterThan(0);
             assertThat(page.locator("#top-table .qtext .t-kw").count()).isGreaterThan(0);
@@ -141,7 +141,7 @@ class DocumentationScreenshotTest {
             comparison.locator("#top-table th:has-text(\"QPS\")")
                     .waitFor(new Locator.WaitForOptions().setTimeout(60_000));
             // DDL 실행은 다음 수집 배치 전에 끝날 수 있으므로 DDL 행 자체가 아니라 실제 차분 행을 검증한다.
-            comparison.locator("#top-table tbody tr").first()
+            comparison.locator("#top-table tbody tr[data-idx]").first()
                     .waitFor(new Locator.WaitForOptions().setTimeout(60_000));
             assertThat(comparison.locator("#compare-summary")).not().containsText("비교하지 못했습니다");
             comparison.evaluate("""
