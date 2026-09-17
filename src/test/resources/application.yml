@@ -24,7 +24,7 @@ spring:
   sql:
     init:
       mode: always
-      schema-locations: classpath:org/springframework/session/jdbc/schema-h2.sql,classpath:schema-alert-cooldown-h2.sql
+      schema-locations: classpath:org/springframework/session/jdbc/schema-h2.sql,classpath:schema-alert-cooldown-h2.sql,classpath:schema-collection-status-h2.sql
       # 인메모리 H2(DB_CLOSE_DELAY=-1)가 테스트 컨텍스트 간 공유돼 스크립트가 재실행되면
       # "already exists"가 난다 — 세션 테이블 생성은 멱등으로 취급(있으면 통과).
       continue-on-error: true
