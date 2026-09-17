@@ -9963,3 +9963,46 @@ DBTOWER_E2E=1 E2E 9개 클래스 42건, 메인이 혼자 2회
 - 대상이 살아 있을 때 첫 화면이 채워지는 시간은 재지 않았다
 - 조회 도중 인스턴스를 바꾸면 `selectInstance`의 약속이 끝나지 않아 거기에 걸린 딥링크 처리(`?aiop=`·`compareAt`)가 실행되지 않는다(첫 진입에서는 실행된다)
 - 워크벤치는 인스턴스당 대상 조회가 스키마 하나뿐이라 같은 문제가 없어 손대지 않았다
+
+## 183. v1.4.0 게시 결과 (2026-09-17)
+
+### 무엇을 게시했나
+
+v1.3.1 이후 main에 들어간 두 갈래 — AI 운영 작업(169~171절)과 콘솔 재설계·결함 수정(172~182절, PR #30·#37) — 를 v1.4.0으로 묶었다.
+게시 전에 PR #38에서 CHANGELOG `[Unreleased]`를 `## [1.4.0] - 2026-09-17`로 닫고 버전(`build.gradle`·`.env.example`·README·operations.md), ROADMAP 161~182절,
+화면 설명과 대표 이미지를 지금 상태에 맞췄다. release.yml은 이 절을 잘라 릴리즈 본문으로 쓰므로, 머지 전에 같은 awk를 로컬에서 돌려 122줄이 잘리는 것을 확인했다.
+
+문서 수치는 VERIFICATION 절·커밋 메시지·실험 문서와 대조했다. 근거를 찾지 못한 개수 표기 둘("입력 조작 13곳")을 빼고,
+실험 문서의 "정확도를 거의 잃지 않지만 보호도 절반 수준"을 "정확도 대가가 관측되지 않았다"로 세게 옮긴 문장을 원문대로 되돌렸다.
+
+### 원격 게시 결과
+
+PR #38 머지 커밋 `81fa188cf5965ab0a14aadb21f84e6410d807764`에 주석 태그 `v1.4.0`을 만들었다. 원격 peeled tag도 이 커밋과 일치했다.
+
+```
+GitHub Actions Release run   35197015062
+시작                         2026-09-17 16:56:00 KST
+완료                         2026-09-17 17:28:39 KST
+규약·Chromium·전체 테스트(게시 전 게이트)·E2E 실제 실행 확인·QEMU·Buildx·GHCR·Release  전부 success
+GitHub Release               https://github.com/dj258255/dbtower/releases/tag/v1.4.0  (Latest, 본문 8,854자)
+```
+
+```
+ghcr.io/dj258255/dbtower:1.4.0
+index digest   sha256:d827e8524eba178fd41a83757fbed12907db90e79971551bf8f2c21b9fd44348
+linux/amd64    sha256:2519e3f8cf54bab937e3cebce791852283f74022941b7c33c15847d541a7d6a6
+linux/arm64    sha256:f2fe2fee19b068e013ba110280bd15b17da4b7544f317689c233f9e68dc2f84a
+(나머지 둘은 플랫폼별 attestation)
+
+태그 1.4.0 · 1.4 · 1 · latest   모두 같은 index digest
+```
+
+게시 직전 main 기준 검증: `./gradlew test` 1041건 실패 0(건너뜀 84), 브라우저 E2E 9개 클래스 42건 혼자 2회 전부 통과(182절), PR #37·#38 CI 통과.
+
+배포 범위는 공개 GitHub Release와 GHCR 멀티아치 이미지까지다. 특정 운영 환경에는 반영하지 않았다.
+
+### 정직하게 남기는 범위
+
+- PRESENTATION.md 이미지는 대부분 v1.3(보라) 화면이다. 본문 설명은 지금과 어긋나지 않는다
+- erd.svg·architecture-detail.svg는 V41·16개 모듈 기준이라 AI 운영 작업·대화 테이블이 그림에 없다(문서 안내에 명시)
+- 게시된 이미지를 새 환경에서 pull해 기동해 보지는 않았다
