@@ -828,7 +828,7 @@ function handleInstanceDeepLink(list) {
   if (deepJob) ready.then(() => openDeepLinkJob(deepJob));
   // 진단 입력은 늘 보이는 AI 칸에 있다(149절) — 모니터링 탭을 열 필요 없이 질문을 채운다
   if (deepQ) { const input = $("#diagnose-question"); input.value = deepQ; autoGrowChatInput(); syncChatComposer(); input.scrollIntoView({ block: "center" }); input.focus(); }
-  if (deepView === "config-drift") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadConfigDrift(); $("#config-drift-result").scrollIntoView({ block: "center" }); }
+  if (deepView === "config-drift") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("config"); loadConfigDrift(); $("#config-drift-result").scrollIntoView({ block: "center" }); }
   if (deepView === "review") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadReviews(); $(".review-gate-card").scrollIntoView({ block: "center" }); }
   // 인시던트 리포트 웹훅 카드(IncidentController)와 월간 리포트의 입구 — 링크는 있었는데 처리하는 곳이 없었다(148절 감사)
   if (deepView === "incident") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("backup"); $("#incident-result").scrollIntoView({ block: "center" }); }
