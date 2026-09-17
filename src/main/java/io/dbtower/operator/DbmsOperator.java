@@ -372,6 +372,14 @@ public interface DbmsOperator {
         throw new UnsupportedOperationException("이 기종은 대량 일괄 변경을 지원하지 않습니다");
     }
 
+    /**
+     * 조건에 맞는 행 수를 센다 — 대량 변경 실행 직전에 "승인 시점 예상과 얼마나 어긋났나"를 보는 데만 쓴다.
+     * 추정치가 아니라 실제 개수를 세므로 큰 테이블에서는 조회 자체가 무겁다. 상한은 {@code timeoutSeconds}다.
+     */
+    default long countRows(ConsoleCredential credential, String table, String where, int timeoutSeconds) {
+        throw new UnsupportedOperationException("이 기종은 조건부 행 수 세기를 지원하지 않습니다");
+    }
+
     /** 구간 하나를 고치고 커밋한다. 영향 행 수가 목표를 넘으면 커밋하지 않는다. */
     default BulkBatchOutcome executeBulkBatch(ConsoleCredential credential, BulkChangePlan plan,
                                               Object fromKey, Object toKey) {
