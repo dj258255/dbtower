@@ -118,6 +118,10 @@ scripts/         dbtower-mcp.sh (MCP stdio 실행기)
 - 공용 규칙이 파일 뒤쪽에 있으면 같은 명시도의 화면별 규칙을 이긴다 — 로그인 칸에 공용 `input:focus-visible`의 보라 윤곽선이
   새어 들어와 `overflow:hidden`에 잘린 아랫변만 선처럼 남았다(172절). 화면별로 끌 때는 같은 의사 클래스로 명시도를 맞춘다
 - 좁은 칸의 한국어 문장에는 `word-break: keep-all` — 기본값은 음절 어디서든 끊어 "않 / 았다면"처럼 낱말이 갈린다(172절)
+- 좁은 화면에서 페이지 가로 넘침 0(`scrollWidth == innerWidth`)은 "쓸 수 있다"가 아니다 — 가로 스크롤 표 안에 끼운 행 상세는 표 폭만큼 넓어져
+  스크롤 상자 밖에서 잘린다(181절). 버튼·문장이 스크롤 상자의 보이는 범위 안인지 `getBoundingClientRect`로 잰다
+- 되돌리기·취소처럼 보낸 적 없는 요청을 무르는 조작은 서버 왕복에 기대지 않는다 — 대상에 닿지 않는 인스턴스의 조회가 브라우저 연결 6자리를 쥐면
+  그 왕복이 밀려 값이 안 돌아온다(180절, #31)
 - SVG 요소는 `el.hidden = true`로 감춰지지 않는다(HTMLElement 전용 프로퍼티) — `toggleAttribute("hidden", ...)`
 - 좁은 화면 확인은 Playwright로 뷰포트를 정확히 맞춰 잰다. Chrome 확장 창 조절(innerWidth 그대로)·iframe(X-Frame-Options)·
   headless `--window-size`(뷰포트가 넓게 잡힘)는 모두 틀린 결과를 냈다
