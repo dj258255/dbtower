@@ -18,7 +18,7 @@ flowchart TB
   agent["AI Agent<br/>MCP Client"]:::actor
   oncall["온콜 채널<br/>Discord · Slack"]:::actor
 
-  subgraph app["DBTower · Java 21 / Spring Boot 4 / Spring Modulith · 16 modules"]
+  subgraph app["DBTower · Java 21 / Spring Boot 4 / Spring Modulith · 17 modules"]
     direction TB
 
     subgraph boundary["접근과 신뢰 경계"]
@@ -43,6 +43,7 @@ flowchart TB
       advisor["advisor<br/>운영 규칙 일일 점검"]:::reason
       finops["finops<br/>인덱스 낭비 신호"]:::reason
       alert["alert<br/>회귀 · 이상 · 복제 · 웹훅"]:::reason
+      aiops["aiops<br/>AI 운영 작업 · 사실 수집<br/>결과 검증 · Outbox"]:::reason
     end
 
     subgraph govern["변경 거버넌스 · 운영"]
@@ -82,13 +83,19 @@ flowchart TB
   operator --> oracle[(Oracle)]:::target
   operator --> mongo[(MongoDB)]:::target
 
-  meta[("플랫폼 메타 DB<br/>PostgreSQL 16 · Flyway V41")]:::infra
+  meta[("플랫폼 메타 DB<br/>PostgreSQL 16 · Flyway V47")]:::infra
+  gateway["integrations/ai-ops-gateway<br/>Slack 입구 · Outbox 릴레이<br/>LangGraph 실행기"]:::external
   ai["AI Backend<br/>Anthropic / CLI"]:::external
   obs["Prometheus · Grafana<br/>DB / Node exporters"]:::external
   store["Vault · S3 호환 저장소"]:::external
 
   app --> meta
   analysis -->|실행권 없음| ai
+  alert -->|경보가 작업 생성| aiops
+  aiops -->|사실은 플랫폼이 모은다| observe
+  aiops -->|검증 전 소견| ai
+  oncall -->|Slack 요청| gateway
+  gateway <-->|API · 리스 토큰| aiops
   app --> obs
   security -. 동적 자격증명 .-> store
   backup -. 암호화 산출물 .-> store
