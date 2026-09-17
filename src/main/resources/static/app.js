@@ -629,6 +629,8 @@ function setupTooltip() {
 // "SELECT가 어디부터 어디까지인가"가 읽히지 않는다(사용자 지적). 문서에 하나만 두고 재사용한다 —
 // 여러 개가 겹쳐 뜨는 것을 구조적으로 막고, 한 번에 하나만 뜬다.
 const SQL_TIP_DELAY_MS = 300;
+// 떠 있는 툴팁을 향해 포인터를 옮기는 동안 다른 행을 지나가도 참는 시간
+const SQL_TIP_SWITCH_MS = 450;
 function setupSqlTip() {
   const tip = document.createElement("div");
   tip.id = "sql-tip"; tip.className = "sql-tip"; tip.hidden = true;
@@ -643,8 +645,9 @@ function setupSqlTip() {
   };
   const place = (el) => {
     const r = el.getBoundingClientRect(), t = tip.getBoundingClientRect();
-    let top = r.bottom + 8;
-    if (top + t.height > window.innerHeight - 8) top = Math.max(8, r.top - t.height - 8);
+    // 셀 바로 아래 붙여 포인터가 지나갈 거리를 줄인다(사이에 다른 행이 끼지 않게)
+    let top = r.bottom + 2;
+    if (top + t.height > window.innerHeight - 8) top = Math.max(8, r.top - t.height - 2);
     tip.style.top = `${top}px`;
     tip.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - t.width - 8))}px`;
   };
@@ -655,14 +658,31 @@ function setupSqlTip() {
     tip.hidden = false;
     place(el);
   };
+  // 떠 있는 툴팁으로 포인터를 옮기는 길에 다른 행을 지나가도 바로 바뀌거나 닫히지 않게 짧게 기다린다(#40).
+  // 전에는 지나가는 행마다 새 툴팁을 띄우거나 닫아, 툴팁 안으로 들어가 긴 SQL을 스크롤할 수 없었다
+  let leaveTimer = null;
+  const cancelLeave = () => { clearTimeout(leaveTimer); leaveTimer = null; };
   document.addEventListener("mouseover", (e) => {
-    if (tip.contains(e.target)) return;          // 툴팁 위(스크롤바 포함)에 있으면 유지 — 안에서 스크롤할 수 있어야 한다
+    if (tip.contains(e.target)) { cancelLeave(); clearTimeout(timer); return; }
     const el = e.target.closest?.("[data-sql-tip]");
-    if (!el) { hide(); return; }
-    if (el === cell) return;
+    if (el === cell) { cancelLeave(); return; }
+    if (tip.hidden) {
+      cancelLeave();
+      if (!el) { hide(); return; }
+      clearTimeout(timer);
+      cell = el;
+      timer = setTimeout(() => show(el), SQL_TIP_DELAY_MS);
+      return;
+    }
+    // 툴팁이 떠 있는 동안: 다른 곳으로 가면 잠시 기다렸다 닫거나 바꾼다 — 그 사이 툴팁에 들어가면 취소된다
+    cancelLeave();
     clearTimeout(timer);
-    cell = el;
-    timer = setTimeout(() => show(el), SQL_TIP_DELAY_MS);
+    leaveTimer = setTimeout(() => {
+      leaveTimer = null;
+      if (!el) { hide(); return; }
+      cell = el;
+      show(el);
+    }, SQL_TIP_SWITCH_MS);
   });
   // 키보드 초점으로도 뜬다 — 마우스만 있는 툴팁은 키보드 사용자에게 없는 정보다(셀에 tabindex를 준 이유)
   document.addEventListener("focusin", (e) => {
@@ -676,7 +696,7 @@ function setupSqlTip() {
   window.addEventListener("scroll", (e) => { if (!tip.contains(e.target)) hide(); }, true);
   window.addEventListener("resize", hide);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
-  tip.addEventListener("mouseleave", hide);
+  tip.addEventListener("mouseleave", () => { cancelLeave(); leaveTimer = setTimeout(hide, SQL_TIP_SWITCH_MS); });
 }
 
 // 검색·필터 이벤트 → 재렌더(입력·선택할 때만 매칭분을 그린다). 앱 로딩 시 한 번 연결.
