@@ -182,11 +182,12 @@
             <div class="detail-views" role="group" aria-label="쿼리 분석 보기">
               <button id="btn-explain" class="seg-btn" type="button" aria-pressed="false">실행계획</button>
               <button id="btn-schema" class="seg-btn" type="button" aria-pressed="false">테이블 구조</button>
-              <button id="btn-ai" class="seg-btn" type="button" aria-pressed="false">AI 분석</button>
               <button id="btn-advisor" class="seg-btn" type="button" aria-pressed="false">인덱스 제안</button>
               <button id="btn-antipattern" class="seg-btn" type="button" aria-pressed="false">안티패턴</button>
             </div>
             <span class="detail-tail">
+              <!-- AI 입구는 오른쪽 대화 칸 하나다(#57) — 이 쿼리를 대화에 붙이고 거기서 방식을 고른다 -->
+              <button id="btn-ask-ai" class="btn btn-small btn-primary" type="button">AI에게 묻기</button>
               <button id="btn-to-workbench" class="btn btn-small" type="button" hidden>워크벤치에서 열기</button>
               <span class="detail-more-wrap">
                 <button id="btn-detail-more" class="btn btn-small detail-more" type="button" aria-label="더보기" aria-haspopup="true" aria-expanded="false" aria-controls="detail-more-menu">
@@ -194,7 +195,6 @@
                 </button>
                 <!-- 드물게 쓰는 둘. 누르는 즉시 실행하지 않는다 — 섹션만 열고 실행은 그 안의 주 버튼이 한다 -->
                 <div id="detail-more-menu" class="detail-more-menu" hidden>
-                  <button id="btn-deep" type="button">심층 진단</button>
                   <button id="btn-inquiry" type="button">DB팀에 문의</button>
                 </div>
               </span>
@@ -232,18 +232,6 @@
             <h3>테이블 구조 <span class="hint">쿼리가 참조하는 테이블의 컬럼·인덱스·대략 행 수. 문의에 자동 첨부됩니다.</span>
               <button class="section-refresh" type="button" hidden data-refresh="schema">다시 조회</button></h3>
             <div id="schema-result" class="findings"></div>
-          </div>
-          <div class="detail-section" id="ai-section" hidden>
-            <h3>AI 분석 <span class="hint">docs/ai-analysis-rules.md 기준</span>
-              <button class="section-refresh" type="button" hidden data-refresh="ai">다시 조회</button></h3>
-            <div id="ai-stage" class="hint ai-stage" role="status"></div>
-            <div id="detail-ai" class="ai-analysis chat-text" aria-live="polite"></div>
-          </div>
-          <div class="detail-section" id="deep-section" hidden>
-            <h3>심층 진단</h3>
-            <p class="hint">쿼리를 실제로 실행해 계획을 봅니다. 운영자 이상만, 시간 제한이 걸립니다. 파라미터 자리(?, $1)는 실제 값으로 바꾸세요.</p>
-            <div class="section-run"><button id="btn-deep-run" class="btn btn-primary btn-small" type="button">진단 실행</button></div>
-            <div id="deep-result" class="findings"></div>
           </div>
           <div class="detail-section" id="inquiry-section" hidden>
             <h3>DB팀에 문의</h3>
@@ -621,6 +609,14 @@
     </div>
     <div id="chat-log" class="chat-log" role="log" aria-label="대화"></div>
     <form id="chat-form" class="chat-composer" autocomplete="off">
+      <!-- 답 받는 방식(#57) — 입구가 다섯 곳(채팅·AI 분석·심층 진단·작업 맡기기·워크벤치)이라 차이를 사람이 알아야 했다.
+           관제의 AI는 이 칸 하나로 모으고 여기서 고른다. 붙인 쿼리는 그 위에 한 줄 -->
+      <div id="chat-attach" class="chat-attach" hidden></div>
+      <div id="chat-modes" class="chat-modes" role="radiogroup" aria-label="답 받는 방식">
+        <button type="button" class="chat-mode" role="radio" data-mode="answer" aria-checked="true" title="읽기 도구로 지금 답합니다. 쿼리를 붙이고 비워 보내면 판단 기준 문서로 그 쿼리를 분석합니다">지금 답하기</button>
+        <button type="button" class="chat-mode" role="radio" data-mode="task" aria-checked="false" title="사실 수집·검증을 거친 결과를 진단 탭에 붙입니다(비동기)">작업으로 맡기기</button>
+        <button type="button" class="chat-mode" role="radio" data-mode="deep" aria-checked="false" title="붙인 쿼리를 대상 DB에서 실제로 실행해 계획을 봅니다. 운영자 이상, 시간 제한">실제 실행 진단</button>
+      </div>
       <div class="chat-input">
         <textarea id="diagnose-question" rows="1" placeholder="왼쪽에서 인스턴스를 고르면 물어볼 수 있습니다" spellcheck="false" disabled></textarea>
         <button id="btn-diagnose" class="chat-send" type="submit" aria-label="보내기" disabled>
@@ -640,7 +636,6 @@
           </svg>
           쿼리 속 값은 ?로 가려서 보냅니다
         </span>
-        <button id="btn-aiop-open" class="chat-delegate" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="aiop-popover" disabled>작업으로 맡기기</button>
         <div id="chat-privacy-tip" class="chat-tip" role="tooltip" hidden>세션·상위 쿼리·느린 쿼리의 SQL 문장은 값(리터럴)을 ?로 바꾼 뒤 AI에 넘깁니다. 대상 DB는 읽기만 하고 바꾸지 않습니다.</div>
       </div>
       <!-- 작업 맡기기 — 접수 폼은 필요할 때만 뜬다(유리 재질: 떠 있는 계층) -->
