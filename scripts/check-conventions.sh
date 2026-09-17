@@ -107,6 +107,12 @@ print("\n".join(bad))
 ')
 report "원시 NUL 바이트 금지 (소스가 바이너리로 취급되지 않게)" "$hits"
 
+# 8) 화면 글자 크기는 네 단계 토큰(--fs-caption/small/body/title)만 — 규칙마다 px를 적다 보니 열두 가지 크기가
+#    섞여 보조 글자가 빽빽해졌다(#61). 18px 이상의 큰 수치 넷은 기준선으로 둔다
+hits=$(grep -nE "font-size: *[0-9.]+px" src/main/resources/static/style.css src/main/resources/static/workbench.css \
+  | grep -vE "font-size: *(18|26|28)px")
+report "화면 글자 크기 토큰 (px 직접 지정 금지)" "$hits"
+
 echo
 [ "$fail" -eq 0 ] && echo "규약 검사 전부 통과" || echo "규약 검사 실패 — 위 항목을 확인하세요"
 exit $fail

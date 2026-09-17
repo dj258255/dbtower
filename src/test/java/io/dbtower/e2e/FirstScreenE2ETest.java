@@ -134,6 +134,12 @@ class FirstScreenE2ETest {
         Page page = loginAs("e2e-fs-viewer", "?instance=" + db.getId());
         page.locator("#result-panel").waitFor();
         page.waitForTimeout(6000);
+        // 시간대 영역은 기간·조회 한 줄만 보이고, 날짜 칸·비교 구간·그래프는 접혀 있다(#61)
+        assertThat(page.locator("#range-preset")).hasValue("30");
+        assertThat(page.locator("#range-text")).containsText("~");
+        assertThat(page.locator("#target-from")).isHidden();
+        assertThat(page.locator("#btn-compare")).isHidden();
+        page.locator("#time-more > summary").click();
         // 빈 그래프는 빈 상자를 남기지 않는다 — 한 줄만 남고 상자는 접힌다
         assertThat(page.locator("#chart-empty")).isVisible();
         assertThat(page.locator("#chart-empty")).containsText("이 구간에 수집된 스냅샷이 없습니다");
