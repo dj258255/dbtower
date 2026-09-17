@@ -262,13 +262,15 @@ class AshBackpressureExperimentIT {
         md.append("- 대상: PostgreSQL 16 (127.0.0.1:15432/sample). 4초마다 한 세션이 행을 약 1.4초 잡아 다른 세션을 막는다(막힘 사건)\n");
         md.append("- 샘플 1회 = 막힌 피해자 세션 수 조회. 계획 간격 1초, 창 ").append(WINDOW_MS / 1000).append("초. 느린 대상은 조회 앞 지연 주입(0ms, 2000ms)\n");
         md.append("- DELAY: 끝난 뒤 1초 쉬고 다음 틱(제품 방식). QUEUE: 1초 계획을 지키려 밀린 틱을 쌓아 순서대로 처리. PARALLEL: 기다리지 않고 매초 새 조회\n");
-        md.append("- 잡은 사건: 사건 동안 찍힌 샘플이 막힘을 봄. 계획 시각도 사건 안: 그 샘플에 기록되는 시각(제품은 틱 시작 시각을 기록한다)도 사건 시작 1초 전 ~ 끝 안에 든다. 수집이 2초 걸리면 기록 시각이 실제 조회보다 2초 앞서 이 칸이 0이 된다\n");
+        md.append("- 잡은 사건: 사건 동안 찍힌 샘플이 막힘을 봄. 기록 시각도 사건 안: 그 샘플에 제품이 기록하는 시각도 사건 시작 1초 전 ~ 끝 안에 든다\n");
+        md.append("  - 수정 전(틱 시작 시각을 기록): 수집이 2초 걸리면 기록 시각이 실제 조회보다 2초 앞서 이 칸이 0이 됐다\n");
+        md.append("  - 수정 후(#98, 인스턴스를 실제로 조회한 시각을 기록): 기록 시각 = 실제 조회 시각이라 잡은 사건과 같다. 제품의 기록 시각과 실제 조회 시각의 차이는 `AshSamplerObservedTimeTest`가 잰다\n");
         md.append("- 한계: 주입 지연은 부하와 무관하다. 실제 과부하에서는 조회가 겹칠수록 대상이 더 느려질 수 있는데 이 실험은 그 되먹임을 재지 않는다\n\n");
-        md.append("| 지연 | 정책 | 창 안 샘플 | 막힘 사건 | 잡은 사건 | 계획 시각도 사건 안 | 실제 조회 시각 - 계획 시각 중앙값 | 최대 | 동시 대상 조회 최대 | 창이 끝난 뒤 마지막 샘플 |\n");
-        md.append("|---|---|---|---|---|---|---|---|---|---|\n");
+        md.append("| 지연 | 정책 | 창 안 샘플 | 막힘 사건 | 잡은 사건 | 기록 시각도 사건 안(수정 전: 틱 시작) | 기록 시각도 사건 안(수정 후: 실제 조회) | 실제 조회 시각 - 계획 시각 중앙값 | 최대 | 동시 대상 조회 최대 | 창이 끝난 뒤 마지막 샘플 |\n");
+        md.append("|---|---|---|---|---|---|---|---|---|---|---|\n");
         for (Result r : results) {
-            md.append(String.format(Locale.ROOT, "| %dms | %s | %d | %d | %d | %d | %dms | %dms | %d | %s |%n",
-                    r.delayMs(), r.policy(), r.samplesInWindow(), r.episodes(), r.captured(), r.capturedAtRightTime(),
+            md.append(String.format(Locale.ROOT, "| %dms | %s | %d | %d | %d | %d | %d | %dms | %dms | %d | %s |%n",
+                    r.delayMs(), r.policy(), r.samplesInWindow(), r.episodes(), r.captured(), r.capturedAtRightTime(), r.captured(),
                     r.skewP50Ms(), r.skewMaxMs(), r.maxConcurrent(),
                     r.lastSnapshotAfterWindowMs() > 0 ? "+" + r.lastSnapshotAfterWindowMs() + "ms" : "-"));
         }
