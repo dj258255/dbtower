@@ -43,6 +43,7 @@ const state = {
   sheetError: null,
   archiveConfirm: null,
   timeline: [],
+  origins: new Map(), // 워크시트 id -> 관제에서 넘어온 출처 {instanceId, parts}(#58). 이 화면을 연 동안만 기억한다
   chips: [],
   picking: false,
   allowValues: false,
@@ -175,9 +176,34 @@ async function receiveHandoff(h) {
   }
   // 조회 SQL은 새 워크시트에 채운다 — 지금 열린 워크시트의 작업을 덮어쓰지 않게
   await createSheet("대시보드에서 넘긴 쿼리");
+  if (state.sheet && h.origin && Array.isArray(h.origin.parts)) {
+    state.origins.set(state.sheet.id, h.origin);
+    drawOrigin();
+  }
   editor.value = h.sql;
   onEdit();
   editor.focus();
+}
+
+// 넘어온 워크시트 맨 위 출처 한 줄과 관제로 돌아가는 길(#58)
+function drawOrigin() {
+  const box = $("wb-origin");
+  const o = state.sheet ? state.origins.get(state.sheet.id) : null;
+  box.hidden = !o;
+  if (!o) { box.innerHTML = ""; return; }
+  box.innerHTML = `<span class="wb-origin-label">관제에서 넘어옴</span>
+    <span class="wb-origin-parts">${o.parts.map((p) => `<span>${esc(p)}</span>`).join("")}</span>
+    <span class="wb-origin-actions">
+      <button type="button" class="link-btn" data-origin="back">관제로 돌아가기</button>
+      <button type="button" class="wb-origin-x" data-origin="close" aria-label="출처 닫기" title="닫기">×</button>
+    </span>`;
+  box.onclick = (e) => {
+    const b = e.target.closest("button[data-origin]");
+    if (!b) return;
+    if (b.dataset.origin === "close") { state.origins.delete(state.sheet.id); drawOrigin(); return; }
+    // 셸의 모드 탭을 누른 것과 같다 — 셸이 워크벤치의 현재 인스턴스로 관제를 연다
+    document.querySelector('.mode-tab[data-mode="monitor"]')?.click();
+  };
 }
 
 function bindChrome() {
@@ -414,6 +440,7 @@ async function openSheet(id) {
   $("wb-title").value = state.sheet.title;
   $("wb-version").textContent = state.sheet.latestVersion ? `최신 v${state.sheet.latestVersion}` : "버전 없음";
   editor.value = state.sheet.currentSql || "";
+  drawOrigin();
   state.chips = [];
   state.lastView = null;
   hideOverlay();
