@@ -1,97 +1,99 @@
 # DBTower 문서 안내
 
-README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. 이 문서는 목적에 맞는 상세
-문서를 빠르게 찾기 위한 지도입니다.
+README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. 이 문서는 **누가 무엇을 하러 왔는지**에 따라
+읽을 문서를 고르는 지도입니다.
 
-## 처음 보는 경우
+## 누가 읽나
 
-1. [한 장 요약](PORTFOLIO-ONEPAGER.md)에서 문제, 해법, 대표 수치를 확인합니다.
-2. [5분 시연](DEMO-5MIN.md)으로 실제 사용자 흐름을 따라갑니다.
-3. 직접 눌러 보려면 [역할별 수동 테스트](MANUAL-TEST.md)를 따라갑니다.
-4. [현재 화면 갤러리](SCREENSHOTS.md)에서 관제·워크벤치·거버넌스 화면을 봅니다.
-5. [설계 문서](DESIGN.md)에서 모듈 경계와 핵심 결정을 읽습니다.
+### 운영자 — 설치하고 대상 DB를 붙이는 사람
 
-전체 발표 서사는 [PRESENTATION.md](PRESENTATION.md), 설계 결정의 짧은 문답은
-[TECHNICAL-QA.md](TECHNICAL-QA.md)에서 확인합니다.
+| 순서 | 문서 | 여기서 얻는 것 |
+|---|---|---|
+| 1 | [루트 README 빠른 시작](../README.md) | 이미지 실행과 필수 환경변수(메타 DB 비밀번호·암호화 키), 버전 고정 |
+| 2 | [least-privilege.md](least-privilege.md) | DBMS별 모니터링·조회·변경 계정 최소 권한 |
+| 3 | [operations.md](operations.md) | 수집·통계·알림, 정식 이미지 배포·업그레이드 시 주의점 |
+| 4 | 인프라 자동 등록 | [Kubernetes](../infra/k8s/README.md) · [Terraform](../infra/terraform/README.md) · [Ansible](../infra/ansible/README.md) |
+| 5 | [API.md](API.md) | 토큰 인증, 주요 REST·MCP 진입점 |
 
-## 주제별 문서
+### 온콜 — 경보를 받고 원인을 찾는 사람
 
-### 제품과 설계
+| 순서 | 문서 | 여기서 얻는 것 |
+|---|---|---|
+| 1 | [DEMO-5MIN.md](DEMO-5MIN.md) | Top Query -> 쿼리 상세(실행계획·AI 분석) -> 인덱스 제안 -> 변경 티켓 승인·실행까지 실제로 누르는 순서 |
+| 2 | [ai-analysis-rules.md](ai-analysis-rules.md) | AI 1차 분석이 무엇을 기준으로 판정하는지, 기종별 예외 |
+| 3 | [AI-OPERATIONS-AUTOMATION.md](AI-OPERATIONS-AUTOMATION.md) | Slack·경보가 만든 AI 작업이 어떤 사실로 어떤 소견을 내는지, 믿으면 안 되는 자리 |
+| 4 | [SCREENSHOTS.md](SCREENSHOTS.md) | 지금 화면이 어떻게 생겼는지 |
 
-| 문서 | 역할 |
+### 개발자 — 코드를 고치는 사람(사람이든 AI 코딩 에이전트든)
+
+| 순서 | 문서 | 여기서 얻는 것 |
+|---|---|---|
+| 1 | [CONTRIBUTING.md](../CONTRIBUTING.md) | 빌드·검사·테스트 명령, 이슈·PR 절차 |
+| 2 | [AGENTS.md](../AGENTS.md) | 모듈 경계, 안전 원칙, 화면 규칙, 작업 기록 규칙. 실제로 틀렸던 것만 적혀 있다 |
+| 3 | [DESIGN.md](DESIGN.md) · [modules/](modules/) | 현재 아키텍처와 핵심 결정, Modulith가 생성한 모듈 의존 |
+| 4 | [MANUAL-TEST.md](MANUAL-TEST.md) | 역할별 계정으로 변경 티켓 흐름을 손으로 확인하는 절차 |
+| 5 | [VERIFICATION.md](VERIFICATION.md) | 고치려는 기능의 과거 결함과 측정 — 아래 "최근 검증 기록"에서 절 번호를 찾는다 |
+
+### 리뷰어·평가자 — 설계와 근거를 확인하는 사람
+
+| 순서 | 문서 | 여기서 얻는 것 |
+|---|---|---|
+| 1 | [PORTFOLIO-ONEPAGER.md](PORTFOLIO-ONEPAGER.md) | 문제, 해법, 대표 수치 한 장 |
+| 2 | [TECHNICAL-QA.md](TECHNICAL-QA.md) | 설계·안전·검증에 관한 질문과 답 |
+| 3 | [experiments/](experiments/) | 안전장치의 비용을 잰 실험(E1~E5). 표와 CSV는 실험 코드가 생성하며 손으로 고치지 않는다 |
+| 4 | [CHANGELOG.md](../CHANGELOG.md) -> [ROADMAP.md](ROADMAP.md) | 릴리스별 변경, 남은 백로그와 의도적으로 하지 않는 범위 |
+| 5 | [PRESENTATION.md](PRESENTATION.md) · [PORTFOLIO-AX.md](PORTFOLIO-AX.md) | 발표 원고, AI를 운영 플랫폼에 안전하게 붙인 사례 |
+
+## 그림
+
+| 그림 | 내용 | 주의 |
+|---|---|---|
+| [architecture-detail.svg](architecture-detail.svg) | 모듈, 5개 DBMS, 신뢰 경계 | 16개 모듈 기준 — AI 운영 작업(aiops) 모듈이 아직 없다(현재 17개) |
+| [erd.svg](erd.svg) | 핵심 데이터 도메인과 증거 관계 | V41 기준 — 이후 AI 운영 작업·대화 테이블(V42~V46)이 없다 |
+| [insight-flow.svg](insight-flow.svg) | 발견, AI 분석, 승인, 실행, 검증의 책임 흐름 | |
+| [deployment-flow.svg](deployment-flow.svg) | CI 게이트, 멀티아키텍처 이미지, 런타임과 IaC 범위 | |
+
+편집 원본은 같은 이름의 `.mmd`입니다. 그림을 고치면 원본과 SVG를 함께 갱신합니다.
+
+## 최근 검증 기록
+
+`VERIFICATION.md`는 증거 원문을 보존하므로 1만 줄이 넘습니다. 처음부터 읽지 말고 `## 184.`처럼 절 번호로 검색합니다.
+
+| 절 | 주제 |
 |---|---|
-| [AI-OPERATIONS-AUTOMATION.md](AI-OPERATIONS-AUTOMATION.md) | AI 운영 작업 — Slack·경보·스케줄이 만든 작업을 사실 수집·모델 소견·결과 검증·알림으로 잇는 설계와 경계 |
-| [DESIGN.md](DESIGN.md) | 현재 아키텍처, 핵심 결정, 안전 원칙 |
-| [ai-analysis-rules.md](ai-analysis-rules.md) | 기종별 실행계획 판단 근거와 예외 |
-| [modules/](modules/) | Spring Modulith가 생성한 모듈 구조와 의존 관계 |
-| [architecture-detail.svg](architecture-detail.svg) | 16개 모듈, 5개 DBMS, 신뢰 경계를 한 장으로 본 구조도(현재 17개 모듈 — AI 운영 작업 모듈은 아직 이 그림에 없다) |
-| [erd.svg](erd.svg) | 핵심 데이터 도메인과 증거 관계. 그림은 V41 기준이라 이후 마이그레이션의 AI 운영 작업·대화 테이블은 아직 없다 |
-| [insight-flow.svg](insight-flow.svg) | 발견, AI 분석, 승인, 실행, 검증의 책임 흐름 |
-| [deployment-flow.svg](deployment-flow.svg) | CI 게이트, 멀티아키텍처 이미지, 런타임과 IaC 범위 |
-| Mermaid 원본 | [아키텍처](architecture-detail.mmd) · [데이터](erd.mmd) · [진단 흐름](insight-flow.mmd) · [배포](deployment-flow.mmd) |
+| 184 | 실제 화면 점검에서 나온 UI/UX 문제 — 원문 오류, 드롭다운, 쿼리 상세, 모니터링 배치 |
+| 183 | v1.4.0 게시 결과 |
+| 182 | 대상 DB가 죽으면 관제 화면이 줄을 서던 것 — 대상 조회 2자리 제한(#31) |
+| 180·181 | 워크벤치에서 조용히 멈추던 자리, 처음 들어온 사람의 화면과 좁은 화면 실측 |
+| 172·175 | 로그인 화면 정리, 화면 전체 하늘 원톤과 대비 재계산 |
+| 173·176·177 | 관제 AI 칸을 채팅으로, 대화 서버 저장, AI로 나가던 값 가리기 |
+| 169~171 | AI 운영 작업 — Slack 한 문장에서 검증된 소견까지, 경보가 스스로 작업을 만드는 경로 |
 
-### 운영과 배포
+## 완료된 작업 기록 (보존)
 
-| 문서 | 역할 |
-|---|---|
-| [operations.md](operations.md) | 수집, 통계, 알림, 정식 이미지 배포·업그레이드 시 주의점 |
-| [least-privilege.md](least-privilege.md) | DBMS별 모니터링 계정 최소 권한 |
-| [API.md](API.md) | 인증 방식과 주요 REST·MCP 진입점 |
-| [MANUAL-TEST.md](MANUAL-TEST.md) | 역할별 계정과 변경 티켓 수동 테스트 |
-| [SCREENSHOTS.md](SCREENSHOTS.md) | 현재 대표 화면과 캡처 갱신 원칙 |
-| [Kubernetes](../infra/k8s/README.md) | CloudNativePG 생성 후 DBTower 등록 |
-| [Terraform](../infra/terraform/README.md) | RDS 프로비저닝과 자동 등록 |
-| [Ansible](../infra/ansible/README.md) | VM DB 구성과 자동 등록 |
+당시의 감사·명세라 지금 구현과 다를 수 있습니다. 결정의 이유를 찾을 때만 읽습니다.
 
-### 계획과 근거
+| 문서 | 내용 | 완료 |
+|---|---|---|
+| [HARDENING-ROADMAP.md](HARDENING-ROADMAP.md) | 동시성·기종 정확성·보안·수명주기 4축 감사와 FIX/SKIP 결정 | v1.1.0, 57~62절 |
+| [deepening-spec.md](deepening-spec.md) | 심화 2차 착수 명세 | v1.1.0, 57~60절 |
+| [OPERATIONAL-BOTTLENECK-ARCS.md](OPERATIONAL-BOTTLENECK-ARCS.md) | 운영 병목 B1~B5와 lakehouse 판정 | v1.2.0, 105~109절 |
+| [PI-POLICY.md](PI-POLICY.md) | 로컬 에이전트의 도구·경로·명령 실행 정책 | 168절 |
+| [eval/](eval/) | 워크벤치 자연어 SQL 평가 세트와 실행 로그 | 2026-09-10 |
 
-| 문서 | 역할 |
-|---|---|
-| [ROADMAP.md](ROADMAP.md) | 완료 단계, 현재 백로그, 의도적으로 하지 않는 범위 |
-| [VERIFICATION.md](VERIFICATION.md) | 명령, 출력, 측정값, 스크린샷을 보존하는 실험 노트 |
-| [CHANGELOG.md](../CHANGELOG.md) | 릴리스별 사용자 관점의 변경 사항 |
-| [HARDENING-ROADMAP.md](HARDENING-ROADMAP.md) | 보안·수명주기·기종 정확성 감사 기록 |
-| [OPERATIONAL-BOTTLENECK-ARCS.md](OPERATIONAL-BOTTLENECK-ARCS.md) | 운영 병목 B1~B5 작업 기록 |
-| [deepening-spec.md](deepening-spec.md) | 심화 작업 당시의 착수 명세 |
-
-`VERIFICATION.md`는 증거 원문을 보존하므로 의도적으로 깁니다. 처음부터 읽기보다 문서
-안에서 `## 140.`처럼 절 번호를 검색하거나, 다른 문서가 가리키는 절부터 읽는 편이 빠릅니다.
-`ROADMAP.md`의 완료 항목도 결정 이력을 보존하기 위해 남겨 둡니다.
-
-### 포트폴리오와 발표
-
-| 문서 | 역할 |
-|---|---|
-| [PORTFOLIO-ONEPAGER.md](PORTFOLIO-ONEPAGER.md) | 프로젝트 한 장 요약 |
-| [PORTFOLIO-AX.md](PORTFOLIO-AX.md) | AI를 운영 플랫폼에 안전하게 연결한 사례 |
-| [PRESENTATION.md](PRESENTATION.md) | 문제 정의부터 결과까지의 발표 원고 |
-| [TECHNICAL-QA.md](TECHNICAL-QA.md) | 설계·안전·검증에 관한 기술 질문과 답 |
-| [DEMO-5MIN.md](DEMO-5MIN.md) | 역할을 바꿔 가며 진행하는 짧은 시연 순서 |
-| [PI-POLICY.md](PI-POLICY.md) | Pi 로컬 에이전트의 도구·경로·명령·테스트 실행 정책 |
-
-## 읽는 목적별 경로
-
-| 목적 | 권장 순서 |
-|---|---|
-| 빠르게 평가 | 한 장 요약 -> 5분 시연 -> 역할별 수동 테스트 |
-| 설계 검토 | DESIGN -> modules -> AI 판단 규칙 -> 최소 권한 |
-| 운영 준비 | 루트 README 빠른 시작 -> operations -> least-privilege -> infra |
-| 변경 이력 확인 | CHANGELOG -> ROADMAP -> 필요한 VERIFICATION 절 |
-| 기여 준비 | CONTRIBUTING -> AGENTS -> DESIGN |
-
-## 문서별 기록 원칙
-
-중복을 줄이기 위해 새 내용을 추가할 때 다음 기준을 사용합니다.
+## 새 내용을 어디에 적나
 
 | 내용 | 기록할 곳 |
 |---|---|
 | 처음 방문한 사람이 알아야 할 제품 가치와 실행법 | 루트 `README.md` |
 | 현재 아키텍처와 핵심 설계 결정 | `DESIGN.md` |
 | 수집, 통계, 배포 운영 시 주의점 | `operations.md` |
-| 완료 단계, 현재 백로그, 의도적으로 하지 않는 범위 | `ROADMAP.md` |
-| 명령, 출력, 측정값, 스크린샷 | `VERIFICATION.md` |
-| 릴리스별 사용자 관점의 변경 사항 | 루트 `CHANGELOG.md` |
+| 틀렸던 적이 있어 다음 작업자가 반드시 지켜야 할 규칙 | 루트 `AGENTS.md` (근거 절 번호와 함께) |
+| 명령, 출력, 측정값, 스크린샷 | `VERIFICATION.md` 새 절 |
+| 릴리스별 사용자 관점의 변경 사항 | 루트 `CHANGELOG.md`의 `[Unreleased]` |
+| 완료 단계, 현재 백로그, 하지 않는 범위 | `ROADMAP.md` |
+| 작업의 예상·마감·실제·어긋난 이유 | GitHub 이슈 본문·댓글(작업 템플릿) |
 | 발표와 포트폴리오를 위한 서사 | `PRESENTATION.md`, `PORTFOLIO-*.md` |
 
-새 내용은 가장 알맞은 문서 한 곳에 상세히 기록하고 다른 문서에서는 링크합니다.
+새 내용은 가장 알맞은 문서 한 곳에 상세히 적고 다른 문서에서는 링크합니다.
 성능과 안정성 수치는 반드시 `VERIFICATION.md`의 재현 가능한 근거와 연결합니다.

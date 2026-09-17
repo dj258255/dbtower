@@ -2,7 +2,7 @@
 name: 버그 신고
 about: 재현 가능한 문제를 알려주세요
 title: ''
-labels: bug
+labels: type:bug
 ---
 
 ## 무엇이 잘못되었나
