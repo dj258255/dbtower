@@ -2211,32 +2211,40 @@ function renderReferencedSchema(data) {
     if (t.dataBytes >= 0) facts.push(`데이터 ${fmtBytes(t.dataBytes)}`);
     if (t.indexBytes >= 0) facts.push(`인덱스 ${fmtBytes(t.indexBytes)}`);
     const rows = facts.length ? ` <span class="muted">${facts.join(" · ")}</span>` : "";
-    const idx = (t.indexes ?? []).length
-      ? (t.indexes.map((i) => {
-          const extra = [i.type ? esc(i.type) : "", i.cardinality != null ? `card≈${Number(i.cardinality).toLocaleString()}` : ""].filter(Boolean).join("·");
-          return `${esc(i.name)}${i.unique ? "<span class=\"idx-u\">[U]</span>" : ""}(${esc((i.columns ?? []).join(","))})${extra ? ` <span class="muted">${extra}</span>` : ""}`;
-        }).join(", "))
-      : '<span class="muted">없음</span>';
-    // 기본키·외래키 열 표시(151절) — 조인 열이 키를 따르는지가 계획 진단의 재료다
+    // 한 줄에 "cols: a type?, b type?…"로 이어 붙이던 것을 열 표로 바꿨다(#40) — 열 40개짜리 테이블이 글 뭉치가 됐다.
+    // 기본키·외래키 열 표시(151절)는 그대로 — 조인 열이 키를 따르는지가 계획 진단의 재료다
     const pk = new Set((t.primaryKey ?? []).map((c) => c.toLowerCase()));
     const fkCols = new Set((t.foreignKeys ?? []).flatMap((fk) => fk.columns.map((c) => c.toLowerCase())));
-    const cols = (t.columns ?? []).map((c) => {
+    const colRows = (t.columns ?? []).map((c) => {
       const key = c.name.toLowerCase();
       const marks = `${pk.has(key) ? '<span class="key-badge pk">PK</span>' : ""}${fkCols.has(key) ? '<span class="key-badge fk">FK</span>' : ""}`;
-      return `${esc(c.name)}${marks} <span class="muted">${esc(c.type)}${c.nullable ? "?" : ""}</span>`;
-    }).join(", ");
+      return `<tr><td class="mono">${esc(c.name)}${marks}</td><td class="muted mono">${esc(c.type)}</td><td>${c.nullable ? '<span class="muted">NULL 허용</span>' : "필수"}</td></tr>`;
+    }).join("");
+    const colCount = (t.columns ?? []).length;
+    const idxRows = (t.indexes ?? []).map((i) => {
+      const extra = [i.type ? esc(i.type) : "", i.cardinality != null ? `고유값 약 ${Number(i.cardinality).toLocaleString()}` : ""].filter(Boolean).join(" · ");
+      return `<li><span class="mono">${esc(i.name)}</span>${i.unique ? ' <span class="key-badge pk">UNIQUE</span>' : ""}
+        <span class="muted">(${esc((i.columns ?? []).join(", "))})${extra ? ` · ${extra}` : ""}</span></li>`;
+    }).join("");
     const fks = (t.foreignKeys ?? []).length
-      ? `<div class="schema-cols">fk: ${t.foreignKeys.map((fk) => `${esc(fk.columns.join(","))} → ${esc(fk.refTable)}(${esc(fk.refColumns.join(","))})`).join(", ")}</div>`
+      ? `<div class="schema-sub">외래키</div><ul class="schema-list">${t.foreignKeys.map((fk) =>
+          `<li class="mono">${esc(fk.columns.join(", "))} → ${esc(fk.refTable)}(${esc(fk.refColumns.join(", "))})</li>`).join("")}</ul>`
       : "";
-    html += `<div class="finding-item schema-table"><b>${esc(t.name)}</b>${rows}
-      <button class="btn btn-small td-toggle" data-table="${esc(t.name)}">상세 보기</button>
-      <div class="schema-idx">idx: ${idx}</div>
-      <div class="schema-cols">cols: ${cols}</div>
+    html += `<div class="finding-item schema-table">
+      <div class="schema-table-head"><b class="mono">${esc(t.name)}</b>${rows}
+        <button class="btn btn-small td-toggle" data-table="${esc(t.name)}">상세 보기</button></div>
+      <div class="schema-sub">인덱스 ${(t.indexes ?? []).length}개</div>
+      ${idxRows ? `<ul class="schema-list">${idxRows}</ul>` : '<div class="muted schema-empty">인덱스가 없습니다.</div>'}
       ${fks}
+      <details class="schema-cols-wrap"${colCount <= 12 ? " open" : ""}>
+        <summary>열 ${colCount}개</summary>
+        <div class="table-scroll"><table class="qtable schema-col-table"><thead><tr><th>열</th><th>타입</th><th>NULL</th></tr></thead>
+          <tbody>${colRows}</tbody></table></div>
+      </details>
       <div class="td-detail" hidden></div></div>`;
   }
   if ((data.notFound ?? []).length) {
-    html += `<div class="finding-item muted">구조 미확보: ${esc(data.notFound.join(", "))}${data.truncated ? " (스키마 상한 초과 가능)" : ""}</div>`;
+    html += `<div class="finding-item muted">구조를 읽지 못한 테이블: ${esc(data.notFound.join(", "))}${data.truncated ? " (스키마 상한 초과 가능)" : ""}</div>`;
   }
   // 렌더 직후 "상세 보기" 버튼에 아코디언 토글을 건다(테이블별 table-detail 조회)
   queueMicrotask(() => {

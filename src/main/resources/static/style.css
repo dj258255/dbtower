@@ -1541,3 +1541,16 @@ input[type="checkbox"] { accent-color: var(--primary); }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .aiop-select { background: #161a21; border-color: #333a45; color: #d5dae2; }
 }
+
+/* 쿼리 상세 테이블 구조(#40) — 인덱스는 목록, 열은 표(많으면 접는다). 전에는 "idx: … cols: …" 두 줄에 전부 이어 붙였다 */
+.schema-table { background: #fff; }
+.schema-table-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.schema-table-head .td-toggle { margin-left: auto; }
+.schema-sub { font-size: 12px; font-weight: 700; color: var(--muted); margin: 8px 0 4px; }
+.schema-list { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.7; }
+.schema-empty { font-size: 12.5px; }
+.schema-cols-wrap { margin-top: 8px; }
+.schema-cols-wrap summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--primary); }
+.schema-col-table { margin-top: 6px; font-size: 12.5px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
