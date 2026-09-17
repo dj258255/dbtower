@@ -22,6 +22,74 @@ const api = (path, opts = {}) => {
   });
 };
 
+// ---------- 대상 DB 조회 줄 (이슈 #31) ----------
+// 대상이 응답하지 않으면 그 조회는 연결 제한 시간(5초, 재시도 10초)까지 브라우저 연결을 쥔다. 평문 HTTP/1.1이라
+// 브라우저는 한 호스트에 연결을 6개까지만 연다 — 대상 조회 여섯이 자리를 다 잡으면 플랫폼 조회(대화 목록·리뷰 등)와
+// 사용자가 누른 조작(역할 적용·채팅 보내기)이 서버에 닿지도 못하고 줄을 선다(181절, 이슈 #31).
+// 그래서 대상 DB를 만지는 조회만 이 줄을 거치게 하고 동시 2개로 묶는다. 2인 이유: 실시간 SSE가 연결 하나를 계속
+// 쥐므로(1+2=3) 나머지 3자리를 플랫폼 조회와 사용자 조작에 남긴다. 1로 낮추면 대상 조회 열두 개일 때 마지막 카드가
+// 60초 뒤에야 뜨고, 3으로 올리면 조작이 줄 설 여지가 남는다.
+const TARGET_CONCURRENCY = 2;
+const targetQueue = { active: 0, waiting: [] };
+// 인스턴스를 바꿀 때마다 올린다 — 올라간 세대의 대기분은 보내지 않고 버린다(이전 대상의 조회로 새 화면을 채우지 않는다)
+let targetScope = 0;
+
+/**
+ * 대상 조회 전용 api() — 줄을 서고 차례가 되면 보낸다. 플랫폼 조회는 이 줄을 거치지 않는다.
+ * keep=true는 선택된 인스턴스와 무관한 대상 조회(함대 헬스 스코어에서 펼친 서버 한 대)라 인스턴스를 바꿔도 버리지 않는다.
+ */
+const targetApi = (path, opts = {}, keep = false) => new Promise((resolve, reject) => {
+  targetQueue.waiting.push({ gen: targetScope, keep, path, opts, resolve, reject });
+  pumpTargetQueue();
+});
+
+function pumpTargetQueue() {
+  while (targetQueue.active < TARGET_CONCURRENCY && targetQueue.waiting.length) {
+    const job = targetQueue.waiting.shift();
+    // 인스턴스가 바뀐 뒤 차례가 온 대기분은 보내지 않는다. 약속을 붙들어 두면 이 로더는 옛 대상의 값을 그리지 않는다
+    if (!job.keep && job.gen !== targetScope) continue;
+    targetQueue.active++;
+    api(job.path, job.opts).then(
+      // 대상이 바뀐 뒤 도착한 옛 응답은 버린다(약속을 붙들어 둔다) — 새 대상의 화면을 옛 값으로 덮지 않는다
+      (v) => { if (job.keep || job.gen === targetScope) job.resolve(v); },
+      (e) => { if (job.keep || job.gen === targetScope) job.reject(e); }
+    ).finally(() => {
+      targetQueue.active--;
+      pumpTargetQueue();
+    });
+  }
+}
+
+/** 인스턴스 전환 — 안 보낸 대상 조회는 버리고, 이미 보낸 것도 응답이 오면 버린다(늦은 응답이 새 화면을 덮지 않게) */
+function dropPendingTargetCalls() {
+  targetScope++;
+  targetQueue.waiting.length = 0;
+  rowsMetricCache.clear();   // 버린 요청의 약속이 캐시에 남으면 다음 선택이 그 약속을 그대로 기다린다
+}
+
+// 헬스 체크가 down으로 판정한 대상과 그 시각. 판정이 오래됐으면(60초) down이어도 한 번 조회한다 —
+// 대상이 되살아난 뒤 화면이 영영 조회하지 않으면, 사람은 고칠 것이 없는데도 카드가 빈 것을 보게 된다.
+const TARGET_DOWN_TTL_MS = 60_000;
+function targetUnreachable(instanceId = state.instance?.id) {
+  const h = state.instanceHealth.get(instanceId);
+  return !!h && !h.up && Date.now() - h.at < TARGET_DOWN_TTL_MS;
+}
+
+/** 대상 조회를 보내지 않았을 때 그 카드에 남기는 한 줄 + 그 카드만 다시 조회하는 버튼 */
+function targetSkipNote(colspan) {
+  const body = '대상에 연결되지 않아 조회하지 않았습니다. '
+    + '<button type="button" class="btn btn-small" data-target-retry>다시 시도</button>';
+  return colspan ? `<tr><td colspan="${colspan}" class="muted">${body}</td></tr>` : `<div class="muted">${body}</div>`;
+}
+
+/** 대상이 down으로 판정돼 있으면 사유를 적고 true를 돌려준다(로더는 요청을 보내지 않고 끝낸다). force면 조회한다 */
+function targetSkipped(container, retry, colspan, force) {
+  if (force || !container || !targetUnreachable()) return false;
+  container.innerHTML = targetSkipNote(colspan);
+  container.querySelector("[data-target-retry]")?.addEventListener("click", retry, { once: true });
+  return true;
+}
+
 const state = {
   instance: null,      // 선택된 인스턴스 {id, name, type, ...}
   instances: [],       // 등록된 인스턴스 전체 목록 (Schema Diff 드롭다운용)
@@ -39,6 +107,7 @@ const state = {
   role: null,          // 로그인 주체의 대표 역할(표시용)
   username: null,      // 로그인 주체의 이름(/api/me username) — 내 작업에만 취소 버튼을 붙이는 판정에 쓴다
   caps: new Set(),     // 로그인 주체의 능력(/api/me capabilities) — 버튼·메뉴는 역할 이름이 아니라 이것으로 가른다
+  instanceHealth: new Map(), // 인스턴스별 {up, at} — 헬스 판정을 기억해 down인 대상에 조회를 보내지 않는다(#31)
 };
 
 // ---------- 유틸 ----------
@@ -393,10 +462,17 @@ function shortVersion(v) {
 }
 
 // 렌더된 카드에만 헬스(핑·버전)·복제 역할을 비동기로 채운다 — 화면에 보이는 만큼만 조회(수천 대 확장).
+// down으로 판정된 대상은 다시 두드리지 않는다 — 그 조회가 브라우저 연결을 쥐고 다른 조회·조작을 막는다(#31).
+// 판정이 60초를 넘겼으면(targetUnreachable이 false) 한 번 더 확인한다.
 function loadInstanceMeta(rendered) {
   rendered.forEach(async (i) => {
+    if (targetUnreachable(i.id)) {
+      const dot = $(`#health-${i.id}`); if (dot) dot.classList.add("down");
+      return;
+    }
     try {
-      const h = await api(`/api/instances/${i.id}/health`);
+      const h = await targetApi(`/api/instances/${i.id}/health`);
+      state.instanceHealth.set(i.id, { up: !!h.up, at: Date.now() });
       const dot = $(`#health-${i.id}`); if (dot) dot.classList.add(h.up ? "up" : "down");
       const ping = $(`#ping-${i.id}`), ver = $(`#ver-${i.id}`);
       // 버전은 전체를 textContent에 담고 축약은 CSS(한 줄 말줄임)에 맡긴다 — 클릭하면 전체가 그대로 펼쳐지게
@@ -404,7 +480,7 @@ function loadInstanceMeta(rendered) {
       else if (ping) ping.textContent = h.message;
     } catch { const dot = $(`#health-${i.id}`); if (dot) dot.classList.add("down"); }
     try {
-      const r = await api(`/api/instances/${i.id}/replication`);
+      const r = await targetApi(`/api/instances/${i.id}/replication`);
       const role = $(`#role-${i.id}`);
       if (role && r && r.role && r.role !== "UNSUPPORTED" && r.role !== "NONE") {
         role.textContent = r.role;
@@ -647,6 +723,9 @@ function openDeepLinkJob(jobId) {
 
 async function selectInstance(instance, card) {
   state.instance = instance;
+  // 대상이 바뀌었다 — 이전 인스턴스의 대상 조회는 (안 보낸 것은 보내지 않고, 이미 보낸 것은 응답이 와도) 버린다(#31).
+  // 그래야 새 대상의 화면을 옛 대상의 값으로 덮지 않는다
+  dropPendingTargetCalls();
   renderInstanceMatches(); // 선택 반영 — 선택 카드를 맨 위 유지·상세 펼침·하이라이트
   renderChat({ follow: true }); // AI 칸은 잠시 그대로 — 아래 로더가 서버에서 그 인스턴스 대화를 다시 읽어 그린다
   $("#time-panel").hidden = false;
@@ -675,15 +754,16 @@ async function selectInstance(instance, card) {
 const SEV_LABEL = { CRITICAL: "치명", WARNING: "경고", INFO: "정보" };
 const STATUS_LABEL = { OK: "통과", VIOLATIONS: "지적", UNSUPPORTED: "미지원", ERROR: "오류", SHARED: "서버 공유" };
 
-async function loadAdvisors() {
+async function loadAdvisors(force) {
   const summary = $("#advisors-summary");
   const box = $("#advisors-result");
   summary.innerHTML = "";
   box.classList.add("muted");
   box.textContent = "점검 중...";
+  if (targetSkipped(box, () => loadAdvisors(true), 0, force)) return;
   let report;
   try {
-    report = await api(`/api/instances/${state.instance.id}/advisors`);
+    report = await targetApi(`/api/instances/${state.instance.id}/advisors`);
   } catch (e) {
     box.textContent = `점검 실패: ${e.message}`;
     return;
@@ -931,15 +1011,16 @@ const WASTE_KIND_LABEL = {
   OVER_INDEXED: "과다 인덱싱", CONNECTION_HEADROOM: "연결 여유", MEMORY_HEADROOM: "메모리 여유",
 };
 
-async function loadFinOps() {
+async function loadFinOps(force) {
   const summary = $("#finops-summary");
   const box = $("#finops-result");
   summary.innerHTML = "";
   box.classList.add("muted");
   box.textContent = "분석 중...";
+  if (targetSkipped(box, () => loadFinOps(true), 0, force)) return;
   let report;
   try {
-    report = await api(`/api/instances/${state.instance.id}/finops`);
+    report = await targetApi(`/api/instances/${state.instance.id}/finops`);
   } catch (e) {
     box.textContent = `분석 실패: ${e.message}`;
     return;
@@ -1165,7 +1246,8 @@ async function fillFreshnessHealth(id) {
   if (!row || row.dataset.filled) return;
   row.dataset.filled = "1";
   try {
-    const h = await api(`/api/instances/${id}/health`);
+    // 선택된 인스턴스와 무관한 함대 조회라 인스턴스를 바꿔도 버리지 않는다(keep) — 버리면 이 줄이 "조회 중"에서 멈춘다
+    const h = await targetApi(`/api/instances/${id}/health`, {}, true);
     const st = h.up ? "OK" : "PENALIZED";
     row.className = `score-contrib score-state-${st}`;
     row.querySelector(".score-contrib-state").className = `score-contrib-state score-state-badge-${st}`;
@@ -1515,7 +1597,11 @@ function setChartMetric(metric) {
 const rowsMetricCache = new Map();
 function rowsMetricLabel(instanceId) {
   if (!rowsMetricCache.has(instanceId)) {
-    rowsMetricCache.set(instanceId, api(`/api/instances/${instanceId}/rows-metric`).then((m) => m.label).catch(() => "행 지표"));
+    // 대상 조회라 줄을 거친다. 실패(또는 대상 전환으로 버려짐)하면 캐시를 비워 다음 선택이 다시 묻는다
+    const p = targetApi(`/api/instances/${instanceId}/rows-metric`)
+      .then((m) => m.label)
+      .catch(() => { rowsMetricCache.delete(instanceId); return "행 지표"; });
+    rowsMetricCache.set(instanceId, p);
   }
   return rowsMetricCache.get(instanceId);
 }
@@ -1523,7 +1609,7 @@ function rowsMetricLabel(instanceId) {
 const msDigits = (...values) => (values.some((v) => v > 0 && v < 1) ? 4 : 2);
 
 // ---------- Top Query: 단순 조회 ----------
-async function runQuery() {
+async function runQuery(force) {
   state.compareMode = false;
   closeDetail();
   // 조회 범위 표기(레퍼런스 하단 텍스트 대응) — 단독 조회에서도 어떤 창을 보고 있는지 남긴다.
@@ -1537,17 +1623,22 @@ async function runQuery() {
   } else {
     sum.hidden = true;
   }
+  const table = $("#top-table");
+  // down으로 판정된 대상에는 보내지 않는다 — 열의 모양을 알 수 없어 머리줄 없이 사유 한 줄만 남긴다(#31)
+  if (targetSkipped(table.querySelector("tbody"), () => runQuery(true), 6, force)) {
+    table.querySelector("thead").innerHTML = "";
+    return;
+  }
   let stats, rowsLabel;
   try {
     [stats, rowsLabel] = await Promise.all([
-      api(`/api/instances/${state.instance.id}/query-stats?limit=20`), rowsMetricLabel(state.instance.id)]);
+      targetApi(`/api/instances/${state.instance.id}/query-stats?limit=20`), rowsMetricLabel(state.instance.id)]);
   } catch (e) {
     // 대상 조회가 실패하면(502) 사유를 표 자리에 보인다 — 전에는 잡지 않아 표가 빈 채로 멈추고 콘솔 오류만 남았다(149절 계측 중 발견)
     $("#top-table thead").innerHTML = "";
     $("#top-table tbody").innerHTML = `<tr><td class="muted">쿼리 통계를 불러오지 못했습니다: ${esc(e.message)}</td></tr>`;
     return;
   }
-  const table = $("#top-table");
   // Call/sec는 스냅샷 차분이라 이력 없으면 null → "—". Latency/행 지표는 누적÷호출수(평균).
   // Plan 컬럼은 값이 있는 기종(MongoDB — profiler가 계획 요약을 저장)에서만 그린다.
   const hasPlan = stats.some((q) => q.plan);
@@ -2279,15 +2370,16 @@ function fmtSlowTime(s) {
   return `<span title="UTC 원문: ${esc(raw)}">${esc(local)}</span>`;
 }
 
-async function loadSlow() {
+async function loadSlow(force) {
   const table = $("#slow-table");
   // 기종별로 확보 가능한 필드가 달라 미확보는 "—"로 표기(MySQL: User@host·Lock·Rows_sent, Mongo: Plan)
   table.querySelector("thead").innerHTML = `
     <tr><th>Captured <span class="muted" title="브라우저 시간대로 변환 표시 — 원문(UTC)은 툴팁">(로컬)</span></th><th>User@host</th><th class="num">Query(ms)</th><th class="num">Lock(ms)</th>
         <th class="num">Rows_sent</th><th class="num">Rows_examined</th><th>Plan</th><th>Query</th></tr>`;
   const dash = (v) => (v == null || v < 0) ? '<span class="muted">—</span>' : null;
+  if (targetSkipped(table.querySelector("tbody"), () => loadSlow(true), 8, force)) return;
   try {
-    const rows = await api(`/api/instances/${state.instance.id}/slow-queries?limit=20`);
+    const rows = await targetApi(`/api/instances/${state.instance.id}/slow-queries?limit=20`);
     table.querySelector("tbody").innerHTML = rows.length ? rows.map((q) => `
       <tr>
         <td class="num">${fmtSlowTime(q.capturedAt)}</td>
@@ -2587,14 +2679,15 @@ const BK_STATUS_LABEL = { FRESH: "신선", STALE: "오래됨", NO_BACKUP: "백�
 
 // 대상별 운영 종합 (DBRE) — 정체(이름·기종·환경·클러스터)와 상태(헬스·복제·백업·RPO 노출)를
 // 한 대상 단위에 모아 선택 즉시 최상단에 보여준다. 조각 하나가 못 읽혀도 나머지는 그대로 표기한다.
-async function loadOverview() {
+async function loadOverview(force) {
   const box = $("#overview-card");
   if (!box) return;
   // 내용이 없는 빈 막대를 남기지 않는다(B4) — 전에는 먼저 펼치고 조회해, 응답이 오기 전까지 흰 줄만 보였다.
   // 대상에 닿지 않는 인스턴스에서는 그 줄이 계속 남아 화면 결함처럼 읽혔다
   box.hidden = true;
+  if (targetSkipped(box, () => loadOverview(true), 0, force)) { box.hidden = false; return; }
   try {
-    const o = await api(`/api/instances/${state.instance.id}/overview`);
+    const o = await targetApi(`/api/instances/${state.instance.id}/overview`);
     const rep = o.replication || {};
     const badge = LAG_SOURCE_LABEL[rep.lagSource];
     const repLag = rep.lagSource === "MEASURED"
@@ -2635,24 +2728,26 @@ async function loadOverview() {
   }
 }
 
-async function loadReplication() {
+async function loadReplication(force) {
   const box = $("#replication-box");
+  if (targetSkipped(box, () => loadReplication(true), 0, force)) return;
   try {
-    const r = await api(`/api/instances/${state.instance.id}/replication`);
+    const r = await targetApi(`/api/instances/${state.instance.id}/replication`);
     const badge = LAG_SOURCE_LABEL[r.lagSource];
     const lag = r.lagSource === "MEASURED"
       ? `${fmtNum(r.lagSeconds, 1)}s`
       : `<span class="verify-badge ${badge ? esc(badge.cls) : "muted"}">${esc(badge ? badge.label : r.lagSource)}</span>`;
     box.innerHTML = `role: ${esc(r.role)}<br>지연: ${lag}<br>${esc(r.detail ?? "")}`;
   } catch (e) { box.textContent = `조회 실패: ${e.message}`; }
-  loadReplicationSlots();
+  loadReplicationSlots(force);
 }
 
 // 복제 슬롯 잔량 (C-1) — 비활성 슬롯이 WAL을 무한 보존해 디스크를 채우는 사각. PG만 결과가 있다.
-async function loadReplicationSlots() {
+async function loadReplicationSlots(force) {
   const box = $("#replication-slots");
+  if (targetSkipped(box, () => loadReplicationSlots(true), 0, force)) return;
   try {
-    const slots = await api(`/api/instances/${state.instance.id}/replication-slots`);
+    const slots = await targetApi(`/api/instances/${state.instance.id}/replication-slots`);
     if (!slots.length) { box.textContent = ""; return; }
     box.innerHTML = "복제 슬롯: " + slots.map((s) => {
       const mb = (s.retainedBytes / (1024 * 1024)).toFixed(1);
@@ -2666,10 +2761,11 @@ async function loadReplicationSlots() {
 // 최근 데드락 (3차 아크 D-축) — DB가 이미 남긴 흔적을 설정 변경 0으로 읽는다.
 // MSSQL system_health XE / MySQL INNODB STATUS는 리포트를, PG는 개별 사건이 없어(카운터뿐) 빈 목록이다.
 // 롤링 저장이라 "최근"만 본다 — 없으면 "최근 데드락 없음"으로 정직하게 표기(과거 전수 보장 아님).
-async function loadDeadlocks() {
+async function loadDeadlocks(force) {
   const box = $("#deadlock-result");
+  if (targetSkipped(box, () => loadDeadlocks(true), 0, force)) return;
   try {
-    const rows = await api(`/api/instances/${state.instance.id}/deadlocks?limit=10`);
+    const rows = await targetApi(`/api/instances/${state.instance.id}/deadlocks?limit=10`);
     if (!rows.length) {
       box.innerHTML = '<p class="muted">최근 데드락 없음 (롤링 저장이라 "최근"만 관측 — PG는 발생 시 알림으로).</p>';
       return;
@@ -2758,12 +2854,13 @@ async function loadPlanChanges() {
 
 // Wait Events — 기종별 의미가 다르다(누적/순간 스냅샷/큐 게이지). 시간 정보가 없는 소스는
 // totalMs=0으로 오므로 "-"로 표시해 "0ms 기다렸다"로 오독되지 않게 한다.
-async function loadWaitEvents() {
+async function loadWaitEvents(force) {
   const table = $("#wait-table");
   table.querySelector("thead").innerHTML = `
     <tr><th>Category</th><th>Event</th><th class="num">Count</th><th class="num">Total(ms)</th></tr>`;
+  if (targetSkipped(table.querySelector("tbody"), () => loadWaitEvents(true), 4, force)) return;
   try {
-    const rows = await api(`/api/instances/${state.instance.id}/wait-events?limit=20`);
+    const rows = await targetApi(`/api/instances/${state.instance.id}/wait-events?limit=20`);
     table.querySelector("tbody").innerHTML = rows.length ? rows.map((w) => `
       <tr>
         <td>${esc(w.category)}</td>
@@ -2789,12 +2886,13 @@ const LATENCY_SOURCE = {
   UNSUPPORTED: { cls: "src-unsupported", label: "미지원", note: "백분위 원자료 없음" },
 };
 
-async function loadLatencyPercentiles() {
+async function loadLatencyPercentiles(force) {
   const table = $("#latency-table");
   table.querySelector("thead").innerHTML = `
     <tr><th>Source</th><th>Query</th><th class="num">p95(ms)</th><th class="num">p99(ms)</th></tr>`;
+  if (targetSkipped(table.querySelector("tbody"), () => loadLatencyPercentiles(true), 4, force)) return;
   try {
-    const rows = await api(`/api/instances/${state.instance.id}/latency-percentiles?limit=20`);
+    const rows = await targetApi(`/api/instances/${state.instance.id}/latency-percentiles?limit=20`);
     table.querySelector("tbody").innerHTML = rows.length ? rows.map((r) => {
       const src = LATENCY_SOURCE[r.source] ?? { cls: "src-unsupported", label: esc(r.source), note: "" };
       return `
@@ -2824,12 +2922,13 @@ const SLO_LATENCY_SOURCE = {
   INSUFFICIENT_DATA: { cls: "src-unsupported", label: "데이터부족", note: "쿼리 통계 없음" },
 };
 
-async function loadSloReport() {
+async function loadSloReport(force) {
   const box = $("#slo-result");
   box.classList.remove("muted");
+  if (targetSkipped(box, () => loadSloReport(true), 0, force)) return;
   let r;
   try {
-    r = await api(`/api/instances/${state.instance.id}/slo`);
+    r = await targetApi(`/api/instances/${state.instance.id}/slo`);
   } catch (e) {
     box.classList.add("muted");
     box.textContent = `조회 실패: ${e.message}`;
@@ -2888,13 +2987,14 @@ async function loadSloReport() {
 // 파티션 조회 (D5) — 테이블별 파티션 목록·방식·경계·행수·크기. 조회 전용(생성·삭제 없음).
 // MongoDB는 partitionMethod=UNSUPPORTED 안내 행으로 오고, 이때 boundary에 사유가 담긴다 —
 // "파티션 없음"과 "이 기종은 원래 파티션 개념이 없음"을 정직하게 구분해 보여준다.
-async function loadPartitions() {
+async function loadPartitions(force) {
   const table = $("#partition-table");
   table.querySelector("thead").innerHTML = `
     <tr><th>Table</th><th>Partition</th><th>Method</th><th>Boundary</th>
         <th class="num">Rows</th><th class="num">Size</th></tr>`;
+  if (targetSkipped(table.querySelector("tbody"), () => loadPartitions(true), 6, force)) return;
   try {
-    const rows = await api(`/api/instances/${state.instance.id}/partitions?limit=50`);
+    const rows = await targetApi(`/api/instances/${state.instance.id}/partitions?limit=50`);
     if (rows.length && rows[0].partitionMethod === "UNSUPPORTED") {
       table.querySelector("tbody").innerHTML =
         `<tr><td colspan="6" class="muted">미지원 — ${esc(rows[0].boundary)}</td></tr>`;
@@ -2917,15 +3017,16 @@ async function loadPartitions() {
 
 // 세션 / 블로킹 (B2) — "지금 누가 누구를 막고 있나". blockedByPid가 있으면 행을 강조한다.
 // 세션 종료 능력(운영자·관리자)이 있으면 행마다 취소(force=false)/강제종료(force=true) 버튼을 붙인다. 없으면 버튼 없음.
-async function loadSessions() {
+async function loadSessions(force) {
   const table = $("#session-table");
   const canKill = can("TARGET_OPERATE");
   const cols = canKill ? 8 : 7;
   table.querySelector("thead").innerHTML = `
     <tr><th class="num">PID</th><th>User</th><th>State</th><th>Wait</th>
         <th class="num">BlockedBy</th><th class="num">Elapsed(ms)</th><th>Query</th>${canKill ? "<th>Action</th>" : ""}</tr>`;
+  if (targetSkipped(table.querySelector("tbody"), () => loadSessions(true), cols, force)) return;
   try {
-    renderSessionRows(await api(`/api/instances/${state.instance.id}/sessions?limit=50`));
+    renderSessionRows(await targetApi(`/api/instances/${state.instance.id}/sessions?limit=50`));
   } catch (e) {
     table.querySelector("tbody").innerHTML =
       `<tr><td colspan="${cols}" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
