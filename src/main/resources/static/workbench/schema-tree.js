@@ -9,6 +9,9 @@ import { esc } from "./api.js";
 const CLICK_DELAY_MS = 220;
 // 뷰 묶음은 기본으로 접는다 — 확장 뷰(pg_stat_statements 등)가 사용자 테이블보다 앞에 늘어서지 않게
 // 묶음 키는 테이블 이름과 겹치지 않게 NUL로 시작한다. 소스에는 이스케이프로 적는다 — 원시 NUL이 들어가면 git이 파일을 바이너리로 본다(154절)
+// 테이블 이름과 겹치지 않는 키가 필요해 전에는 NUL(\u0000)을 앞에 붙였는데, 그 키를 data-toggle 속성(HTML)에 실으면
+// 파서가 NUL을 U+FFFD로 바꿔 클릭한 키가 이 값과 영영 같지 않았다 — "뷰"를 눌러도 펼쳐지지 않았다(#40).
+// 그래서 키는 속성에 싣지 않고, 묶음 머리는 data-toggle-group으로 따로 구분한다
 const VIEWS_GROUP_KEY = "\u0000group:views";
 
 export function renderTree(container, schema, { filter, expanded, onInsert, onPreview, onToggle, isPicking, onPick, onDetail = () => {}, error = null }) {
@@ -69,13 +72,17 @@ export function renderTree(container, schema, { filter, expanded, onInsert, onPr
       <div class="tree-group-head tree-group-static">테이블 <span class="wb-count">${tables.length}</span></div>
       <ul class="tree">${tables.map(item).join("")}</ul></li>` : "";
   const viewsGroup = views.length ? `<li class="tree-group">
-      <button class="tree-group-head" data-toggle="${VIEWS_GROUP_KEY}" aria-expanded="${viewsOpen}">
+      <button class="tree-group-head" data-toggle-group="views" aria-expanded="${viewsOpen}">
         <span class="wb-chevron" aria-hidden="true"></span>뷰 <span class="wb-count">${views.length}</span></button>
       ${viewsOpen ? `<ul class="tree">${views.map(item).join("")}</ul>` : ""}</li>` : "";
   container.innerHTML = cap + root + `<ul class="tree tree-groups">${tablesGroup}${viewsGroup}</ul>`;
 
   let pending = null;
   container.onclick = (e) => {
+    if (e.target.closest("[data-toggle-group]")) {
+      onToggle(VIEWS_GROUP_KEY);
+      return;
+    }
     const toggle = e.target.closest("[data-toggle]");
     if (toggle) {
       onToggle(toggle.dataset.toggle);
