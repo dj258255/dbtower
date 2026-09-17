@@ -2007,7 +2007,7 @@ async function runQuery(force) {
       <td class="num">${fmtNum(q.rowsExaminedAvg, 0)}</td>
       ${hasPlan ? `<td>${q.plan ? `<span class="plan-badge ${/COLLSCAN/i.test(q.plan) ? "plan-bad" : "plan-ok"}">${esc(q.plan)}</span>` : '<span class="muted">—</span>'}</td>` : ""}
     </tr>`).join("");
-  bindRowClicks(stats.map((q) => ({ queryId: q.queryId, queryText: q.queryText })));
+  bindRowClicks(stats.map((q) => ({ queryId: q.queryId, queryText: q.queryText, loadPct: q.loadPct, avgLatencyMs: q.avgLatencyMs })));
 }
 
 // ---------- Top Query: 비교 조회 (증감 + NEW) ----------
@@ -2972,6 +2972,29 @@ async function loadMcpCommand() {
 // 대시보드에서 워크벤치로 넘기기. SQL은 URL에 싣지 않는다 — 정규화 쿼리 텍스트가 수 KB면 인코딩 후 요청 줄 상한(8KB)을 넘어
 // 400이 난다. 같은 브라우저 localStorage에 한 번 쓰고 워크벤치가 읽자마자 지운다(새 탭에서도 같은 출처라 보인다)
 const HANDOFF_PREFIX = "dbtower.handoff.";
+// 워크벤치가 "무엇 때문에 왔는지" 한 줄로 보일 출처(#58) — SQL만 넘어가 어떤 인스턴스의 어떤 구간·신호였는지 사라졌다.
+// 문장 조각만 넘기고 워크벤치는 그대로 이스케이프해 보인다
+function handoffOrigin() {
+  const parts = [state.instance.name];
+  const range = (from, to) => from && to ? `${from.slice(5).replace("T", " ")} ~ ${to.slice(0, 10) === from.slice(0, 10) ? to.slice(11) : to.slice(5).replace("T", " ")}` : "";
+  const target = range($("#target-from").value, $("#target-to").value);
+  if (target) parts.push(`조회 ${target}`);
+  if (state.compareMode) {
+    const base = range($("#base-from").value, $("#base-to").value);
+    if (base) parts.push(`비교 ${base}`);
+  }
+  const q = state.currentQuery;
+  if (q) {
+    parts.push(`쿼리 ${shortQueryId(q.queryId)}`);
+    if (q.newQuery) parts.push("신규 쿼리");
+    else if (q.qpsChangePct != null) parts.push(`QPS ${q.qpsChangePct >= 0 ? "+" : ""}${fmtNum(q.qpsChangePct, 0)}%`);
+    if (q.latencyChangePct != null) parts.push(`지연 ${q.latencyChangePct >= 0 ? "+" : ""}${fmtNum(q.latencyChangePct, 0)}%`);
+    if (q.loadPct != null) parts.push(`부하 ${fmtNum(q.loadPct)}%`);
+    if (q.avgLatencyMs != null) parts.push(`평균 ${fmtNum(q.avgLatencyMs, msDigits(q.avgLatencyMs))}ms`);
+  }
+  return { instanceId: state.instance.id, parts };
+}
+
 function handToWorkbench(kind, sql, reason = "") {
   if (!state.instance || !sql) return;
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -2980,7 +3003,7 @@ function handToWorkbench(kind, sql, reason = "") {
     Object.keys(localStorage).filter((k) => k.startsWith(HANDOFF_PREFIX)).forEach((k) => {
       try { if (Date.now() - JSON.parse(localStorage.getItem(k)).at > 10 * 60000) localStorage.removeItem(k); } catch { localStorage.removeItem(k); }
     });
-    localStorage.setItem(HANDOFF_PREFIX + id, JSON.stringify({ kind, sql, reason, at: Date.now() }));
+    localStorage.setItem(HANDOFF_PREFIX + id, JSON.stringify({ kind, sql, reason, origin: handoffOrigin(), at: Date.now() }));
   } catch {
     setInstanceNotice("브라우저 저장소를 쓸 수 없어 워크벤치로 넘기지 못했습니다. SQL을 복사해 워크벤치에 붙여 넣으세요.");
     return;

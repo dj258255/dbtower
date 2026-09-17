@@ -608,3 +608,13 @@ tr.df-removed td { background: #fdf1f2; }
 @media (max-width: 640px) {
   .wb-shell { padding: 10px; gap: 10px; }
 }
+
+/* 관제에서 넘어온 출처(#58) — 편집기 위 한 줄. 정보라 채운 면이 아니라 옅은 하늘 바탕 */
+.wb-origin { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 8px; padding: 8px 12px; border-radius: 10px; background: #eef7fd; font-size: var(--fs-small); }
+.wb-origin[hidden] { display: none; }
+.wb-origin-label { font-weight: 600; color: var(--primary); }
+.wb-origin-parts { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; color: #333d4b; min-width: 0; }
+.wb-origin-parts span + span::before { content: "·"; margin-right: 10px; color: var(--muted); }
+.wb-origin-actions { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; white-space: nowrap; }
+.wb-origin-x { border: 0; background: none; font: inherit; font-size: var(--fs-body); color: var(--muted); cursor: pointer; padding: 0 2px; }
+.wb-origin-x:hover { color: #333d4b; }
