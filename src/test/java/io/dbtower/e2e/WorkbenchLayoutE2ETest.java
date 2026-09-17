@@ -320,10 +320,13 @@ class WorkbenchLayoutE2ETest {
                  "rows":[["<insufficient privilege>",0.19754200000000002,12345,null]],
                  "rowCount":1,"truncated":false,"elapsedMs":3,"maskedColumns":[]},"version":null}""";
         Page page = openWorkbench(a, p -> p.route("**/api/workbench/instances/*/query", route -> fulfillJson(route, result)));
-        // 편집기는 사람의 입력 이벤트로 상태를 맞춘다 — fill로 값을 바꾸면 실행이 나가지 않았다
+        // 워크시트가 열리기 전에 실행을 누르면 실행이 조용히 나가지 않는다(run은 열린 워크시트가 있어야 보낸다) —
+        // 느린 CI에서 이 순서가 뒤집혀 결과표가 비었다. 활성 탭을 기다린 뒤 입력하고, 결과 행을 기다린다
+        page.locator("#wb-sheets .wb-sheet-tab.active").waitFor();
         page.locator("#wb-input").click();
         page.keyboard().type("SELECT 1");
         page.locator("#wb-run").click();
+        page.locator("#wb-grid table.grid tbody tr").first().waitFor();
 
         Locator cells = page.locator("#wb-grid table.grid tbody tr").first().locator("td");
         assertThat(cells.nth(1)).hasText("권한 없음");
