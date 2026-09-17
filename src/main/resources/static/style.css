@@ -1572,3 +1572,8 @@ input[type="checkbox"] { accent-color: var(--primary); }
 .chip-btn { border: 0; background: #e8f3fb; color: #075985; border-radius: 999px; padding: 4px 10px; font: 600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; }
 .chip-btn:hover { background: #d6eaf7; }
 .chip-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* DB팀 문의 입력 — 처음부터 칸 폭 전체, 밝은 입력칸(#40). 전에는 코드 상자 스타일이라 좁고 어두웠다 */
+.inquiry-label { display: block; font-size: 12.5px; font-weight: 600; margin: 4px 0 6px; }
+.inquiry-note { display: block; width: 100%; box-sizing: border-box; min-height: 96px; resize: vertical; border: 1px solid var(--control-line); border-radius: 10px; padding: 10px 12px; font: 13.5px/1.6 inherit; font-family: inherit; color: var(--text); background: #fff; }
+.inquiry-note:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+

@@ -219,7 +219,8 @@
           </div>
           <div class="detail-section" id="inquiry-section" hidden>
             <h3>DB팀에 문의</h3>
-            <textarea id="inquiry-note" class="codeblock" rows="3" placeholder="비고 (선택): 상황·요청 사항을 적어주세요"></textarea>
+            <label class="inquiry-label" for="inquiry-note">DB팀에 전할 말 <span class="muted">(선택)</span></label>
+            <textarea id="inquiry-note" class="inquiry-note" rows="4" placeholder="무슨 일이 있었는지, 무엇을 원하는지 적어 주세요. 예: 어제 21시부터 주문 조회가 3초 넘게 걸립니다"></textarea>
             <p class="hint">함께 첨부됩니다: 쿼리 · 실행계획 · 규칙 지적 · AI 분석</p>
             <div class="section-run"><button id="btn-inquiry-send" class="btn btn-primary btn-small" type="button">문의 보내기</button></div>
             <div id="inquiry-result" class="findings"></div>
