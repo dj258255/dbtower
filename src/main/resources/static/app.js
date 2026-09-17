@@ -2272,6 +2272,28 @@ async function toggleTableDetail(btn) {
 
 // AI 분석은 흘려 받는다(143절) — 실행계획은 1초 안에 오는데 AI 답은 수십 초 걸린다. 한 번에 받으면 그동안 계획까지 같이 기다렸다.
 // 순서: plan(계획·규칙 지적) -> text(쓰이는 대로) -> result(완성본). 화면에 남기고 문의에 첨부하는 것은 완성본이다
+/**
+ * 쿼리 상세 AI 분석을 읽히게 그린다(#40). 전에는 어두운 코드 상자에 한 문단이 통째로 들어가 "글 뭉치"였다.
+ * 채팅 답과 같은 서식(문단·목록·코드·굵게, esc 뒤 토큰만)을 쓰고, 모델이 줄을 나누지 않은 긴 문단은
+ * 문장 두 개씩 끊어 보인다 — 표시만 바꾸고 저장·첨부되는 원문(state.lastAi)은 그대로다.
+ * 맨 앞 "**판정: …**"은 결론이라 따로 강조한다.
+ */
+function aiAnalysisHtml(text) {
+  let src = stripEmoji(text ?? "").replace(/\r\n?/g, "\n").trim();
+  if (!src) return "";
+  let verdict = "";
+  const m = src.match(/^\*\*(판정[^*]*)\*\*\s*/);
+  if (m) { verdict = `<p class="ai-verdict">${esc(m[1])}</p>`; src = src.slice(m[0].length); }
+  const blocks = src.split(/\n{2,}/).map((b) => {
+    if (b.includes("\n") || b.length < 260 || /^\s*([-*]|\d+\.)\s/.test(b) || b.includes("```")) return b;
+    const sentences = b.split(/(?<=[.다요])\s+(?=\S)/);
+    const groups = [];
+    for (let i = 0; i < sentences.length; i += 2) groups.push(sentences.slice(i, i + 2).join(" "));
+    return groups.join("\n\n");
+  });
+  return verdict + chatAnswerHtml(blocks.join("\n\n"));
+}
+
 async function runAiAnalysis() {
   const sql = $("#detail-sql").value.trim();
   if (!sql) return;
@@ -2294,7 +2316,7 @@ async function runAiAnalysis() {
       } else if (name === "text") {
         if (firstTextAt == null) firstTextAt = Date.now();
         written += data.delta;
-        out.textContent = stripEmoji(written);
+        out.innerHTML = aiAnalysisHtml(written);
         stage.textContent = "AI가 답을 쓰는 중";
       } else if (name === "result") {
         result = data;
@@ -2303,15 +2325,15 @@ async function runAiAnalysis() {
       }
     });
     if (!result) throw new Error("분석 결과가 끝까지 오지 않았습니다(연결 끊김)");
-    out.textContent = stripEmoji(result.aiAnalysis) ||
-      "AI 분석 비활성화 상태입니다 (ANTHROPIC_API_KEY도 claude CLI도 없음) — 규칙 기반 지적까지만 표시합니다.";
+    out.innerHTML = result.aiAnalysis ? aiAnalysisHtml(result.aiAnalysis)
+      : `<p class="muted">AI 분석이 꺼져 있습니다(ANTHROPIC_API_KEY도 claude CLI도 없음) — 규칙 기반 지적까지만 표시합니다.</p>`;
     const first = firstTextAt ? ` · 첫 글자 ${((firstTextAt - startedAt) / 1000).toFixed(1)}초` : "";
     stage.textContent = `완료 ${((Date.now() - startedAt) / 1000).toFixed(1)}초${first}`;
     state.lastPlan = result.plan;
     state.lastFindings = result.findings ?? [];
     state.lastAi = result.aiAnalysis ?? null;
   } catch (e) {
-    out.textContent = `실패: ${apiMessage(e)}`;
+    out.innerHTML = `<p class="chat-error">분석하지 못했습니다: ${esc(apiMessage(e))}</p>`;
     stage.textContent = "";
   } finally {
     btn.classList.remove("loading");

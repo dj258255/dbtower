@@ -440,6 +440,11 @@ input[type="datetime-local"] {
   overflow-x: auto; white-space: pre-wrap; word-break: break-word; margin: 0;
 }
 .codeblock.ai { background: #10141b; color: #d9e6d9; }
+/* 쿼리 상세 AI 분석 — 읽는 글이라 밝은 카드에 본문 글꼴로(#40). 전에는 어두운 코드 상자에 고정폭 한 문단이었다 */
+.ai-analysis { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; font-size: 13.5px; line-height: 1.75; color: var(--text); word-break: keep-all; overflow-wrap: anywhere; }
+.ai-analysis:empty { display: none; }
+.ai-analysis p { margin: 0 0 10px; }
+.ai-verdict { font-weight: 700; color: #075985; background: #e8f3fb; border-radius: 8px; padding: 8px 12px; }
 /* JSON 실행계획 구문 강조 — 다크 코드블록 위에서 키·문자열·숫자·불리언 색 구분 */
 .j-key { color: #7cc7ff; }
 .j-str { color: #9fe8a8; }
