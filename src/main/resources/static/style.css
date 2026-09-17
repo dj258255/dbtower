@@ -103,7 +103,7 @@ body {
 
 /* 함대 개요 — 헬스 스코어 + 백업 신선도 나란히 */
 /* 함대 개요 — 반응형: 각 패널이 600px 이상 확보되면 2열, 아니면 1열로 쌓인다(짤림 방지) */
-.fleet-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 16px; }
+.fleet-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(600px, 100%), 1fr)); gap: 16px; }
 .fleet-row .panel { margin-bottom: 16px; min-width: 0; }
 /* 한 줄 표가 패널보다 넓으면 잘리지 말고 가로 스크롤 */
 #score-result, #freshness-result { overflow-x: auto; }
@@ -251,7 +251,15 @@ input[type="datetime-local"] {
 .chart-tools { display: inline-flex; gap: 6px; }
 .chart-wrap { position: relative; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
 #activity-chart { display: block; cursor: crosshair; }
-.center { text-align: center; padding: 40px 0; }
+/* 빈 차트 자리표시 — 빈 상자를 크게 남기지 않고 한 줄로 줄인다(139·B6). 쓰는 곳은 전부 차트의 빈 자리다 */
+.center { text-align: center; padding: 14px 0; }
+/* 인스턴스가 0대일 때의 안내 한 줄 — 이때는 함대 카드 둘을 접고 이 한 줄만 남긴다(B6) */
+.empty-onboarding { padding: 16px 18px; }
+.empty-onboarding-line { margin: 0; font-size: 13px; line-height: 1.7; word-break: keep-all; }
+.empty-onboarding-line code {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px;
+  background: rgba(10, 106, 168, .08); border-radius: 5px; padding: 1px 5px;
+}
 
 /* 탭 */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
@@ -408,6 +416,10 @@ input[type="datetime-local"] {
 /* 상세는 표 열 폭 계산에 끼지 않는다(width:0) — 끼면 실행계획 표(12열)가 Top Query 표 전체를 벌린다(146절: 1280px에서 902px).
    셀 폭은 min-width로 채우고, 넓은 실행계획은 코드블록 안에서 옆으로 스크롤된다 */
 #top-table tr.detail-host .detail { margin: 10px 12px 14px; box-sizing: border-box; width: 0; min-width: calc(100% - 24px); }
+/* 폭 맞춤 래퍼 — 셀은 표 폭(max-content)만큼 넓어지므로, 그 안에서 왼쪽 고정 + '스크롤 상자의 보이는 폭'(JS가 준다)을 쓴다.
+   그래야 가로 스크롤이 있는 좁은 화면에서도 상세 오른쪽(토글·더보기)이 화면 안에 있다(B6fix).
+   표가 화면에 들어오면 상자 폭 = 셀 폭이라 146절과 같은 결과가 된다(넓은 화면은 그대로) */
+.row-detail-fit { position: sticky; left: 0; box-sizing: border-box; max-width: 100%; }
 .advisor-input { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .advisor-cols {
   flex: 1; border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px;
@@ -857,7 +869,7 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 .score-grade-F td:first-child { box-shadow: inset 3px 0 0 #d6404f; }
 /* 신호별 기여 분해(행 클릭 시) */
 .score-detail { display: flex; flex-direction: column; gap: 4px; padding: 6px 4px; }
-.score-contrib { display: grid; grid-template-columns: 90px 78px 44px 1fr; align-items: center; gap: 8px; font-size: 12.5px; }
+.score-contrib { display: grid; grid-template-columns: 90px 78px 44px minmax(0, 1fr); align-items: center; gap: 8px; font-size: 12.5px; }
 .score-contrib-signal { font-weight: 700; }
 .score-contrib-penalty { color: #d6404f; font-weight: 700; text-align: right; }
 .score-contrib-summary { color: var(--muted); }
@@ -939,6 +951,7 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 /* 차트 호버 — 커서에 가장 가까운 점의 정확 수치·시각 (Grafana류 툴팁) */
 .chart-tip {
   position: fixed;
+  max-width: calc(100vw - 16px);
   transform: translate(-50%, -100%);
   background: #1f2430;
   color: #fff;
@@ -990,7 +1003,13 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 .repl-role { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; margin-left: 4px; }
 .role-primary { background: #e6f4ea; color: #137333; }
 .role-replica { background: #e8f0fe; color: #1a56db; }
-.command-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+/* 1fr은 최소 폭이 내용이라 좁은 화면에서 두 열이 버티지 못한다(139절) — minmax(0,1fr)로 두고,
+   담는 칸이 좁아지면(관제 카드 560px 아래) 한 열로 접는다. 뷰포트가 아니라 칸 폭 기준이다 */
+.command-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.metric-card { container-type: inline-size; }
+@container (max-width: 560px) {
+  .command-grid { grid-template-columns: minmax(0, 1fr); }
+}
 .command-box h4 { margin-bottom: 4px; }
 .cmd-legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); margin-top: 2px; }
 /* 명령/행 연산 묶음 — Query Activity·Row Operation 그룹 헤더로 쿼리는 쿼리끼리 */
@@ -1115,14 +1134,29 @@ body { background: var(--bg); }
 /* 입력 조작 — 검색·드롭다운·날짜·select를 한 모양으로(175절). 전에는 모서리 6·7·8·10px, 테두리 네 가지 색이 섞여 있었다.
    테두리 #7090a7은 흰 바탕 3.37:1로 조작 요소 경계 기준(3:1)을 넘는다 — 전의 #e3e6ea는 1.25:1이라 칸이 어디까지인지 보이지 않았다 */
 :root { --control-line: #7090a7; }
-.cs-btn, .instance-filter input[type="search"], .instance-filter-row select, input[type="datetime-local"], .audit-filters input, .preset {
+/* 텍스트·숫자 입력도 같은 규칙으로(B6) — 전에는 범위를 좁게 잡아 #monthly-days(type=number)처럼
+   클래스가 없는 칸이 브라우저 기본 모양으로 남았다 */
+.cs-btn, .instance-filter input[type="search"], .instance-filter-row select, input[type="datetime-local"],
+input[type="text"], input[type="number"], .audit-filters input, .preset, .ddl-input, .advisor-cols {
   border: 1px solid var(--control-line); border-radius: 10px;
 }
-.cs-btn, .instance-filter input[type="search"], input[type="datetime-local"], .audit-filters input { min-height: 32px; }
-.instance-filter input[type="search"]:focus-visible, input[type="datetime-local"]:focus-visible, .audit-filters input:focus-visible, .cs-btn:focus-visible {
+.cs-btn, .instance-filter input[type="search"], input[type="datetime-local"],
+input[type="text"], input[type="number"], .audit-filters input { min-height: 32px; }
+.instance-filter input[type="search"]:focus-visible, input[type="datetime-local"]:focus-visible,
+input[type="text"]:focus-visible, input[type="number"]:focus-visible,
+.audit-filters input:focus-visible, .cs-btn:focus-visible {
   outline: 2px solid var(--primary); outline-offset: 1px;
 }
+/* 체크박스는 크롬 기본 파랑이 남아 있었다 — 글자색 하나로 브랜드 색을 따른다(B6) */
+input[type="checkbox"] { accent-color: var(--primary); }
 .preset { border-radius: 999px; }
+
+/* 표 안의 역할 select — 이 표의 다른 칸과 같은 규칙을 쓴다(전에는 규칙이 없어 브라우저 기본 모양이었다, B6).
+   줄 높이를 키우지 않게 세로 여백만 줄인다. 표 안이라 .cs 드롭다운은 쓰지 않는다(가로 스크롤 상자를 벗어난다) */
+#users-table [data-user-role] {
+  padding: 2px 6px; font: inherit; font-size: 12.5px; background: #fff; color: var(--text); max-width: 100%;
+}
+#users-table [data-user-role]:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
 /* 사용자·역할 카드 (B4). 새 사용자 줄의 입력·select는 175절 입력 규칙(테두리 --control-line, 모서리 10px, 높이 32px)을
    그대로 쓴다 — 전에는 .ddl-input(모서리 6px)이라 같은 카드 안에서 칸 모양이 갈렸다 */
@@ -1140,6 +1174,8 @@ body { background: var(--bg); }
 .user-new-row input:focus-visible, .user-new-row select:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 /* 행에 남는 자리는 역할 칸이 먹는다 — 이름·비밀번호는 고정 폭, 버튼은 오른쪽 끝 */
 .user-new-row select { flex: 1 1 110px; min-width: 110px; }
+/* 관제의 다른 필터와 같은 드롭다운을 쓰므로 늘어나는 상자는 .cs 쪽이 된다 */
+.user-new-row .cs { flex: 1 1 110px; }
 .user-new-row #btn-user-create { flex: none; margin-left: auto; }
 /* 역할 적용·취소 — select를 바꾼 행에만 나타난다(바꾸는 즉시 서버로 보내지 않는다) */
 .user-role-actions { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -1488,8 +1524,9 @@ body { background: var(--bg); }
   :root:not([data-theme="light"]) .aiops-scope { color: #98a2b3; }
 }
 
-/* 작업 맡기기 팝오버의 유형·구간 — 누르는 요소라 테두리는 비텍스트 대비 3:1(#7090a7, 3.4:1) */
-.aiop-select { width: 100%; min-width: 0; height: 28px; padding: 0 8px; font-size: 12px; border-radius: 8px;
+/* 작업 맡기기 팝오버의 유형·구간 — 누르는 요소라 테두리는 비텍스트 대비 3:1(#7090a7, 3.4:1).
+   모서리는 다른 입력과 같은 10px(B6 — 전에는 여기만 8px이었다) */
+.aiop-select { width: 100%; min-width: 0; height: 28px; padding: 0 8px; font-size: 12px; border-radius: 10px;
   border: 1px solid #7090a7; background: #fff; color: #0b2a45; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .aiop-select { background: #161a21; border-color: #333a45; color: #d5dae2; }

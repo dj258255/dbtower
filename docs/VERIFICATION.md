@@ -9783,7 +9783,7 @@ DBTOWER_E2E=1 ... --rerun-tasks  (혼자, 시작 15:09:10 UTC)
 
 ```text
 ./scripts/check-conventions.sh   규약 검사 전부 통과
-WorkbenchLayoutE2ETest 혼자 5회  6/6 x5 (01:40~ 전날 16:40~16:41 UTC 회차)
+WorkbenchLayoutE2ETest 혼자 5회  6/6 x5 (09-16 16:40~16:41 UTC)
 전체 E2E 2회(혼자)               1회차 PersonaUi 10 중 1 실패, 나머지 전부 통과 / 2회차 31개 전부 통과 (01:43:13 UTC 시작)
 PersonaUiE2ETest 혼자 6회        10/10 x6 (01:54~02:03 UTC)
 ./gradlew test                   테스트 1020, 실패 0, 오류 0, 건너뜀 67 (01:48:31 UTC 시작)
@@ -9793,3 +9793,97 @@ PersonaUiE2ETest 혼자 6회        10/10 x6 (01:54~02:03 UTC)
 
 - **`PersonaUiE2ETest`가 전체 E2E 1회차에서 1건 실패했다.** 다음 실행이 결과 XML을 덮어 실패 내용을 잃었고, 혼자 6회·전체 2회차에서는 재현되지 않았다. 원인을 모른 채로 두고 이슈로 남긴다 — 다음 묶음부터 E2E 결과를 회차별로 보관한다
 - 좁은 화면, 인스턴스 수십 개일 때 드롭다운이 왼쪽 칸 밖으로 넘치는지, 탭이 많을 때는 재지 않았다(다음 묶음)
+
+
+## 181. 처음 들어온 사람의 화면, 남은 입력 모양, 좁은 화면 실측 (2026-09-17)
+
+### 왜
+
+175~180절이 각각 "정직하게 남기는 범위"에 남긴 것들 — 빈 상태 문구, 기본 모양 그대로인 입력, 재지 않은 좁은 화면 — 을 한 번에 닫는다.
+원칙은 같다: 빈 자리에는 지금 무엇이 없고 다음에 무엇을 하면 되는지 한 문장, 같은 뜻을 두 곳에 쓰지 않고, 그 역할이 할 수 없는 일을 권하지 않는다.
+
+### 빈 상태 — 역할·상황별로 먼저 찍고 고쳤다
+
+관제 첫 화면은 VIEWER·APPROVER·OPERATOR·ADMIN이 같다(요청자만 워크벤치가 홈 — `PlatformRoles.homeFor`).
+
+| 상황 | 역할 | 전 | 후 | 스크린샷 |
+|---|---|---|---|---|
+| A 관제, 인스턴스를 아직 안 고름 | VIEWER·APPROVER·OPERATOR·ADMIN | 사이드바 "위에서 검색하거나 필터를 선택하면 여기 표시됩니다." ✓ / **헬스 스코어 "등록된 인스턴스가 없습니다." ← 거짓**(바로 아래 백업 신선도 카드에는 그 인스턴스가 있다) / 대화 칸 "왼쪽에서 인스턴스를 고르세요" ✓ | 집계 카드는 등록 수(라이브)와 집계 수(스냅샷)를 갈라 말한다: "이 집계에 든 인스턴스가 없습니다 — 등록 1대, 다음 집계 뒤 다시 봅니다." 원인은 **로더 순서**였다(집계가 목록보다 먼저 도착해 0대로 굳음) — 목록 뒤에 부르게 고쳤다 | `first-console-none-{viewer,approver,operator,admin}.png` |
+| B 관제, 인스턴스 골랐지만 스냅샷 없음(대상 미도달) | VIEWER | 활동 그래프가 **180px 빈 흰 상자**이고 문장이 그 아래 떠 있다 | 빈 상자를 접는다(SVG hidden) → 한 줄. 단언: `#chart-wrap` 높이 ≤ 80px | `first-console-picked.png`, `first-console-picked-full.png` |
+| C 워크벤치 처음 들어옴(워크시트 0 → 자동 생성) | REQUESTER | 고칠 것 없음 — 자동 생성된 탭·"버전 없음"·AI 칸 안내("이 워크시트에서 … AI가 SQL을 제안합니다")·"문장을 실행하면 결과가 여기에 나옵니다"가 이미 다음 행동을 말한다 | 같음 | `first-workbench-new.png` |
+| D 워크벤치, 볼 수 있는 인스턴스 0 | REQUESTER | 노트 "…ADMIN이 인스턴스를 등록하면 여기에 나옵니다." + 스키마 자리 **"인스턴스를 고르세요"(고를 것이 없다)** | 노트를 역할에 맞춰 "ADMIN에게 등록을 요청하세요"로, 스키마 자리는 비웠다(같은 뜻을 두 곳에 쓰지 않는다) | `first-workbench-none.png` |
+| E 등록된 인스턴스 0 | ADMIN / VIEWER | 사이드바 "위에서 검색하거나 필터를…"(찾을 것이 없다) · **두 함대 카드가 같은 문장 "등록된 인스턴스가 없습니다." 두 번** · 대화 칸 "왼쪽에서 인스턴스를 고르세요"(할 수 없다) · 등록 입구 없음 | 함대 카드 둘을 접고 **작업면 한 줄**: ADMIN은 "콘솔에는 등록 화면이 없고, `POST /api/instances`(또는 IaC의 멱등 upsert)로 등록하면 여기에 나타납니다.", 그 외 역할은 "등록은 ADMIN이 하므로 관리자에게 요청하세요." 대화 칸도 "인스턴스가 등록되면 이 칸에서 물어볼 수 있습니다" | `first-console-empty-{admin,viewer}.png` |
+
+인스턴스 0대일 때 대화 칸도 같은 말을 세 번(부제·대화 영역·입력창 안내) 했고 그중 입력창 "왼쪽에서 인스턴스를 고르면"은 할 수 없는 일이었다 — 부제 한 줄만 남기고 새 대화 버튼을 감췄다.
+콘솔에는 인스턴스 등록 화면이 없다(`RegistryController`의 `POST /api/instances`·멱등 `PUT`만 있다). 버튼을 만들지 않고 실제 입구를 문장으로 적었다.
+
+![관제 첫 화면 — 인스턴스를 아직 고르지 않음](images/webui/184-first-console-none.png)
+![등록된 인스턴스 0대, ADMIN](images/webui/185-first-console-empty-admin.png)
+
+### 남은 입력 모양
+
+| 자리 | 전 | 후 |
+|---|---|---|
+| 사용자 표 역할 select (`#users-table [data-user-role]`) | **규칙 없음 → 브라우저 기본** | 175 규칙(10px·control-line). 표 안이라 `.cs`는 쓰지 않는다(가로 스크롤 상자를 벗어난다) |
+| `#monthly-days`(type=number) | **규칙 없음**(`.incident-time`은 padding뿐) → 기본 숫자 상자 | `input[type="text"]`·`input[type="number"]`를 175 규칙에 넣었다 |
+| `#aiops-all-instances`·`#wb-share` 체크박스 | 크롬 기본 파랑 | `accent-color: var(--primary)` |
+| `.ddl-input` 3칸(리뷰 사유·DDL 테이블·ALTER) | `#d4d9df`·7px | control-line·10px |
+| `.advisor-cols` | `--line`·6px | control-line·10px |
+| `.aiop-select` 2개(작업 유형·구간) | 테두리 ✓, 모서리 8px | 모서리 10px |
+| `.wb-search`(워크벤치 트리 검색) | 회색 채움·테두리 없음 | 흰 바탕·control-line·10px |
+| `.cmp-bar` select·input(비교 대상·키 열) | hairline·알약 | control-line·10px (+`#wb-cmp-right`는 `.cs`로) |
+| `.grid-filter`·`.grid-size`(결과 표 위) | hairline·알약 | control-line·10px |
+| `.wb-dialog textarea` 3개(내보내기 사유·티켓 사유·검증 SQL) | hairline | control-line |
+| `.wb-composer`(워크벤치 대화 입력) | hairline·18px | control-line·14px(관제 `.chat-input`과 같은 값) |
+| `#wb-limit`(행 상한) | 네이티브 select(알약) | **`.cs` 드롭다운**(툴바의 "한 값" 규칙에 `.cs-btn`을 포함시켜 알약·28px 유지) |
+| `#user-new-role`(역할) | 네이티브 select | **`.cs` 드롭다운** |
+| `#wb-cmp-right`(비교 대상) | 네이티브 select | **`.cs` 드롭다운**(항목을 다시 채울 때마다 `_csSync`) |
+| 워크벤치 활성 탭의 × | hover 전에는 안 보임 | 활성 탭에서는 늘 보인다(지금 만지는 탭의 조작은 숨기지 않는다) |
+
+남긴 것: 작업 맡기기 팝오버의 선택 둘(드롭다운 패널이 팝오버 경계에 잘릴 수 있어 규칙만 적용), 탭 이름 인라인 편집기(32px 규칙을 적용하면 탭 줄이 깨진다), 표 머리 열 필터, 코드·대화 입력면(콘텐츠 면).
+
+작업 중 결함 하나를 기존 E2E가 잡았다: `enhanceSelect($("user-new-role"))` — app.js의 `$`는 `querySelector`라 `#`이 빠지면 null이고, 그 예외가 `DOMContentLoaded` 핸들러를 멈춰 뒤의 초기화(제공 도구·채팅 배선·AI 작업 입구)가 통째로 죽었다. 화면은 멀쩡해 보였고 E2E 6건이 실패해 드러났다.
+
+### 좁은 화면 — 뷰포트를 맞춰 잰 값
+
+`NarrowViewportE2ETest`가 `setViewportSize`로 390x844·768x1024·1280x800을 맞춘다. 관제는 인스턴스 선택·쿼리 상세 열림·채팅, 워크벤치는 편집기·탭 줄이 있는 상태에서 셋 모두 `scrollWidth == innerWidth`(넘침 0).
+
+**페이지 넘침 0인데 쓸 수 없던 것.** 390px 스크린샷에서 쿼리 상세의 오른쪽(더보기 버튼·설명 문장)이 잘려 있었다. 상세는 Top Query 표의 행 안에 끼우는데(146절 `width: 0; min-width: 100%`),
+그 100%가 표 폭이라 표가 가로로 스크롤되는 좁은 화면에서 상세도 표 폭만큼 넓어져 스크롤 상자 밖으로 나갔다. 페이지는 넘치지 않으니 scrollWidth 측정으로는 잡히지 않는다.
+셀 안에 래퍼를 두고 스크롤 상자의 보이는 폭(`clientWidth`, `ResizeObserver`)을 주고 `position: sticky; left: 0`으로 붙였다. 같은 구조의 헬스 스코어·백업 신선도 상세 행도 함께.
+
+390x844, 같은 테스트가 잰 값:
+
+| | 스크롤 상자의 보이는 범위 | 상세 패널 | 더보기(⋯) 오른쪽 끝 | 토글 묶음 오른쪽 끝 |
+|---|---|---|---|---|
+| 고침 전 | [37, 353] | [37, **377**] | **360 ← 7px 밖** | 345 |
+| 고침 후 | [37, 353] | [49, **341**] | **324** | 324 |
+
+폭 맞춤을 끄면 "상세 오른쪽 끝이 스크롤 상자 밖", sticky를 빼면 "표를 밀자 상세 왼쪽이 상자 밖"으로 실패하는 것을 확인했다.
+CSS를 읽어 찾은 넘침 위험 다섯(스크롤 상자 없던 AI 리포트 표, `.command-grid`·`.score-contrib`의 `1fr`, `.fleet-row`의 `minmax(600px,1fr)`, 폭 제한 없는 차트 툴팁)도 미리 막았다 — 실측으로 재현한 넘침은 아니다.
+
+![390px — 쿼리 상세가 보이는 폭 안에](images/webui/186-narrow-console-390.png)
+![390px — 워크벤치](images/webui/187-narrow-workbench-390.png)
+
+### 테스트
+
+새 `FirstScreenE2ETest` 5건(역할·상황별 문장과 스크린샷, 0대일 때 대화 칸 한 줄·빈 placeholder·감춘 버튼), `NarrowViewportE2ETest` 2건(세 뷰포트 넘침 0, 상세·토글·더보기가 스크롤 상자 안, 표를 밀어도 상자 안).
+이슈 #35에 따라 E2E를 돌릴 때마다 결과 XML을 `build/e2e-runs/<UTC>/`에 따로 남겼다.
+
+```text
+./scripts/check-conventions.sh   규약 검사 전부 통과
+DBTOWER_E2E=1 E2E 8개 클래스, 혼자 2회 (메인)
+  1회차 05:04:19 UTC  38/38   build/e2e-runs/main-20260917T050419Z
+  2회차 05:14:12 UTC  38/38   build/e2e-runs/main-20260917T051412Z
+  (AiOperationConsole 4 · ChatConversation 2 · FirstScreen 5 · MonitorAdmin 6 · NarrowViewport 2 · PersonaUi 10 · QueryDetail 3 · WorkbenchLayout 6)
+./gradlew test                   테스트 1027, 실패 0, 오류 0, 건너뜀 74 (05:20:49 UTC 시작)
+```
+
+메인 검증 중 두 번 백그라운드 실행이 메모리 부족으로 중단됐다(유휴 Gradle 데몬 다섯). 데몬을 멈추고 전경에서 한 회차씩 돌린 결과를 위에 적었다.
+
+### 정직하게 남기는 범위
+
+- 헬스 스코어·백업 신선도 상세 행은 구조만 같이 고쳤고 좁은 화면에서 펼쳐 재지 않았다
+- 980~1200px 구간, 워크시트 탭이 여러 개일 때의 좁은 화면은 재지 않았다
+- 집계 카드의 원인인 서버 60초 캐시(`ScoreService.reportAll`)는 그대로다 — 화면은 사실만 말한다
+- 콘솔 인스턴스 등록 화면은 없다(만들지 않았다)

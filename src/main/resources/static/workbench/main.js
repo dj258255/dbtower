@@ -130,7 +130,13 @@ async function init() {
       `<option value="${esc(i.id)}" data-icon="${esc(i.type)}">${esc(i.name)}${i.readConfigured ? "" : " · 조회 계정 없음"}</option>`).join("")
     : '<option value="">볼 수 있는 인스턴스가 없습니다</option>';
   if (!state.instances.length) {
-    showInstanceProblem("볼 수 있는 인스턴스가 없습니다 — 다른 팀 대상이거나, 아직 등록된 인스턴스가 없습니다. ADMIN이 인스턴스를 등록하면 여기에 나옵니다.");
+    // 역할에 따라 할 수 있는 일이 다르다 — 등록은 ADMIN 몫이라 요청자에게 "등록하세요"라고 하면 안 된다(B6).
+    // 스키마 자리는 비운다: 같은 뜻을 두 곳에 쓰지 않고, 여기서 더 말할 것도 없다
+    const admin = state.me && state.me.role === "ADMIN";
+    showInstanceProblem(admin
+      ? "볼 수 있는 인스턴스가 없습니다 — 다른 팀 대상이거나 아직 등록되지 않았습니다. 등록은 콘솔이 아니라 REST API(POST /api/instances)로 합니다."
+      : "볼 수 있는 인스턴스가 없습니다 — 다른 팀 대상이거나 아직 등록되지 않았습니다. ADMIN에게 등록을 요청하세요.");
+    $("wb-tree").textContent = "";
     return;
   }
   enhanceSelect(select);
@@ -193,6 +199,8 @@ function bindChrome() {
   $("wb-ticket-cancel").addEventListener("click", () => { $("wb-ticket-modal").hidden = true; });
   $("wb-ticket-ok").addEventListener("click", submitTicket);
   document.querySelectorAll(".wb-rtab").forEach((b) => b.addEventListener("click", () => showPane(b.dataset.pane)));
+  // 툴바의 행 상한도 관제와 같은 드롭다운으로(B6) — 버튼 모양은 툴바 규칙(알약·같은 높이)이 덮는다
+  enhanceSelect($("wb-limit"));
   bindInfoTips();
 }
 
@@ -883,9 +891,13 @@ async function submitTicket() {
 function drawCompareTargets() {
   $("wb-cmp-left").textContent = state.instance ? `${state.instance.name} (${state.instance.type})` : "";
   const others = state.instances.filter((i) => state.instance && i.id !== state.instance.id);
-  $("wb-cmp-right").innerHTML = others.length
-    ? others.map((i) => `<option value="${esc(i.id)}">${esc(i.name)} · ${esc(i.type)}${i.readConfigured ? "" : " (조회 계정 없음)"}</option>`).join("")
+  const select = $("wb-cmp-right");
+  select.innerHTML = others.length
+    ? others.map((i) => `<option value="${esc(i.id)}" data-icon="${esc(i.type)}">${esc(i.name)}${i.readConfigured ? "" : " · 조회 계정 없음"}</option>`).join("")
     : '<option value="">비교할 다른 인스턴스가 없습니다</option>';
+  // 항목을 다시 채운 뒤 관제와 같은 드롭다운의 버튼 글자를 맞춘다(B6) — 감싸기(enhanceSelect)는 처음 한 번
+  enhanceSelect(select);
+  select._csSync?.();
 }
 
 async function runCompare() {

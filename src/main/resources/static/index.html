@@ -60,8 +60,11 @@
 
   <main class="workspace">
 
+    <!-- 등록된 인스턴스가 한 대도 없을 때 — 함대 카드 둘은 빈 채로 같은 문장을 두 번 말하게 되므로 접고, 여기 한 줄만 둔다(B6) -->
+    <section id="inst-onboarding" class="panel empty-onboarding" hidden></section>
+
     <!-- 함대 개요 — 인스턴스 선택과 무관한 전체 뷰 두 개를 나란히 -->
-    <div class="fleet-row">
+    <div class="fleet-row" id="fleet-row">
       <!-- 통합 헬스 스코어 (D8) — 5기종 전체를 한 점수·등급으로, 나쁜 순으로. 어디부터 볼지 기계가 정렬 -->
       <section class="panel health-score-panel">
         <h2 class="panel-title">헬스 스코어

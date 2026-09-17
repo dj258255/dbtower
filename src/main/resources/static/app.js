@@ -232,7 +232,41 @@ async function loadInstances() {
   state.serverCount = serverCount;
   populateInstanceFilterOptions(list);
   renderInstanceMatches();
+  renderInstanceOnboarding();
   handleInstanceDeepLink(list);
+}
+
+/**
+ * 등록된 인스턴스가 한 대도 없을 때의 한 줄 (B6).
+ *
+ * 함대 카드 둘(헬스 스코어·백업 신선도)은 빈 채로 같은 문장을 두 번 말하게 되므로 접고 여기서 한 번만 말한다.
+ * 역할에 따라 할 수 있는 일이 다르다 — 관제 역할에게 "등록하세요"라고 하면 할 수 없는 일을 권하는 것이다.
+ * 등록 화면은 콘솔에 없다(만들지 않는다) — 있지도 않은 화면으로 가는 버튼 대신 실제 입구를 적는다.
+ */
+function renderInstanceOnboarding() {
+  const box = $("#inst-onboarding");
+  const fleet = $("#fleet-row");
+  const none = state.instances.length === 0;
+  box.hidden = !none;
+  fleet.hidden = none;
+  // 대화 칸의 안내도 같은 사실 위에 선다 — 목록이 늦게 도착하면 "왼쪽에서 고르세요"로 굳는다(B6)
+  if (!state.instance) renderChat({});
+  if (!none) return;
+  box.innerHTML = state.role === "ADMIN"
+    ? `<p class="empty-onboarding-line">등록된 인스턴스가 없습니다. 콘솔에는 등록 화면이 없고,
+       <code>POST /api/instances</code>(또는 IaC의 멱등 upsert)로 등록하면 여기에 나타납니다.</p>`
+    : `<p class="empty-onboarding-line">등록된 인스턴스가 없습니다. 등록은 ADMIN이 하므로 관리자에게 요청하세요.</p>`;
+}
+
+/**
+ * 집계 카드가 비었을 때의 문장 — "등록된 인스턴스가 없습니다"라고 쓰면 화면이 거짓말을 한다.
+ * 이 카드들은 주기 집계 스냅샷을 그대로 보여주므로, 바로 아래 카드에 인스턴스가 버젓이 있는데도 그 문장이 떴다(B6).
+ * 등록 수(라이브)와 집계에 든 수(스냅샷)를 갈라서 말한다.
+ */
+function emptyAggregateNote() {
+  return state.instances.length
+    ? `이 집계에 든 인스턴스가 없습니다 — 등록 ${state.instances.length}대, 다음 집계 뒤 다시 봅니다.`
+    : "등록된 인스턴스가 없습니다.";
 }
 
 // 엔진 아이콘 — 공식 브랜드 로고(devicon SVG)를 스프라이트 심볼로 1회 정의하고 <use>로 참조(DOM 폭증 방지).
@@ -312,9 +346,11 @@ function renderInstanceMatches() {
   }
   $("#inst-count").textContent = anyFilter ? `${matches.length}/${total}` : `${total}대`;
   if (!shown.length) {
-    box.innerHTML = anyFilter
-      ? '<div class="inst-empty muted">일치하는 인스턴스가 없습니다.</div>'
-      : `<div class="inst-empty muted">위에서 검색하거나 필터를 선택하면 여기 표시됩니다.</div>`;
+    // 등록된 인스턴스가 0대면 "검색하거나 필터를 고르세요"가 거짓말이 된다(찾을 것이 없다). 안내는 작업면 한 곳에만 둔다
+    box.innerHTML = total === 0 ? ""
+      : anyFilter
+        ? '<div class="inst-empty muted">일치하는 인스턴스가 없습니다.</div>'
+        : `<div class="inst-empty muted">위에서 검색하거나 필터를 선택하면 여기 표시됩니다.</div>`;
     return;
   }
   const capped = shown.slice(0, INSTANCE_RENDER_CAP);
@@ -971,7 +1007,7 @@ async function loadHealthScore() {
     <span class="score-time muted">집계 ${esc(String(report.generatedAt).replace("T", " ").slice(0, 19))}</span>`;
 
   if (!report.instances.length) {
-    box.innerHTML = '<div class="muted">등록된 인스턴스가 없습니다.</div>';
+    box.innerHTML = `<div class="muted">${esc(emptyAggregateNote())}</div>`;
     return;
   }
   // 이미 서버가 나쁜 순으로 정렬해 내려준다 — 죽은 것·백업 없는 것이 위로 온다
@@ -1003,7 +1039,7 @@ async function loadHealthScore() {
           <td><span class="grade-badge grade-${esc(s.grade)}">${esc(s.grade)}</span></td>
           <td class="score-reasons">${reasons}</td>
         </tr>
-        <tr class="score-detail-row" hidden><td colspan="4"><div class="score-detail">${detail}</div></td></tr>
+        <tr class="score-detail-row" hidden><td colspan="4"><div class="row-detail-fit"><div class="score-detail">${detail}</div></div></td></tr>
       </tbody>`;
   }).join("");
   box.innerHTML = `
@@ -1019,6 +1055,8 @@ async function loadHealthScore() {
       const detailRow = row.parentElement.querySelector(".score-detail-row");
       detailRow.hidden = !detailRow.hidden;
       row.classList.toggle("score-row-open", !detailRow.hidden);
+      // 펼친 뒤(=레이아웃이 잡힌 뒤) 폭을 맞춘다 — 숨은 동안에는 clientWidth가 0이라 미리 맞출 수 없다
+      if (!detailRow.hidden) fitRowDetails();
     });
   });
 }
@@ -1046,7 +1084,7 @@ async function loadBackupFreshness() {
     <span class="freshness-time muted">임계 ${report.thresholdHours}h · 집계 ${esc(String(report.checkedAt).replace("T", " ").slice(0, 19))}</span>`;
 
   if (!report.instances.length) {
-    box.innerHTML = '<div class="muted">등록된 인스턴스가 없습니다.</div>';
+    box.innerHTML = `<div class="muted">${esc(emptyAggregateNote())}</div>`;
     return;
   }
   // 이미 서버가 나쁜 순으로 정렬해 내려준다 — 오래된 것/백업 없는 것이 위로 온다
@@ -1089,7 +1127,7 @@ async function loadBackupFreshness() {
           <td>${verify}</td>
           <td>${remote}</td>
         </tr>
-        <tr class="fresh-detail-row" hidden><td colspan="6"><div class="score-detail">${detail}</div></td></tr>
+        <tr class="fresh-detail-row" hidden><td colspan="6"><div class="row-detail-fit"><div class="score-detail">${detail}</div></div></td></tr>
       </tbody>`;
   }).join("");
   box.innerHTML = `
@@ -1106,7 +1144,7 @@ async function loadBackupFreshness() {
       const detailRow = group.querySelector(".fresh-detail-row");
       detailRow.hidden = !detailRow.hidden;
       row.classList.toggle("fresh-row-open", !detailRow.hidden);
-      if (!detailRow.hidden) fillFreshnessHealth(group.dataset.id);
+      if (!detailRow.hidden) { fitRowDetails(); fillFreshnessHealth(group.dataset.id); }
     });
   });
 }
@@ -1364,11 +1402,15 @@ function drawChart() {
   if (pts.length < 2) {
     svg.innerHTML = "";
     svg._chart = null;
+    // 빈 상자를 180px 남기면 안내 한 줄이 그 아래 떠 자리만 차지한다(139절의 drawSimpleChart와 같은 규칙).
+    // SVG에는 hidden 프로퍼티가 없어(HTMLElement 전용) 속성을 직접 토글한다
+    svg.toggleAttribute("hidden", true);
     $("#chart-empty").hidden = false;
     $("#chart-empty").textContent = state.chartMetric === "cpu"
       ? "CPU 시계열이 없습니다 (node_exporter/Prometheus 미수집)" : "이 구간에 수집된 스냅샷이 없습니다";
     return;
   }
+  svg.toggleAttribute("hidden", false);
   $("#chart-empty").hidden = true;
   const s = chartScales();
 
@@ -1690,8 +1732,49 @@ function placeDetailUnder(tr) {
     host.innerHTML = '<td class="detail-cell"></td>';
   }
   host.firstElementChild.colSpan = tr.children.length;
-  host.firstElementChild.appendChild(detail);
+  // 상세를 폭 맞춤 래퍼 안에 넣는다 — 146절의 width:0 규칙만으로는 표가 화면보다 넓을 때 상세가 표 폭만큼 넓어진다(B6fix)
+  let wrap = host.firstElementChild.querySelector(".row-detail-fit");
+  if (!wrap) {
+    wrap = document.createElement("div");
+    wrap.className = "row-detail-fit";
+    host.firstElementChild.appendChild(wrap);
+  }
+  wrap.appendChild(detail);
   tr.after(host);
+  fitRowDetails();
+}
+
+/** 표에서 가장 가까운 가로 스크롤 상자 — 상세 폭의 기준이 되는 '보이는 폭'을 가진 조상 */
+function scrollBoxOf(el) {
+  for (let n = el.parentElement; n; n = n.parentElement) {
+    const ox = getComputedStyle(n).overflowX;
+    if (ox === "auto" || ox === "scroll") return n;
+  }
+  return null;
+}
+
+/**
+ * 표 행 안에 끼운 상세의 폭을 스크롤 상자의 **보이는 폭**에 맞춘다.
+ *
+ * 146절은 셀 안 상세를 `width: 0; min-width: calc(100% - 24px)`로 표 폭에 맞췄고, 표가 화면에 들어오면 그게 정답이다.
+ * 표가 화면보다 넓으면(390px) `100%`가 곧 표 전체 폭이라 상세 오른쪽이 스크롤 밖으로 나가고, 더보기·토글 오른쪽을
+ * 쓸 수 없게 된다(B6fix — 페이지 넘침은 0이었지만 사람은 쓸 수 없었다). 래퍼를 왼쪽 고정(sticky)으로 두고
+ * 폭을 상자의 clientWidth로 준다 — 표를 옆으로 밀어도 상세는 제자리에서 보이는 폭을 다 쓴다.
+ */
+function fitRowDetails(root = document) {
+  root.querySelectorAll(".row-detail-fit").forEach((wrap) => {
+    const box = scrollBoxOf(wrap);
+    if (!box) return;
+    wrap.style.width = box.clientWidth + "px";
+  });
+}
+
+/** 창·사이드바 폭이 바뀌면 상세 폭도 따라간다(상자를 관찰한다 — 표 내용이 아니라 상자 폭이 기준이다) */
+function watchRowDetails() {
+  const obs = new ResizeObserver(() => fitRowDetails());
+  document.querySelectorAll(".table-scroll, #score-result, #freshness-result, #command-metrics")
+    .forEach((box) => obs.observe(box));
+  window.addEventListener("resize", () => fitRowDetails());
 }
 
 function openDetail(query, tr) {
@@ -2436,6 +2519,8 @@ function setupUsersCard() {
   });
   ["user-new-name", "user-new-password"].forEach((id) =>
     $(`#${id}`).addEventListener("input", syncUserCreateButton));
+  // 역할 고르기도 다른 화면과 같은 드롭다운으로(B6) — 이 파일의 $는 querySelector라 id에는 #을 붙인다
+  enhanceSelect($("#user-new-role"));
   syncUserCreateButton();
 }
 
@@ -3297,7 +3382,9 @@ function mdToHtml(md) {
       const head = cells(rows[0]);
       const body = rows.slice(1).filter((r) => !isSep(r))
         .map((r) => `<tr>${cells(r).map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("");
-      out.push(`<table class="qtable incident-table"><thead><tr>${head.map((h) => `<th>${inline(h)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>`);
+      // 표를 스크롤 상자에 넣는다 — 리포트 표는 열 수·머리 글자가 AI가 만든 값이라 좁은 화면에서
+      // 그대로 두면 문서 폭을 밀어 페이지가 옆으로 넘친다(B6)
+      out.push(`<div class="table-scroll"><table class="qtable incident-table"><thead><tr>${head.map((h) => `<th>${inline(h)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`);
       continue;
     }
     if (l.startsWith("- ")) {
@@ -3645,7 +3732,10 @@ function renderChat({ follow = false } = {}) {
   const inst = state.instance;
   const cs = chatState();
   if (!inst || !cs) {
-    log.innerHTML = `<div class="chat-empty"><p>왼쪽에서 인스턴스를 고르면 그 DB에 물어볼 수 있습니다.</p></div>`;
+    // 인스턴스가 한 대도 없을 때 여기서 또 말하면 화면 세 곳이 같은 문장이 된다 — 그 사실은 작업면 한 줄과 부제가 말한다(B6fix)
+    log.innerHTML = state.instances.length
+      ? '<div class="chat-empty"><p>왼쪽에서 인스턴스를 고르면 그 DB에 물어볼 수 있습니다.</p></div>'
+      : "";
   } else {
     const parts = [];
     if (cs.error) parts.push(`<div class="chat-error">${esc(cs.error)}</div>`);
@@ -3682,12 +3772,17 @@ function syncChatHeader() {
   if (sub) {
     // 이름과 고정 문구를 분리한다 — 좁아지면 이름만 줄어들고 "· 읽기 도구로만 답합니다"는 끝까지 남는다.
     // 문구 사이의 공백은 글자에 넣지 않고 CSS 여백으로 준다(flex 항목 경계에서 앞 공백이 사라진다)
+    // 등록된 인스턴스가 한 대도 없으면 "왼쪽에서 고르세요"가 할 수 없는 일을 권하는 문장이 된다(B6)
+    const chatIdle = state.instances.length ? "왼쪽에서 인스턴스를 고르세요" : "인스턴스가 등록되면 이 칸에서 물어볼 수 있습니다";
     sub.innerHTML = inst
       ? `<span class="chat-sub-name">${esc(inst.name)}</span><span class="chat-sub-fixed">· 읽기 도구로만 답합니다</span>`
-      : `<span class="chat-sub-name">왼쪽에서 인스턴스를 고르세요</span>`;
+      : `<span class="chat-sub-name">${chatIdle}</span>`;
   }
   if (label) label.textContent = cs?.title || "새 대화";
-  if (sw) sw.disabled = !inst;
+  if (sw) {
+    sw.disabled = !inst;
+    sw.hidden = !inst;   // 누를 수 없으면 감춘다(B6fix) — 대상이 없으면 새 대화도 전환도 할 일이 없다
+  }
 }
 
 function renderChatList() {
@@ -3870,7 +3965,12 @@ function syncChatComposer() {
   const runningElsewhere = chat.running && !runningHere;
   const hasText = input.value.trim().length > 0;
   input.disabled = !inst;
-  input.placeholder = inst ? "무엇이 궁금한가요?" : "왼쪽에서 인스턴스를 고르면 물어볼 수 있습니다";
+  // 0대일 때 "왼쪽에서 고르세요"는 할 수 없는 일이다 — 부제가 사실을 말하므로 여기서는 비운다(B6fix)
+  input.placeholder = inst ? "무엇이 궁금한가요?"
+    : state.instances.length ? "왼쪽에서 인스턴스를 고르면 물어볼 수 있습니다" : "";
+  // 누를 수 없는 버튼은 감춘다 — 목록의 "새 대화"는 대상이 없으면 만들 것이 없다(B6fix)
+  const newBtn = $("#chat-new");
+  if (newBtn) newBtn.hidden = !inst;
   send.classList.toggle("is-stop", !!runningHere);
   send.setAttribute("aria-label", runningHere ? "중지" : "보내기");
   send.title = runningElsewhere ? "다른 인스턴스의 진단이 끝나면 보낼 수 있습니다" : "";
@@ -4220,9 +4320,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadMe();
   setupModes();
   loadMcpCommand();
-  loadInstances();
-  loadHealthScore();     // 함대 전체 통합 헬스 스코어 (D8) — 나쁜 순 정렬, 대시보드 상단 상시 뷰
-  loadBackupFreshness(); // 함대 전체 백업 신선도 (D7) — 인스턴스 선택과 무관한 상시 뷰
+  // 함대 카드 둘은 "등록된 인스턴스가 있는가"에 따라 문장이 달라진다 — 목록을 안 뒤에 부른다(B6).
+  // 병렬로 쏘면 목록보다 먼저 도착한 카드가 "등록된 인스턴스가 없습니다"로 굳는다
+  loadInstances().catch(() => {}).then(() => {
+    loadHealthScore();     // 함대 전체 통합 헬스 스코어 (D8) — 나쁜 순 정렬, 대시보드 상단 상시 뷰
+    loadBackupFreshness(); // 함대 전체 백업 신선도 (D7) — 인스턴스 선택과 무관한 상시 뷰
+  });
   setupTabs();
   setupMonitorNav();
   setupLive();
@@ -4237,6 +4340,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupChartDrag();
   setupCopyButtons();
   setupQueryDetail();
+  watchRowDetails();   // 표 행 안 상세의 폭을 스크롤 상자의 보이는 폭에 맞춘다(B6fix)
   setupMcpCard();      // 제공 도구 접기(B4)
   setupUsersCard();    // 역할 적용/취소·새 사용자 조건(B4)
   loadMcpTools();
