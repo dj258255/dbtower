@@ -56,7 +56,7 @@ class ScoreServiceTest {
                 new io.dbtower.operator.model.ResourcePressure(2, 151L, 0L, "실행 중 스레드", "Threads_running")));
         service = new ScoreService(registryService, baselineService, advisorService, sloService, freshnessService,
                 operatorFactory,
-                45, 4, 16, 8, 3, 30, 25, 10, 20, 12, 6, 14, 0.75, 0.90);
+                45, 4, 16, 8, 3, 30, 25, 10, 20, 12, 6, 14, 0.75, 0.90, 4);
     }
 
     private DatabaseInstance instance(long id, String name) {
@@ -76,6 +76,52 @@ class ScoreServiceTest {
         when(freshnessService.freshnessFor(inst)).thenReturn(
                 new BackupFreshness(id, inst.getName(), DbmsType.MYSQL, null, null, null, 2.0, true,
                         BackupFreshness.Status.FRESH, 24));
+    }
+
+    @Test
+    void 닿지_않는_대상의_느린_신호들은_동시에_기다린다() {
+        // #80 — 재기동 직후 첫 조회 56초: 다운 대상 둘이 신호마다 연결 시간 초과를 차례로 기다렸다.
+        // 두 인스턴스 × 느린 신호 셋(각 300ms)이 차례로면 1.8초, 동시면 약 0.3초다
+        DatabaseInstance a = instance(1L, "oracle");
+        DatabaseInstance b = instance(2L, "mssql");
+        stubHealthy(1L, a);
+        stubHealthy(2L, b);
+        when(registryService.findAll()).thenReturn(List.of(a, b));
+        for (long id : new long[]{1L, 2L}) {
+            when(registryService.health(id)).thenAnswer(inv -> { Thread.sleep(300); return HealthStatus.up("x", 300); });
+            when(sloService.evaluate(id)).thenAnswer(inv -> { Thread.sleep(300);
+                return new SloReport(id, "x", DbmsType.MYSQL, now, null, null, null, SloReport.MEETING); });
+        }
+        when(advisorService.inspect(any(DatabaseInstance.class))).thenAnswer(inv -> { Thread.sleep(300);
+            DatabaseInstance i = inv.getArgument(0);
+            return new InstanceAdvisorReport(i.getId(), i.getName(), DbmsType.MYSQL, now, List.of(), 0, 0, 0); });
+
+        long start = System.nanoTime();
+        HealthScoreReport report = service.reportAll();
+        long ms = (System.nanoTime() - start) / 1_000_000;
+
+        assertEquals(2, report.instances().size());
+        assertTrue(ms < 1200, "차례로 기다렸다: " + ms + "ms");
+    }
+
+    @Test
+    void 캐시가_빈_채로_동시에_들어온_조회는_한_번만_계산한다() throws Exception {
+        DatabaseInstance a = instance(1L, "mysql");
+        stubHealthy(1L, a);
+        when(registryService.findAll()).thenReturn(List.of(a));
+        java.util.concurrent.atomic.AtomicInteger probes = new java.util.concurrent.atomic.AtomicInteger();
+        when(registryService.health(1L)).thenAnswer(inv -> { probes.incrementAndGet(); Thread.sleep(200); return HealthStatus.up("8.0", 2); });
+
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(4);
+        try {
+            var calls = new java.util.ArrayList<java.util.concurrent.Future<HealthScoreReport>>();
+            for (int k = 0; k < 4; k++) calls.add(pool.submit(() -> service.reportAll()));
+            HealthScoreReport first = calls.get(0).get();
+            for (var c : calls) assertSame(first, c.get());
+        } finally {
+            pool.shutdownNow();
+        }
+        assertEquals(1, probes.get());
     }
 
     @Test

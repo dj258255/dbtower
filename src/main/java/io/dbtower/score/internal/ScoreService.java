@@ -12,6 +12,7 @@ import io.dbtower.score.HealthScoreView;
 import io.dbtower.score.ScoreQuery;
 import io.dbtower.score.internal.SignalContribution.Signal;
 import io.dbtower.slo.SloService;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +22,11 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Supplier;
 
 /**
@@ -45,6 +51,12 @@ public class ScoreService implements ScoreQuery {
     private final BackupFreshnessService freshnessService;
     private final DbmsOperatorFactory operatorFactory;
     private final ScoreWeights weights;
+    // 계산 병렬화(#80) — 재기동 직후 첫 조회가 56초 걸렸다. 닿지 않는 대상은 신호마다 연결 시간 초과(가용성 5초·점검 조언 10~15초·SLO 5초·자원 5초)를
+    // 기다리는데, 신호도 인스턴스도 차례로 돌아 합이 됐다. 인스턴스 풀과 신호 풀을 나눈다 — 인스턴스 작업이 신호 결과를 기다리므로
+    // 한 풀에 섞으면 풀이 인스턴스 작업으로 차서 교착한다. 가상 스레드는 JDBC 드라이버의 synchronized에 캐리어가 묶여(Java 21) 쓰지 않는다
+    private final ExecutorService instancePool;
+    private final ExecutorService signalPool;
+    private final Object computeLock = new Object();
 
     public ScoreService(RegistryService registryService, BaselineService baselineService,
                         AdvisorService advisorService, SloService sloService,
@@ -63,7 +75,12 @@ public class ScoreService implements ScoreQuery {
                         @Value("${dbtower.score.weights.resource-warn:6}") double resourceWarn,
                         @Value("${dbtower.score.weights.resource-critical:14}") double resourceCritical,
                         @Value("${dbtower.score.weights.resource-warn-ratio:0.75}") double resourceWarnRatio,
-                        @Value("${dbtower.score.weights.resource-critical-ratio:0.90}") double resourceCriticalRatio) {
+                        @Value("${dbtower.score.weights.resource-critical-ratio:0.90}") double resourceCriticalRatio,
+                        @Value("${dbtower.score.parallelism:4}") int parallelism) {
+        int instances = Math.max(1, parallelism);
+        this.instancePool = Executors.newFixedThreadPool(instances, daemon("dbtower-score"));
+        // 인스턴스 하나가 신호 여섯을 동시에 낸다
+        this.signalPool = Executors.newFixedThreadPool(instances * 6, daemon("dbtower-score-signal"));
         this.registryService = registryService;
         this.operatorFactory = operatorFactory;
         this.baselineService = baselineService;
@@ -74,6 +91,20 @@ public class ScoreService implements ScoreQuery {
                 advisorCritical, advisorWarning, advisorCap, sloBreaching, sloAtRisk,
                 backupNoBackup, backupStale,
                 resourceWarn, resourceCritical, resourceWarnRatio, resourceCriticalRatio);
+    }
+
+    private static java.util.concurrent.ThreadFactory daemon(String name) {
+        return r -> {
+            Thread t = new Thread(r, name);
+            t.setDaemon(true);
+            return t;
+        };
+    }
+
+    @PreDestroy
+    void shutdown() {
+        instancePool.shutdownNow();
+        signalPool.shutdownNow();
     }
 
     /**
@@ -91,7 +122,9 @@ public class ScoreService implements ScoreQuery {
     @Scheduled(fixedDelayString = "${dbtower.score.refresh-ms:60000}")
     public void refreshCache() {
         try {
-            this.cached = computeAll();
+            synchronized (computeLock) {
+                this.cached = computeAll();
+            }
         } catch (Exception e) {
             log.warn("헬스 스코어 캐시 갱신 실패(직전 캐시 유지): {}", e.getMessage());
         }
@@ -100,15 +133,36 @@ public class ScoreService implements ScoreQuery {
     /** 전 인스턴스 스코어 — 웹 카드·GET /api/health-score. 캐시가 있으면 그대로, 없으면(첫 조회) 즉석 계산. */
     public HealthScoreReport reportAll() {
         HealthScoreReport snapshot = cached;
-        return snapshot != null ? snapshot : computeAll();
+        if (snapshot != null) {
+            return snapshot;
+        }
+        // 캐시가 비었을 때(재기동 직후) 들어온 조회는 따로 계산하지 않고 도는 계산을 기다린다 — 전에는 기동 직후의 주기 계산과
+        // 첫 조회가 같은 계산을 동시에 두 번 했다(#80)
+        synchronized (computeLock) {
+            if (cached == null) {
+                cached = computeAll();
+            }
+            return cached;
+        }
     }
 
     private HealthScoreReport computeAll() {
         LocalDateTime now = LocalDateTime.now();
-        List<HealthScore> scores = registryService.findAll().stream()
-                .map(instance -> evaluate(instance, now))
+        List<Future<HealthScore>> futures = registryService.findAll().stream()
+                .map(instance -> instancePool.submit(() -> evaluate(instance, now)))
                 .toList();
-        return HealthScoreReport.of(now, scores);
+        return HealthScoreReport.of(now, futures.stream().map(ScoreService::join).toList());
+    }
+
+    private static <T> T join(Future<T> future) {
+        try {
+            return future.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("헬스 스코어 계산이 중단됐다", e);
+        } catch (ExecutionException e) {
+            throw e.getCause() instanceof RuntimeException re ? re : new IllegalStateException(e.getCause());
+        }
     }
 
     /** 인스턴스 하나의 상세 분해 — GET /api/instances/{id}/health-score(존재 검증 포함). */
@@ -132,20 +186,27 @@ public class ScoreService implements ScoreQuery {
         // 다른 신호와 달리 health 실패는 인스턴스가 사용자에게도 닿지 않는다는 가장 치명적인 신호라, ERROR로
         // 물러서지 않고 down으로 감점해 나쁜 순 정렬 최상단에 올린다(오퍼레이터가 DataAccessException만 down으로
         // 잡고 풀 초기화 예외는 흘려보내는 경우까지 여기서 down으로 수렴시킨다).
-        contributions.add(SignalContribution.fromHealth(probeHealth(id), weights));
-        contributions.add(collect(Signal.ANOMALY,
-                () -> SignalContribution.fromAnomaly(baselineService.detectAnomalies(id, now), weights)));
-        contributions.add(collect(Signal.ADVISOR,
-                () -> SignalContribution.fromAdvisor(advisorService.inspect(instance), weights)));
-        contributions.add(collect(Signal.SLO,
-                () -> SignalContribution.fromSlo(sloService.evaluate(id), weights)));
-        contributions.add(collect(Signal.BACKUP,
-                () -> SignalContribution.fromBackup(freshnessService.freshnessFor(instance), weights)));
-        // 자원 압박 (162절) — 기종이 자기 통계로 답하는 "지금 몇 개가 동시에 일하나".
-        // 못 읽는 기종·환경은 empty라 판정 보류로 두고 점수에서 제외한다(0으로 위장하지 않는다).
-        contributions.add(collect(Signal.RESOURCE, () -> resourceSignal(instance)));
+        // 신호는 서로 독립이라 동시에 모은다(#80). 결과 순서는 제출 순서 그대로 둔다
+        List<Future<SignalContribution>> signals = List.of(
+                signal(() -> SignalContribution.fromHealth(probeHealth(id), weights)),
+                signal(() -> collect(Signal.ANOMALY,
+                        () -> SignalContribution.fromAnomaly(baselineService.detectAnomalies(id, now), weights))),
+                signal(() -> collect(Signal.ADVISOR,
+                        () -> SignalContribution.fromAdvisor(advisorService.inspect(instance), weights))),
+                signal(() -> collect(Signal.SLO,
+                        () -> SignalContribution.fromSlo(sloService.evaluate(id), weights))),
+                signal(() -> collect(Signal.BACKUP,
+                        () -> SignalContribution.fromBackup(freshnessService.freshnessFor(instance), weights))),
+                // 자원 압박 (162절) — 기종이 자기 통계로 답하는 "지금 몇 개가 동시에 일하나".
+                // 못 읽는 기종·환경은 empty라 판정 보류로 두고 점수에서 제외한다(0으로 위장하지 않는다).
+                signal(() -> collect(Signal.RESOURCE, () -> resourceSignal(instance))));
+        signals.forEach(f -> contributions.add(join(f)));
 
         return HealthScore.of(id, instance.getName(), instance.getType(), now, contributions);
+    }
+
+    private Future<SignalContribution> signal(Callable<SignalContribution> task) {
+        return signalPool.submit(task);
     }
 
     /** health 프로브 — 실패는 다운으로 수렴시킨다(접속 불가 = 사용자에게도 불가 = 치명). */
