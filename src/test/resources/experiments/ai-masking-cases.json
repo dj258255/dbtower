@@ -1,5 +1,5 @@
 {
-  "note": "E2 마스킹 토글 실험 사례 세트 — 조건 A/B/C의 입력과 자동 채점 키워드",
+  "note": "E2 마스킹 토글 실험 사례 세트 — 조건 A/B/C의 입력과 자동 채점 키워드. L=리터럴이 진단을 가르는 사례 11개(날짜·숫자 범위 크기와 날짜 함수 포함), C=리터럴과 무관한 대조군 4개",
   "cases": [
     {
       "id": "L1",
@@ -195,6 +195,61 @@
       ],
       "sensitiveLiterals": [
         "VIP"
+      ]
+    },
+    {
+      "id": "L9",
+      "dbms": "MySQL",
+      "sql": "SELECT id FROM exp_mask_orders WHERE amount BETWEEN 99000 AND 99100 AND created_at >= '2026-08-01'",
+      "expectedCause": "좁은 범위: 인덱스 레인지 스캔이 맞다",
+      "acceptKeywords": [
+        "좁은 범위",
+        "선택도",
+        "레인지",
+        "range",
+        "인덱스가 유리",
+        "적은 행"
+      ],
+      "sensitiveLiterals": [
+        "99000",
+        "99100",
+        "2026-08-01"
+      ]
+    },
+    {
+      "id": "L10",
+      "dbms": "MySQL",
+      "sql": "SELECT id FROM exp_mask_orders WHERE amount > 0 AND created_at >= '2020-01-01'",
+      "expectedCause": "넓은 범위: 전 행이 조건을 만족해 풀스캔이 정상",
+      "acceptKeywords": [
+        "넓은 범위",
+        "전 행",
+        "대부분",
+        "선택도",
+        "풀스캔이 합리",
+        "풀스캔이 정상",
+        "인덱스가 도움이 되지 않"
+      ],
+      "sensitiveLiterals": [
+        "2020-01-01"
+      ]
+    },
+    {
+      "id": "L11",
+      "dbms": "PostgreSQL",
+      "sql": "SELECT id FROM exp_mask_orders WHERE date_trunc('month', created_at) = DATE '2026-08-01'",
+      "expectedCause": "컬럼에 함수: 인덱스를 못 쓴다",
+      "acceptKeywords": [
+        "함수",
+        "date_trunc",
+        "표현식",
+        "가공",
+        "인덱스를 쓰지 못",
+        "sargable",
+        "형태를 바꾸"
+      ],
+      "sensitiveLiterals": [
+        "2026-08-01"
       ]
     }
   ]
