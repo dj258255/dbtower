@@ -862,8 +862,30 @@ function handleInstanceDeepLink(list) {
   }
   state.instance = target;
   renderInstanceMatches();
+  // 들어온 주소를 첫 선택이 덮어쓰지 않게 한다 — 되살리기가 끝나면(또는 되살릴 것이 없으면 첫 조회 뒤) 다시 주소를 쓴다
+  urlState.restoring = true;
   const ready = selectInstance(target, $(`#instance-list .instance-card[data-id="${target.id}"]`));
   const deepQ = params.get("diagnose"), deepView = params.get("view"), compareAt = params.get("compareAt");
+  // 탭·그룹·기간·상세를 되살린다(#60). 기존 딥링크(view·compareAt·aiop)가 있으면 그쪽이 화면을 정한다
+  if (!deepView && !compareAt && !deepJob && (params.has("tab") || params.has("q") || params.has("range"))) {
+    // 탭·그룹은 바로 연다(첫 조회가 느린 대상이면 그만큼 엉뚱한 탭을 보게 된다). 상세·기간은 표가 그려진 뒤에
+    const tab = params.get("tab");
+    if (tab) document.querySelector(`.tab[data-tab="${CSS.escape(tab)}"]`)?.click();
+    if (tab === "monitor" && params.get("mon") && document.querySelector(`.mon-tab[data-mon="${CSS.escape(params.get("mon"))}"]`)) showMonGroup(params.get("mon"));
+    // 기간은 바로 바꿔 다시 조회한다(순번이 앞선 기본 조회를 이긴다). 상세는 그 표가 그려질 때 연다 — 모든 첫 조회를 기다리면
+    // 느린 대상에서 수십 초 뒤에야 열렸다
+    const range = params.get("range");
+    if (range && [...$("#range-preset").options].some((o) => o.value === range && o.value !== "custom")) {
+      setRangePreset(range);
+      applyRangeMinutes(Number(range));
+      syncRangeText();
+      runQuery();
+    }
+    if (params.get("q") && (tab || "top") === "top") urlState.pendingQuery = params.get("q");
+    urlState.restoring = false;
+  } else {
+    urlState.restoring = false;
+  }
   // 워크벤치에서 변경을 실행한 운영자가 넘어오는 입구 — 실행 시각 앞 30분(기준)과 뒤 30분(대상)을 시점 비교로 바로 연다.
   // 기본 구간 설정과 첫 조회가 끝난 뒤에 덮어써야 selectInstance의 기본값에 지워지지 않는다
   if (compareAt && !Number.isNaN(parseApiTime(compareAt).getTime())) {
@@ -907,6 +929,9 @@ async function selectInstance(instance, card) {
   // 대상이 바뀌었다 — 이전 인스턴스의 대상 조회는 (안 보낸 것은 보내지 않고, 이미 보낸 것은 응답이 와도) 버린다(#31).
   // 그래야 새 대상의 화면을 옛 대상의 값으로 덮지 않는다
   dropPendingTargetCalls();
+  // 앞 인스턴스의 펼친 상세가 새 주소에 실리지 않게 먼저 닫는다(첫 조회도 어차피 닫는다)
+  if (state.currentQuery) closeDetail();
+  syncMonitorUrl();
   renderInstanceMatches(); // 선택 반영 — 선택 카드를 맨 위 유지·상세 펼침·하이라이트
   renderChat({ follow: true }); // AI 칸은 잠시 그대로 — 아래 로더가 서버에서 그 인스턴스 대화를 다시 읽어 그린다
   $("#time-panel").hidden = false;
@@ -1079,6 +1104,7 @@ function parkAiopDetail() {
 
 function closeAiOperation() {
   aiops.openId = null;
+  syncMonitorUrl();
   const box = $("#aiops-detail");
   if (box) box.hidden = true;
   parkAiopDetail();
@@ -1099,6 +1125,7 @@ const aiopList = (title, items, extra = "", cap = 0) => (items && items.length)
 async function openAiOperation(jobId, opts = {}) {
   const box = $("#aiops-detail");
   aiops.openId = jobId;
+  if (!opts.quiet) syncMonitorUrl();
   if (document.querySelector(`#aiops-table .aiop-row[data-job="${CSS.escape(jobId)}"]`)) placeAiopDetail(jobId);
   else parkAiopDetail();
   if (!opts.quiet) { box.hidden = false; box.innerHTML = `<div class="muted">불러오는 중...</div>`; }
@@ -2239,11 +2266,19 @@ function openDetailSection(id) {
 }
 
 function bindRowClicks(rows) {
+  state.topRows = rows;
+  // 주소로 들어온 상세(#60)는 그 표가 처음 그려질 때 한 번 연다
+  if (urlState.pendingQuery) {
+    const qid = urlState.pendingQuery;
+    urlState.pendingQuery = null;
+    queueMicrotask(() => { urlState.restoring = true; openDetailByQueryId(qid); urlState.restoring = false; });
+  }
   $("#top-table").querySelectorAll("tbody tr").forEach((tr) => {
     tr.addEventListener("click", () => {
       document.querySelectorAll("#top-table tbody tr").forEach((r) => r.classList.remove("selected"));
       tr.classList.add("selected");
       openDetail(rows[tr.dataset.idx], tr);
+      syncMonitorUrl();
     });
   });
 }
@@ -4856,6 +4891,7 @@ function setupTabs() {
         $(`#tab-${name}`).hidden = name !== tab.dataset.tab;
       });
       syncLive();
+      syncMonitorUrl();
     });
   });
 }
@@ -4873,6 +4909,7 @@ function showMonGroup(name) {
   document.querySelectorAll(".mon-group").forEach((g) => { g.hidden = g.dataset.group !== name; });
   syncLive();
   scheduleAiOpsRefresh();
+  syncMonitorUrl();
 }
 
 // 기간 선택(#61) — 최근 N분을 고르면 조회 구간과 그 직전 같은 길이의 비교 구간을 채우고 바로 조회한다.
@@ -4909,6 +4946,7 @@ function setupPresets() {
       applyRangeMinutes(Number(sel.value));
       syncRangeText();
       if (state.instance) runQuery();
+      syncMonitorUrl({ push: false });
       return;
     }
     syncRangeText();
@@ -4926,6 +4964,7 @@ function setupModes() {
   if (new URLSearchParams(location.search).get("mode") === "workbench") setMode("workbench", { keepUrl: true });
   window.addEventListener("popstate", () => {
     const m = new URLSearchParams(location.search).get("mode") === "workbench" ? "workbench" : "monitor";
+    if (m === "monitor" && shell.mode === "monitor") restoreMonitorFromPop();
     if (m !== shell.mode) setMode(m, { keepUrl: true });
   });
 }
@@ -4968,6 +5007,91 @@ async function setMode(mode, { instance = null, handoff = null, keepUrl = false 
 }
 
 // 워크벤치에서 보던 인스턴스를 관제로 돌아와서도 연다 — 모드를 바꿀 때마다 대상을 다시 고르지 않게
+// ---------- 보던 화면을 주소에 남긴다(#60) ----------
+// 탭·모니터링 그룹·펼친 쿼리 상세·펼친 AI 작업·기간이 주소에 없어 새로고침하거나 동료에게 링크를 주면 첫 화면으로 돌아갔다.
+// 한 단계(인스턴스·탭·그룹·상세·작업을 바꿈)는 pushState라 뒤로 가기가 그 단계로 돌아가고, 기간 선택은 replaceState로 덮는다.
+// 되돌리는 동안(urlState.restoring)에는 주소를 다시 쓰지 않는다 — 뒤로 가기가 새 단계를 만들면 앞으로 가기가 사라진다
+const urlState = { restoring: false };
+
+function monitorUrlParams() {
+  const q = new URLSearchParams();
+  if (!state.instance) {
+    if (aiops.openId) q.set("aiop", aiops.openId);
+    return q;
+  }
+  q.set("instance", state.instance.id);
+  const tab = document.querySelector(".tab.active")?.dataset.tab || "top";
+  if (tab !== "top") q.set("tab", tab);
+  if (tab === "monitor") {
+    const mon = document.querySelector(".mon-tab.active")?.dataset.mon || "perf";
+    if (mon !== "perf") q.set("mon", mon);
+    if (mon === "diag" && aiops.openId) q.set("aiop", aiops.openId);
+  }
+  if (tab === "top" && state.currentQuery && state.currentQuery.queryId != null) q.set("q", String(state.currentQuery.queryId));
+  const range = $("#range-preset")?.value;
+  if (range && range !== "30" && range !== "custom") q.set("range", range);
+  return q;
+}
+
+function syncMonitorUrl({ push = true } = {}) {
+  if (urlState.restoring || shell.mode !== "monitor") return;
+  const next = monitorUrlParams().toString();
+  const url = next ? `/?${next}` : "/";
+  if (url === location.pathname + location.search) return;
+  history[push ? "pushState" : "replaceState"](null, "", url);
+}
+
+// 주소에 적힌 탭·그룹·기간·상세·작업을 화면에 되살린다. 인스턴스의 첫 조회가 끝난 뒤(표가 그려진 뒤) 부른다
+async function restoreMonitorView(params) {
+  urlState.restoring = true;
+  try {
+    const range = params.get("range");
+    if (range && range !== $("#range-preset").value && [...$("#range-preset").options].some((o) => o.value === range)) {
+      setRangePreset(range);
+      applyRangeMinutes(Number(range));
+      syncRangeText();
+      await runQuery();
+    }
+    const tab = params.get("tab") || "top";
+    document.querySelector(`.tab[data-tab="${CSS.escape(tab)}"]`)?.click();
+    if (tab === "monitor") {
+      const mon = params.get("mon") || "perf";
+      if (document.querySelector(`.mon-tab[data-mon="${CSS.escape(mon)}"]`)) showMonGroup(mon);
+      const job = params.get("aiop");
+      if (mon === "diag" && job) await openAiOperation(job);
+      else if (aiops.openId) closeAiOperation();
+    }
+    const qid = params.get("q");
+    if (tab === "top" && qid) openDetailByQueryId(qid);
+    else if (!qid && state.currentQuery) closeDetail();
+  } finally {
+    urlState.restoring = false;
+  }
+}
+
+// 뒤로·앞으로 가기(#60) — 같은 인스턴스면 보기만 되돌리고, 인스턴스가 다르면 그 인스턴스를 연 뒤 되돌린다
+async function restoreMonitorFromPop() {
+  const params = new URLSearchParams(location.search);
+  const id = params.get("instance");
+  if (id && (!state.instance || String(state.instance.id) !== id)) {
+    const inst = state.instances.find((i) => String(i.id) === id);
+    if (!inst) return;
+    urlState.restoring = true;
+    await selectInstance(inst, null);
+  }
+  await restoreMonitorView(params);
+}
+
+function openDetailByQueryId(queryId) {
+  const idx = (state.topRows || []).findIndex((row) => String(row.queryId) === queryId);
+  if (idx < 0) return;
+  const tr = $("#top-table").querySelector(`tbody tr[data-idx="${idx}"]`);
+  if (!tr) return;
+  document.querySelectorAll("#top-table tbody tr").forEach((r) => r.classList.remove("selected"));
+  tr.classList.add("selected");
+  openDetail(state.topRows[idx], tr);
+}
+
 function openMonitorInstance(id) {
   if (id == null || !state.instances || (state.instance && String(state.instance.id) === String(id))) return;
   const inst = state.instances.find((i) => String(i.id) === String(id));
