@@ -440,6 +440,11 @@ input[type="datetime-local"] {
   overflow-x: auto; white-space: pre-wrap; word-break: break-word; margin: 0;
 }
 .codeblock.ai { background: #10141b; color: #d9e6d9; }
+/* 쿼리 상세 AI 분석 — 읽는 글이라 밝은 카드에 본문 글꼴로(#40). 전에는 어두운 코드 상자에 고정폭 한 문단이었다 */
+.ai-analysis { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; font-size: 13.5px; line-height: 1.75; color: var(--text); word-break: keep-all; overflow-wrap: anywhere; }
+.ai-analysis:empty { display: none; }
+.ai-analysis p { margin: 0 0 10px; }
+.ai-verdict { font-weight: 700; color: #075985; background: #e8f3fb; border-radius: 8px; padding: 8px 12px; }
 /* JSON 실행계획 구문 강조 — 다크 코드블록 위에서 키·문자열·숫자·불리언 색 구분 */
 .j-key { color: #7cc7ff; }
 .j-str { color: #9fe8a8; }
@@ -899,12 +904,24 @@ button:focus-visible, input:focus-visible, select:focus-visible,
    값이 없는 축은 0이 아니라 "미확보"로 적는다. 대비(계산): 지표 이름 #5b6475/흰 5.96, 보조 #667085/흰 4.97·강조행 4.60 */
 /* 안티패턴 카드(162절) — 축 3개가 붙어 있어 어디까지가 한 축인지 안 보였다. 축마다 칸을 주고
    이름·값·원천을 세로 위계로 세운다. 카드 사이 간격도 벌려 목록이 벽처럼 읽히지 않게 한다. */
-.ap-row { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; }
+.ap-row { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
 .ap-row + .ap-row { margin-top: 8px; }
-.ap-current { background: #f3f6ff; }
+/* 지금 보는 쿼리만 하늘 테두리 — 전에는 모든 카드가 경고색(노란) 면이라 "전부 문제"로 읽혔다(#40) */
+.ap-current { border-color: rgba(10, 106, 168, .45); background: #f7fbff; }
+.ap-badge { font-size: 11px; font-weight: 700; color: #075985; background: #e8f3fb; border-radius: 999px; padding: 1px 8px; }
+.ap-label { color: var(--muted); }
+.ap-state { font-size: 11px; font-weight: 700; border-radius: 6px; padding: 0 6px; margin-right: 2px; }
+.ap-unknown { color: #52697d; background: #eef1f5; cursor: help; }
+.ap-ok { color: #14724a; background: #e7f6ee; }
+.ap-check { color: #8a4d05; background: #fff1e0; }
+.ap-legend { margin: 0 0 8px; font-size: 12.5px; }
+.ap-legend summary { cursor: pointer; color: var(--primary); font-weight: 600; }
+.ap-legend p { margin: 6px 0 4px; }
+.ap-legend ul { margin: 0; padding-left: 18px; line-height: 1.7; }
 .ap-head { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
 .ap-head b { font-family: var(--mono, monospace); font-size: 12px; letter-spacing: .01em; cursor: help; }
-.ap-text { font-size: 11.5px; overflow-wrap: anywhere; line-height: 1.55; }
+/* 카드 안 SQL은 표 칸이 아니라 한 줄 말줄임 — .qtext의 색만 빌리고 표용 max-width:0은 되돌린다 */
+.ap-row .ap-text { font-size: 12px; line-height: 1.55; max-width: 100%; width: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ap-axes {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 10px; font-size: 12px; margin-top: 2px;
@@ -1536,3 +1553,27 @@ input[type="checkbox"] { accent-color: var(--primary); }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .aiop-select { background: #161a21; border-color: #333a45; color: #d5dae2; }
 }
+
+/* 쿼리 상세 테이블 구조(#40) — 인덱스는 목록, 열은 표(많으면 접는다). 전에는 "idx: … cols: …" 두 줄에 전부 이어 붙였다 */
+.schema-table { background: #fff; }
+.schema-table-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.schema-table-head .td-toggle { margin-left: auto; }
+.schema-sub { font-size: 12px; font-weight: 700; color: var(--muted); margin: 8px 0 4px; }
+.schema-list { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.7; }
+.schema-empty { font-size: 12.5px; }
+.schema-cols-wrap { margin-top: 8px; }
+.schema-cols-wrap summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--primary); }
+.schema-col-table { margin-top: 6px; font-size: 12.5px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* 인덱스 제안 설명과 후보(#40) — 무엇을 비교하는지, 무엇을 적는지 먼저 말한다 */
+.advisor-explain { margin: 4px 0 8px; font-size: 12.5px; line-height: 1.65; color: var(--text); word-break: keep-all; }
+.advisor-candidates { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12.5px; }
+.chip-btn { border: 0; background: #e8f3fb; color: #075985; border-radius: 999px; padding: 4px 10px; font: 600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; }
+.chip-btn:hover { background: #d6eaf7; }
+.chip-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* DB팀 문의 입력 — 처음부터 칸 폭 전체, 밝은 입력칸(#40). 전에는 코드 상자 스타일이라 좁고 어두웠다 */
+.inquiry-label { display: block; font-size: 12.5px; font-weight: 600; margin: 4px 0 6px; }
+.inquiry-note { display: block; width: 100%; box-sizing: border-box; min-height: 96px; resize: vertical; border: 1px solid var(--control-line); border-radius: 10px; padding: 10px 12px; font: 13.5px/1.6 inherit; font-family: inherit; color: var(--text); background: #fff; }
+.inquiry-note:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+
