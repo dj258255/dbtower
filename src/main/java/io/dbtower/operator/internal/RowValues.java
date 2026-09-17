@@ -101,8 +101,18 @@ final class RowValues {
             return;
         }
         switch (type) {
-            case Types.TINYINT, Types.SMALLINT, Types.INTEGER, Types.BIGINT, Types.REAL, Types.FLOAT, Types.DOUBLE,
-                 Types.NUMERIC, Types.DECIMAL -> ps.setBigDecimal(index, new BigDecimal(value));
+            // 정수 열을 BigDecimal로 보내면 PostgreSQL은 bigint = numeric 비교가 되어 기본 키 인덱스를 못 탄다.
+            // 키 재조회·되돌리기가 행마다 전체 스캔이 된다(2만 행 표에서 키 100개 묶음 72ms). long 범위를 넘는 값만
+            // (MySQL BIGINT UNSIGNED) BigDecimal로 보낸다
+            case Types.TINYINT, Types.SMALLINT, Types.INTEGER, Types.BIGINT -> {
+                try {
+                    ps.setLong(index, Long.parseLong(value));
+                } catch (NumberFormatException outOfRange) {
+                    ps.setBigDecimal(index, new BigDecimal(value));
+                }
+            }
+            case Types.REAL, Types.FLOAT, Types.DOUBLE, Types.NUMERIC, Types.DECIMAL ->
+                    ps.setBigDecimal(index, new BigDecimal(value));
             case Types.DATE -> ps.setObject(index, LocalDate.parse(value));
             case Types.TIME -> ps.setObject(index, LocalTime.parse(value));
             case Types.TIMESTAMP, Types.TIMESTAMP_WITH_TIMEZONE -> ps.setObject(index,
