@@ -1554,3 +1554,9 @@ input[type="checkbox"] { accent-color: var(--primary); }
 .schema-col-table { margin-top: 6px; font-size: 12.5px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
+/* 인덱스 제안 설명과 후보(#40) — 무엇을 비교하는지, 무엇을 적는지 먼저 말한다 */
+.advisor-explain { margin: 4px 0 8px; font-size: 12.5px; line-height: 1.65; color: var(--text); word-break: keep-all; }
+.advisor-candidates { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12.5px; }
+.chip-btn { border: 0; background: #e8f3fb; color: #075985; border-radius: 999px; padding: 4px 10px; font: 600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; }
+.chip-btn:hover { background: #d6eaf7; }
+.chip-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }

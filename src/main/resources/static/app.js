@@ -1892,6 +1892,7 @@ function toggleDetailView(key) {
   // 대신 SQL이 바뀌었으면 옛 결과는 그 SQL의 것이 아니므로 버린다
   if (key === "advisor") {
     if (stale) resetAdvisor();
+    renderAdvisorCandidates();
     $("#advisor-columns").focus();
     return;
   }
@@ -1902,6 +1903,49 @@ function toggleDetailView(key) {
 function refreshDetailView(key) {
   detailView.sql[key] = "";
   DETAIL_RUN[key]();
+}
+
+/**
+ * 인덱스 제안 후보 — 쿼리의 FROM 첫 테이블과 WHERE·JOIN ON·ORDER BY에 나온 열을 뽑아 누르면 채워지게 한다(#40).
+ * 사용자가 "무엇을 적으라는 건지" 몰랐다. 서버는 자동 추천을 하지 않으므로(PostgresOperator.adviseIndex) 여기서도
+ * 추천이라 부르지 않고 "쿼리에 나온 조건 열"로만 보인다. 파싱이 틀려도 채우기만 하고 실행은 사람이 누른다.
+ */
+function advisorCandidateList(sql) {
+  let text = String(sql || "").replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
+  // 서브쿼리 안의 열은 바깥 테이블의 것이 아니다 — 괄호 속 SELECT를 먼저 지운다
+  text = text.replace(/\b[A-Za-z_]\w*\(\s*\)/g, " ? ");   // current_database() 같은 인자 없는 호출
+  for (let i = 0; i < 5 && /\(\s*select\b[^()]*\)/i.test(text); i++) text = text.replace(/\(\s*select\b[^()]*\)/gi, " ? ");
+  const from = text.match(/\bfrom\s+([A-Za-z_][\w.]*)(?:\s+(?:as\s+)?([A-Za-z_]\w*))?/i);
+  if (!from) return [];
+  const table = from[1].split(".").pop();
+  const alias = from[2] && !/^(where|join|inner|left|right|order|group|limit|on)$/i.test(from[2]) ? from[2] : null;
+  const cols = [];
+  const add = (c) => { const name = c.split(".").pop(); if (!cols.includes(name) && !/^\$?\d+$/.test(name)) cols.push(name); };
+  const scan = (part) => {
+    for (const m of part.matchAll(/([A-Za-z_][\w]*(?:\.[A-Za-z_]\w*)?)\s*(?:=|<>|!=|<=|>=|<|>|\bin\b|\blike\b|\bbetween\b|\bis\b)/gi)) {
+      const ref = m[1];
+      if (/^(and|or|not|where|on|select|case|when|then)$/i.test(ref)) continue;
+      const q = ref.includes(".") ? ref.split(".")[0] : null;
+      if (q && q !== table && q !== alias) continue;
+      add(ref);
+    }
+  };
+  const where = text.match(/\bwhere\b([\s\S]*?)(?:\bgroup\s+by\b|\border\s+by\b|\blimit\b|$)/i);
+  if (where) scan(where[1]);
+  const order = text.match(/\border\s+by\b([\s\S]*?)(?:\blimit\b|$)/i);
+  if (order) order[1].split(",").forEach((p) => { const m = p.trim().match(/^([A-Za-z_][\w.]*)/); if (m && !/^\d/.test(m[1])) { const q = m[1].includes(".") ? m[1].split(".")[0] : null; if (!q || q === table || q === alias) add(m[1]); } });
+  const out = cols.slice(0, 4).map((c) => `${table}(${c})`);
+  if (cols.length >= 2) out.push(`${table}(${cols.slice(0, 2).join(", ")})`);
+  return out;
+}
+
+function renderAdvisorCandidates() {
+  const box = $("#advisor-candidates");
+  const list = advisorCandidateList(detailSql());
+  box.hidden = !list.length;
+  box.innerHTML = list.length
+    ? `<span class="muted">쿼리에 나온 조건 열:</span> ${list.map((c) => `<button type="button" class="chip-btn" data-advisor-candidate="${esc(c)}">${esc(c)}</button>`).join("")}`
+    : "";
 }
 
 function resetAdvisor() {
@@ -4675,6 +4719,12 @@ function setupQueryDetail() {
     if (e.key === "Escape" && !$("#detail-more-menu").hidden) closeDetailMore(true);
   });
   $("#btn-advisor-run").addEventListener("click", runIndexAdvisor);
+  $("#advisor-candidates").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-advisor-candidate]");
+    if (!b) return;
+    $("#advisor-columns").value = b.dataset.advisorCandidate;
+    $("#advisor-columns").focus();
+  });
   // 안티패턴 "다른 쿼리 N개 보기" — 결과를 다시 그리므로 위임으로 잡는다
   $("#antipattern-result").addEventListener("click", (e) => {
     const more = e.target.closest(".ap-more");
