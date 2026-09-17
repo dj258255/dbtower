@@ -5,7 +5,7 @@ import { request, streamEvents, esc, csrfToken, ApiError, errText, localTime } f
 import { SqlEditor, highlight } from "./editor.js";
 import { renderTree } from "./schema-tree.js";
 import { renderGrid } from "./grid.js";
-import { renderTimeline, renderChips, updatePending } from "./chat.js";
+import { renderTimeline, renderChips, updatePending, renderVersionPanel } from "./chat.js";
 import { renderDiff } from "./diff.js";
 import { TicketPanel } from "./tickets.js";
 import { renderTableDetail } from "./table-detail.js";
@@ -202,6 +202,7 @@ function bindChrome() {
   // 툴바의 행 상한도 관제와 같은 드롭다운으로(B6) — 버튼 모양은 툴바 규칙(알약·같은 높이)이 덮는다
   enhanceSelect($("wb-limit"));
   bindInfoTips();
+  setupVersionPanel();
 }
 
 /**
@@ -683,14 +684,13 @@ async function loadTimeline() {
   drawTimeline();
 }
 
-function drawTimeline() {
-  renderTimeline($("wb-timeline"), state.timeline, {
+function versionHandlers() {
+  return {
     currentVersion: state.sheet ? state.sheet.latestVersion : null,
-    // 흘려 받는 중인 답은 질문을 보낸 워크시트에만 그린다 — 다른 워크시트를 열면 남의 말풍선이 붙었다(148절 감사)
-    pending: state.pendingQuestion && state.sheet && state.pendingQuestion.sheetId === state.sheet.id ? state.pendingQuestion : null,
-    onApply: (sql) => { editor.value = sql; onEdit(); editor.focus(); },
-    onPreview: (sql) => previewSql(sql),
+    onApply: (sql) => { closeVersionPanel(); editor.value = sql; onEdit(); editor.focus(); },
+    onPreview: (sql) => { closeVersionPanel(); previewSql(sql); },
     onRestore: async (versionNo) => {
+      closeVersionPanel();
       const v = await request(`/api/workbench/worksheets/${state.sheet.id}/versions/${versionNo}/restore`, { method: "POST" });
       await reloadSheets();
       editor.value = v.sql;
@@ -699,7 +699,48 @@ function drawTimeline() {
       classifySoon();
       loadTimeline();
     },
+  };
+}
+
+function drawTimeline() {
+  renderTimeline($("wb-timeline"), state.timeline, {
+    ...versionHandlers(),
+    // 흘려 받는 중인 답은 질문을 보낸 워크시트에만 그린다 — 다른 워크시트를 열면 남의 말풍선이 붙었다(148절 감사)
+    pending: state.pendingQuestion && state.sheet && state.pendingQuestion.sheetId === state.sheet.id ? state.pendingQuestion : null,
   });
+  if (!$("wb-version-panel").hidden) renderVersionPanel($("wb-version-panel"), state.timeline, versionHandlers());
+}
+
+// 버전 기록 패널(#63) — 탭의 "최신 vN"에서 아래로 연다. 드롭다운과 같은 방식으로 body 좌표에 띄운다
+function openVersionPanel() {
+  const panel = $("wb-version-panel");
+  const badge = $("wb-version");
+  if (panel.parentElement !== document.body) document.body.appendChild(panel);
+  renderVersionPanel(panel, state.timeline, versionHandlers());
+  const r = badge.getBoundingClientRect();
+  panel.hidden = false;
+  const width = panel.offsetWidth;
+  panel.style.top = `${Math.round(r.bottom + 6)}px`;
+  panel.style.left = `${Math.round(Math.max(8, Math.min(r.left, window.innerWidth - width - 8)))}px`;
+  badge.setAttribute("aria-expanded", "true");
+}
+
+function closeVersionPanel() {
+  const panel = $("wb-version-panel");
+  if (panel.hidden) return;
+  panel.hidden = true;
+  $("wb-version").setAttribute("aria-expanded", "false");
+}
+
+function setupVersionPanel() {
+  $("wb-version").addEventListener("click", (e) => {
+    e.stopPropagation();
+    $("wb-version-panel").hidden ? openVersionPanel() : closeVersionPanel();
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#wb-version-panel, #wb-version")) closeVersionPanel();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeVersionPanel(); });
 }
 
 async function ask() {
