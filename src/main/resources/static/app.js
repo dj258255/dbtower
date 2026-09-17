@@ -16,10 +16,42 @@ const api = (path, opts = {}) => {
   if (opts.method && opts.method !== "GET") headers["X-XSRF-TOKEN"] = csrfToken();
   return fetch(path, { ...opts, headers }).then((r) => {
     if (r.status === 401) { location.href = "/login.html"; throw new Error("로그인이 필요합니다"); }
-    if (!r.ok) return r.text().then((t) => { throw new Error(`${r.status} ${t}`); });
+    if (!r.ok) return r.text().then((t) => { throw apiFailure(r.status, t); });
     // 204 No Content(대화 삭제 등)에는 본문이 없다 — r.json()이 던지면 성공이 실패로 보인다
     return r.status === 204 ? null : r.json();
   });
+};
+
+/**
+ * 실패 응답을 화면용 Error로 바꾼다.
+ *
+ * <p>전에는 `${status} ${본문}`을 그대로 메시지로 만들어 502 응답 본문(JSON)이 화면에 그대로 보였다
+ * (B9 — "쿼리 통계를 불러오지 못했습니다: 502 {"errorId":"367f…","error":"…"}"). 원문 오류(JSON·드라이버
+ * 영문·스택)는 화면에 내보내지 않는다(148절). 서버가 {"error": 사람 문장, "errorId": 원인 번호}로 주면
+ * 문장만 message에 싣고 번호는 errorId로 따로 둔다 — HTTP 상태 숫자는 문장에 넣지 않는다.
+ *
+ * <p>컨테이너 기본 오류 본문(403·404·500 — timestamp·path·error가 영문인 Boot 기본 형식)은 사람 문장이
+ * 아니므로 쓰지 않는다. 그대로 쓰면 화면에 "Forbidden"이 뜬다.
+ */
+function apiFailure(status, bodyText) {
+  let body = null;
+  try { body = bodyText ? JSON.parse(bodyText) : null; } catch { /* JSON 아님 — 아래 기본 문장 */ }
+  const whitelabel = body && typeof body === "object" && "timestamp" in body && "path" in body;
+  const human = !whitelabel && body && typeof body.error === "string" && body.error.trim() ? body.error : null;
+  const err = new Error(human || (status === 403 ? "이 작업을 할 권한이 없습니다." : "요청을 처리하지 못했습니다."));
+  err.status = status;
+  if (body && typeof body === "object" && body.errorId) err.errorId = String(body.errorId);
+  return err;
+}
+
+/** 화면에 보일 오류 문장 — errorId는 앞 8자만 덧붙여 서버 로그와 대조할 수 있게 한다(B9) */
+const apiMessage = (e) => {
+  let msg = e && e.message ? e.message : "요청을 처리하지 못했습니다.";
+  let id = e && e.errorId ? String(e.errorId) : null;
+  // 스트림(SSE) 오류는 본문이 아니라 문장 안에 "errorId=…"를 싣는다 — 같은 모양(앞 8자)으로 맞춘다(#42)
+  const m = msg.match(/\s*errorId=([0-9a-f-]{8,})\s*$/i);
+  if (m) { msg = msg.slice(0, m.index).trim(); id = id || m[1]; }
+  return id ? `${msg} (오류 번호 ${id.slice(0, 8)})` : msg;
 };
 
 // ---------- 대상 DB 조회 줄 (이슈 #31) ----------
@@ -358,6 +390,7 @@ function instanceCardHtml(i) {
   const sharedNames = cnt > 1
     ? state.instances.filter((o) => o.id !== i.id && `${o.host.toLowerCase()}:${o.port}` === serverKey).map((o) => o.name) : [];
   const selected = state.instance && state.instance.id === i.id ? " selected" : "";
+  const collect = collectBadge(i);
   return `
     <div class="instance-card${selected}" data-id="${i.id}" data-name="${esc(i.name.toLowerCase())}"
          data-host="${esc(i.host.toLowerCase())}" data-type="${esc(i.type)}" data-team="${esc(i.teamLabel || "")}"
@@ -374,8 +407,8 @@ function instanceCardHtml(i) {
         <div class="inst-field"><span class="k">DB</span><span class="v">${esc(i.dbName)}${sharedNames.length ? ` <span class="server-shared-badge" title="같은 서버(${esc(serverKey)})에 등록된 다른 인스턴스: ${esc(sharedNames.join(", "))} — 서버 전역 경보(복제·세션·데드락)는 그룹당 1회">서버 공유 ×${cnt}</span>` : ""}</span></div>
         <div class="inst-field"><span class="k">응답</span><span class="v" id="ping-${i.id}">—</span></div>
         <div class="inst-field"><span class="k">버전</span><span class="v ver" id="ver-${i.id}" title="">—</span></div>
-        <div class="inst-field"><span class="k">수집</span><span class="v"><button class="collect-toggle ${i.collectionEnabled ? "" : "isolated"}" data-id="${i.id}"
-          title="수집 격리 토글 — 끄면 스냅샷 수집·운영 경보에서 이 인스턴스를 뺀다(등록은 유지)">${i.collectionEnabled ? "수집중" : "격리됨"}</button></span></div>
+        <div class="inst-field"><span class="k">수집</span><span class="v"><button class="collect-toggle ${collect.cls}" data-id="${i.id}"
+          title="수집 격리 토글 — 끄면 스냅샷 수집·운영 경보에서 이 인스턴스를 뺀다(등록은 유지)">${collect.label}</button></span></div>
         ${i.environment || i.region || i.cluster || i.teamLabel || i.consoleUrl || i.appSchema ? `<div class="instance-meta">
           ${i.appSchema ? `<span class="tag-badge" title="앱 스키마 — 모니터 계정이 딕셔너리·콘솔에서 볼 스키마(Oracle)">스키마 ${esc(i.appSchema)}</span>` : ""}
           ${i.environment ? `<span class="tag-badge tag-env" title="환경">${esc(i.environment)}</span>` : ""}
@@ -386,6 +419,44 @@ function instanceCardHtml(i) {
         </div>` : ""}
       </div>
     </div>`;
+}
+
+/**
+ * 수집 배지 — "수집 설정이 켜져 있음"과 "지금 실제로 수집되는가"를 가른다.
+ * down인 대상에 초록 "수집중"을 두면 화면이 거짓말을 한다(B9) — 설정은 켜져 있어도 지금은 멈춘 상태다.
+ * 토글 동작은 그대로다(배지는 표시만 바꾼다).
+ */
+function collectBadge(inst) {
+  if (!inst.collectionEnabled) return { cls: "isolated", label: "격리됨" };
+  if (targetUnreachable(inst.id)) return { cls: "paused", label: "수집 멈춤(연결 안 됨)" };
+  return { cls: "", label: "수집중" };
+}
+
+/** 이미 그려진 카드의 수집 배지만 다시 칠한다(카드 전체를 다시 그리면 선택·스크롤이 흔들린다) */
+function syncCollectBadge(id) {
+  const btn = document.querySelector(`.collect-toggle[data-id="${id}"]`);
+  const inst = state.instances.find((i) => i.id == id);
+  if (!btn || !inst) return;
+  const b = collectBadge(inst);
+  btn.textContent = b.label;
+  btn.classList.toggle("isolated", b.cls === "isolated");
+  btn.classList.toggle("paused", b.cls === "paused");
+}
+
+/**
+ * 기억해 둔 헬스 판정을 카드에 반영한다 — 검색·필터·재선택으로 카드가 다시 그려져도 사유와 배지가 남는다.
+ * down이면 응답 칸에 서버가 분류한 사유를 적는다(원문 드라이버 영문은 서버가 내려주지 않는다, 148절).
+ */
+function applyInstanceHealth(id) {
+  const h = state.instanceHealth.get(id);
+  if (!h) return;
+  const dot = $(`#health-${id}`);
+  if (dot) { dot.classList.toggle("up", h.up); dot.classList.toggle("down", !h.up); }
+  const ping = $(`#ping-${id}`);
+  if (ping) ping.textContent = h.up ? `${h.pingMillis}ms` : `연결 안 됨 — ${h.message || "알 수 없음"}`;
+  const ver = $(`#ver-${id}`);
+  if (ver && h.up && h.version) { ver.textContent = h.version; ver.title = h.version; }
+  syncCollectBadge(id);
 }
 
 // 현재 검색·필터에 걸리는 인스턴스 — 아무 조건 없으면 빈 배열(초기 빈 리스트)
@@ -448,7 +519,7 @@ function bindInstanceCards() {
         renderInstanceMatches();
       } catch (err) {
         // 경고창 대신 목록 안에 적는다 — 어느 인스턴스에서 실패했는지 맥락이 남는다(162절)
-        setInstanceNotice(`수집 토글 실패 — ${inst.name}: ${err.message}`);
+        setInstanceNotice(`수집 토글 실패 — ${inst.name}: ${apiMessage(err)}`);
       }
     });
   });
@@ -466,18 +537,16 @@ function shortVersion(v) {
 // 판정이 60초를 넘겼으면(targetUnreachable이 false) 한 번 더 확인한다.
 function loadInstanceMeta(rendered) {
   rendered.forEach(async (i) => {
+    // 카드가 다시 그려졌어도 기억해 둔 판정을 먼저 칠한다 — 사유·배지가 "—"로 돌아가지 않게(B9)
+    applyInstanceHealth(i.id);
     if (targetUnreachable(i.id)) {
       const dot = $(`#health-${i.id}`); if (dot) dot.classList.add("down");
       return;
     }
     try {
       const h = await targetApi(`/api/instances/${i.id}/health`);
-      state.instanceHealth.set(i.id, { up: !!h.up, at: Date.now() });
-      const dot = $(`#health-${i.id}`); if (dot) dot.classList.add(h.up ? "up" : "down");
-      const ping = $(`#ping-${i.id}`), ver = $(`#ver-${i.id}`);
-      // 버전은 전체를 textContent에 담고 축약은 CSS(한 줄 말줄임)에 맡긴다 — 클릭하면 전체가 그대로 펼쳐지게
-      if (h.up) { if (ping) ping.textContent = `${h.pingMillis}ms`; if (ver) { ver.textContent = h.version || "—"; ver.title = h.version || ""; } }
-      else if (ping) ping.textContent = h.message;
+      state.instanceHealth.set(i.id, { up: !!h.up, at: Date.now(), pingMillis: h.pingMillis, message: h.message, version: h.version });
+      applyInstanceHealth(i.id);
     } catch { const dot = $(`#health-${i.id}`); if (dot) dot.classList.add("down"); }
     try {
       const r = await targetApi(`/api/instances/${i.id}/replication`);
@@ -765,7 +834,7 @@ async function loadAdvisors(force) {
   try {
     report = await targetApi(`/api/instances/${state.instance.id}/advisors`);
   } catch (e) {
-    box.textContent = `점검 실패: ${e.message}`;
+    box.textContent = `점검 실패: ${apiMessage(e)}`;
     return;
   }
   box.classList.remove("muted");
@@ -806,7 +875,7 @@ async function loadAdvisors(force) {
 // 사실(DBTower가 모음)과 AI 소견(모델이 만듦)을 한 덩어리로 보여주지 않는다. 검증 안 된 수치가 있으면 소견보다 먼저 세운다.
 const AIOP_TYPE_LABEL = {
   QUERY_DIAGNOSIS: "쿼리 진단", REGRESSION_EXPLANATION: "회귀 원인", BACKUP_RISK_REVIEW: "백업 위험",
-  SLO_RISK_REVIEW: "SLO 위험", ADVISOR_SUMMARY: "Advisor 요약", COST_REVIEW: "비용 검토",
+  SLO_RISK_REVIEW: "SLO 위험", ADVISOR_SUMMARY: "점검 조언 요약", COST_REVIEW: "비용 검토",
   INCIDENT_TRIAGE: "장애 초기 진단", DB_TEAM_INQUIRY: "DB팀 문의", PERIODIC_REPORT: "정기 리포트",
 };
 const AIOP_STATUS_LABEL = {
@@ -824,7 +893,7 @@ async function loadAiOperations() {
   try {
     jobs = await api("/api/ai-operations?limit=30");
   } catch (e) {
-    $("#aiops-status").textContent = `조회 실패: ${e.message}`;
+    $("#aiops-status").textContent = `조회 실패: ${apiMessage(e)}`;
     body.innerHTML = `<tr><td colspan="6" class="muted">조회 실패</td></tr>`;
     return;
   }
@@ -880,7 +949,7 @@ async function openAiOperation(jobId, opts = {}) {
     job = await api(`/api/ai-operations/${encodeURIComponent(jobId)}`);
   } catch (e) {
     box.hidden = false;
-    box.innerHTML = `<div class="muted">작업을 열지 못했습니다: ${esc(e.message)}</div>`;
+    box.innerHTML = `<div class="muted">작업을 열지 못했습니다: ${esc(apiMessage(e))}</div>`;
     return;
   }
   const r = job.result;
@@ -930,7 +999,7 @@ async function aiOperationAction(jobId, action) {
   try {
     await api(`/api/ai-operations/${encodeURIComponent(jobId)}/${action}`, { method: "POST" });
   } catch (e) {
-    $("#aiops-status").textContent = `${action === "cancel" ? "취소" : "재시도"} 실패: ${e.message}`;
+    $("#aiops-status").textContent = `${action === "cancel" ? "취소" : "재시도"} 실패: ${apiMessage(e)}`;
     return;
   }
   await loadAiOperations();
@@ -985,8 +1054,8 @@ async function submitAiOperation() {
   } catch (e) {
     // 접수까지는 됐는데 그 뒤가 실패한 경우를 "접수 실패"로 적지 않는다 — 작업은 이미 만들어져 돌고 있다
     say(accepted
-      ? `접수는 됐지만 작업 목록을 갱신하지 못했습니다: ${e.message}`
-      : `작업을 접수하지 못했습니다: ${e.message}`, accepted?.jobId);
+      ? `접수는 됐지만 작업 목록을 갱신하지 못했습니다: ${apiMessage(e)}`
+      : `작업을 접수하지 못했습니다: ${apiMessage(e)}`, accepted?.jobId);
   } finally {
     delete btn.dataset.busy;
     syncChatComposer();
@@ -1022,7 +1091,7 @@ async function loadFinOps(force) {
   try {
     report = await targetApi(`/api/instances/${state.instance.id}/finops`);
   } catch (e) {
-    box.textContent = `분석 실패: ${e.message}`;
+    box.textContent = `분석 실패: ${apiMessage(e)}`;
     return;
   }
   box.classList.remove("muted");
@@ -1061,7 +1130,7 @@ async function loadFinOps(force) {
 // ---------- 통합 헬스 스코어 (D8) — 흩어진 신호를 인스턴스별 한 점수로, 나쁜 순으로 ----------
 // 인스턴스 선택과 무관한 함대 전체 뷰. "어디부터 볼지"를 서버가 정렬해 내려주고, 행 클릭 시 감점 사유를 분해한다.
 const SCORE_SIGNAL_LABEL = {
-  HEALTH: "가용성", ANOMALY: "이상 감지", ADVISOR: "Advisors", SLO: "SLO / 버짓", BACKUP: "백업 신선도",
+  HEALTH: "가용성", ANOMALY: "이상 감지", ADVISOR: "점검 조언", SLO: "SLO / 버짓", BACKUP: "백업 신선도",
   // CPU가 아니라 "동시 실행 압박" — 기종마다 세는 단위가 달라 요약 문구에 무엇을 읽었는지 담긴다(162절)
   RESOURCE: "자원 압박",
 };
@@ -1077,7 +1146,7 @@ async function loadHealthScore() {
     report = await api("/api/health-score");
   } catch (e) {
     box.classList.add("muted");
-    box.textContent = `조회 실패: ${e.message}`;
+    box.textContent = `조회 실패: ${apiMessage(e)}`;
     return;
   }
   box.classList.remove("muted");
@@ -1114,7 +1183,7 @@ async function loadHealthScore() {
       <tbody class="score-group" data-id="${s.instanceId}">
         <tr class="score-row score-grade-${esc(s.grade)}">
           <td><span class="cell-inst">${engineIcon(s.type)} ${esc(s.instanceName)}</span>
-            ${s.down ? '<span class="score-down">DOWN</span>' : ""}
+            ${s.down ? '<span class="score-down">다운</span>' : ""}
             ${s.partial ? '<span class="score-partial-dot" title="일부 신호가 데이터 부족·수집 실패">부분</span>' : ""}</td>
           <td class="num score-num">${s.score}<span class="score-outof">/100</span></td>
           <td><span class="grade-badge grade-${esc(s.grade)}">${esc(s.grade)}</span></td>
@@ -1154,7 +1223,7 @@ async function loadBackupFreshness() {
     report = await api("/api/backup-freshness");
   } catch (e) {
     box.classList.add("muted");
-    box.textContent = `조회 실패: ${e.message}`;
+    box.textContent = `조회 실패: ${apiMessage(e)}`;
     return;
   }
   box.classList.remove("muted");
@@ -1256,7 +1325,7 @@ async function fillFreshnessHealth(id) {
       ? `핑 ${h.pingMillis}ms · ${shortVersion(h.version)}` : (h.message || "접속 실패");
   } catch (e) {
     row.querySelector(".score-contrib-state").textContent = "조회 실패";
-    row.querySelector(".score-contrib-summary").textContent = e.message;
+    row.querySelector(".score-contrib-summary").textContent = apiMessage(e);
     row.dataset.filled = "";
   }
 }
@@ -1283,7 +1352,7 @@ async function loadMetrics() {
   try {
     m = await api(`/api/instances/${state.instance.id}/metrics?from=${from}&to=${to}`);
   } catch (e) {
-    m = { cpu: [], cpuNote: `조회 실패: ${e.message}`, connections: [], connectionsNote: `조회 실패: ${e.message}` };
+    m = { cpu: [], cpuNote: `조회 실패: ${apiMessage(e)}`, connections: [], connectionsNote: `조회 실패: ${apiMessage(e)}` };
   }
   state.metricsCpu = m.cpu ?? [];
   drawSimpleChart("#cpu-chart", "#cpu-empty", m.cpu ?? [], "#e5533d", m.cpuNote, "%", 100);
@@ -1299,7 +1368,7 @@ async function loadCommandMetrics(from, to) {
   try {
     cm = await api(`/api/instances/${state.instance.id}/metrics/commands?from=${from}&to=${to}`);
   } catch (e) {
-    box.innerHTML = `<div class="muted">명령별 시계열 조회 실패: ${esc(e.message)}</div>`;
+    box.innerHTML = `<div class="muted">명령별 시계열 조회 실패: ${esc(apiMessage(e))}</div>`;
     return;
   }
   if (!cm.series || !cm.series.length) {
@@ -1316,8 +1385,8 @@ async function loadCommandMetrics(from, to) {
       <h4>${esc(s.name)}</h4>
       <svg id="cmd-chart-${idx}" width="100%" height="120" preserveAspectRatio="none"></svg>
       <div id="cmd-empty-${idx}" class="muted center" hidden></div>
-      <div class="cmd-legend"><span>Mean <b>${fmtStat(s.mean)}</b></span>
-        <span>Max <b>${fmtStat(s.max)}</b></span><span>Min <b>${fmtStat(s.min)}</b></span></div>
+      <div class="cmd-legend"><span>평균 <b>${fmtStat(s.mean)}</b></span>
+        <span>최대 <b>${fmtStat(s.max)}</b></span><span>최소 <b>${fmtStat(s.min)}</b></span></div>
     </div>`;
   box.innerHTML = Object.entries(groups).map(([g, items]) => `
     <div class="command-group">
@@ -1636,15 +1705,15 @@ async function runQuery(force) {
   } catch (e) {
     // 대상 조회가 실패하면(502) 사유를 표 자리에 보인다 — 전에는 잡지 않아 표가 빈 채로 멈추고 콘솔 오류만 남았다(149절 계측 중 발견)
     $("#top-table thead").innerHTML = "";
-    $("#top-table tbody").innerHTML = `<tr><td class="muted">쿼리 통계를 불러오지 못했습니다: ${esc(e.message)}</td></tr>`;
+    $("#top-table tbody").innerHTML = `<tr><td class="muted">쿼리 통계를 불러오지 못했습니다: ${esc(apiMessage(e))}</td></tr>`;
     return;
   }
   // Call/sec는 스냅샷 차분이라 이력 없으면 null → "—". Latency/행 지표는 누적÷호출수(평균).
   // Plan 컬럼은 값이 있는 기종(MongoDB — profiler가 계획 요약을 저장)에서만 그린다.
   const hasPlan = stats.some((q) => q.plan);
   table.querySelector("thead").innerHTML = `
-    <tr><th>Load</th><th>Query</th><th class="num">Call/sec</th>
-        <th class="num">Latency(ms)</th><th class="num">${esc(rowsLabel)} (평균)</th>${hasPlan ? "<th>Plan</th>" : ""}</tr>`;
+    <tr><th>부하</th><th>쿼리</th><th class="num">호출/초</th>
+        <th class="num">지연(ms)</th><th class="num">${esc(rowsLabel)} (평균)</th>${hasPlan ? "<th>계획</th>" : ""}</tr>`;
   table.querySelector("tbody").innerHTML = stats.map((q, idx) => `
     <tr data-idx="${idx}">
       <td class="num">${fmtNum(q.loadPct)}%</td>
@@ -1673,7 +1742,7 @@ async function runCompare() {
     // 브라우저 경고창은 화면 밖으로 튀어나오고 맥락을 잃는다 — 실패한 자리에 그대로 적는다
     const sum = $("#compare-summary");
     sum.hidden = false;
-    sum.innerHTML = `<div class="finding-item">비교하지 못했습니다 — ${esc(e.message)}`
+    sum.innerHTML = `<div class="finding-item">비교하지 못했습니다 — ${esc(apiMessage(e))}`
       + `<div class="muted">구간 안에 스냅샷 배치가 2개 이상 있어야 차분을 낼 수 있습니다(수집 주기 1분).`
       + ` 구간을 넓히거나, 수집이 도는 동안 기다린 뒤 다시 조회하세요.</div></div>`;
     return;
@@ -1706,11 +1775,11 @@ async function runCompare() {
   const rows = [...result.queries].sort((a, b) => targetLoad(b) - targetLoad(a));
   const table = $("#top-table");
   table.querySelector("thead").innerHTML = `
-    <tr><th class="num">Load</th><th>Query</th><th class="num">QPS</th><th class="num">Latency(ms)</th><th class="num">${esc(rowsLabel)}/call</th></tr>`;
+    <tr><th class="num">부하</th><th>쿼리</th><th class="num">QPS</th><th class="num">지연(ms)</th><th class="num">${esc(rowsLabel)}/호출</th></tr>`;
   table.querySelector("tbody").innerHTML = rows.map((q, idx) => `
     <tr data-idx="${idx}" class="${q.newQuery ? "new-query" : ""}">
       <td>${deltaCell(baseLoad(q), targetLoad(q), loadPctChange(baseLoad(q), targetLoad(q)))}</td>
-      <td class="qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${q.newQuery ? '<span class="badge-new">NEW</span>' : ""}${queryTextHtml(q.queryText)}</td>
+      <td class="qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${q.newQuery ? '<span class="badge-new">신규</span>' : ""}${queryTextHtml(q.queryText)}</td>
       <td>${deltaCell(q.baseQps, q.targetQps, q.qpsChangePct)}</td>
       <td>${deltaCell(q.baseAvgMs, q.targetAvgMs, q.latencyChangePct, msDigits(q.baseAvgMs, q.targetAvgMs))}</td>
       <td>${deltaCell(q.baseRowsPerCall, q.targetRowsPerCall, q.rowsPerCallChangePct, 0)}</td>
@@ -1934,7 +2003,7 @@ async function runExplain() {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
       });
     } catch (e) {
-      $("#detail-plan").textContent = `실행 실패: ${e.message}`;
+      $("#detail-plan").textContent = `실행 실패: ${apiMessage(e)}`;
       $("#detail-findings").innerHTML = "";
       return;
     }
@@ -1962,7 +2031,7 @@ async function runAntiPatterns() {
     const rows = await api(`/api/instances/${state.instance.id}/query-anti-patterns?limit=20`);
     box.innerHTML = renderAntiPatterns(rows);
   } catch (e) {
-    box.innerHTML = `<div class="finding-item">조회 실패: ${esc(e.message)}</div>`;
+    box.innerHTML = `<div class="finding-item">조회 실패: ${esc(apiMessage(e))}</div>`;
   } finally {
     btn.classList.remove("loading");
     markDetailFresh("antipattern");
@@ -2039,7 +2108,7 @@ async function runReferencedSchema() {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
       });
     } catch (e) {
-      box.innerHTML = `<div class="finding-item">조회 실패: ${esc(e.message)}</div>`;
+      box.innerHTML = `<div class="finding-item">조회 실패: ${esc(apiMessage(e))}</div>`;
       return;
     }
     box.innerHTML = renderReferencedSchema(data);
@@ -2122,7 +2191,7 @@ async function toggleTableDetail(btn) {
     box.innerHTML = renderTableDetail(d, { columns: ref ? ref.columns : null });
     box.dataset.loaded = "1";
   } catch (e) {
-    box.innerHTML = `<div class="finding-item">상세 조회 실패: ${esc(e.message)}</div>`;
+    box.innerHTML = `<div class="finding-item">상세 조회 실패: ${esc(apiMessage(e))}</div>`;
   }
 }
 
@@ -2167,7 +2236,7 @@ async function runAiAnalysis() {
     state.lastFindings = result.findings ?? [];
     state.lastAi = result.aiAnalysis ?? null;
   } catch (e) {
-    out.textContent = `실패: ${e.message}`;
+    out.textContent = `실패: ${apiMessage(e)}`;
     stage.textContent = "";
   } finally {
     btn.classList.remove("loading");
@@ -2199,7 +2268,7 @@ async function runIndexAdvisor() {
         body: JSON.stringify({ sql, columns: columns || null }),
       });
     } catch (e) {
-      result.innerHTML = `<div class="finding-item">시뮬레이션 실패: ${esc(e.message)}</div>`;
+      result.innerHTML = `<div class="finding-item">시뮬레이션 실패: ${esc(apiMessage(e))}</div>`;
       return;
     }
     const meta = ADVISOR_STATUS[data.status] || { cls: "unsupported", label: data.status };
@@ -2259,7 +2328,7 @@ async function runDeepDiagnose() {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
       });
     } catch (e) {
-      result.innerHTML = `<div class="finding-item">진단 실패: ${esc(e.message)}</div>`;
+      result.innerHTML = `<div class="finding-item">진단 실패: ${esc(apiMessage(e))}</div>`;
       return;
     }
     // 표시 순서 원칙(외부 리뷰 반영): 근본원인이 있으면 "원인 -> 증상" 순으로.
@@ -2346,7 +2415,7 @@ async function runInquiry() {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
     } catch (e) {
-      result.innerHTML = `<div class="finding-item">문의 실패: ${esc(e.message)}</div>`;
+      result.innerHTML = `<div class="finding-item">문의 실패: ${esc(apiMessage(e))}</div>`;
       return;
     }
     result.innerHTML = data.sent
@@ -2374,8 +2443,8 @@ async function loadSlow(force) {
   const table = $("#slow-table");
   // 기종별로 확보 가능한 필드가 달라 미확보는 "—"로 표기(MySQL: User@host·Lock·Rows_sent, Mongo: Plan)
   table.querySelector("thead").innerHTML = `
-    <tr><th>Captured <span class="muted" title="브라우저 시간대로 변환 표시 — 원문(UTC)은 툴팁">(로컬)</span></th><th>User@host</th><th class="num">Query(ms)</th><th class="num">Lock(ms)</th>
-        <th class="num">Rows_sent</th><th class="num">Rows_examined</th><th>Plan</th><th>Query</th></tr>`;
+    <tr><th>수집 시각 <span class="muted" title="브라우저 시간대로 변환 표시 — 원문(UTC)은 툴팁">(로컬)</span></th><th>사용자@호스트</th><th class="num">쿼리(ms)</th><th class="num">잠금(ms)</th>
+        <th class="num">보낸 행</th><th class="num">검사한 행</th><th>계획</th><th>쿼리</th></tr>`;
   const dash = (v) => (v == null || v < 0) ? '<span class="muted">—</span>' : null;
   if (targetSkipped(table.querySelector("tbody"), () => loadSlow(true), 8, force)) return;
   try {
@@ -2395,7 +2464,7 @@ async function loadSlow(force) {
     // 형제 로더(top·sessions·latency·partitions·deadlocks)와 같은 모양 — 실패를 이 카드에 적고 끝낸다.
     // 여기서 던지면 selectInstance의 Promise.all이 깨지고, 그 약속에 걸린 딥링크(?aiop=·compareAt)까지 함께 사라진다(170절 9번)
     table.querySelector("tbody").innerHTML =
-      `<tr><td colspan="8" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+      `<tr><td colspan="8" class="muted">조회 실패: ${esc(apiMessage(e))}</td></tr>`;
   }
   // Mongo 보존 창 정직 표기 — system.profile은 순환(capped) 컬렉션이라 오래된 항목이 덮어써진다.
   // 로그 파일 파싱 기반 도구와 보존 범위가 다름을 숨기지 않는다. 조회가 실패해도 이 문구는 지금 대상의 것이라
@@ -2437,7 +2506,7 @@ async function loadBackupInfo() {
         <td class="qtext" title="${esc(r.detail ?? "")}">${esc((r.detail ?? "").slice(0, 90))}</td>
       </tr>`).join("") : '<tr><td colspan="5" class="muted">백업 이력이 없습니다.</td></tr>';
   } catch (e) {
-    $("#pitr-window").textContent = `조회 실패: ${e.message}`;
+    $("#pitr-window").textContent = `조회 실패: ${apiMessage(e)}`;
   }
 }
 
@@ -2457,7 +2526,7 @@ async function loadMcpTools() {
     toggle.textContent = toggle.dataset.label;
   } catch (e) {
     box.classList.remove("muted");
-    box.textContent = `도구 목록 조회 실패: ${e.message}`;
+    box.textContent = `도구 목록 조회 실패: ${apiMessage(e)}`;
     toggle.textContent = toggle.dataset.label = "제공 도구 보기";
   }
 }
@@ -2532,7 +2601,7 @@ async function loadUsers() {
   try {
     users = await api("/api/security/users");
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="4" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="muted">조회 실패: ${esc(apiMessage(e))}</td></tr>`;
     return;
   }
   // select의 영문 괄호는 뺀다 — 화면에는 역할 이름만(value는 그대로)
@@ -2588,7 +2657,7 @@ async function applyUserRole(sel) {
     });
     setUsersMsg(`${username}의 역할을 ${ROLE_LABEL[r.role] ?? r.role}(으)로 바꿨습니다. 다음 로그인부터 적용됩니다.`, false);
   } catch (e) {
-    setUsersMsg(`역할을 바꾸지 못했습니다: ${e.message}`, true);
+    setUsersMsg(`역할을 바꾸지 못했습니다: ${apiMessage(e)}`, true);
   }
   loadUsers();
 }
@@ -2626,7 +2695,7 @@ async function createUser() {
     syncUserCreateButton();
     loadUsers();
   } catch (e) {
-    setUsersMsg(`만들지 못했습니다: ${e.message}`, true);
+    setUsersMsg(`만들지 못했습니다: ${apiMessage(e)}`, true);
   }
 }
 
@@ -2685,7 +2754,9 @@ async function loadOverview(force) {
   // 내용이 없는 빈 막대를 남기지 않는다(B4) — 전에는 먼저 펼치고 조회해, 응답이 오기 전까지 흰 줄만 보였다.
   // 대상에 닿지 않는 인스턴스에서는 그 줄이 계속 남아 화면 결함처럼 읽혔다
   box.hidden = true;
-  if (targetSkipped(box, () => loadOverview(true), 0, force)) { box.hidden = false; return; }
+  // 대상에 닿지 않으면 이 카드는 접는다 — 탭 줄 위에 "연결되지 않아 조회하지 않았습니다" 상자가 떠서
+  // 어느 카드 얘기인지 모호했다. 사유는 각 결과 영역(Top Query·Slow Query 표 등)이 자기 자리에서 말한다(B9, 182절)
+  if (!force && targetUnreachable()) return;
   try {
     const o = await targetApi(`/api/instances/${state.instance.id}/overview`);
     const rep = o.replication || {};
@@ -2713,7 +2784,7 @@ async function loadOverview(force) {
           ${meta ? `<span class="ov-meta muted">${meta}</span>` : ""}
         </div>
         <div class="ov-health">
-          <span class="ov-status ${o.down ? "ov-down" : "ov-up"}">${o.down ? "DOWN" : "UP"}</span>
+          <span class="ov-status ${o.down ? "ov-down" : "ov-up"}">${o.down ? "다운" : "정상"}</span>
           <span class="ov-grade grade-${esc(o.grade)}">${esc(o.grade)} · ${esc(String(o.healthScore))}</span>
         </div>
       </div>
@@ -2723,7 +2794,7 @@ async function loadOverview(force) {
       </div>`;
     box.hidden = false;
   } catch (e) {
-    box.innerHTML = `<span class="muted">운영 종합 조회 실패: ${esc(e.message)}</span>`;
+    box.innerHTML = `<span class="muted">운영 종합 조회 실패: ${esc(apiMessage(e))}</span>`;
     box.hidden = false;
   }
 }
@@ -2737,8 +2808,8 @@ async function loadReplication(force) {
     const lag = r.lagSource === "MEASURED"
       ? `${fmtNum(r.lagSeconds, 1)}s`
       : `<span class="verify-badge ${badge ? esc(badge.cls) : "muted"}">${esc(badge ? badge.label : r.lagSource)}</span>`;
-    box.innerHTML = `role: ${esc(r.role)}<br>지연: ${lag}<br>${esc(r.detail ?? "")}`;
-  } catch (e) { box.textContent = `조회 실패: ${e.message}`; }
+    box.innerHTML = `역할: ${esc(r.role)}<br>지연: ${lag}<br>${esc(r.detail ?? "")}`;
+  } catch (e) { box.textContent = `조회 실패: ${apiMessage(e)}`; }
   loadReplicationSlots(force);
 }
 
@@ -2780,7 +2851,7 @@ async function loadDeadlocks(force) {
       </div>`;
     }).join("");
   } catch (e) {
-    box.innerHTML = `<p class="muted">조회 실패: ${esc(e.message)}</p>`;
+    box.innerHTML = `<p class="muted">조회 실패: ${esc(apiMessage(e))}</p>`;
   }
 }
 
@@ -2814,7 +2885,7 @@ async function loadAnomalies() {
     box.innerHTML = parts.join("");
   } catch (e) {
     box.className = "anomaly-result muted";
-    box.textContent = `조회 실패: ${e.message}`;
+    box.textContent = `조회 실패: ${apiMessage(e)}`;
   }
 }
 
@@ -2848,7 +2919,7 @@ async function loadPlanChanges() {
     });
   } catch (e) {
     box.className = "anomaly-result muted";
-    box.textContent = `조회 실패: ${e.message}`;
+    box.textContent = `조회 실패: ${apiMessage(e)}`;
   }
 }
 
@@ -2857,7 +2928,7 @@ async function loadPlanChanges() {
 async function loadWaitEvents(force) {
   const table = $("#wait-table");
   table.querySelector("thead").innerHTML = `
-    <tr><th>Category</th><th>Event</th><th class="num">Count</th><th class="num">Total(ms)</th></tr>`;
+    <tr><th>분류</th><th>이벤트</th><th class="num">횟수</th><th class="num">합계(ms)</th></tr>`;
   if (targetSkipped(table.querySelector("tbody"), () => loadWaitEvents(true), 4, force)) return;
   try {
     const rows = await targetApi(`/api/instances/${state.instance.id}/wait-events?limit=20`);
@@ -2870,7 +2941,7 @@ async function loadWaitEvents(force) {
       </tr>`).join("") : '<tr><td colspan="4" class="muted">대기 이벤트가 없습니다.</td></tr>';
   } catch (e) {
     table.querySelector("tbody").innerHTML =
-      `<tr><td colspan="4" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+      `<tr><td colspan="4" class="muted">조회 실패: ${esc(apiMessage(e))}</td></tr>`;
   }
 }
 
@@ -2889,7 +2960,7 @@ const LATENCY_SOURCE = {
 async function loadLatencyPercentiles(force) {
   const table = $("#latency-table");
   table.querySelector("thead").innerHTML = `
-    <tr><th>Source</th><th>Query</th><th class="num">p95(ms)</th><th class="num">p99(ms)</th></tr>`;
+    <tr><th>출처</th><th>쿼리</th><th class="num">p95(ms)</th><th class="num">p99(ms)</th></tr>`;
   if (targetSkipped(table.querySelector("tbody"), () => loadLatencyPercentiles(true), 4, force)) return;
   try {
     const rows = await targetApi(`/api/instances/${state.instance.id}/latency-percentiles?limit=20`);
@@ -2905,7 +2976,7 @@ async function loadLatencyPercentiles(force) {
     }).join("") : '<tr><td colspan="4" class="muted">백분위 데이터가 없습니다.</td></tr>';
   } catch (e) {
     table.querySelector("tbody").innerHTML =
-      `<tr><td colspan="4" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+      `<tr><td colspan="4" class="muted">조회 실패: ${esc(apiMessage(e))}</td></tr>`;
   }
 }
 
@@ -2931,7 +3002,7 @@ async function loadSloReport(force) {
     r = await targetApi(`/api/instances/${state.instance.id}/slo`);
   } catch (e) {
     box.classList.add("muted");
-    box.textContent = `조회 실패: ${e.message}`;
+    box.textContent = `조회 실패: ${apiMessage(e)}`;
     return;
   }
   const lat = r.latency, av = r.availability, eb = r.errorBudget;
@@ -2990,8 +3061,8 @@ async function loadSloReport(force) {
 async function loadPartitions(force) {
   const table = $("#partition-table");
   table.querySelector("thead").innerHTML = `
-    <tr><th>Table</th><th>Partition</th><th>Method</th><th>Boundary</th>
-        <th class="num">Rows</th><th class="num">Size</th></tr>`;
+    <tr><th>테이블</th><th>파티션</th><th>방식</th><th>경계</th>
+        <th class="num">행 수</th><th class="num">크기</th></tr>`;
   if (targetSkipped(table.querySelector("tbody"), () => loadPartitions(true), 6, force)) return;
   try {
     const rows = await targetApi(`/api/instances/${state.instance.id}/partitions?limit=50`);
@@ -3011,7 +3082,7 @@ async function loadPartitions(force) {
       </tr>`).join("") : '<tr><td colspan="6" class="muted">파티션이 있는 테이블이 없습니다.</td></tr>';
   } catch (e) {
     table.querySelector("tbody").innerHTML =
-      `<tr><td colspan="6" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+      `<tr><td colspan="6" class="muted">조회 실패: ${esc(apiMessage(e))}</td></tr>`;
   }
 }
 
@@ -3022,14 +3093,14 @@ async function loadSessions(force) {
   const canKill = can("TARGET_OPERATE");
   const cols = canKill ? 8 : 7;
   table.querySelector("thead").innerHTML = `
-    <tr><th class="num">PID</th><th>User</th><th>State</th><th>Wait</th>
-        <th class="num">BlockedBy</th><th class="num">Elapsed(ms)</th><th>Query</th>${canKill ? "<th>Action</th>" : ""}</tr>`;
+    <tr><th class="num">PID</th><th>사용자</th><th>상태</th><th>대기</th>
+        <th class="num">막는 PID</th><th class="num">경과(ms)</th><th>쿼리</th>${canKill ? "<th>동작</th>" : ""}</tr>`;
   if (targetSkipped(table.querySelector("tbody"), () => loadSessions(true), cols, force)) return;
   try {
     renderSessionRows(await targetApi(`/api/instances/${state.instance.id}/sessions?limit=50`));
   } catch (e) {
     table.querySelector("tbody").innerHTML =
-      `<tr><td colspan="${cols}" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+      `<tr><td colspan="${cols}" class="muted">조회 실패: ${esc(apiMessage(e))}</td></tr>`;
   }
 }
 
@@ -3135,7 +3206,7 @@ function onLiveFrame(f) {
   }
   if (f.status === "ERROR") {
     // 마지막으로 성공한 표는 남긴다 — 순간 실패로 표가 비면 "세션이 다 사라졌다"로 읽힌다
-    setLiveStatus(`LIVE · ${time} 조회 실패: ${f.error ?? ""}${gap}`, "err");
+    setLiveStatus(`실시간 · ${time} 조회 실패: ${f.error ?? ""}${gap}`, "err");
     return;
   }
   const s = f.summary;
@@ -3143,7 +3214,7 @@ function onLiveFrame(f) {
   if (live.history.length > LIVE_HISTORY) live.history.shift();
   drawLiveSpark();
   const paused = live.hover ? " · 표 위에 포인터가 있어 표 갱신을 멈춤" : "";
-  setLiveStatus(`LIVE · ${time} · 세션 ${s.total} · 막힘 ${s.blocked} · 대기 ${s.waiting} · 최장 ${fmtNum(s.longestMs)}ms · 수집 ${fmtNum(f.collectMs)}ms${gap}${paused}`,
+  setLiveStatus(`실시간 · ${time} · 세션 ${s.total} · 막힘 ${s.blocked} · 대기 ${s.waiting} · 최장 ${fmtNum(s.longestMs)}ms · 수집 ${fmtNum(f.collectMs)}ms${gap}${paused}`,
     s.blocked > 0 ? "warn" : "ok");
   if (live.hover) live.pending = f.sessions;
   else renderSessionRows(f.sessions);
@@ -3191,7 +3262,7 @@ function wireKillButtons() {
         await loadSessions();
       } catch (e) {
         btn.disabled = false;
-        setLiveStatus(`세션 종료 실패: ${e.message}`, "bad");
+        setLiveStatus(`세션 종료 실패: ${apiMessage(e)}`, "bad");
       }
     });
   });
@@ -3230,7 +3301,7 @@ async function runSchemaDiff() {
   try {
     d = await api(`/api/schema-diff?left=${left}&right=${right}`);
   } catch (e) {
-    box.innerHTML = `<div class="schema-warning">비교 실패: ${esc(e.message)}</div>`;
+    box.innerHTML = `<div class="schema-warning">비교 실패: ${esc(apiMessage(e))}</div>`;
     return;
   }
   if (d.warning) { warnBox.hidden = false; warnBox.textContent = `주의: ${d.warning}`; }
@@ -3245,11 +3316,11 @@ async function runSchemaDiff() {
     + (f.onDelete && f.onDelete !== "NO ACTION" ? ` ON DELETE ${esc(f.onDelete)}` : "");
 
   if (d.addedTables.length) {
-    parts.push('<div class="schema-block"><h4>추가된 테이블 <span class="hint">(right에만)</span></h4>' +
+    parts.push('<div class="schema-block"><h4>추가된 테이블 <span class="hint">(오른쪽에만)</span></h4>' +
       d.addedTables.map((t) => line("schema-add", "+", `${esc(t.name)} ${tableMeta(t)}`)).join("") + "</div>");
   }
   if (d.removedTables.length) {
-    parts.push('<div class="schema-block"><h4>삭제된 테이블 <span class="hint">(left에만)</span></h4>' +
+    parts.push('<div class="schema-block"><h4>삭제된 테이블 <span class="hint">(왼쪽에만)</span></h4>' +
       d.removedTables.map((t) => line("schema-del", "−", `${esc(t.name)} ${tableMeta(t)}`)).join("") + "</div>");
   }
   d.changedTables.forEach((t) => {
@@ -3290,9 +3361,9 @@ async function runParamDiff() {
   try {
     d = await api(`/api/param-diff?left=${left}&right=${right}`);
   } catch (e) {
-    box.innerHTML = e.message.startsWith("403")
+    box.innerHTML = e.status === 403
       ? '<div class="schema-warning">파라미터 드리프트는 운영자·관리자만 볼 수 있습니다.</div>'
-      : `<div class="schema-warning">비교 실패: ${esc(e.message)}</div>`;
+      : `<div class="schema-warning">비교 실패: ${esc(apiMessage(e))}</div>`;
     return;
   }
   if (d.warning) { warnBox.hidden = false; warnBox.textContent = `주의: ${d.warning}`; }
@@ -3312,15 +3383,15 @@ async function runParamDiff() {
       </tr>`).join("");
     parts.push(`<div class="schema-block"><h4>값이 다른 파라미터 <span class="hint">(${d.changed.length})</span></h4>
       <div class="table-scroll"><table class="qtable param-diff-table">
-        <thead><tr><th>name</th><th>left</th><th>right</th></tr></thead>
+        <thead><tr><th>이름</th><th>왼쪽</th><th>오른쪽</th></tr></thead>
         <tbody>${rows}</tbody></table></div></div>`);
   }
   if (d.leftOnly.length) {
-    parts.push('<div class="schema-block"><h4>left에만 있는 파라미터</h4>' +
+    parts.push('<div class="schema-block"><h4>왼쪽에만 있는 파라미터</h4>' +
       d.leftOnly.map((p) => line("schema-del", "−", `${esc(p.name)} = ${esc(p.value)}`)).join("") + "</div>");
   }
   if (d.rightOnly.length) {
-    parts.push('<div class="schema-block"><h4>right에만 있는 파라미터</h4>' +
+    parts.push('<div class="schema-block"><h4>오른쪽에만 있는 파라미터</h4>' +
       d.rightOnly.map((p) => line("schema-add", "+", `${esc(p.name)} = ${esc(p.value)}`)).join("") + "</div>");
   }
   box.innerHTML = parts.join("");
@@ -3336,9 +3407,9 @@ async function loadConfigDrift() {
   try {
     rows = await api(`/api/instances/${state.instance.id}/config-drift?limit=100`);
   } catch (e) {
-    box.innerHTML = e.message.startsWith("403")
+    box.innerHTML = e.status === 403
       ? '<div class="schema-warning">설정 변경 이력은 운영자·관리자만 볼 수 있습니다.</div>'
-      : `<div class="schema-warning">조회 실패: ${esc(e.message)}</div>`;
+      : `<div class="schema-warning">조회 실패: ${esc(apiMessage(e))}</div>`;
     return;
   }
   box.className = "config-drift-result";
@@ -3385,7 +3456,7 @@ async function submitReview() {
     await loadReviews();
   } catch (e) {
     $("#review-list").className = "review-list schema-warning";
-    $("#review-list").textContent = `요청 실패: ${e.message}`;
+    $("#review-list").textContent = `요청 실패: ${apiMessage(e)}`;
   } finally { btn.disabled = false; }
 }
 
@@ -3396,7 +3467,7 @@ async function loadReviews() {
   let rows;
   try {
     rows = await api(`/api/instances/${state.instance.id}/reviews`);
-  } catch (e) { box.innerHTML = `<div class="schema-warning">조회 실패: ${esc(e.message)}</div>`; return; }
+  } catch (e) { box.innerHTML = `<div class="schema-warning">조회 실패: ${esc(apiMessage(e))}</div>`; return; }
   box.className = "review-list";
   if (!rows.length) { box.innerHTML = '<div class="muted">아직 리뷰 요청이 없습니다.</div>'; return; }
   const canDecide = can("CHANGE_APPROVE");
@@ -3441,9 +3512,9 @@ async function decideReview(id, approved) {
     });
     await loadReviews();
   } catch (e) {
-    const msg = e.message.startsWith("403")
+    const msg = e.status === 403
       ? "승인/반려는 승인자(APPROVER)·관리자만 합니다."
-      : `처리 실패: ${e.message}`;
+      : `처리 실패: ${apiMessage(e)}`;
     const box = document.getElementById("review-list");
     if (box) box.insertAdjacentHTML("afterbegin", `<div class="finding-item">${esc(msg)}</div>`);
   }
@@ -3536,7 +3607,7 @@ async function generateIncident() {
     $("#btn-incident-dl").hidden = false;
   } catch (e) {
     box.className = "incident-result schema-warning";
-    box.textContent = e.message.startsWith("403") ? "인시던트 리포트는 운영자·관리자만 생성할 수 있습니다." : `생성 실패: ${e.message}`;
+    box.textContent = e.status === 403 ? "인시던트 리포트는 운영자·관리자만 생성할 수 있습니다." : `생성 실패: ${apiMessage(e)}`;
   } finally { btn.disabled = false; }
 }
 
@@ -3567,7 +3638,7 @@ async function generateMonthly() {
     $("#btn-monthly-dl").hidden = false;
   } catch (e) {
     box.className = "incident-result schema-warning";
-    box.textContent = e.message.startsWith("403") ? "월간 리포트는 운영자·관리자만 생성할 수 있습니다." : `생성 실패: ${e.message}`;
+    box.textContent = e.status === 403 ? "월간 리포트는 운영자·관리자만 생성할 수 있습니다." : `생성 실패: ${apiMessage(e)}`;
   } finally { btn.disabled = false; }
 }
 
@@ -3601,7 +3672,7 @@ async function runOnlineDdl(execute) {
     });
   } catch (e) {
     box.className = "ddl-result schema-warning";
-    box.textContent = `요청 실패: ${e.message}`;
+    box.textContent = `요청 실패: ${apiMessage(e)}`;
     return;
   }
   const cls = { OK: "schema-same", FAILED: "schema-warning", UNSUPPORTED: "muted" }[d.status] || "muted";
@@ -3951,7 +4022,7 @@ async function loadConversations() {
     cs.error = null;
   } catch (e) {
     if (state.instance?.id !== inst.id) return;
-    cs.error = `대화 목록을 불러오지 못했습니다: ${e.message}`;
+    cs.error = `대화 목록을 불러오지 못했습니다: ${apiMessage(e)}`;
   }
   renderChat();
   renderChatList();
@@ -3993,12 +4064,12 @@ async function openConversation(cid) {
   } catch (e) {
     if (state.instance?.id !== inst.id) return;
     cs.status = "idle";
-    if (/^404\b/.test(e.message)) {
+    if (e.status === 404) {
       // 지워진 대화다 — 오류가 아니라 빈 대화로 돌아간다
       cs.conversationId = null;
       cs.list = cs.list.filter((c) => c.id !== cid);
     } else {
-      cs.error = `대화를 열지 못했습니다: ${e.message}`;
+      cs.error = `대화를 열지 못했습니다: ${apiMessage(e)}`;
     }
     renderChat();
     renderChatList();
@@ -4036,8 +4107,8 @@ async function deleteConversation(cid) {
   try {
     await api(`/api/instances/${inst.id}/conversations/${cid}`, { method: "DELETE" });
   } catch (e) {
-    if (!/^404\b/.test(e.message)) {
-      cs.error = `대화를 지우지 못했습니다: ${e.message}`;
+    if (e.status !== 404) {
+      cs.error = `대화를 지우지 못했습니다: ${apiMessage(e)}`;
       renderChat();
       renderChatList();
       return;
@@ -4150,7 +4221,7 @@ async function runDiagnose() {
       turn.status = "stopped";
     } else {
       turn.status = "error";
-      turn.error = e.message;
+      turn.error = apiMessage(e);
     }
   } finally {
     turn.took = Date.now() - turn.startedAt;
@@ -4299,9 +4370,9 @@ async function loadAudit() {
         <td class="num">${e.durationMs == null ? "-" : e.durationMs}</td>
       </tr>`).join("") : '<tr><td colspan="6" class="muted">조건에 맞는 기록이 없습니다.</td></tr>';
   } catch (e) {
-    table.querySelector("tbody").innerHTML = e.message.startsWith("403")
+    table.querySelector("tbody").innerHTML = e.status === 403
       ? '<tr><td colspan="6" class="muted">감사 로그는 ADMIN 역할만 볼 수 있습니다.</td></tr>'
-      : `<tr><td colspan="6" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+      : `<tr><td colspan="6" class="muted">조회 실패: ${esc(apiMessage(e))}</td></tr>`;
   }
 }
 

@@ -38,7 +38,7 @@
   <!-- 좌측 사이드바 — 인스턴스 검색·목록(수백 대 확장 대응, 스크롤). 선택 시 우측 워크스페이스에 대시보드 -->
   <aside class="sidebar">
     <div class="sidebar-head">
-      <h2 class="sidebar-title">Instances</h2>
+      <h2 class="sidebar-title">인스턴스</h2>
       <span id="inst-count" class="muted"></span>
     </div>
     <!-- 검색·필터 (레퍼런스의 클러스터 검색·필터 대응 — 환경/리전은 AWS 고유라 기종·팀으로 일반화) -->
@@ -68,7 +68,7 @@
       <!-- 통합 헬스 스코어 (D8) — 5기종 전체를 한 점수·등급으로, 나쁜 순으로. 어디부터 볼지 기계가 정렬 -->
       <section class="panel health-score-panel">
         <h2 class="panel-title">헬스 스코어
-          <span class="hint">(흩어진 신호를 인스턴스별 한 점수로 — 나쁜 순 정렬 · 읽고 종합만, 대상 DB 변경 없음)</span>
+          <span class="hint">인스턴스별 한 점수로 종합해 나쁜 순으로 정렬합니다 — 읽기만 하고 대상 DB는 바꾸지 않습니다.</span>
         </h2>
         <div id="score-summary" class="score-summary"></div>
         <div id="score-result" class="score-result muted">불러오는 중...</div>
@@ -77,7 +77,7 @@
       <!-- 백업 신선도 (D7) — 전 인스턴스를 한 표로, 오래된 것·백업 없는 것을 위로 -->
       <section class="panel backup-freshness-panel">
         <h2 class="panel-title">백업 신선도
-          <span class="hint">(모든 DB가 최근에 백업됐나 · 3-2-1 일일 점검 — 읽고 비출 뿐, 백업 실행은 안 합니다)</span>
+          <span class="hint">모든 DB가 최근에 백업됐는지 3-2-1 기준으로 봅니다 — 백업 실행은 하지 않습니다.</span>
         </h2>
         <div id="freshness-summary" class="freshness-summary"></div>
         <div id="freshness-result" class="freshness-result muted">불러오는 중...</div>
@@ -129,9 +129,9 @@
       <!-- 대상별 운영 종합 (DBRE) — 이 DB가 무엇인지 + 지금 어떤지를 한눈에. GET /api/instances/{id}/overview -->
       <div id="overview-card" class="overview-card" hidden></div>
       <div class="tabs">
-        <button class="tab active" data-tab="top">Top Query</button>
-        <button class="tab" data-tab="slow">Slow Query</button>
-        <button class="tab" data-tab="monitor">Monitoring</button>
+        <button class="tab active" data-tab="top">상위 쿼리</button>
+        <button class="tab" data-tab="slow">느린 쿼리</button>
+        <button class="tab" data-tab="monitor">모니터링</button>
       </div>
 
       <div id="tab-top" class="tab-body">
@@ -248,7 +248,7 @@
         <!-- 성능 -->
         <div class="mon-group" data-group="perf">
           <div class="monitor-card metric-card">
-            <h3>Metric <span class="hint">Prometheus 시계열입니다. 미수집은 사유를 그대로 표기합니다.</span>
+            <h3>지표 <span class="hint">Prometheus 시계열입니다. 미수집은 사유를 그대로 표기합니다.</span>
               <a class="metric-full-link" href="http://localhost:13000" target="_blank" rel="noopener">전체 화면으로 보기 ↗</a></h3>
             <div class="metric-chart-box">
               <h4>CPU (%)</h4>
@@ -256,12 +256,12 @@
               <div id="cpu-empty" class="muted center" hidden></div>
             </div>
             <div class="metric-chart-box">
-              <h4>Connections</h4>
+              <h4>연결 수</h4>
               <svg id="conn-chart" width="100%" height="140" preserveAspectRatio="none"></svg>
               <div id="conn-empty" class="muted center" hidden></div>
             </div>
             <div class="metric-chart-box">
-              <h4>Query Activity (QPS)</h4>
+              <h4>쿼리 활동 (QPS)</h4>
               <svg id="qps-chart" width="100%" height="140" preserveAspectRatio="none"></svg>
               <div id="qps-empty" class="muted center" hidden></div>
             </div>
@@ -324,7 +324,7 @@
             <div id="aiops-detail" class="aiops-detail" hidden></div>
           </div>
           <div class="monitor-card advisors-card">
-            <h3>Advisors <span class="hint">읽고 조언만 합니다 — 대상 DB는 바꾸지 않습니다.</span></h3>
+            <h3>점검 조언 <span class="hint">읽고 조언만 합니다 — 대상 DB는 바꾸지 않습니다.</span></h3>
             <div id="advisors-summary" class="advisors-summary"></div>
             <div id="advisors-result" class="advisors-result muted">점검 중...</div>
           </div>
@@ -341,7 +341,7 @@
             <div id="plan-change-result" class="anomaly-result muted">조회 중...</div>
           </div>
           <div class="monitor-card">
-            <h3>Wait Events <span class="hint">그 시간에 무엇을 기다렸는지 — CPU·IO·Lock.</span></h3>
+            <h3>대기 이벤트 <span class="hint">그 시간에 무엇을 기다렸는지 — CPU·IO·Lock.</span></h3>
             <div class="table-scroll">
               <table class="qtable" id="wait-table">
                 <thead></thead>
@@ -374,13 +374,13 @@
             <div id="config-drift-result" class="config-drift-result muted">조회를 누르면 최근 설정 변경을 최신순으로 보여줍니다.</div>
           </div>
           <div class="monitor-card schema-diff-card">
-            <h3>Schema Diff <span class="hint">두 인스턴스의 구조 차이만 표시합니다.</span></h3>
+            <h3>스키마 차이 <span class="hint">두 인스턴스의 구조 차이만 표시합니다.</span></h3>
             <div class="schema-diff-controls">
               <select id="schema-left" class="schema-select"></select>
               <span class="schema-arrow">→</span>
               <select id="schema-right" class="schema-select"></select>
               <button id="btn-schema-diff" class="btn btn-primary btn-small">비교</button>
-              <span class="hint">추가=초록(right에만) · 삭제=빨강(left에만) · 변경=주황</span>
+              <span class="hint">추가=초록(오른쪽에만) · 삭제=빨강(왼쪽에만) · 변경=주황</span>
             </div>
             <div id="schema-diff-warning" class="schema-warning" hidden></div>
             <div id="schema-diff-result" class="schema-diff-result muted">좌/우 인스턴스를 고르고 비교를 누르세요.</div>
@@ -419,7 +419,7 @@
             </div>
             <div class="table-scroll">
               <table class="qtable" id="audit-table">
-                <thead><tr><th>시각</th><th>주체</th><th>역할</th><th>action</th><th>결과</th><th>ms</th></tr></thead>
+                <thead><tr><th>시각</th><th>주체</th><th>역할</th><th>동작</th><th>결과</th><th>ms</th></tr></thead>
                 <tbody><tr><td class="muted" colspan="6">검색을 눌러 조회하세요.</td></tr></tbody>
               </table>
             </div>
@@ -590,7 +590,7 @@
           쿼리 속 값은 ?로 가려서 보냅니다
         </span>
         <button id="btn-aiop-open" class="chat-delegate" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="aiop-popover" disabled>작업으로 맡기기</button>
-        <div id="chat-privacy-tip" class="chat-tip" role="tooltip" hidden>세션·Top Query·슬로우 쿼리의 SQL 문장은 값(리터럴)을 ?로 바꾼 뒤 AI에 넘깁니다. 대상 DB는 읽기만 하고 바꾸지 않습니다.</div>
+        <div id="chat-privacy-tip" class="chat-tip" role="tooltip" hidden>세션·상위 쿼리·느린 쿼리의 SQL 문장은 값(리터럴)을 ?로 바꾼 뒤 AI에 넘깁니다. 대상 DB는 읽기만 하고 바꾸지 않습니다.</div>
       </div>
       <!-- 작업 맡기기 — 접수 폼은 필요할 때만 뜬다(유리 재질: 떠 있는 계층) -->
       <div id="aiop-popover" class="aiop-popover" role="dialog" aria-label="작업으로 맡기기" hidden>
@@ -603,7 +603,7 @@
           <option value="INCIDENT_TRIAGE">장애 초기 진단</option>
           <option value="BACKUP_RISK_REVIEW">백업 위험</option>
           <option value="SLO_RISK_REVIEW">SLO 위험</option>
-          <option value="ADVISOR_SUMMARY">Advisor 요약</option>
+          <option value="ADVISOR_SUMMARY">점검 조언 요약</option>
           <option value="COST_REVIEW">비용 검토</option>
           <option value="DB_TEAM_INQUIRY">DB팀 문의</option>
         </select>

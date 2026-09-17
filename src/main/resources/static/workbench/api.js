@@ -25,8 +25,16 @@ export class ApiError extends Error {
     super((body && body.error) || `HTTP ${status}`);
     this.status = status;
     this.body = body || {};
+    // 서버 로그와 대조할 원인 번호. 본문 전체(JSON)는 화면에 내보내지 않고 이 번호만 짧게 붙인다(148절)
+    this.errorId = body && body.errorId ? String(body.errorId) : null;
   }
 }
+
+/** 화면에 보일 오류 문장 — 원문(JSON·드라이버 영문·스택)은 빼고 errorId 앞 8자만 덧붙인다(148절, B9) */
+export const errText = (e) => {
+  const msg = e && e.message ? e.message : "요청을 처리하지 못했습니다.";
+  return e && e.errorId ? `${msg} (오류 번호 ${String(e.errorId).slice(0, 8)})` : msg;
+};
 
 // raw=true면 성공 응답을 Response 그대로 돌려준다(CSV 내려받기용)
 export async function request(path, { method = "GET", body, raw = false } = {}) {

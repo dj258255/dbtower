@@ -154,7 +154,8 @@ public class ScoreService implements ScoreQuery {
             return registryService.health(id);
         } catch (Exception e) {
             log.warn("헬스 스코어 health 프로브 실패(다운으로 판정) id={} cause={}", id, e.getMessage());
-            return HealthStatus.down(e.getMessage());
+            // 분류된 사유만 스코어에 싣는다 — 원문은 위 로그에 남았다(148절, B9)
+            return HealthStatus.down(e);
         }
     }
 
