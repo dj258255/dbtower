@@ -1,0 +1,17 @@
+case,limit,round,waldir_mb,wal_status,safe_wal_mb,slot_active
+unlimited,-1,1,64.0,reserved,null,false
+unlimited,-1,2,96.0,extended,null,false
+unlimited,-1,3,128.0,extended,null,false
+unlimited,-1,4,160.0,extended,null,false
+unlimited,-1,5,192.0,extended,null,false
+unlimited,-1,6,224.0,extended,null,false
+unlimited,-1,7,256.0,extended,null,false
+unlimited,-1,8,288.0,extended,null,false
+limit32,32MB,1,32.0,lost,null,false
+limit32,32MB,2,32.0,lost,null,false
+limit32,32MB,3,32.0,lost,null,false
+limit32,32MB,4,32.0,lost,null,false
+limit32,32MB,5,32.0,lost,null,false
+limit32,32MB,6,32.0,lost,null,false
+limit32,32MB,7,32.0,lost,null,false
+limit32,32MB,8,32.0,lost,null,false
