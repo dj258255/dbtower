@@ -9887,3 +9887,79 @@ DBTOWER_E2E=1 E2E 8개 클래스, 혼자 2회 (메인)
 - 980~1200px 구간, 워크시트 탭이 여러 개일 때의 좁은 화면은 재지 않았다
 - 집계 카드의 원인인 서버 60초 캐시(`ScoreService.reportAll`)는 그대로다 — 화면은 사실만 말한다
 - 콘솔 인스턴스 등록 화면은 없다(만들지 않았다)
+
+
+## 182. 대상 DB가 죽으면 관제 화면이 줄을 서던 것 — 대상 조회를 2자리로 묶고, 닿지 않는 대상엔 보내지 않는다 (2026-09-17, #31)
+
+### 왜
+
+178절에서 채팅 대화 목록이 10초 늦게 오는 원인을 서버 커넥션 풀이 아니라 브라우저의 호스트당 연결 6개 제한으로 확정했다(curl로 대상 조회 20개 동시에도 대화 목록 0.007초).
+180절의 역할 취소 결함도 같은 줄에 걸렸다. 화면이 갇히지 않게만 해 둔 것을 원인에서 고친다.
+
+### 어떤 요청이 대상 DB를 만지는가 (컨트롤러·서비스 호출 근거)
+
+| 경로 | 분류 | 근거 |
+|---|---|---|
+| `/api/instances/{id}/health` | 대상 조회 | `RegistryController.health` → `RegistryService.health` → `InstanceOperations.health`(대상 접속) |
+| `/api/instances/{id}/overview` | 대상 조회(+플랫폼) | `OverviewController` → `OverviewService.overviewFor`의 `replicationSummary`가 `operatorFactory.create(i).replicationState()` 호출. 헬스 스코어·백업 신선도 조각은 플랫폼 조회 |
+| `/api/instances/{id}/activity` | 플랫폼 DB | `InsightController.activity` → `snapshotRepository.sumByBatch` |
+| `/api/instances/{id}/metrics` | Prometheus | `InsightController.metrics` → `prometheusClient.queryRange` |
+| `/api/instances/{id}/metrics/commands` | Prometheus | `InsightController.commandMetrics` → `prometheusClient.queryRange` |
+| `/api/instances/{id}/query-stats` | 대상 조회 | `InsightController.queryStats` → `operator.queryStats` |
+| `/api/instances/{id}/rows-metric` | 대상 조회 | `InsightController.rowsMetric` → `operator.rowsMetric` |
+| `/api/instances/{id}/slow-queries` | 대상 조회 | `InsightController.slowQueries` → `operator.slowQueries` |
+| `/api/instances/{id}/replication` | 대상 조회 | `InsightController.replication` → `operator.replicationState` |
+| `/api/instances/{id}/replication-slots` | 대상 조회 | `InsightController.replicationSlots` → `operator.replicationSlots` |
+| `/api/instances/{id}/wait-events` | 대상 조회 | `InsightController.waitEvents` → `operator.waitEvents` |
+| `/api/instances/{id}/sessions` | 대상 조회 | `InsightController.sessions` → `operator.activeSessions` |
+| `/api/instances/{id}/latency-percentiles` | 대상 조회 | `InsightController.latencyPercentiles` → `operator.latencyPercentiles` |
+| `/api/instances/{id}/slo` | 대상 조회(+플랫폼) | `SloService.evaluate`가 `operator.latencyPercentiles`/`operator.queryStats` 호출. 가용성·에러 버짓은 `HealthSampleRepository`(플랫폼) |
+| `/api/instances/{id}/partitions` | 대상 조회 | `InsightController.partitions` → `operator.partitions` |
+| `/api/instances/{id}/advisors` | 대상 조회 | `AdvisorService.inspect` → `operator.describeSchema`·`tableStats`·`queryStats`·`parameters` |
+| `/api/instances/{id}/finops` | 대상 조회 | `FinOpsService.analyze` → `operator.describeSchema`·`tableStats`·`activeSessions`·`parameters` |
+| `/api/instances/{id}/deadlocks` | 대상 조회 | `InsightController.deadlocks` → `operator.recentDeadlocks` |
+| `/api/instances/{id}/anomalies` | 플랫폼 DB | `BaselineService.detectAnomalies` → `snapshotRepository` + `BaselineLongtermDao` (operator 미사용) |
+| `/api/instances/{id}/plan-changes` | 플랫폼 DB | `PlanChangeController` → `PlanSnapshotRepository` |
+| `/api/instances/{id}/backup-runs` | 플랫폼 DB | `BackupService.history` → `runRepository.findTop20...` |
+| `/api/instances/{id}/pitr-window` | 플랫폼 DB | `BackupService.pitrWindow` → `runRepository` + `operatorFactory.create(instance).pitrRestoreGuide(...)`. `pitrRestoreGuide`는 안내 문자열 생성뿐이고(접속 없음), `create`는 구현체 생성만 한다(`DbmsOperatorFactory.create` switch) |
+| `/api/instances/{id}/reviews` | 플랫폼 DB | `ReviewController.byInstance` → `ReviewService.byInstance` |
+| `/api/instances/{id}/conversations` | 플랫폼 DB | `ConversationController.list` → `ConversationService.list` |
+| `/api/ai-operations?limit=30` | 플랫폼 DB | `AiOperationController` 목록 조회 |
+| `/api/instances/{id}/live/sessions` (SSE) | 대상 조회(장수명) | `LiveController` → `LiveSessionHub`가 대상 조회 |
+
+### 고친 것
+
+- 대상 조회 전용 동시 실행 제한기(동시 2). 실시간 세션 SSE가 1자리를 계속 쥐므로 1 + 2 = 3, 남은 3자리는 플랫폼 조회와 사용자 조작(역할 적용·채팅 보내기·대화 목록)이 쓴다
+- 인스턴스를 바꾸면 세대를 올려 이전 대상의 대기 중 조회는 보내지 않고, 진행 중 조회의 늦은 응답은 버린다(그대로 두면 이전 대상의 5초짜리 응답이 새 대상 카드를 "조회 실패"로 덮었다)
+- 헬스가 down으로 판정된 대상은 60초 동안 대상 조회를 보내지 않고 카드마다 "대상에 연결되지 않아 조회하지 않았습니다." + 다시 시도(그 카드만). 플랫폼만 읽는 카드는 그대로 조회
+- 인스턴스 카드의 헬스·복제 역할 조회도 같은 제한기를 거친다(빼면 down 재선택에도 13건이 나갔다)
+
+### 측정 (`TargetSlotE2ETest`, 대상 127.0.0.1:1, `page.onRequest/onResponse`)
+
+| 항목 | 고치기 전 | 고친 뒤 (최종 2회) |
+|---|---|---|
+| 인스턴스 선택 후 `/conversations` 요청→응답 | **10073ms** | **8ms** / **11ms** |
+| 동시에 진행 중인 대상 조회 최대 | **15개** | **2개** / **2개** |
+| down 판정 뒤 같은 인스턴스 재선택 시 대상 조회 | **13건**(health·overview·query-stats·slow-queries·replication·wait-events·sessions·latency-percentiles·slo·partitions·advisors·finops·deadlocks) | **0건** / **0건** |
+| A→B 빠른 전환 시점까지 나간 A 대상 조회 | **16건** | **1건** / **1건** |
+
+고치기 전 코드로 같은 테스트를 돌려 4건 모두 실패하는 것을 먼저 확인했다("대화 목록이 대상 조회 뒤에 줄을 섰다(10073ms)", "대상 조회가 15개까지 동시에 나갔다" 등).
+"동시 15개"는 요청 시작 이벤트 기준이라 소켓을 기다리는 대기분도 센다 — 6자리 고갈은 대화 목록 10073ms가 보여준다.
+
+### 테스트
+
+```text
+./scripts/check-conventions.sh   규약 검사 전부 통과
+DBTOWER_E2E=1 E2E 9개 클래스 42건, 메인이 혼자 2회
+  1회차 07:02:02 UTC  42/42   build/e2e-runs/main-b7-20260917T070202Z
+  2회차 07:05:40 UTC  42/42   build/e2e-runs/main-b7-20260917T070540Z
+./gradlew test                   테스트 1041, 실패 0, 오류 0, 건너뜀 84 (07:09:09 UTC 시작)
+```
+
+### 정직하게 남기는 범위
+
+- **대상이 죽어 있고 헬스 판정 전이면 카드가 늦게 찬다.** 12개 로더가 2개씩 5초에 걸쳐 돌아 마지막 카드는 약 30초 뒤다(전에는 약 10초). 플랫폼 조회·조작을 지키려는 맞바꿈이고, 판정 뒤에는 조회 자체를 보내지 않는다. 실측하지 않았다
+- down 판정 60초 유지는 실측 근거가 없다
+- 대상이 살아 있을 때 첫 화면이 채워지는 시간은 재지 않았다
+- 조회 도중 인스턴스를 바꾸면 `selectInstance`의 약속이 끝나지 않아 거기에 걸린 딥링크 처리(`?aiop=`·`compareAt`)가 실행되지 않는다(첫 진입에서는 실행된다)
+- 워크벤치는 인스턴스당 대상 조회가 스키마 하나뿐이라 같은 문제가 없어 손대지 않았다
