@@ -113,6 +113,35 @@ body {
 
 /* 함대 개요 — 헬스 스코어 + 백업 신선도 나란히 */
 /* 함대 개요 — 반응형: 각 패널이 600px 이상 확보되면 2열, 아니면 1열로 쌓인다(짤림 방지) */
+/* 확인이 필요한 DB (#55) — 한 줄에 이름·사유 칩·보기. 칩은 누를 수 있는 조작이라 채운 면(기본 버튼과 같은 회색) */
+.attention-panel { margin-bottom: 16px; container-type: inline-size; }
+.attention-head { display: flex; align-items: baseline; gap: 10px; }
+.attention-head .panel-title { margin: 0; }
+.attention-list { list-style: none; margin: 12px 0 0; padding: 0; }
+.attention-row {
+  display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr) auto; align-items: center; gap: 12px;
+  padding: 10px 0; border-top: 1px solid var(--line);
+}
+.attention-row:first-child { border-top: 0; }
+.attention-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.attention-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.attn-chip {
+  border: 0; background: #f2f4f6; color: #333d4b; border-radius: 999px; padding: 5px 11px;
+  font: inherit; font-size: var(--fs-small); font-weight: 600; cursor: pointer;
+}
+.attn-chip:hover { background: #e5e8eb; }
+.attn-chip:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.attention-rest { padding: 8px 0 0; }
+.attention-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.link-btn { border: 0; background: none; padding: 0; font: inherit; font-size: var(--fs-small); font-weight: 600; color: var(--primary); cursor: pointer; }
+.link-btn:hover { text-decoration: underline; }
+.link-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.fleet-row.fleet-collapsed { display: none; }
+.attention-flash { background: #fff1e0 !important; transition: background-color .3s ease; }
+@container (max-width: 560px) {
+  .attention-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .attention-chips { grid-column: 1 / -1; grid-row: 2; }
+}
 .fleet-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(600px, 100%), 1fr)); gap: 16px; }
 .fleet-row .panel { margin-bottom: 16px; min-width: 0; }
 /* 한 줄 표가 패널보다 넓으면 잘리지 말고 가로 스크롤 */

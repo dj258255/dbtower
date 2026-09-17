@@ -1284,6 +1284,130 @@ const SCORE_STATE_LABEL = {
   OK: "정상", PENALIZED: "감점", INSUFFICIENT_DATA: "데이터 부족", ERROR: "수집 실패",
 };
 
+// ---------- 확인이 필요한 DB (#55) · 원인 지름길 (#56) ----------
+// 첫 화면에서 "지금 손볼 DB가 몇 대이고 무엇 때문인가"를 사람이 두 표를 읽고 합쳐야 알았다. 헬스 스코어 보고서에서
+// 다운이거나 D·F 등급인 대상을 나쁜 순으로 세 줄까지 올리고, 감점 사유 칩을 누르면 그 원인을 보는 화면으로 바로 간다.
+// 표 둘은 아래에 접는다 — 보고서가 비었거나 실패하면 요약을 만들 근거가 없으니 표를 펼친 채 둔다(표가 사유를 말한다)
+const fleet = { score: null, freshness: null, expanded: false };
+const ATTENTION_ROWS = 3;
+
+function needsAttention(s) {
+  return s.down || s.grade === "D" || s.grade === "F";
+}
+
+function renderAttention() {
+  const card = $("#attention");
+  const rows = $("#fleet-row");
+  const report = fleet.score;
+  if (!report || !report.instances || !report.instances.length) {
+    card.hidden = true;
+    rows.classList.remove("fleet-collapsed");
+    return;
+  }
+  card.hidden = false;
+  rows.classList.toggle("fleet-collapsed", !fleet.expanded);
+  $("#attention-more").setAttribute("aria-expanded", String(fleet.expanded));
+  $("#attention-more").textContent = fleet.expanded ? "전체 헬스 스코어 · 백업 신선도 접기" : "전체 헬스 스코어 · 백업 신선도 보기";
+
+  // 서버가 이미 나쁜 순으로 정렬해 내려준다
+  const need = report.instances.filter(needsAttention);
+  $("#attention-title").textContent = need.length ? `확인이 필요한 DB ${need.length}대` : "지금 확인이 필요한 DB가 없습니다";
+  $("#attention-total").textContent = `${report.total ?? report.instances.length}대 중 · 집계 ${String(report.generatedAt).replace("T", " ").slice(11, 16)}`;
+  const shown = need.slice(0, ATTENTION_ROWS);
+  const list = $("#attention-list");
+  list.innerHTML = shown.map((s) => {
+    const chips = s.contributions
+      .filter((c) => c.state === "PENALIZED")
+      .sort((a, b) => b.penalty - a.penalty)
+      .slice(0, 3)
+      .map((c) => `<button type="button" class="attn-chip" data-id="${s.instanceId}" data-signal="${esc(c.signal)}"
+          title="${esc(c.summary)} — ${esc(ATTENTION_GO_LABEL[c.signal] ?? "인스턴스를 엽니다")}">${esc(SCORE_SIGNAL_LABEL[c.signal] ?? c.signal)} −${fmtNum(c.penalty, 0)}</button>`)
+      .join("");
+    const lead = s.down ? '<span class="score-down">다운</span>' : `<span class="grade-badge grade-${esc(s.grade)}">${esc(s.grade)}</span>`;
+    return `<li class="attention-row">
+      <span class="attention-name">${engineIcon(s.type)} ${esc(s.instanceName)} ${lead}</span>
+      <span class="attention-chips">${chips || '<span class="muted">감점 사유 없음</span>'}</span>
+      <button type="button" class="btn btn-small attention-open" data-id="${s.instanceId}">보기</button>
+    </li>`;
+  }).join("") + (need.length > ATTENTION_ROWS
+    ? `<li class="attention-rest"><button type="button" class="link-btn attention-rest-btn">외 ${need.length - ATTENTION_ROWS}대 — 전체 헬스 스코어에서 보기</button></li>` : "");
+
+  const f = fleet.freshness;
+  const backup = f ? [f.noBackupCount ? `백업 없음 ${f.noBackupCount}대` : "", f.staleCount ? `백업 오래됨 ${f.staleCount}대` : ""].filter(Boolean) : [];
+  $("#attention-backup").innerHTML = backup.length
+    ? `<button type="button" class="link-btn attention-backup-btn">${esc(backup.join(" · "))}</button>` : "";
+}
+
+// 감점 사유 칩이 여는 화면 — 칩의 title에도 같은 말을 적어 누르기 전에 어디로 가는지 알린다
+const ATTENTION_GO_LABEL = {
+  HEALTH: "인스턴스를 열어 연결 상태를 봅니다",
+  ANOMALY: "최근 30분과 직전 30분을 시점 비교합니다",
+  SLO: "느린 쿼리를 엽니다",
+  BACKUP: "백업 신선도 표의 이 인스턴스로 갑니다",
+  ADVISOR: "진단 탭의 점검 조언을 엽니다",
+  RESOURCE: "모니터링의 성능 지표를 엽니다",
+};
+
+function setupAttention() {
+  $("#attention-more").addEventListener("click", () => {
+    fleet.expanded = !fleet.expanded;
+    renderAttention();
+  });
+  $("#attention").addEventListener("click", (e) => {
+    const chip = e.target.closest(".attn-chip");
+    const open = e.target.closest(".attention-open");
+    if (chip) goToCause(Number(chip.dataset.id), chip.dataset.signal);
+    else if (open) goToCause(Number(open.dataset.id), "HEALTH");
+    else if (e.target.closest(".attention-rest-btn")) expandFleet(".health-score-panel");
+    else if (e.target.closest(".attention-backup-btn")) expandFleet(".backup-freshness-panel");
+  });
+}
+
+function expandFleet(selector) {
+  fleet.expanded = true;
+  renderAttention();
+  document.querySelector(selector)?.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+/** 원인 지름길(#56) — 전에는 인스턴스 선택 -> 시간대 -> 드래그 -> 비교 조회 -> 행 클릭까지 사람이 밟았다 */
+function goToCause(id, signal) {
+  const inst = state.instances.find((i) => i.id === id);
+  if (!inst) return;
+  if (signal === "BACKUP") {
+    expandFleet(".backup-freshness-panel");
+    const row = document.querySelector(`#freshness-result .fresh-group[data-id="${id}"] .fresh-row`);
+    if (row) {
+      row.scrollIntoView({ block: "center", behavior: "smooth" });
+      row.classList.add("attention-flash");
+      setTimeout(() => row.classList.remove("attention-flash"), 2000);
+    }
+    return;
+  }
+  // selectInstance는 구간 기본값(최근 30분 / 직전 30분)을 첫 await 전에 채운다 — 끝나기를 기다리지 않는다
+  if (state.instance?.id !== id) selectInstance(inst, null);
+  const show = (el) => el?.scrollIntoView({ block: "start", behavior: "smooth" });
+  if (signal === "ANOMALY") {
+    // 인스턴스의 첫 조회가 다 끝나기를 기다리지 않는다 — 느린 대상이면 그만큼 기다렸다. 먼저 출발한 단독 조회는 순번에 져 표를 덮지 않는다
+    document.querySelector('.tab[data-tab="top"]').click();
+    $("#time-more").open = true;
+    show($("#time-panel"));
+    runCompare();
+  } else if (signal === "SLO") {
+    document.querySelector('.tab[data-tab="slow"]').click();
+    show($("#result-panel"));
+  } else if (signal === "ADVISOR") {
+    document.querySelector('.tab[data-tab="monitor"]').click();
+    showMonGroup("diag");
+    show(document.querySelector(".advisors-card"));
+  } else if (signal === "RESOURCE") {
+    document.querySelector('.tab[data-tab="monitor"]').click();
+    showMonGroup("perf");
+    show($("#result-panel"));
+  } else {
+    show($("#result-panel"));
+  }
+}
+
 async function loadHealthScore() {
   const summary = $("#score-summary");
   const box = $("#score-result");
@@ -1293,8 +1417,12 @@ async function loadHealthScore() {
   } catch (e) {
     box.classList.add("muted");
     box.textContent = `조회 실패: ${apiMessage(e)}`;
+    fleet.score = null;
+    renderAttention();
     return;
   }
+  fleet.score = report;
+  renderAttention();
   box.classList.remove("muted");
   const g = report.gradeCounts || {};
   summary.innerHTML = `
@@ -1372,6 +1500,8 @@ async function loadBackupFreshness() {
     box.textContent = `조회 실패: ${apiMessage(e)}`;
     return;
   }
+  fleet.freshness = report;
+  renderAttention();
   box.classList.remove("muted");
   summary.innerHTML = `
     <span class="fresh-badge fresh-FRESH">신선 ${report.freshCount}</span>
@@ -1820,6 +1950,9 @@ const msDigits = (...values) => (values.some((v) => v > 0 && v < 1) ? 4 : 2);
 
 // ---------- Top Query: 단순 조회 ----------
 async function runQuery(force) {
+  // 단독 조회와 비교 조회는 같은 표를 그린다 — 늦게 끝난 앞 요청이 뒤 요청의 표를 덮지 않게 순번을 같이 쓴다.
+  // 원인 지름길(#56)이 인스턴스를 열자마자 비교를 내면, 먼저 출발한 단독 조회가 나중에 도착해 비교 결과를 지웠다
+  const requestSeq = ++state.compareSeq;
   state.compareMode = false;
   closeDetail();
   // 조회 범위 표기(레퍼런스 하단 텍스트 대응) — 단독 조회에서도 어떤 창을 보고 있는지 남긴다.
@@ -1844,11 +1977,13 @@ async function runQuery(force) {
     [stats, rowsLabel] = await Promise.all([
       targetApi(`/api/instances/${state.instance.id}/query-stats?limit=20`), rowsMetricLabel(state.instance.id)]);
   } catch (e) {
+    if (requestSeq !== state.compareSeq) return;
     // 대상 조회가 실패하면(502) 사유를 표 자리에 보인다 — 전에는 잡지 않아 표가 빈 채로 멈추고 콘솔 오류만 남았다(149절 계측 중 발견)
     $("#top-table thead").innerHTML = "";
     $("#top-table tbody").innerHTML = `<tr><td class="muted">쿼리 통계를 불러오지 못했습니다: ${esc(apiMessage(e))}</td></tr>`;
     return;
   }
+  if (requestSeq !== state.compareSeq) return;
   // Call/sec는 스냅샷 차분이라 이력 없으면 null → "—". Latency/행 지표는 누적÷호출수(평균).
   // Plan 컬럼은 값이 있는 기종(MongoDB — profiler가 계획 요약을 저장)에서만 그린다.
   const hasPlan = stats.some((q) => q.plan);
@@ -1950,9 +2085,6 @@ function detailSql() { return $("#detail-sql").value.trim(); }
 
 /**
  * 조회가 끝났다 — 그 결과가 어느 SQL의 것인지 기록하고 "다시 조회"를 보인다.
-  // 단독 조회와 비교 조회는 같은 표를 그린다 — 늦게 끝난 앞 요청이 뒤 요청의 표를 덮지 않게 순번을 같이 쓴다.
-  // 원인 지름길(#56)이 인스턴스를 열자마자 비교를 내면, 먼저 출발한 단독 조회가 나중에 도착해 비교 결과를 지웠다
-  const requestSeq = ++state.compareSeq;
  * 토글이 다시 조회할지 판단하는 근거가 이 기록이고, 한 번도 조회하지 않은 섹션에 "다시 조회"가
  * 떠 있으면 무엇을 다시 조회하는지 알 수 없다(B3 2차).
  */
@@ -1977,13 +2109,11 @@ function toggleDetailView(key) {
   // 인덱스 제안만 사람의 입력(후보 컬럼)이 필요하다 — 토글이 대신 실행하지 않고 입력칸으로 보낸다.
   // 대신 SQL이 바뀌었으면 옛 결과는 그 SQL의 것이 아니므로 버린다
   if (key === "advisor") {
-    if (requestSeq !== state.compareSeq) return;
     if (stale) resetAdvisor();
     renderAdvisorCandidates();
     $("#advisor-columns").focus();
     return;
   }
-  if (requestSeq !== state.compareSeq) return;
   if (stale) DETAIL_RUN[key]();
 }
 
@@ -4797,6 +4927,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupSqlTip();         // 표의 SQL 셀은 강조된 전용 툴팁을 쓴다(B3) — title을 쓰지 않는다
   setupInstanceFilter(); // 검색·필터 이벤트 연결(검색·필터 구동 렌더)
   setupPresets();
+  setupAttention();
   setupAiOperations();
   // SQL 편집 시 하이라이트 레이어를 따라 갱신·스크롤 동기화(투명 textarea 오버레이)
   $("#detail-sql").addEventListener("input", updateSqlHl);

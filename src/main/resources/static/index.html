@@ -63,6 +63,20 @@
     <!-- 등록된 인스턴스가 한 대도 없을 때 — 함대 카드 둘은 빈 채로 같은 문장을 두 번 말하게 되므로 접고, 여기 한 줄만 둔다(B6) -->
     <section id="inst-onboarding" class="panel empty-onboarding" hidden></section>
 
+    <!-- 확인이 필요한 DB (#55) — 두 표를 읽고 사람이 합치던 "지금 손볼 DB와 이유"를 맨 위 한 카드로.
+         사유 칩은 그 원인 화면으로 바로 간다(#56). 표 둘은 아래에 접어 두고 필요할 때 연다 -->
+    <section id="attention" class="panel attention-panel" hidden>
+      <div class="attention-head">
+        <h2 class="panel-title" id="attention-title">확인이 필요한 DB</h2>
+        <span id="attention-total" class="muted"></span>
+      </div>
+      <ul id="attention-list" class="attention-list"></ul>
+      <div class="attention-foot">
+        <span id="attention-backup" class="attention-backup"></span>
+        <button type="button" id="attention-more" class="link-btn" aria-expanded="false" aria-controls="fleet-row">전체 헬스 스코어 · 백업 신선도 보기</button>
+      </div>
+    </section>
+
     <!-- 함대 개요 — 인스턴스 선택과 무관한 전체 뷰 두 개를 나란히 -->
     <div class="fleet-row" id="fleet-row">
       <!-- 통합 헬스 스코어 (D8) — 5기종 전체를 한 점수·등급으로, 나쁜 순으로. 어디부터 볼지 기계가 정렬 -->
