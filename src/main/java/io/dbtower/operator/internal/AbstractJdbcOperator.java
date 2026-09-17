@@ -339,6 +339,20 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
         }
     }
 
+    @Override
+    public long countRows(ConsoleCredential credential, String table, String where, int timeoutSeconds) {
+        String sql = "SELECT COUNT(*) FROM " + table + (where == null || where.isBlank() ? "" : " WHERE " + where);
+        try (Connection c = writeConnection(credential);
+             java.sql.Statement st = c.createStatement()) {
+            st.setQueryTimeout(timeoutSeconds);
+            try (java.sql.ResultSet rs = st.executeQuery(sql)) {
+                return rs.next() ? rs.getLong(1) : 0;
+            }
+        } catch (SQLException e) {
+            throw new OperatorException(instance.getType() + " 행 수 세기 실패: " + e.getMessage(), e);
+        }
+    }
+
     private JdbcBulkChangeRunner bulkRunner() {
         return new JdbcBulkChangeRunner(AbstractJdbcOperator.this::beginChange);
     }
