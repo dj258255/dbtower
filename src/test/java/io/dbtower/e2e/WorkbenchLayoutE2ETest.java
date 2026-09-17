@@ -271,6 +271,42 @@ class WorkbenchLayoutE2ETest {
         assertThat(sheetPatches).hasSize(1);
     }
 
+    /**
+     * 대화 칸에는 대화만 — 직접 실행·되돌림 버전 카드는 탭의 "최신 vN"이 여는 버전 기록에 모인다(#63).
+     * 전에는 실행할 때마다 "v1 · 직접 실행한 SQL" 카드가 대화 칸에 쌓여 대화가 기록 목록처럼 밀렸다.
+     */
+    @Test
+    void 직접_실행_버전은_대화_칸이_아니라_버전_기록에_모인다() {
+        DatabaseInstance a = instance("e2e-wb-v");
+        sheets.put(a.getId(), mutableListOf(new StubSheet(1, "버전 시트", 3)));
+        String version = "{\"versionNo\":%d,\"title\":%s,\"source\":\"%s\",\"principal\":\"e2e\",\"createdAt\":\"2026-09-17T10:0%d:00\",\"sql\":\"SELECT %d\",\"restoredFrom\":null}";
+        String timeline = "[" + "{\"type\":\"VERSION\",\"version\":" + version.formatted(1, "null", "RUN", 1, 1) + "},"
+                + "{\"type\":\"MESSAGE\",\"message\":{\"role\":\"USER\",\"content\":\"주문 상태별 건수\",\"valuesShared\":false}},"
+                + "{\"type\":\"MESSAGE\",\"message\":{\"role\":\"ASSISTANT\",\"content\":\"상태별로 묶었습니다.\",\"sql\":\"SELECT status, count(*) FROM orders GROUP BY status\","
+                + "\"tier\":\"READ\",\"version\":" + version.formatted(2, "\"AI 제안\"", "AI", 2, 2) + "}},"
+                + "{\"type\":\"VERSION\",\"version\":" + version.formatted(3, "null", "RUN", 3, 3) + "}]";
+        Page page = openWorkbench(a, p -> p.route("**/api/workbench/worksheets/*/timeline", route -> fulfillJson(route, timeline)));
+
+        Locator chat = page.locator("#wb-timeline");
+        assertThat(chat).containsText("상태별로 묶었습니다.");
+        assertThat(chat.locator(".checkpoint")).hasCount(1);            // AI 답에 붙은 제안 버전만
+        assertThat(chat.locator(".checkpoint")).containsText("v2");
+        assertThat(chat).not().containsText("직접 실행");
+
+        Locator badge = page.locator("#wb-sheets .wb-sheet-tab.active #wb-version");
+        assertThat(badge).hasText("최신 v3");
+        badge.click();
+        Locator panel = page.locator("#wb-version-panel");
+        assertThat(panel).isVisible();
+        assertThat(badge).hasAttribute("aria-expanded", "true");
+        assertThat(panel.locator(".checkpoint")).hasCount(3);
+        assertThat(panel.locator(".checkpoint .cp-title").first()).hasText("v3 · 직접 실행");
+        screenshot(page, "workbench-version-panel.png");
+
+        page.keyboard().press("Escape");
+        assertThat(panel).isHidden();
+    }
+
     private Page openWorkbench(DatabaseInstance target, Consumer<Page> extra) {
         BrowserContext context = browser.newContext(new Browser.NewContextOptions()
                 .setTimezoneId("Asia/Seoul").setViewportSize(1512, 900));
