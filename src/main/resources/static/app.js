@@ -2076,16 +2076,22 @@ async function runAntiPatterns() {
   }
 }
 
-// 정규화 쿼리 식별자를 사람이 읽을 길이로 줄인다. PostgreSQL queryid는 부호 있는 64비트라 음수로 찍히는데,
-// 화면에서 20자리 숫자는 서로 구분이 안 되고 "왜 마이너스인가"라는 오해만 남긴다(162절 지적).
-// 전체 값은 title로 남겨 복사·대조가 가능하게 둔다 — 줄이되 숨기지 않는다.
+// 쿼리 ID를 사람이 읽을 길이로 줄인다. 통계가 "같은 모양의 쿼리"를 묶어 붙이는 번호다(PostgreSQL queryid, MySQL digest).
+// PostgreSQL queryid는 부호 있는 64비트라 -8248214055340972226처럼 음수로 찍혀 "무슨 값인가"만 남겼다(#40, 162절).
+// 숫자 ID는 부호 없는 64비트 16진수로 바꿔 MySQL digest와 같은 모양으로 보인다 — 값 자체에 뜻이 없다는 것이 모양으로 드러난다.
+// 원래 값은 title과 복사 버튼에 그대로 남긴다(pg_stat_statements에서 찾을 때는 원래 값이 필요하다).
 function shortQueryId(id) {
-  const s = String(id ?? "");
+  const s = String(id ?? "").trim().replace("−", "-");
   if (!s) return "—";
-  if (s.length <= 12) return s;
-  const neg = s.startsWith("-") || s.startsWith("−");
-  const digits = neg ? s.slice(1) : s;
-  return `${neg ? "n" : ""}${digits.slice(0, 6)}…${digits.slice(-4)}`;
+  let hex = s;
+  if (/^-?\d+$/.test(s)) {
+    try {
+      let n = BigInt(s);
+      if (n < 0n) n += 1n << 64n;
+      hex = n.toString(16).padStart(16, "0");
+    } catch { hex = s; }
+  }
+  return hex.length <= 12 ? hex : `${hex.slice(0, 6)}…${hex.slice(-4)}`;
 }
 
 function renderAntiPatterns(rows) {
