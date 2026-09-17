@@ -17,7 +17,8 @@ const api = (path, opts = {}) => {
   return fetch(path, { ...opts, headers }).then((r) => {
     if (r.status === 401) { location.href = "/login.html"; throw new Error("로그인이 필요합니다"); }
     if (!r.ok) return r.text().then((t) => { throw new Error(`${r.status} ${t}`); });
-    return r.json();
+    // 204 No Content(대화 삭제 등)에는 본문이 없다 — r.json()이 던지면 성공이 실패로 보인다
+    return r.status === 204 ? null : r.json();
   });
 };
 
@@ -231,7 +232,41 @@ async function loadInstances() {
   state.serverCount = serverCount;
   populateInstanceFilterOptions(list);
   renderInstanceMatches();
+  renderInstanceOnboarding();
   handleInstanceDeepLink(list);
+}
+
+/**
+ * 등록된 인스턴스가 한 대도 없을 때의 한 줄 (B6).
+ *
+ * 함대 카드 둘(헬스 스코어·백업 신선도)은 빈 채로 같은 문장을 두 번 말하게 되므로 접고 여기서 한 번만 말한다.
+ * 역할에 따라 할 수 있는 일이 다르다 — 관제 역할에게 "등록하세요"라고 하면 할 수 없는 일을 권하는 것이다.
+ * 등록 화면은 콘솔에 없다(만들지 않는다) — 있지도 않은 화면으로 가는 버튼 대신 실제 입구를 적는다.
+ */
+function renderInstanceOnboarding() {
+  const box = $("#inst-onboarding");
+  const fleet = $("#fleet-row");
+  const none = state.instances.length === 0;
+  box.hidden = !none;
+  fleet.hidden = none;
+  // 대화 칸의 안내도 같은 사실 위에 선다 — 목록이 늦게 도착하면 "왼쪽에서 고르세요"로 굳는다(B6)
+  if (!state.instance) renderChat({});
+  if (!none) return;
+  box.innerHTML = state.role === "ADMIN"
+    ? `<p class="empty-onboarding-line">등록된 인스턴스가 없습니다. 콘솔에는 등록 화면이 없고,
+       <code>POST /api/instances</code>(또는 IaC의 멱등 upsert)로 등록하면 여기에 나타납니다.</p>`
+    : `<p class="empty-onboarding-line">등록된 인스턴스가 없습니다. 등록은 ADMIN이 하므로 관리자에게 요청하세요.</p>`;
+}
+
+/**
+ * 집계 카드가 비었을 때의 문장 — "등록된 인스턴스가 없습니다"라고 쓰면 화면이 거짓말을 한다.
+ * 이 카드들은 주기 집계 스냅샷을 그대로 보여주므로, 바로 아래 카드에 인스턴스가 버젓이 있는데도 그 문장이 떴다(B6).
+ * 등록 수(라이브)와 집계에 든 수(스냅샷)를 갈라서 말한다.
+ */
+function emptyAggregateNote() {
+  return state.instances.length
+    ? `이 집계에 든 인스턴스가 없습니다 — 등록 ${state.instances.length}대, 다음 집계 뒤 다시 봅니다.`
+    : "등록된 인스턴스가 없습니다.";
 }
 
 // 엔진 아이콘 — 공식 브랜드 로고(devicon SVG)를 스프라이트 심볼로 1회 정의하고 <use>로 참조(DOM 폭증 방지).
@@ -311,9 +346,11 @@ function renderInstanceMatches() {
   }
   $("#inst-count").textContent = anyFilter ? `${matches.length}/${total}` : `${total}대`;
   if (!shown.length) {
-    box.innerHTML = anyFilter
-      ? '<div class="inst-empty muted">일치하는 인스턴스가 없습니다.</div>'
-      : `<div class="inst-empty muted">총 <b>${total}</b>대 — 위에서 검색하거나 필터를 선택하면 여기 표시됩니다.</div>`;
+    // 등록된 인스턴스가 0대면 "검색하거나 필터를 고르세요"가 거짓말이 된다(찾을 것이 없다). 안내는 작업면 한 곳에만 둔다
+    box.innerHTML = total === 0 ? ""
+      : anyFilter
+        ? '<div class="inst-empty muted">일치하는 인스턴스가 없습니다.</div>'
+        : `<div class="inst-empty muted">위에서 검색하거나 필터를 선택하면 여기 표시됩니다.</div>`;
     return;
   }
   const capped = shown.slice(0, INSTANCE_RENDER_CAP);
@@ -380,15 +417,30 @@ function loadInstanceMeta(rendered) {
 function populateInstanceFilterOptions(list) {
   const opts = (id, placeholder, values) => {
     const sel = $(`#${id}`);
+    const distinct = [...new Set(values.filter((v) => v != null && v !== ""))].sort();
+    // 값이 없거나 하나뿐이면 고를 것이 없다 — 늘 "전체"만 보이는 필터는 동작하지 않는 것처럼 읽힌다(사용자 지적).
+    // 서로 다른 값이 둘 이상일 때만 보인다(같은 값뿐이면 "무엇인지"는 인스턴스 카드가 이미 말한다)
+    const show = distinct.length >= 2;
     sel.innerHTML = `<option value="">${placeholder}</option>`
-      + [...new Set(values.filter(Boolean))].sort().map((v) => `<option>${esc(v)}</option>`).join("");
+      + distinct.map((v) => `<option>${esc(v)}</option>`).join("");
+    if (!show && sel.value) sel.value = "";   // 감출 거면 걸려 있던 조건도 푼다
+    sel.hidden = !show;
+    // 커스텀 드롭다운(enhanceSelect)은 select를 .cs로 감싸므로 감추는 대상이 둘이다
+    const wrap = sel.closest(".cs");
+    if (wrap) wrap.hidden = !show;
     sel._csSync?.(); // 커스텀 드롭다운 버튼 텍스트 동기화
+    return show;
   };
-  opts("inst-engine", "기종 전체", list.map((i) => i.type));
-  opts("inst-env", "환경 전체", list.map((i) => i.environment));
-  opts("inst-region", "리전 전체", list.map((i) => i.region));
-  opts("inst-cluster", "클러스터 전체", list.map((i) => i.cluster));
-  opts("inst-team", "팀 전체", list.map((i) => i.teamLabel));
+  const shown = [
+    opts("inst-engine", "기종 전체", list.map((i) => i.type)),
+    opts("inst-env", "환경 전체", list.map((i) => i.environment)),
+    opts("inst-region", "리전 전체", list.map((i) => i.region)),
+    opts("inst-cluster", "클러스터 전체", list.map((i) => i.cluster)),
+    opts("inst-team", "팀 전체", list.map((i) => i.teamLabel)),
+  ];
+  // 다 감추면 필터 줄 자체를 감춘다 — 검색 칸은 남는다
+  const row = $(".instance-filter-row");
+  if (row) row.hidden = !shown.some(Boolean);
 }
 
 // 커스텀 호버 툴팁 — 네이티브 title은 느리고 스타일이 안 먹어 못생겼다. title을 전역에서 가로채
@@ -428,6 +480,60 @@ function setupTooltip() {
   window.addEventListener("resize", hide);
 }
 
+// 표의 SQL 툴팁 (B3) — 셀은 말줄임이라 전체 문장이 안 보이는데, 네이티브 title은 강조 없는 한 줄이라
+// "SELECT가 어디부터 어디까지인가"가 읽히지 않는다(사용자 지적). 문서에 하나만 두고 재사용한다 —
+// 여러 개가 겹쳐 뜨는 것을 구조적으로 막고, 한 번에 하나만 뜬다.
+const SQL_TIP_DELAY_MS = 300;
+function setupSqlTip() {
+  const tip = document.createElement("div");
+  tip.id = "sql-tip"; tip.className = "sql-tip"; tip.hidden = true;
+  tip.setAttribute("role", "tooltip");
+  document.body.appendChild(tip);
+  let cell = null, timer = null;
+
+  const hide = () => {
+    clearTimeout(timer); timer = null;
+    if (!tip.hidden) { tip.hidden = true; tip.innerHTML = ""; }
+    cell = null;
+  };
+  const place = (el) => {
+    const r = el.getBoundingClientRect(), t = tip.getBoundingClientRect();
+    let top = r.bottom + 8;
+    if (top + t.height > window.innerHeight - 8) top = Math.max(8, r.top - t.height - 8);
+    tip.style.top = `${top}px`;
+    tip.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - t.width - 8))}px`;
+  };
+  const show = (el) => {
+    const sql = el.getAttribute("data-sql-tip");
+    if (!sql) return;
+    tip.innerHTML = highlightSql(formatSql(sql));
+    tip.hidden = false;
+    place(el);
+  };
+  document.addEventListener("mouseover", (e) => {
+    if (tip.contains(e.target)) return;          // 툴팁 위(스크롤바 포함)에 있으면 유지 — 안에서 스크롤할 수 있어야 한다
+    const el = e.target.closest?.("[data-sql-tip]");
+    if (!el) { hide(); return; }
+    if (el === cell) return;
+    clearTimeout(timer);
+    cell = el;
+    timer = setTimeout(() => show(el), SQL_TIP_DELAY_MS);
+  });
+  // 키보드 초점으로도 뜬다 — 마우스만 있는 툴팁은 키보드 사용자에게 없는 정보다(셀에 tabindex를 준 이유)
+  document.addEventListener("focusin", (e) => {
+    const el = e.target.closest?.("[data-sql-tip]");
+    if (el) { clearTimeout(timer); cell = el; show(el); }
+  });
+  document.addEventListener("focusout", (e) => {
+    if (e.target.closest?.("[data-sql-tip]")) hide();
+  });
+  // 스크롤·리사이즈로 자리가 어긋나면 숨긴다. 툴팁 안 스크롤은 툴팁의 것이라 닫지 않는다
+  window.addEventListener("scroll", (e) => { if (!tip.contains(e.target)) hide(); }, true);
+  window.addEventListener("resize", hide);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+  tip.addEventListener("mouseleave", hide);
+}
+
 // 검색·필터 이벤트 → 재렌더(입력·선택할 때만 매칭분을 그린다). 앱 로딩 시 한 번 연결.
 function setupInstanceFilter() {
   ["inst-search", "inst-engine", "inst-env", "inst-region", "inst-cluster", "inst-team"].forEach((id) => {
@@ -451,9 +557,13 @@ function enhanceSelect(sel) {
   btn.type = "button";
   btn.className = "cs-btn";
   wrap.appendChild(btn);
-  // 기종 옵션이면 브랜드 아이콘을 붙인다(engineIcon은 5기종 외엔 "" 반환이라 다른 필터엔 영향 없음)
-  const label = (txt) => engineIcon(txt) + `<span>${esc(txt)}</span>`;
-  const sync = () => { btn.innerHTML = label(sel.options[sel.selectedIndex]?.text ?? ""); };
+  // 기종 옵션이면 브랜드 아이콘을 붙인다. 항목에 data-icon이 있으면 그것을 쓴다 —
+  // 워크벤치 인스턴스처럼 항목 글자가 기종 이름이 아닌 목록도 같은 드롭다운을 쓴다(B5)
+  const label = (o) => engineIcon(o.dataset?.icon || o.text) + `<span>${esc(o.text)}</span>`;
+  const sync = () => {
+    const o = sel.options[sel.selectedIndex];
+    btn.innerHTML = o ? label(o) : "";
+  };
   sync();
   sel._csSync = sync;
   let panel = null;
@@ -467,7 +577,7 @@ function enhanceSelect(sel) {
     [...sel.options].forEach((o, i) => {
       const it = document.createElement("div");
       it.className = "cs-opt" + (i === sel.selectedIndex ? " sel" : "");
-      it.innerHTML = label(o.text);
+      it.innerHTML = label(o);
       it.addEventListener("click", () => {
         sel.selectedIndex = i; sync();
         sel.dispatchEvent(new Event("change"));
@@ -514,7 +624,7 @@ function handleInstanceDeepLink(list) {
   // Slack 결과·경보가 건 링크(?aiop=작업id)로 들어오면 그 작업을 연다 — 링크가 JSON API를 가리키면 사람이 읽을 화면이 없다
   if (deepJob) ready.then(() => openDeepLinkJob(deepJob));
   // 진단 입력은 늘 보이는 AI 칸에 있다(149절) — 모니터링 탭을 열 필요 없이 질문을 채운다
-  if (deepQ) { const input = $("#diagnose-question"); input.value = deepQ; input.scrollIntoView({ block: "center" }); input.focus(); }
+  if (deepQ) { const input = $("#diagnose-question"); input.value = deepQ; autoGrowChatInput(); syncChatComposer(); input.scrollIntoView({ block: "center" }); input.focus(); }
   if (deepView === "config-drift") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadConfigDrift(); $("#config-drift-result").scrollIntoView({ block: "center" }); }
   if (deepView === "review") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadReviews(); $(".review-gate-card").scrollIntoView({ block: "center" }); }
   // 인시던트 리포트 웹훅 카드(IncidentController)와 월간 리포트의 입구 — 링크는 있었는데 처리하는 곳이 없었다(148절 감사)
@@ -538,6 +648,7 @@ function openDeepLinkJob(jobId) {
 async function selectInstance(instance, card) {
   state.instance = instance;
   renderInstanceMatches(); // 선택 반영 — 선택 카드를 맨 위 유지·상세 펼침·하이라이트
+  renderChat({ follow: true }); // AI 칸은 잠시 그대로 — 아래 로더가 서버에서 그 인스턴스 대화를 다시 읽어 그린다
   $("#time-panel").hidden = false;
   $("#result-panel").hidden = false;
 
@@ -556,7 +667,7 @@ async function selectInstance(instance, card) {
   // 로더 하나가 실패해도 이 약속은 깨지지 않는다. 딥링크(?aiop=·compareAt)가 이 약속에 .then으로 걸려 있어,
   // 한 로더의 502가 Promise.all을 reject시키면 화면은 아무 일도 하지 않은 채 조용히 끝난다(170절 9번).
   // 실패는 각 로더가 자기 카드에 적는다 — 여기서는 "대상의 첫 조회가 끝났다"만 알린다
-  await Promise.allSettled([loadOverview(), loadActivity(), loadMetrics(), loadBackupInfo(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadAiOperations(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks(), loadReviews()]);
+  await Promise.allSettled([loadOverview(), loadActivity(), loadMetrics(), loadBackupInfo(), runQuery(), loadSlow(), loadReplication(), loadWaitEvents(), loadSessions(), loadLatencyPercentiles(), loadSloReport(), loadPartitions(), loadAdvisors(), loadAiOperations(), loadFinOps(), loadAnomalies(), loadPlanChanges(), loadDeadlocks(), loadReviews(), loadConversationsAndOpenLatest(instance.id)]);
 }
 
 // ---------- Advisors (D2) — 자동 점검 결과를 심각도별로 표시 ----------
@@ -753,14 +864,25 @@ function setupAiOperations() {
   document.addEventListener("visibilitychange", scheduleAiOpsRefresh);
 }
 
-// 같은 칸의 "지금 보기"(자연어 진단)와 달리, 여기서 만든 작업은 사실 수집·검증을 거쳐 나중에 결과가 붙는다.
+// 같은 칸의 채팅(자연어 진단)과 달리, 여기서 만든 작업은 사실 수집·검증을 거쳐 나중에 결과가 붙는다.
+// 결과는 대화에 한 줄로 남기고, 같은 문장을 화면 낭독기용 상태 영역에도 적는다(눈에는 한 번만 보인다).
+// 이 접수 줄은 서버 대화에 저장되지 않는다 — 화면 메모리에만 있고 대화를 바꾸면 사라진다(결과는 진단 탭 카드에 남는다).
 async function submitAiOperation() {
   const status = $("#aiop-submit-status");
   const btn = $("#btn-aiop-submit");
-  if (!state.instance) { status.textContent = "인스턴스를 먼저 선택하세요."; return; }
-  const prompt = $("#diagnose-question").value.trim();
-  if (!prompt) { status.textContent = "무엇을 봐 달라고 할지 적어 주세요. 위 입력칸을 함께 씁니다."; return; }
+  const input = $("#diagnose-question");
+  const inst = state.instance;
+  const prompt = input.value.trim();
+  if (!inst || !prompt || btn.dataset.busy) return;
+  const turns = chatTurns();
+  const say = (text, jobId) => {
+    status.textContent = text;
+    // 접수 도중 다른 인스턴스로 옮겨도 그 작업을 맡긴 대상의 대화에 남긴다
+    turns.push({ role: "system", text, jobId });
+    if (state.instance?.id === inst.id) renderChat({ follow: true });
+  };
   const type = $("#aiop-new-type").value;
+  btn.dataset.busy = "1";
   btn.disabled = true;
   status.textContent = "접수 중...";
   let accepted = null;
@@ -768,21 +890,26 @@ async function submitAiOperation() {
     accepted = await api("/api/ai-operations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type, instanceId: state.instance.id,
+      body: JSON.stringify({ type, instanceId: inst.id,
         windowMinutes: Number($("#aiop-new-window").value), prompt, trigger: "WEB" }),
     });
-    status.textContent = `${AIOP_TYPE_LABEL[accepted.type] ?? accepted.type} 작업 ${String(accepted.jobId ?? "").slice(0, 8)}을 접수했습니다.`;
+    turns.push({ role: "user", text: prompt });
+    input.value = "";
+    autoGrowChatInput();
+    closeAiOpPopover();
+    say(`${AIOP_TYPE_LABEL[accepted.type] ?? accepted.type} 작업 ${String(accepted.jobId ?? "").slice(0, 8)}을 접수했습니다. 사실 수집과 검증이 끝나면 결과가 붙습니다.`, accepted.jobId);
     showMonGroup("diag");
     document.querySelector('.tab[data-tab="monitor"]')?.click();
     await loadAiOperations();
     if (accepted.jobId) openAiOperation(accepted.jobId);
   } catch (e) {
     // 접수까지는 됐는데 그 뒤가 실패한 경우를 "접수 실패"로 적지 않는다 — 작업은 이미 만들어져 돌고 있다
-    status.textContent = accepted
-      ? `접수는 됐지만 목록을 갱신하지 못했습니다: ${e.message}`
-      : `접수하지 못했습니다: ${e.message}`;
+    say(accepted
+      ? `접수는 됐지만 작업 목록을 갱신하지 못했습니다: ${e.message}`
+      : `작업을 접수하지 못했습니다: ${e.message}`, accepted?.jobId);
   } finally {
-    btn.disabled = false;
+    delete btn.dataset.busy;
+    syncChatComposer();
   }
 }
 
@@ -880,7 +1007,7 @@ async function loadHealthScore() {
     <span class="score-time muted">집계 ${esc(String(report.generatedAt).replace("T", " ").slice(0, 19))}</span>`;
 
   if (!report.instances.length) {
-    box.innerHTML = '<div class="muted">등록된 인스턴스가 없습니다.</div>';
+    box.innerHTML = `<div class="muted">${esc(emptyAggregateNote())}</div>`;
     return;
   }
   // 이미 서버가 나쁜 순으로 정렬해 내려준다 — 죽은 것·백업 없는 것이 위로 온다
@@ -912,7 +1039,7 @@ async function loadHealthScore() {
           <td><span class="grade-badge grade-${esc(s.grade)}">${esc(s.grade)}</span></td>
           <td class="score-reasons">${reasons}</td>
         </tr>
-        <tr class="score-detail-row" hidden><td colspan="4"><div class="score-detail">${detail}</div></td></tr>
+        <tr class="score-detail-row" hidden><td colspan="4"><div class="row-detail-fit"><div class="score-detail">${detail}</div></div></td></tr>
       </tbody>`;
   }).join("");
   box.innerHTML = `
@@ -928,6 +1055,8 @@ async function loadHealthScore() {
       const detailRow = row.parentElement.querySelector(".score-detail-row");
       detailRow.hidden = !detailRow.hidden;
       row.classList.toggle("score-row-open", !detailRow.hidden);
+      // 펼친 뒤(=레이아웃이 잡힌 뒤) 폭을 맞춘다 — 숨은 동안에는 clientWidth가 0이라 미리 맞출 수 없다
+      if (!detailRow.hidden) fitRowDetails();
     });
   });
 }
@@ -955,7 +1084,7 @@ async function loadBackupFreshness() {
     <span class="freshness-time muted">임계 ${report.thresholdHours}h · 집계 ${esc(String(report.checkedAt).replace("T", " ").slice(0, 19))}</span>`;
 
   if (!report.instances.length) {
-    box.innerHTML = '<div class="muted">등록된 인스턴스가 없습니다.</div>';
+    box.innerHTML = `<div class="muted">${esc(emptyAggregateNote())}</div>`;
     return;
   }
   // 이미 서버가 나쁜 순으로 정렬해 내려준다 — 오래된 것/백업 없는 것이 위로 온다
@@ -998,7 +1127,7 @@ async function loadBackupFreshness() {
           <td>${verify}</td>
           <td>${remote}</td>
         </tr>
-        <tr class="fresh-detail-row" hidden><td colspan="6"><div class="score-detail">${detail}</div></td></tr>
+        <tr class="fresh-detail-row" hidden><td colspan="6"><div class="row-detail-fit"><div class="score-detail">${detail}</div></div></td></tr>
       </tbody>`;
   }).join("");
   box.innerHTML = `
@@ -1015,7 +1144,7 @@ async function loadBackupFreshness() {
       const detailRow = group.querySelector(".fresh-detail-row");
       detailRow.hidden = !detailRow.hidden;
       row.classList.toggle("fresh-row-open", !detailRow.hidden);
-      if (!detailRow.hidden) fillFreshnessHealth(group.dataset.id);
+      if (!detailRow.hidden) { fitRowDetails(); fillFreshnessHealth(group.dataset.id); }
     });
   });
 }
@@ -1273,11 +1402,15 @@ function drawChart() {
   if (pts.length < 2) {
     svg.innerHTML = "";
     svg._chart = null;
+    // 빈 상자를 180px 남기면 안내 한 줄이 그 아래 떠 자리만 차지한다(139절의 drawSimpleChart와 같은 규칙).
+    // SVG에는 hidden 프로퍼티가 없어(HTMLElement 전용) 속성을 직접 토글한다
+    svg.toggleAttribute("hidden", true);
     $("#chart-empty").hidden = false;
     $("#chart-empty").textContent = state.chartMetric === "cpu"
       ? "CPU 시계열이 없습니다 (node_exporter/Prometheus 미수집)" : "이 구간에 수집된 스냅샷이 없습니다";
     return;
   }
+  svg.toggleAttribute("hidden", false);
   $("#chart-empty").hidden = true;
   const s = chartScales();
 
@@ -1424,7 +1557,7 @@ async function runQuery() {
   table.querySelector("tbody").innerHTML = stats.map((q, idx) => `
     <tr data-idx="${idx}">
       <td class="num">${fmtNum(q.loadPct)}%</td>
-      <td class="qtext" title="${esc(q.queryText)}">${queryTextHtml(q.queryText)}</td>
+      <td class="qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${queryTextHtml(q.queryText)}</td>
       <td class="num">${q.callsPerSec == null ? '<span class="muted">—</span>' : fmtNum(q.callsPerSec)}</td>
       <td class="num">${fmtNum(q.avgLatencyMs, msDigits(q.avgLatencyMs))}</td>
       <td class="num">${fmtNum(q.rowsExaminedAvg, 0)}</td>
@@ -1486,7 +1619,7 @@ async function runCompare() {
   table.querySelector("tbody").innerHTML = rows.map((q, idx) => `
     <tr data-idx="${idx}" class="${q.newQuery ? "new-query" : ""}">
       <td>${deltaCell(baseLoad(q), targetLoad(q), loadPctChange(baseLoad(q), targetLoad(q)))}</td>
-      <td class="qtext" title="${esc(q.queryText)}">${q.newQuery ? '<span class="badge-new">NEW</span>' : ""}${queryTextHtml(q.queryText)}</td>
+      <td class="qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${q.newQuery ? '<span class="badge-new">NEW</span>' : ""}${queryTextHtml(q.queryText)}</td>
       <td>${deltaCell(q.baseQps, q.targetQps, q.qpsChangePct)}</td>
       <td>${deltaCell(q.baseAvgMs, q.targetAvgMs, q.latencyChangePct, msDigits(q.baseAvgMs, q.targetAvgMs))}</td>
       <td>${deltaCell(q.baseRowsPerCall, q.targetRowsPerCall, q.rowsPerCallChangePct, 0)}</td>
@@ -1495,6 +1628,90 @@ async function runCompare() {
 }
 
 // ---------- 쿼리 상세 (EXPLAIN + AI) ----------
+// 보기 버튼 다섯은 토글이다(B3). 예전에는 여덟 개가 늘 같은 무게로 떠 있었고, 누르는 순간 섹션이 열리며 조회가 나가
+// 무엇이 켜져 있는지와 무엇이 아직 안 돌았는지가 화면에 없었다. 지금은 켜짐/꺼짐이 보이고, 조회는
+// "아직 결과가 없거나 SQL이 바뀌었을 때"만 나간다 — 다시 켜면 보관된 결과를 조회 없이 보여준다.
+const DETAIL_RUN = {
+  explain: () => runExplain(),
+  schema: () => runReferencedSchema(),
+  ai: () => runAiAnalysis(),
+  advisor: () => runIndexAdvisor(),
+  antipattern: () => runAntiPatterns(),
+};
+const DETAIL_VIEWS = {
+  explain: "plan-section", schema: "schema-section", ai: "ai-section",
+  advisor: "advisor-section", antipattern: "antipattern-section",
+};
+// 어느 SQL의 결과인지 — 토글이 다시 조회할지 판단하는 근거다
+const detailView = { open: {}, sql: {} };
+
+function detailSql() { return $("#detail-sql").value.trim(); }
+
+/**
+ * 조회가 끝났다 — 그 결과가 어느 SQL의 것인지 기록하고 "다시 조회"를 보인다.
+ * 토글이 다시 조회할지 판단하는 근거가 이 기록이고, 한 번도 조회하지 않은 섹션에 "다시 조회"가
+ * 떠 있으면 무엇을 다시 조회하는지 알 수 없다(B3 2차).
+ */
+function markDetailFresh(key) {
+  detailView.sql[key] = detailSql();
+  const btn = document.querySelector(`[data-refresh="${key}"]`);
+  if (btn) btn.hidden = false;
+}
+
+/** 토글 상태를 화면에 반영한다(섹션 열기/닫기 + aria-pressed) */
+function setDetailView(key, on) {
+  detailView.open[key] = on;
+  $("#btn-" + key).setAttribute("aria-pressed", String(on));
+  $("#" + DETAIL_VIEWS[key]).hidden = !on;
+}
+
+function toggleDetailView(key) {
+  const on = !detailView.open[key];
+  setDetailView(key, on);
+  if (!on) return;
+  const stale = detailView.sql[key] !== detailSql();
+  // 인덱스 제안만 사람의 입력(후보 컬럼)이 필요하다 — 토글이 대신 실행하지 않고 입력칸으로 보낸다.
+  // 대신 SQL이 바뀌었으면 옛 결과는 그 SQL의 것이 아니므로 버린다
+  if (key === "advisor") {
+    if (stale) resetAdvisor();
+    $("#advisor-columns").focus();
+    return;
+  }
+  if (stale) DETAIL_RUN[key]();
+}
+
+/** "다시 조회" — 보관된 결과를 버리고 같은 SQL로 새로 조회한다(같은 문장이라도 통계는 변한다) */
+function refreshDetailView(key) {
+  detailView.sql[key] = "";
+  DETAIL_RUN[key]();
+}
+
+function resetAdvisor() {
+  $("#advisor-columns").value = "";
+  $("#advisor-result").innerHTML = "";
+  detailView.sql.advisor = "";
+}
+
+// 더보기 메뉴 — 드물게 쓰는 둘(심층 진단·문의)을 접어 둔다. 항목은 실행하지 않고 섹션만 연다:
+// 전에는 누르는 즉시 쿼리를 실제로 실행하거나 문의를 보냈고, 비고 칸은 보낸 뒤에야 나타났다
+function openDetailMore() {
+  $("#detail-more-menu").hidden = false;
+  $("#btn-detail-more").setAttribute("aria-expanded", "true");
+}
+function closeDetailMore(refocus = false) {
+  const menu = $("#detail-more-menu");
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  $("#btn-detail-more").setAttribute("aria-expanded", "false");
+  if (refocus) $("#btn-detail-more").focus();
+}
+
+function openDetailSection(id) {
+  closeDetailMore();
+  $(id).hidden = false;
+  $(id).scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
 function bindRowClicks(rows) {
   $("#top-table").querySelectorAll("tbody tr").forEach((tr) => {
     tr.addEventListener("click", () => {
@@ -1515,8 +1732,49 @@ function placeDetailUnder(tr) {
     host.innerHTML = '<td class="detail-cell"></td>';
   }
   host.firstElementChild.colSpan = tr.children.length;
-  host.firstElementChild.appendChild(detail);
+  // 상세를 폭 맞춤 래퍼 안에 넣는다 — 146절의 width:0 규칙만으로는 표가 화면보다 넓을 때 상세가 표 폭만큼 넓어진다(B6fix)
+  let wrap = host.firstElementChild.querySelector(".row-detail-fit");
+  if (!wrap) {
+    wrap = document.createElement("div");
+    wrap.className = "row-detail-fit";
+    host.firstElementChild.appendChild(wrap);
+  }
+  wrap.appendChild(detail);
   tr.after(host);
+  fitRowDetails();
+}
+
+/** 표에서 가장 가까운 가로 스크롤 상자 — 상세 폭의 기준이 되는 '보이는 폭'을 가진 조상 */
+function scrollBoxOf(el) {
+  for (let n = el.parentElement; n; n = n.parentElement) {
+    const ox = getComputedStyle(n).overflowX;
+    if (ox === "auto" || ox === "scroll") return n;
+  }
+  return null;
+}
+
+/**
+ * 표 행 안에 끼운 상세의 폭을 스크롤 상자의 **보이는 폭**에 맞춘다.
+ *
+ * 146절은 셀 안 상세를 `width: 0; min-width: calc(100% - 24px)`로 표 폭에 맞췄고, 표가 화면에 들어오면 그게 정답이다.
+ * 표가 화면보다 넓으면(390px) `100%`가 곧 표 전체 폭이라 상세 오른쪽이 스크롤 밖으로 나가고, 더보기·토글 오른쪽을
+ * 쓸 수 없게 된다(B6fix — 페이지 넘침은 0이었지만 사람은 쓸 수 없었다). 래퍼를 왼쪽 고정(sticky)으로 두고
+ * 폭을 상자의 clientWidth로 준다 — 표를 옆으로 밀어도 상세는 제자리에서 보이는 폭을 다 쓴다.
+ */
+function fitRowDetails(root = document) {
+  root.querySelectorAll(".row-detail-fit").forEach((wrap) => {
+    const box = scrollBoxOf(wrap);
+    if (!box) return;
+    wrap.style.width = box.clientWidth + "px";
+  });
+}
+
+/** 창·사이드바 폭이 바뀌면 상세 폭도 따라간다(상자를 관찰한다 — 표 내용이 아니라 상자 폭이 기준이다) */
+function watchRowDetails() {
+  const obs = new ResizeObserver(() => fitRowDetails());
+  document.querySelectorAll(".table-scroll, #score-result, #freshness-result, #command-metrics")
+    .forEach((box) => obs.observe(box));
+  window.addEventListener("resize", () => fitRowDetails());
 }
 
 function openDetail(query, tr) {
@@ -1524,25 +1782,34 @@ function openDetail(query, tr) {
   $("#btn-to-workbench").hidden = !can("WORKBENCH");
   $("#query-detail").hidden = false;
   if (tr) placeDetailUnder(tr);
-  $("#detail-qid").textContent = `SQL ID: ${query.queryId}`;
+  // SQL ID는 64자(MySQL digest)나 20자리(PG queryid)라 통째로 보이면 값이 이상해 보인다(사용자 지적).
+  // 짧게 보이고, 전체 값은 title에 남기고 복사 버튼이 그 값을 집어 간다 — 줄이되 숨기지 않는다
+  const qid = String(query.queryId ?? "");
+  $("#detail-qid").textContent = qid ? shortQueryId(qid) : "—";
+  $("#detail-qid").title = qid;
+  $("#btn-copy-qid").disabled = !qid;
+  // 인덱스 제안은 PostgreSQL의 HypoPG 전용이다 — 눌러서 "지원하지 않습니다"를 읽게 하지 않고 감춘다(159절)
+  $("#btn-advisor").hidden = state.instance?.type !== "POSTGRESQL";
   const formatted = formatSql(query.queryText);
   $("#detail-sql").value = formatted;
   $("#detail-sql").rows = Math.min(24, Math.max(5, formatted.split("\n").length + 1)); // 포매팅 줄 수에 맞춰 높이 자동
   updateSqlHl(); // SQL 구문 강조 레이어 갱신
 
-  $("#plan-section").hidden = true;
-  $("#schema-section").hidden = true;
+  // 쿼리를 새로 열면 보기 토글도 전부 꺼짐으로 되돌리고, 직전 쿼리의 결과는 첨부 대상이 아니다 — 비운다.
+  // "다시 조회"도 함께 감춘다: 결과가 없는 섹션에 그 버튼만 떠 있으면 무엇을 다시 조회하는지 알 수 없다
+  Object.keys(DETAIL_VIEWS).forEach((key) => setDetailView(key, false));
+  Object.keys(DETAIL_RUN).forEach((key) => { detailView.sql[key] = ""; });
+  $("#query-detail").querySelectorAll(".section-refresh").forEach((b) => { b.hidden = true; });
   $("#schema-result").innerHTML = "";
-  $("#ai-section").hidden = true;
-  $("#advisor-section").hidden = true;
   $("#advisor-columns").value = "";
   $("#advisor-result").innerHTML = "";
+  $("#antipattern-result").innerHTML = "";
   $("#deep-section").hidden = true;
   $("#deep-result").innerHTML = "";
   $("#inquiry-section").hidden = true;
   $("#inquiry-note").value = "";
   $("#inquiry-result").innerHTML = "";
-  // 쿼리를 새로 열면 직전 쿼리의 분석 결과는 첨부 대상이 아니다 — 비운다
+  closeDetailMore();
   state.lastPlan = null;
   state.lastFindings = [];
   state.lastAi = null;
@@ -1552,6 +1819,7 @@ function openDetail(query, tr) {
 function closeDetail() {
   const detail = $("#query-detail");
   detail.hidden = true;
+  closeDetailMore();
   // 인라인 호스트 행에서 빼내 원위치(테이블 밖 tab-top)로 되돌린다 — 표를 다시 그려도 상세 엘리먼트가 살아남게
   $("#tab-top").appendChild(detail);
   const host = $("#top-table").querySelector("tbody tr.detail-host");
@@ -1567,6 +1835,9 @@ async function runExplain() {
   try {
     let data;
     $("#plan-section").hidden = false;
+    // "다시 조회"는 결과를 버리고 새로 조회하는 것이다 — 옛 계획이 남아 있으면 새 결과와 구분되지 않는다
+    $("#detail-plan").innerHTML = "";
+    $("#detail-findings").innerHTML = "";
     try {
       data = await api(`/api/instances/${state.instance.id}/explain`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
@@ -1582,7 +1853,10 @@ async function runExplain() {
       '<div class="muted">규칙 기반 지적 없음 — 비효율 신호가 발견되지 않았습니다.</div>';
     state.lastPlan = data.plan;
     state.lastFindings = data.findings ?? [];
-  } finally { btn.classList.remove("loading"); }
+  } finally {
+    btn.classList.remove("loading");
+    markDetailFresh("explain");   // 실패해도 "이 SQL로 조회했다" — 다시 켤 때 같은 요청을 반복하지 않는다
+  }
 }
 
 // 안티패턴 신호 (158절) — 느림의 크기가 아니라 성질. 축은 5기종 공통이지만 원천 지표 이름은 기종이 답한다.
@@ -1598,7 +1872,10 @@ async function runAntiPatterns() {
     box.innerHTML = renderAntiPatterns(rows);
   } catch (e) {
     box.innerHTML = `<div class="finding-item">조회 실패: ${esc(e.message)}</div>`;
-  } finally { btn.classList.remove("loading"); }
+  } finally {
+    btn.classList.remove("loading");
+    markDetailFresh("antipattern");
+  }
 }
 
 // 정규화 쿼리 식별자를 사람이 읽을 길이로 줄인다. PostgreSQL queryid는 부호 있는 64비트라 음수로 찍히는데,
@@ -1618,17 +1895,31 @@ function renderAntiPatterns(rows) {
   if (rows.length === 1 && rows[0].source === "UNSUPPORTED") {
     return `<div class="finding-item muted">판정 불가: ${esc(rows[0].note ?? "")}</div>`;
   }
-  // 지금 보고 있는 쿼리를 먼저 — 통계 뷰의 식별자가 쿼리 상세와 같은 기종에서만 맞아떨어진다
+  // 지금 보고 있는 쿼리를 먼저 — 통계 뷰의 식별자가 쿼리 상세와 같은 기종에서만 맞아떨어진다.
+  // 나머지는 접어 둔다(B3): 20행이 펼쳐져 있으면 지금 쿼리의 신호가 그 벽에 묻힌다
   const current = state.currentQuery ? String(state.currentQuery.queryId) : null;
-  const sorted = [...rows].sort((a, b) => (String(b.queryId) === current) - (String(a.queryId) === current));
+  const mine = current ? rows.find((q) => String(q.queryId) === current) : null;
+  const others = rows.filter((q) => q !== mine).slice(0, 9);
+  const head = mine
+    ? apRow(mine, true)
+    : '<div class="finding-item muted">이 쿼리의 신호는 통계 상위 20개에 없습니다.</div>';
+  const tail = others.length
+    ? `<div id="ap-others" hidden>${others.map((q) => apRow(q, false)).join("")}</div>
+       <button type="button" class="ap-more" data-more="${others.length}" aria-expanded="false" aria-controls="ap-others">다른 쿼리 ${others.length}개 보기</button>`
+    : "";
+  // 같은 기종이면 note가 모든 행에 같다 — 행마다 반복하지 않고 목록 아래 한 번만 적는다
+  return head + tail + (rows[0].note ? `<div class="ap-note muted">${esc(rows[0].note)}</div>` : "");
+}
+
+function apRow(q, isCurrent) {
   const axis = (m) => {
     if (!m || m.value == null) return '<b class="ap-none">미확보</b>';
     const v = m.value >= 100 ? fmtNum(m.value, 0) : fmtNum(m.value, 2);
     return `<b>${v}</b> <span class="muted">${esc(m.unit ?? "")}</span>`;
   };
   const src = (m) => (m ? `<div class="ap-src">${esc(m.sourceName ?? "")}</div>` : "");
-  return sorted.slice(0, 10).map((q) => `
-    <div class="finding-item ap-row${current && String(q.queryId) === current ? " ap-current" : ""}">
+  return `
+    <div class="finding-item ap-row${isCurrent ? " ap-current" : ""}">
       <div class="ap-head"><b title="${esc(String(q.queryId ?? ""))}">${esc(shortQueryId(q.queryId))}</b>
         <span class="muted">실행 ${fmtNum(q.calls, 0)}회</span></div>
       ${q.queryText ? `<div class="ap-text muted">${esc(q.queryText.replace(/\s+/g, " ").slice(0, 120))}</div>` : ""}
@@ -1637,9 +1928,7 @@ function renderAntiPatterns(rows) {
         <div><span class="muted">디스크로 넘침</span><span class="ap-val">${axis(q.diskSpill)}</span>${src(q.diskSpill)}</div>
         <div><span class="muted">행당 읽은 양</span><span class="ap-val">${axis(q.examinedPerRow)}</span>${src(q.examinedPerRow)}</div>
       </div>
-    </div>`).join("")
-    // 같은 기종이면 note가 모든 행에 같다 — 행마다 반복하지 않고 목록 아래 한 번만 적는다
-    + (sorted[0].note ? `<div class="ap-note muted">${esc(sorted[0].note)}</div>` : "");
+    </div>`;
 }
 
 // 관련 테이블 구조 — 쿼리가 참조하는 테이블의 컬럼·인덱스·대략 행수. 문의 시 서버가 자동 첨부하지만,
@@ -1663,7 +1952,10 @@ async function runReferencedSchema() {
       return;
     }
     box.innerHTML = renderReferencedSchema(data);
-  } finally { btn.classList.remove("loading"); }
+  } finally {
+    btn.classList.remove("loading");
+    markDetailFresh("schema");
+  }
 }
 
 // 펼친 상세가 이 목록의 열(타입·NULL)을 다시 쓴다 — 테이블 상세 API는 열 목록을 주지 않는다
@@ -1786,7 +2078,10 @@ async function runAiAnalysis() {
   } catch (e) {
     out.textContent = `실패: ${e.message}`;
     stage.textContent = "";
-  } finally { btn.classList.remove("loading"); }
+  } finally {
+    btn.classList.remove("loading");
+    markDetailFresh("ai");
+  }
 }
 
 // 인덱스 어드바이저 — 후보 컬럼으로 가상 인덱스를 만들었을 때 플랜 비용이 어떻게 바뀌는지 시뮬레이션.
@@ -1838,7 +2133,10 @@ async function runIndexAdvisor() {
       const qid = state.currentQuery ? ` SQL ID ${state.currentQuery.queryId}` : "";
       handToWorkbench("draft", data.suggestedIndex, `대시보드 인덱스 제안(HypoPG)${qid}${cost}`);
     });
-  } finally { btn.classList.remove("loading"); }
+  } finally {
+    btn.classList.remove("loading");
+    markDetailFresh("advisor");
+  }
 }
 
 // 심층 원인 진단 (D9) — 실제 실행 계획으로 카디널리티 괴리·근본원인을 짚는다.
@@ -1858,7 +2156,7 @@ async function runDeepDiagnose() {
       + `위 SQL 편집칸에서 실제 값으로 바꾼 뒤 다시 눌러 주세요(추정만 하는 "실행계획 보기"는 그대로 됩니다).</div></div>`;
     return;
   }
-  const btn = $("#btn-deep");
+  const btn = $("#btn-deep-run");
   btn.classList.add("loading");
   $("#deep-section").hidden = false;
   const result = $("#deep-result");
@@ -1938,7 +2236,7 @@ async function runDeepDiagnose() {
 async function runInquiry() {
   const sql = $("#detail-sql").value.trim();
   if (!sql) return;
-  const btn = $("#btn-inquiry");
+  const btn = $("#btn-inquiry-send");
   btn.classList.add("loading");
   $("#inquiry-section").hidden = false;
   const result = $("#inquiry-result");
@@ -1999,7 +2297,7 @@ async function loadSlow() {
         <td class="num">${dash(q.rowsSent) ?? fmtNum(q.rowsSent, 0)}</td>
         <td class="num">${fmtNum(q.rowsExamined, 0)}</td>
         <td>${q.planSummary ? `<span class="plan-badge ${/COLLSCAN/i.test(q.planSummary) ? "plan-bad" : "plan-ok"}">${esc(q.planSummary)}</span>` : '<span class="muted">—</span>'}</td>
-        <td class="qtext" title="${esc(q.queryText)}">${queryTextHtml(q.queryText)}</td>
+        <td class="qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${queryTextHtml(q.queryText)}</td>
       </tr>`).join("") : '<tr><td colspan="8" class="muted">슬로우 쿼리가 없습니다.</td></tr>';
   } catch (e) {
     // 형제 로더(top·sessions·latency·partitions·deadlocks)와 같은 모양 — 실패를 이 카드에 적고 끝낸다.
@@ -2057,14 +2355,36 @@ async function loadBackupInfo() {
 // 같은 코어의 목록을 세션 경로로 받는다(132절).
 async function loadMcpTools() {
   const box = $("#mcp-tools");
+  const toggle = $("#btn-mcp-tools");
   try {
     const tools = await api("/api/mcp/tools");
     box.classList.remove("muted");
     box.innerHTML = tools.map((t) => `
-      <div class="mcp-tool"><b>${esc(t.name)}</b><p>${esc(t.description)}</p></div>`).join("");
+      <button type="button" class="mcp-tool" aria-expanded="false"><b>${esc(t.name)}</b><p>${esc(t.description)}</p></button>`).join("");
+    toggle.dataset.label = `제공 도구 ${tools.length}개 보기`;
+    toggle.textContent = toggle.dataset.label;
   } catch (e) {
+    box.classList.remove("muted");
     box.textContent = `도구 목록 조회 실패: ${e.message}`;
+    toggle.textContent = toggle.dataset.label = "제공 도구 보기";
   }
+}
+
+// 제공 도구 접기/펴기 (B4) — 목록이 길어 카드가 화면을 다 먹었다. 항목을 누르면 그 항목의 설명만 펼쳐진다
+// (툴팁에 기대지 않는다: 설명이 길고, 키보드만으로도 읽을 수 있어야 한다)
+function setupMcpCard() {
+  const toggle = $("#btn-mcp-tools");
+  const box = $("#mcp-tools");
+  toggle.addEventListener("click", () => {
+    const open = toggle.getAttribute("aria-expanded") === "true";
+    toggle.setAttribute("aria-expanded", String(!open));
+    box.hidden = open;
+    toggle.textContent = open ? (toggle.dataset.label || "제공 도구 보기") : "접기";
+  });
+  box.addEventListener("click", (e) => {
+    const item = e.target.closest(".mcp-tool");
+    if (item) item.setAttribute("aria-expanded", String(item.getAttribute("aria-expanded") !== "true"));
+  });
 }
 
 // MCP 등록 명령 — ADMIN이면 서비스 토큰을 받아 실제 명령을 완성한다 (A1)
@@ -2076,6 +2396,8 @@ async function loadMcpCommand() {
     const { token } = await api("/api/security/mcp-token");
     $("#mcp-cmd-http").textContent =
       `claude mcp add --transport http dbtower http://localhost:8080/mcp --header "Authorization: Bearer ${token}"`;
+    // 명령에 토큰이 들어간 순간 보조 줄도 그 사실을 말해야 한다(공유 금지)
+    $("#mcp-http-note").textContent = "서비스 토큰이 들어 있습니다. 공유하지 마세요.";
   } catch { /* ADMIN이 아니면 — 헤더 없는 등록(OAuth 브라우저 로그인) 안내를 유지 */ }
 }
 
@@ -2099,47 +2421,120 @@ function handToWorkbench(kind, sql, reason = "") {
   setMode("workbench", { instance: state.instance.id, handoff: id });
 }
 
-// 사용자·역할 카드(ADMIN) — 역할은 인증 시 권한에 실리므로 바꾼 역할은 그 사용자의 다음 로그인부터 적용된다
+// 사용자·역할 카드(ADMIN). 역할은 인증 시 권한에 실리므로 바꾼 역할은 그 사용자의 다음 로그인부터 적용된다.
+//
+// select를 바꾸는 즉시 PATCH하지 않는다(B4): 되돌릴 수 없는 요청이 스크롤·오조작으로 나가도 화면에는 흔적이 남지 않는다.
+// 바꾼 행에만 "적용/취소"가 나타나고 적용을 눌러야 나간다. 취소는 목록을 다시 그려 원래 값으로 되돌린다.
+const USER_NAME_RE = /^[A-Za-z0-9._-]{3,50}$/;
+const USER_PASSWORD_MIN = 12;
+
+function setUsersMsg(text, isError) {
+  const msg = $("#users-msg");
+  msg.textContent = text;
+  msg.classList.toggle("is-error", !!isError);   // 실패는 채팅 오류와 같은 빨강 계열
+}
+
 async function loadUsers() {
   const tbody = $("#users-table tbody");
   let users;
   try {
     users = await api("/api/security/users");
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="3" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
     return;
   }
-  tbody.innerHTML = users.map((u) => `<tr>
+  // select의 영문 괄호는 뺀다 — 화면에는 역할 이름만(value는 그대로)
+  const options = (role) => Object.keys(ROLE_LABEL).map((r) =>
+    `<option value="${r}"${r === role ? " selected" : ""}>${esc(ROLE_LABEL[r])}</option>`).join("");
+  tbody.innerHTML = users.map((u) => `<tr data-user="${esc(u.username)}" data-role="${esc(u.role)}">
       <td>${esc(u.username)}</td>
-      <td><select data-user-role="${esc(u.username)}" aria-label="${esc(u.username)} 역할">${Object.keys(ROLE_LABEL).map((r) =>
-        `<option value="${r}"${r === u.role ? " selected" : ""}>${esc(ROLE_LABEL[r])} (${r})</option>`).join("")}</select></td>
+      <td><select data-user-role="${esc(u.username)}" aria-label="${esc(u.username)} 역할">${options(u.role)}</select></td>
       <td>${esc(u.teamLabel ?? "전역")}</td>
+      <td><span class="user-role-actions" hidden>
+        <span class="user-role-warn" hidden>내 관리자 권한이 없어집니다</span>
+        <button type="button" class="btn btn-primary btn-small" data-role-apply>적용</button>
+        <button type="button" class="btn btn-small" data-role-cancel>취소</button>
+      </span></td>
     </tr>`).join("");
-  tbody.querySelectorAll("[data-user-role]").forEach((sel) => sel.addEventListener("change", async () => {
-    const msg = $("#users-msg");
-    try {
-      await api(`/api/security/users/${encodeURIComponent(sel.dataset.userRole)}/role`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: sel.value }),
-      });
-      msg.textContent = `${sel.dataset.userRole}의 역할을 ${ROLE_LABEL[sel.value]}(으)로 바꿨습니다. 다음 로그인부터 적용됩니다.`;
-    } catch (e) {
-      msg.textContent = `역할을 바꾸지 못했습니다: ${e.message}`;
-    }
-    loadUsers();
-  }));
+  tbody.querySelectorAll("[data-user-role]").forEach((sel) => {
+    sel.addEventListener("change", () => markRoleDirty(sel));
+  });
+}
+
+/** select가 원래 값과 달라졌을 때만 그 행에 적용·취소를 보인다 */
+function markRoleDirty(sel) {
+  const tr = sel.closest("tr");
+  const changed = sel.value !== tr.dataset.role;
+  tr.querySelector(".user-role-actions").hidden = !changed;
+  // 자기 자신을 ADMIN에서 내리는 경우를 화면에서 먼저 알린다. 서버는 "마지막 ADMIN"만 막으므로
+  // (둘 이상이면 자기 강등이 실제로 된다) 이 경고가 그 자리를 메운다
+  const self = sel.dataset.userRole === state.username;
+  tr.querySelector(".user-role-warn").hidden =
+    !(changed && self && tr.dataset.role === "ADMIN" && sel.value !== "ADMIN");
+  return changed;
+}
+
+/**
+ * 취소 — 그 행을 화면이 기억하는 값(data-role)으로 되돌린다.
+ *
+ * 서버를 다시 부르지 않는다: 취소는 보낸 적 없는 요청을 무르는 일이라 돌아올 응답이 없다.
+ * 목록을 다시 받아 그리는 방식이면 화면이 서버 왕복에 묶여, 대상 조회가 몰려 연결이 밀릴 때
+ * (브라우저는 호스트당 연결이 여섯이다) 취소를 눌러도 한참 동안 아무 일도 안 일어난 것처럼 보인다.
+ */
+function cancelRoleChange(tr) {
+  const sel = tr.querySelector("[data-user-role]");
+  if (sel) sel.value = tr.dataset.role;
+  tr.querySelector(".user-role-actions").hidden = true;
+  tr.querySelector(".user-role-warn").hidden = true;
+}
+
+async function applyUserRole(sel) {
+  const username = sel.dataset.userRole;
+  try {
+    const r = await api(`/api/security/users/${encodeURIComponent(username)}/role`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: sel.value }),
+    });
+    setUsersMsg(`${username}의 역할을 ${ROLE_LABEL[r.role] ?? r.role}(으)로 바꿨습니다. 다음 로그인부터 적용됩니다.`, false);
+  } catch (e) {
+    setUsersMsg(`역할을 바꾸지 못했습니다: ${e.message}`, true);
+  }
+  loadUsers();
+}
+
+/** 이름·비밀번호가 서버 조건을 채우기 전에는 만들기 버튼을 누를 수 없다(눌러서 400을 받지 않는다) */
+function syncUserCreateButton() {
+  const name = $("#user-new-name").value.trim();
+  const password = $("#user-new-password").value;
+  $("#btn-user-create").disabled = !USER_NAME_RE.test(name) || password.length < USER_PASSWORD_MIN;
+}
+
+function setupUsersCard() {
+  const tbody = $("#users-table tbody");
+  // 목록을 다시 그려도 살아남게 tbody에 위임한다(innerHTML 교체는 tbody 자신을 갈지 않는다)
+  tbody.addEventListener("click", (e) => {
+    const tr = e.target.closest("tr");
+    if (!tr) return;
+    if (e.target.closest("[data-role-cancel]")) { cancelRoleChange(tr); return; }
+    if (e.target.closest("[data-role-apply]")) applyUserRole(tr.querySelector("[data-user-role]"));
+  });
+  ["user-new-name", "user-new-password"].forEach((id) =>
+    $(`#${id}`).addEventListener("input", syncUserCreateButton));
+  // 역할 고르기도 다른 화면과 같은 드롭다운으로(B6) — 이 파일의 $는 querySelector라 id에는 #을 붙인다
+  enhanceSelect($("#user-new-role"));
+  syncUserCreateButton();
 }
 
 async function createUser() {
-  const msg = $("#users-msg");
   const body = { username: $("#user-new-name").value.trim(), password: $("#user-new-password").value, role: $("#user-new-role").value };
   try {
     await api("/api/security/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     $("#user-new-name").value = "";
     $("#user-new-password").value = "";
-    msg.textContent = `${body.username} 계정을 만들었습니다(${ROLE_LABEL[body.role]}).`;
+    setUsersMsg(`${body.username} 계정을 만들었습니다(${ROLE_LABEL[body.role]}).`, false);
+    syncUserCreateButton();
     loadUsers();
   } catch (e) {
-    msg.textContent = `만들지 못했습니다: ${e.message}`;
+    setUsersMsg(`만들지 못했습니다: ${e.message}`, true);
   }
 }
 
@@ -2167,7 +2562,8 @@ async function loadMe() {
 function setupCopyButtons() {
   document.querySelectorAll("[data-copy]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const text = $(`#${btn.dataset.copy}`).textContent.split("   (")[0].trim();
+      // code 안에는 명령만 있다(B4) — 괄호 설명을 함께 복사하지 않으려고 잘라내던 코드는 필요 없어졌다
+      const text = $(`#${btn.dataset.copy}`).textContent.trim();
       try {
         await navigator.clipboard.writeText(text);
         const old = btn.textContent;
@@ -2194,7 +2590,9 @@ const BK_STATUS_LABEL = { FRESH: "신선", STALE: "오래됨", NO_BACKUP: "백�
 async function loadOverview() {
   const box = $("#overview-card");
   if (!box) return;
-  box.hidden = false;
+  // 내용이 없는 빈 막대를 남기지 않는다(B4) — 전에는 먼저 펼치고 조회해, 응답이 오기 전까지 흰 줄만 보였다.
+  // 대상에 닿지 않는 인스턴스에서는 그 줄이 계속 남아 화면 결함처럼 읽혔다
+  box.hidden = true;
   try {
     const o = await api(`/api/instances/${state.instance.id}/overview`);
     const rep = o.replication || {};
@@ -2230,8 +2628,10 @@ async function loadOverview() {
         <span class="ov-sig"><span class="ov-sig-k">복제</span> ${esc(rep.role ?? "-")} · 지연 ${repLag}${rpo}</span>
         <span class="ov-sig"><span class="ov-sig-k">백업</span> ${bkStr}</span>
       </div>`;
+    box.hidden = false;
   } catch (e) {
     box.innerHTML = `<span class="muted">운영 종합 조회 실패: ${esc(e.message)}</span>`;
+    box.hidden = false;
   }
 }
 
@@ -2304,7 +2704,7 @@ async function loadAnomalies() {
           `(평소 ${fmtNum(m.baselineMean)}±${fmtNum(m.baselineStddev)}, z=${fmtNum(m.zScore, 1)})</span>`
         ).join(" ");
         return `<div class="anomaly-item">
-          <div class="anomaly-q qtext" title="${esc(q.queryText)}">${queryTextHtml(q.queryText)}</div>
+          <div class="anomaly-q qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${queryTextHtml(q.queryText)}</div>
           <div class="anomaly-metrics">${metrics}</div>
           <div class="hint">${q.dayOfWeek}요일 ${q.hour}시대 기준 · 관측 ${q.observations}회</div>
         </div>`;
@@ -2400,7 +2800,7 @@ async function loadLatencyPercentiles() {
       return `
       <tr>
         <td><span class="src-badge ${src.cls}" title="${esc(src.note)}">${src.label}</span></td>
-        <td class="qtext" title="${esc(r.queryText)}">${queryTextHtml(r.queryText)}</td>
+        <td class="qtext" data-sql-tip="${esc(r.queryText)}" tabindex="0" aria-describedby="sql-tip">${queryTextHtml(r.queryText)}</td>
         <td class="num">${r.p95Ms != null ? fmtNum(r.p95Ms) : "-"}</td>
         <td class="num">${r.p99Ms != null ? fmtNum(r.p99Ms) : "-"}</td>
       </tr>`;
@@ -2545,7 +2945,7 @@ function renderSessionRows(rows) {
         <td title="${esc(s.waitEvent ?? "")}">${esc(s.waitEvent ?? "-")}</td>
         <td class="num">${s.blockedByPid != null ? `<span class="blocked-by">${esc(s.blockedByPid)}</span>` : "-"}</td>
         <td class="num">${fmtNum(s.elapsedMs)}</td>
-        <td class="qtext" title="${esc(s.query)}">${queryTextHtml(s.query)}</td>
+        <td class="qtext" data-sql-tip="${esc(s.query)}" tabindex="0" aria-describedby="sql-tip">${queryTextHtml(s.query)}</td>
         ${canKill ? `<td class="session-actions">
           <button class="btn btn-small" data-kill="${esc(s.pid)}" data-force="false">취소</button>
           <button class="btn btn-small btn-danger" data-kill="${esc(s.pid)}" data-force="true">강제종료</button>
@@ -2982,7 +3382,9 @@ function mdToHtml(md) {
       const head = cells(rows[0]);
       const body = rows.slice(1).filter((r) => !isSep(r))
         .map((r) => `<tr>${cells(r).map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("");
-      out.push(`<table class="qtable incident-table"><thead><tr>${head.map((h) => `<th>${inline(h)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>`);
+      // 표를 스크롤 상자에 넣는다 — 리포트 표는 열 수·머리 글자가 AI가 만든 값이라 좁은 화면에서
+      // 그대로 두면 문서 폭을 밀어 페이지가 옆으로 넘친다(B6)
+      out.push(`<div class="table-scroll"><table class="qtable incident-table"><thead><tr>${head.map((h) => `<th>${inline(h)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`);
       continue;
     }
     if (l.startsWith("- ")) {
@@ -3107,27 +3509,14 @@ async function runOnlineDdl(execute) {
   box.innerHTML = `<strong>${esc(d.status)}</strong>${d.mode ? ` (${esc(d.mode)})` : ""}${ghost}<br>${esc(d.detail || "")}`;
 }
 
-// ---------- 자연어 근본원인 진단 (D3) ----------
-// 도구 호출 한 줄 — 진행 중 목록과 최종 결과가 같은 모양을 쓴다
-function diagnoseStepHtml(c, i) {
-  const badge = c.rejected
-    ? `<span class="sev-badge sev-CRITICAL">거부</span>`
-    : `<span class="src-badge src-native">${i + 1}</span>`;
-  return `
-    <div class="diagnose-step">
-      <div class="diagnose-step-head">${badge} <code>${esc(c.tool)}</code>
-        <span class="muted diagnose-step-args">${esc(c.arguments || "")}</span></div>
-      <div class="diagnose-step-reason">${esc(c.reason || "")}</div>
-    </div>`;
-}
-
 // 서버가 흘리는 SSE를 POST로 받는다(141절) — EventSource는 본문과 CSRF 헤더를 실을 수 없다. workbench/api.js streamEvents와 같은 규칙.
 // Accept에 text/event-stream을 싣지 않는다: 스트림을 열기 전 거절(404·503)은 JSON으로 오는데 그걸 못 받는다고 선언하면 406이 된다
-async function streamSse(path, body, onEvent) {
+async function streamSse(path, body, onEvent, signal) {
   const r = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-XSRF-TOKEN": csrfToken() },
     body: JSON.stringify(body),
+    signal,
   });
   if (r.status === 401) { location.href = "/login.html"; throw new Error("로그인이 필요합니다"); }
   if (!r.ok || !(r.headers.get("Content-Type") || "").startsWith("text/event-stream")) {
@@ -3163,86 +3552,627 @@ async function streamSse(path, body, onEvent) {
   }
 }
 
-async function runDiagnose() {
-  const box = $("#diagnose-result");
-  if (!state.instance) { box.className = "diagnose-result schema-warning"; box.textContent = "인스턴스를 먼저 선택하세요."; return; }
-  const question = $("#diagnose-question").value.trim();
-  if (!question) { box.className = "diagnose-result schema-warning"; box.textContent = "질문을 입력하세요."; return; }
+// ---------- AI 어시스턴트 채팅 (자연어 진단) ----------
+// 대화는 서버에 남는다(V46·176절): 인스턴스를 고르면 가장 최근 대화를 열어 턴을 그대로 그리고, 첫 질문을 보낼 때
+// 새 대화를 만든다(빈 대화가 목록에 쌓이지 않게). 앞선 맥락은 서버가 그 대화의 DB 턴에서만 만든다 — 화면은
+// conversationId만 보낸다. 예전에는 브라우저가 만든 history를 보냈고, 그건 위조할 수 있는 입력이었다.
+// 한 번에 한 진단만 돈다(진단은 100초를 넘기도 하고, 두 스트림이 같은 칸에 번갈아 그렸다 — 148절 감사).
+const chat = { byInstance: new Map(), running: null, confirmId: null };
+const CHAT_CONFIDENCE = { high: "높음", medium: "보통", low: "낮음" };
+// 예시는 진단 도구로 실제로 답할 수 있는 것만 둔다(query_stats·compare, sessions, replication)
+const CHAT_SUGGESTIONS = ["최근 1시간 동안 느려진 쿼리가 있어?", "지금 락을 기다리는 세션이 있어?", "복제가 밀리고 있어?"];
 
-  // 진단은 100초 넘게 걸리기도 한다. 그동안 다시 누르거나 Enter를 치면 두 스트림이 같은 칸에 번갈아 그렸다(148절 감사)
-  if (state.diagnosing) return;
-  state.diagnosing = true;
-  const diagnoseBtn = $("#btn-diagnose");
-  if (diagnoseBtn) diagnoseBtn.disabled = true;
+// 인스턴스별 대화 상태. 화면 메모리에만 있고 서버가 진실이다 — sessionStorage에 두던 시절에는 새로고침 뒤
+// 화면과 서버가 어긋났고, 브라우저마다 다른 대화가 목록처럼 보였다.
+function chatState() {
+  const id = state.instance?.id;
+  if (id == null) return null;
+  if (!chat.byInstance.has(id)) {
+    chat.byInstance.set(id, { conversationId: null, title: "", turns: [], list: [], status: "idle", error: null });
+  }
+  return chat.byInstance.get(id);
+}
 
-  // 끝날 때까지 한 번에 기다리지 않고 스텝마다 흘려 받는다(141절) — 수십 초 동안 "진단 중"만 보이면 멈춘 것과 구분이 안 된다
-  box.className = "diagnose-result";
-  const progress = { steps: [], stage: "진단을 시작합니다", startedAt: Date.now() };
-  const drawProgress = () => {
-    box.innerHTML = `
-      <div class="diagnose-live" aria-live="polite"><span class="diagnose-live-stage">${esc(progress.stage)}</span>
-        <span class="muted" id="diagnose-elapsed"></span></div>
-      <div class="diagnose-steps">${progress.steps.map(diagnoseStepHtml).join("")}</div>`;
-    tickElapsed();
-  };
-  const tickElapsed = () => {
-    const el = $("#diagnose-elapsed");
-    if (el) el.textContent = `· ${Math.floor((Date.now() - progress.startedAt) / 1000)}초 경과`;
-  };
-  drawProgress();
-  const ticker = setInterval(tickElapsed, 1000);
-  let d = null;
-  try {
-    await streamSse(`/api/instances/${state.instance.id}/diagnose/stream`, { question }, (name, data) => {
-      if (name === "thinking") {
-        progress.stage = data.synthesis ? "도구 호출 상한에 도달해 지금까지의 근거로 답을 정리하는 중" : `AI가 ${data.step}번째 판단을 내리는 중`;
-      } else if (name === "tool") {
-        progress.steps.push(data);
-        progress.stage = data.rejected ? `요청한 도구가 거부됐습니다: ${data.tool}` : `${data.tool} 결과를 받았습니다`;
-      } else if (name === "result") {
-        d = data;
-        return;
-      } else if (name === "error") {
-        throw new Error(data.message);
+function chatTurns() {
+  return chatState()?.turns ?? [];
+}
+
+/** 그 인스턴스의 진단이 지금 돌고 있나 — 도는 동안 대화를 갈아치우면 진행 중 턴이 화면에서 사라진다 */
+function chatRunningHere(instanceId) {
+  return !!chat.running && chat.running.instanceId === instanceId;
+}
+
+/** 서버 턴 한 건 = 질문 한 줄 + 답 한 덩어리. 저장된 도구 호출에는 결과 본문이 없다(176절) — 화면은 원래 그리지 않는다 */
+function chatTurnsFromServer(turns) {
+  return (turns || []).flatMap((t) => [
+    { role: "user", text: t.question },
+    { role: "ai", status: "done", took: t.tookMs, steps: t.toolCalls || [], result: {
+      aiEnabled: true, answer: t.answer, rootCause: t.rootCause, confidence: t.confidence,
+      backend: t.backend, toolCallCount: (t.toolCalls || []).filter((c) => !c.rejected).length,
+      toolCalls: t.toolCalls || [], note: null } },
+  ]);
+}
+
+/** 목록의 짧은 시각 — 오늘이면 "오후 3:12", 아니면 "9월 14일". 서버 시각은 UTC라 브라우저 시간대로 옮긴다 */
+function chatListTime(iso) {
+  if (!iso) return "";
+  const d = parseApiTime(String(iso));
+  if (Number.isNaN(d.getTime())) return "";
+  const now = new Date();
+  if (d.getFullYear() !== now.getFullYear() || d.getMonth() !== now.getMonth() || d.getDate() !== now.getDate()) {
+    return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+  }
+  const h = d.getHours();
+  return `${h < 12 ? "오전" : "오후"} ${h % 12 === 0 ? 12 : h % 12}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// 답 서식 — 모델이 실제로 쓰는 것만 그린다: 빈 줄로 나뉜 문단, - / * / 1. 목록, `코드`, ``` 울타리 블록, **굵게**.
+// 그 밖(표·#제목·링크)은 글자 그대로 둔다: 링크를 만들면 모델이 쓴 주소를 사람이 누르게 되어 피싱 경로가 되고,
+// 표·제목은 지금 프롬프트 규약("JSON 하나만 출력")에서 실제로 나오지 않는다.
+// 순서가 중요하다 — esc를 먼저 걸고 토큰만 감싼다. 뒤집으면 답에 섞인 태그가 그대로 실행된다.
+function chatInline(escaped) {
+  return escaped.replace(/`([^`]+)`|\*\*([^*]+)\*\*/g,
+    (m, code, bold) => (code != null ? `<code>${code}</code>` : `<strong>${bold}</strong>`));
+}
+
+const CHAT_SQL_START = /^\s*(select|with|update|insert|delete|explain)\b/i;
+
+function chatCodeHtml(code, lang) {
+  // highlightSql도 토큰마다 esc를 거친다 — 서버가 준 SQL을 innerHTML에 넣어도 태그로 실행되지 않는다
+  const sql = /^sql$/i.test(lang || "") || CHAT_SQL_START.test(code);
+  return sql ? `<pre class="chat-sql"><code>${highlightSql(code)}</code></pre>`
+             : `<pre><code>${esc(code)}</code></pre>`;
+}
+
+function chatAnswerHtml(text) {
+  const src = stripEmoji(text ?? "");
+  if (!src.trim()) return "";
+  const lines = src.replace(/\r\n?/g, "\n").split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.trim().startsWith("```")) {
+      const lang = line.trim().slice(3).trim();
+      const buf = [];
+      i++;
+      while (i < lines.length && !lines[i].trim().startsWith("```")) { buf.push(lines[i]); i++; }
+      i++; // 닫는 울타리 — 없으면 끝까지가 블록이다
+      out.push(chatCodeHtml(buf.join("\n"), lang));
+      continue;
+    }
+    if (line.trim() === "") { i++; continue; }
+    const ordered = /^\s*\d+\.\s/.test(line);
+    if (ordered || /^\s*[-*]\s/.test(line)) {
+      const items = [];
+      while (i < lines.length) {
+        const m = ordered ? lines[i].match(/^\s*\d+\.\s+(.*)$/) : lines[i].match(/^\s*[-*]\s+(.*)$/);
+        if (!m) break;
+        items.push(chatInline(esc(m[1])));
+        i++;
       }
-      drawProgress();
-    });
-    if (!d) throw new Error("진단 결과가 끝까지 오지 않았습니다(연결 끊김)");
+      out.push(ordered ? `<ol>${items.map((x) => `<li>${x}</li>`).join("")}</ol>`
+                       : `<ul>${items.map((x) => `<li>${x}</li>`).join("")}</ul>`);
+      continue;
+    }
+    const para = [];
+    while (i < lines.length && lines[i].trim() !== "" && !lines[i].trim().startsWith("```")
+           && !/^\s*(\d+\.|[-*])\s/.test(lines[i])) { para.push(lines[i]); i++; }
+    out.push(`<p>${chatInline(esc(para.join("\n")))}</p>`);
+  }
+  return out.join("");
+}
+
+function chatToolHtml(c) {
+  return `
+    <div class="chat-tool${c.rejected ? " is-rejected" : ""}">
+      <div class="chat-tool-line"><span class="chat-tool-dot" aria-hidden="true"></span><code class="chat-tool-name">${esc(c.tool)}</code>
+        <span class="chat-tool-args" title="${esc(c.arguments || "")}">${esc(c.arguments || "")}</span></div>
+      <div class="chat-tool-why">${c.rejected ? "거부됨 · " : ""}${esc(c.reason || "")}</div>
+    </div>`;
+}
+
+/** 메타 줄의 도구 표기 — 중복 제거, 호출 순서. 한 번이라도 거부된 도구는 이름 뒤에 (거부) */
+function chatToolNames(steps) {
+  const names = [];
+  for (const s of steps || []) {
+    if (!s || !s.tool) continue;
+    const found = names.find((n) => n.tool === s.tool);
+    if (found) { found.rejected = found.rejected || !!s.rejected; continue; }
+    names.push({ tool: s.tool, rejected: !!s.rejected });
+  }
+  return names;
+}
+
+function chatTurnHtml(t, idx) {
+  if (t.role === "user") return `<div class="chat-msg chat-user"><div class="chat-bubble">${esc(t.text)}</div></div>`;
+  if (t.role === "system") {
+    const link = t.jobId ? ` <button class="chat-link" type="button" data-job="${esc(t.jobId)}">결과 보기</button>` : "";
+    return `<div class="chat-msg chat-system">${esc(t.text)}${link}</div>`;
+  }
+  const steps = t.steps || [];
+  // 진행 중에는 펼친 채로 쌓는다(그 순간 무엇을 보고 있는지가 정보) — 끝난 답은 기본으로 접는다
+  const open = t.status === "running" || !!t.toolsOpen;
+  const tools = steps.length
+    ? `<div id="chat-tools-${idx}" class="chat-tools-used"${open ? "" : " hidden"}>${steps.map(chatToolHtml).join("")}</div>`
+    : "";
+  const secs = (ms) => `${Math.round(ms / 100) / 10}초`;
+  let body = "";
+  if (t.status === "running") {
+    // 글자를 한 덩어리로 감싼다 — flex 줄에서는 글자 조각마다 gap이 끼어 "20 초"처럼 벌어졌다
+    body = `<div class="chat-stage"><span class="chat-stage-dot" aria-hidden="true"></span><span>${esc(t.stage)} · <span data-elapsed>${Math.floor((Date.now() - t.startedAt) / 1000)}</span>초</span></div>`;
+  } else if (t.status === "done") {
+    const d = t.result;
+    if (!d.aiEnabled) {
+      body = `<div class="chat-note">${esc(d.note || "AI 진단을 쓸 수 없습니다")}</div>`;
+    } else {
+      const names = chatToolNames(steps);
+      // backend(cli/api)는 메타 줄에서 뺀다 — 사용자가 판단에 쓸 값이 아니다(저장은 그대로 남는다)
+      const toolsMeta = names.length
+        ? ` · <button type="button" class="chat-meta-tools" data-idx="${idx}" aria-expanded="${open}" aria-controls="chat-tools-${idx}">도구 ${names.length}개 (${esc(names.map((n) => `${n.tool}${n.rejected ? " (거부)" : ""}`).join(", "))})</button>`
+        : "";
+      body = `
+        ${d.rootCause ? `<p class="chat-root"><span class="chat-root-k">근본원인</span>${esc(stripEmoji(d.rootCause))}</p>` : ""}
+        <div class="chat-text">${chatAnswerHtml(d.answer) || "<p>(답변 없음)</p>"}</div>
+        <div class="chat-meta">확신도 ${esc(CHAT_CONFIDENCE[d.confidence] || d.confidence || "-")} · ${secs(t.took)}${toolsMeta}</div>
+        ${d.note ? `<div class="chat-note">${esc(d.note)}</div>` : ""}`;
+    }
+  } else if (t.status === "stopped") {
+    body = `<div class="chat-meta">화면에서 중지했습니다 · ${secs(t.took)}</div>`;
+  } else if (t.status === "error") {
+    body = `<div class="chat-error">진단하지 못했습니다: ${esc(t.error)}</div>`;
+  }
+  return `<div class="chat-msg chat-ai">${tools}${body}</div>`;
+}
+
+function renderChat({ follow = false } = {}) {
+  const log = $("#chat-log");
+  if (!log) return;
+  const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+  const inst = state.instance;
+  const cs = chatState();
+  if (!inst || !cs) {
+    // 인스턴스가 한 대도 없을 때 여기서 또 말하면 화면 세 곳이 같은 문장이 된다 — 그 사실은 작업면 한 줄과 부제가 말한다(B6fix)
+    log.innerHTML = state.instances.length
+      ? '<div class="chat-empty"><p>왼쪽에서 인스턴스를 고르면 그 DB에 물어볼 수 있습니다.</p></div>'
+      : "";
+  } else {
+    const parts = [];
+    if (cs.error) parts.push(`<div class="chat-error">${esc(cs.error)}</div>`);
+    if (!cs.turns.length) {
+      // 불러오는 중에도 빈 대화 화면을 함께 보여준다 — 로딩 문구만 남으면 사람은 기다릴지 새로 고를지 알 수 없다.
+      // 서버가 느릴 때(대상 조회가 몰리면 대화 목록 조회가 그 뒤에 줄을 선다) 실제로 십여 초가 걸린다
+      const loading = cs.status === "loading"
+        ? `<p class="chat-empty-sub">대화를 불러오는 중입니다.</p>` : "";
+      parts.push(`
+          <div class="chat-empty">
+            ${loading}
+            <p><strong>${esc(inst.name)}</strong>에 무엇이든 물어보세요.</p>
+            <p class="chat-empty-sub">근거가 없으면 모른다고 답합니다.</p>
+            <div class="chat-suggest">${CHAT_SUGGESTIONS.map((q) => `<button type="button" class="chat-chip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>
+          </div>`);
+    } else {
+      parts.push(cs.turns.map(chatTurnHtml).join(""));
+    }
+    log.innerHTML = parts.join("");
+  }
+  // 새 줄이 붙으면 맨 아래로 — 단 위로 올려 앞 대화를 읽는 중이면 끌어내리지 않는다
+  if (follow || nearBottom) log.scrollTop = log.scrollHeight;
+  syncChatComposer();
+  syncChatHeader();
+}
+
+/** 헤더 — 부제는 대상, 전환 버튼 글자는 지금 대화 제목(없으면 "새 대화") */
+function syncChatHeader() {
+  const inst = state.instance;
+  const cs = chatState();
+  const sub = $("#chat-sub");
+  const label = $("#chat-switch-label");
+  const sw = $("#chat-switch");
+  if (sub) {
+    // 이름과 고정 문구를 분리한다 — 좁아지면 이름만 줄어들고 "· 읽기 도구로만 답합니다"는 끝까지 남는다.
+    // 문구 사이의 공백은 글자에 넣지 않고 CSS 여백으로 준다(flex 항목 경계에서 앞 공백이 사라진다)
+    // 등록된 인스턴스가 한 대도 없으면 "왼쪽에서 고르세요"가 할 수 없는 일을 권하는 문장이 된다(B6)
+    const chatIdle = state.instances.length ? "왼쪽에서 인스턴스를 고르세요" : "인스턴스가 등록되면 이 칸에서 물어볼 수 있습니다";
+    sub.innerHTML = inst
+      ? `<span class="chat-sub-name">${esc(inst.name)}</span><span class="chat-sub-fixed">· 읽기 도구로만 답합니다</span>`
+      : `<span class="chat-sub-name">${chatIdle}</span>`;
+  }
+  if (label) label.textContent = cs?.title || "새 대화";
+  if (sw) {
+    sw.disabled = !inst;
+    sw.hidden = !inst;   // 누를 수 없으면 감춘다(B6fix) — 대상이 없으면 새 대화도 전환도 할 일이 없다
+  }
+}
+
+function renderChatList() {
+  const box = $("#chat-list-items");
+  const cs = chatState();
+  if (!box) return;
+  if (!cs || !cs.list.length) {
+    box.innerHTML = `<div class="chat-list-empty">아직 대화가 없습니다</div>`;
+    return;
+  }
+  box.innerHTML = cs.list.map((c) => {
+    // 삭제는 그 자리에서 한 번 더 묻는다 — window.confirm은 무엇을 지우는지 화면에서 사라진다
+    if (chat.confirmId === c.id) {
+      return `<div class="chat-list-confirm">
+        <span>삭제할까요?</span>
+        <button type="button" class="chat-list-yes" data-del="${esc(c.id)}">삭제</button>
+        <button type="button" class="chat-list-no" data-cancel="1">취소</button>
+      </div>`;
+    }
+    const sel = c.id === cs.conversationId ? " sel" : "";
+    return `<div class="chat-list-row${sel}">
+      <button type="button" class="chat-list-item" data-open="${esc(c.id)}">
+        <span class="chat-list-title">${esc(c.title)}</span>
+        <span class="chat-list-time">${esc(chatListTime(c.updatedAt))}</span>
+      </button>
+      <button type="button" class="chat-list-del" data-confirm="${esc(c.id)}" aria-label="대화 삭제">
+        <svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true">
+          <path d="M3 4h8M5.6 4V3h2.8v1M4.2 4l.5 7h4.6l.5-7" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>`;
+  }).join("");
+}
+
+function openChatList() {
+  const list = $("#chat-list");
+  const sw = $("#chat-switch");
+  if (!list || !sw) return;
+  chat.confirmId = null;
+  renderChatList();
+  list.hidden = false;
+  sw.setAttribute("aria-expanded", "true");
+}
+
+function closeChatList() {
+  const list = $("#chat-list");
+  const sw = $("#chat-switch");
+  if (!list || !sw || list.hidden) return;
+  list.hidden = true;
+  sw.setAttribute("aria-expanded", "false");
+  chat.confirmId = null;
+}
+
+/** 목록만 다시 받는다(첫 턴이 서버에서 제목을 바꾼다). 실패는 대화 칸 한 줄로 — 화면 전체를 막지 않는다 */
+async function loadConversations() {
+  const inst = state.instance;
+  const cs = chatState();
+  if (!inst || !cs) return;
+  try {
+    const list = await api(`/api/instances/${inst.id}/conversations`);
+    if (state.instance?.id !== inst.id) return;
+    cs.list = list;
+    const mine = cs.conversationId == null ? null : list.find((c) => c.id === cs.conversationId);
+    if (mine) cs.title = mine.title;
+    cs.error = null;
   } catch (e) {
-    box.className = "diagnose-result schema-warning";
-    box.textContent = `진단 실패: ${e.message}`;
+    if (state.instance?.id !== inst.id) return;
+    cs.error = `대화 목록을 불러오지 못했습니다: ${e.message}`;
+  }
+  renderChat();
+  renderChatList();
+}
+
+/** 인스턴스를 고를 때 — 그 인스턴스의 대화를 서버에서 다시 읽는다(있으면 열던 대화, 없으면 가장 최근) */
+async function loadConversationsAndOpenLatest(instanceId) {
+  const cs = chatState();
+  if (!cs || chatRunningHere(instanceId)) return;
+  cs.status = "loading";
+  cs.error = null;
+  renderChat();
+  await loadConversations();
+  if (state.instance?.id !== instanceId) return;
+  if (cs.conversationId != null) {
+    await openConversation(cs.conversationId);
+  } else if (cs.list.length) {
+    await openConversation(cs.list[0].id);
+  } else {
+    cs.status = "idle";
+    renderChat();
+  }
+}
+
+async function openConversation(cid) {
+  const inst = state.instance;
+  const cs = chatState();
+  if (!inst || !cs || chatRunningHere(inst.id)) return;
+  closeChatList();
+  cs.status = "loading";
+  cs.error = null;
+  cs.conversationId = cid;
+  cs.title = "";
+  cs.turns = [];
+  renderChat();
+  let detail;
+  try {
+    detail = await api(`/api/instances/${inst.id}/conversations/${cid}`);
+  } catch (e) {
+    if (state.instance?.id !== inst.id) return;
+    cs.status = "idle";
+    if (/^404\b/.test(e.message)) {
+      // 지워진 대화다 — 오류가 아니라 빈 대화로 돌아간다
+      cs.conversationId = null;
+      cs.list = cs.list.filter((c) => c.id !== cid);
+    } else {
+      cs.error = `대화를 열지 못했습니다: ${e.message}`;
+    }
+    renderChat();
+    renderChatList();
     return;
+  }
+  if (state.instance?.id !== inst.id) return;
+  cs.status = "idle";
+  cs.title = detail.title;
+  cs.turns = chatTurnsFromServer(detail.turns);
+  renderChat({ follow: true });
+  renderChatList();
+}
+
+/** 새 대화 — 서버에는 아직 만들지 않는다. 첫 질문을 보낼 때 POST한다(빈 대화가 목록에 쌓이지 않게) */
+function newConversation() {
+  const inst = state.instance;
+  const cs = chatState();
+  if (!inst || !cs || chatRunningHere(inst.id)) return;
+  closeChatList();
+  cs.conversationId = null;
+  cs.title = "";
+  cs.turns = [];
+  cs.error = null;
+  cs.status = "idle";
+  renderChat();
+  renderChatList();
+  $("#diagnose-question").focus();
+}
+
+async function deleteConversation(cid) {
+  const inst = state.instance;
+  const cs = chatState();
+  if (!inst || !cs) return;
+  chat.confirmId = null;
+  try {
+    await api(`/api/instances/${inst.id}/conversations/${cid}`, { method: "DELETE" });
+  } catch (e) {
+    if (!/^404\b/.test(e.message)) {
+      cs.error = `대화를 지우지 못했습니다: ${e.message}`;
+      renderChat();
+      renderChatList();
+      return;
+    }
+  }
+  if (state.instance?.id !== inst.id) return;
+  cs.list = cs.list.filter((c) => c.id !== cid);
+  if (cs.conversationId === cid) {
+    cs.conversationId = null;
+    cs.title = "";
+    cs.turns = [];
+  }
+  cs.error = null;
+  renderChat();
+  renderChatList();
+}
+
+function syncChatComposer() {
+  const input = $("#diagnose-question");
+  const send = $("#btn-diagnose");
+  const openBtn = $("#btn-aiop-open");
+  const submit = $("#btn-aiop-submit");
+  if (!input) return;
+  const inst = state.instance;
+  const runningHere = inst && chatRunningHere(inst.id);
+  const runningElsewhere = chat.running && !runningHere;
+  const hasText = input.value.trim().length > 0;
+  input.disabled = !inst;
+  // 0대일 때 "왼쪽에서 고르세요"는 할 수 없는 일이다 — 부제가 사실을 말하므로 여기서는 비운다(B6fix)
+  input.placeholder = inst ? "무엇이 궁금한가요?"
+    : state.instances.length ? "왼쪽에서 인스턴스를 고르면 물어볼 수 있습니다" : "";
+  // 누를 수 없는 버튼은 감춘다 — 목록의 "새 대화"는 대상이 없으면 만들 것이 없다(B6fix)
+  const newBtn = $("#chat-new");
+  if (newBtn) newBtn.hidden = !inst;
+  send.classList.toggle("is-stop", !!runningHere);
+  send.setAttribute("aria-label", runningHere ? "중지" : "보내기");
+  send.title = runningElsewhere ? "다른 인스턴스의 진단이 끝나면 보낼 수 있습니다" : "";
+  // 진행 중에는 같은 버튼이 중지가 된다 — 그래서 빈 입력이어도 누를 수 있어야 한다
+  send.disabled = runningHere ? false : (!inst || !hasText || !!runningElsewhere);
+  if (openBtn) openBtn.disabled = !inst || !hasText;
+  if (submit && !submit.dataset.busy) submit.disabled = !inst || !hasText;
+}
+
+function autoGrowChatInput() {
+  const input = $("#diagnose-question");
+  input.style.height = "auto";
+  input.style.height = `${Math.min(input.scrollHeight, 148)}px`;
+  // 최대 높이 전에는 스크롤을 숨긴다 — 한 줄인데도 1~2px 차이로 회색 스크롤바가 떠 있었다
+  input.style.overflowY = input.scrollHeight > 148 ? "auto" : "hidden";
+}
+
+async function runDiagnose() {
+  const input = $("#diagnose-question");
+  const inst = state.instance;
+  const cs = chatState();
+  const question = input.value.trim();
+  if (!inst || !cs || !question || chat.running) return;
+
+  const turns = cs.turns;
+  turns.push({ role: "user", text: question });
+  const turn = { role: "ai", status: "running", stage: "진단을 시작합니다", steps: [], startedAt: Date.now() };
+  turns.push(turn);
+  input.value = "";
+  autoGrowChatInput();
+  closeChatList();
+
+  const controller = new AbortController();
+  chat.running = { instanceId: inst.id, controller };
+  renderChat({ follow: true });
+  // 경과 초만 1초마다 고친다 — 전체를 다시 그리면 읽던 자리의 선택·스크롤이 흔들린다
+  const ticker = setInterval(() => {
+    if (state.instance?.id !== inst.id) return;
+    const el = document.querySelector("#chat-log [data-elapsed]");
+    if (el) el.textContent = Math.floor((Date.now() - turn.startedAt) / 1000);
+  }, 1000);
+  const redraw = () => { if (state.instance?.id === inst.id) renderChat(); };
+
+  try {
+    // 첫 질문을 보낼 때 대화를 만든다 — 들어가기만 해도 대화가 생기면 목록이 빈 대화로 찬다
+    if (cs.conversationId == null) {
+      const created = await api(`/api/instances/${inst.id}/conversations`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+      });
+      cs.conversationId = created.id;
+      cs.title = created.title;
+    }
+    let result = null;
+    // 본문에 history를 싣지 않는다 — 앞선 맥락은 서버가 이 대화의 턴에서 만든다(위조 방지, 176절)
+    await streamSse(`/api/instances/${inst.id}/diagnose/stream`,
+      { question, conversationId: cs.conversationId }, (name, data) => {
+        if (name === "thinking") {
+          turn.stage = data.synthesis ? "도구 호출 상한에 도달해 지금까지의 근거로 답을 정리하는 중" : `${data.step}번째 판단 중`;
+        } else if (name === "tool") {
+          turn.steps.push(data);
+          turn.stage = data.rejected ? `요청한 도구가 거부됐습니다: ${data.tool}` : `${data.tool} 결과를 받았습니다`;
+        } else if (name === "result") {
+          result = data;
+          return;
+        } else if (name === "error") {
+          throw new Error(data.message);
+        }
+        redraw();
+      }, controller.signal);
+    if (!result) throw new Error("답이 끝까지 오지 않았습니다(연결 끊김)");
+    turn.status = "done";
+    turn.result = result;
+    turn.steps = result.toolCalls || turn.steps;
+  } catch (e) {
+    if (e.name === "AbortError") {
+      turn.status = "stopped";
+    } else {
+      turn.status = "error";
+      turn.error = e.message;
+    }
   } finally {
+    turn.took = Date.now() - turn.startedAt;
     clearInterval(ticker);
-    state.diagnosing = false;
-    if (diagnoseBtn) diagnoseBtn.disabled = false;
+    chat.running = null;
+    redraw();
+    syncChatComposer();
+    // 첫 턴이 저장되면 서버가 제목을 질문 앞 40자로 바꾼다 — 목록을 다시 받아 그 제목을 보여준다
+    if (state.instance?.id === inst.id) loadConversations();
   }
+}
 
-  if (!d.aiEnabled) {
-    box.innerHTML = `<div class="diagnose-note muted">${esc(d.note || "AI 진단 비활성")}</div>`;
-    return;
-  }
+/** 도구 줄 접기/펴기 — 다시 그리지 않고 그 자리만 바꾼다(누른 버튼에 초점이 남는다) */
+function toggleChatTools(button) {
+  const body = document.getElementById(button.getAttribute("aria-controls"));
+  if (!body) return;
+  const wasOpen = button.getAttribute("aria-expanded") === "true";
+  button.setAttribute("aria-expanded", String(!wasOpen));
+  body.hidden = wasOpen;
+  const turn = chatTurns()[Number(button.dataset.idx)];
+  if (turn) turn.toolsOpen = !wasOpen;
+}
 
-  // 사용한 도구(투명성) — 어떤 도구를 왜 불렀나, 거부된 요청도 표시
-  const calls = (d.toolCalls || []).map(diagnoseStepHtml).join("");
-  const took = Math.round((Date.now() - progress.startedAt) / 100) / 10;
+function openAiOpPopover() {
+  const popover = $("#aiop-popover");
+  const openBtn = $("#btn-aiop-open");
+  if (!popover || popover.hidden === false) return;
+  popover.hidden = false;
+  openBtn.setAttribute("aria-expanded", "true");
+  $("#aiop-new-type").focus();
+}
 
-  const conf = esc(d.confidence || "");
-  box.innerHTML = `
-    <div class="diagnose-answer">
-      <div class="diagnose-answer-head">
-        <strong>근본원인</strong>
-        <span class="src-badge conf-${conf}">확신도 ${conf}</span>
-        <span class="muted">${esc(d.backend || "")} · 사용 도구 ${d.toolCallCount}개 · ${took}초</span>
-      </div>
-      ${d.rootCause ? `<div class="diagnose-rootcause">${esc(stripEmoji(d.rootCause))}</div>` : ""}
-      <div class="diagnose-text">${esc(stripEmoji(d.answer) || "(답변 없음)")}</div>
-    </div>
-    <div class="diagnose-steps">
-      <div class="diagnose-steps-head muted">AI가 부른 도구 (근거·투명성)</div>
-      ${calls || '<div class="muted">호출한 도구 없음</div>'}
-    </div>
-    ${d.note ? `<div class="diagnose-note muted">${esc(d.note)}</div>` : ""}`;
+function closeAiOpPopover(refocus = false) {
+  const popover = $("#aiop-popover");
+  const openBtn = $("#btn-aiop-open");
+  if (!popover || popover.hidden) return;
+  popover.hidden = true;
+  openBtn.setAttribute("aria-expanded", "false");
+  if (refocus) openBtn.focus();
+}
+
+function wireChat() {
+  const form = $("#chat-form");
+  const input = $("#diagnose-question");
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (chat.running && chat.running.instanceId === state.instance?.id) chat.running.controller.abort();
+    else runDiagnose();
+  });
+  input.addEventListener("keydown", (e) => {
+    // 한글은 조합 중에도 Enter가 온다 — 그때 보내면 마지막 글자가 덜 쳐진 채 나간다
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    if (!chat.running) runDiagnose();
+  });
+  input.addEventListener("input", () => { autoGrowChatInput(); syncChatComposer(); });
+
+  $("#chat-switch").addEventListener("click", () => {
+    if ($("#chat-list").hidden) { openChatList(); loadConversations(); }
+    else closeChatList();
+  });
+  $("#chat-new").addEventListener("click", newConversation);
+  $("#chat-list").addEventListener("click", (e) => {
+    // 목록 안의 클릭은 여기서 끝낸다. 삭제 확인으로 목록을 다시 그리면 누른 요소가 DOM에서 떨어져
+    // 바깥 클릭 판정(e.target.closest)이 "바깥"으로 읽고 패널을 닫아 버린다
+    e.stopPropagation();
+    const open = e.target.closest("[data-open]");
+    if (open) { openConversation(Number(open.dataset.open)); return; }
+    const ask = e.target.closest("[data-confirm]");
+    if (ask) { chat.confirmId = Number(ask.dataset.confirm); renderChatList(); return; }
+    if (e.target.closest("[data-cancel]")) { chat.confirmId = null; renderChatList(); return; }
+    const yes = e.target.closest("[data-del]");
+    if (yes) deleteConversation(Number(yes.dataset.del));
+  });
+  // 바깥 클릭·Esc로 닫힌다. Esc는 초점을 전환 버튼으로 돌려준다(키보드로 연 사람이 길을 잃지 않게)
+  document.addEventListener("click", (e) => {
+    if (!$("#chat-list").hidden && !e.target.closest("#chat-list") && !e.target.closest("#chat-switch")) closeChatList();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("#chat-list").hidden) { closeChatList(); $("#chat-switch").focus(); }
+  });
+
+  $("#chat-log").addEventListener("click", (e) => {
+    const chip = e.target.closest(".chat-chip");
+    if (chip) {
+      input.value = chip.dataset.q;
+      autoGrowChatInput();
+      syncChatComposer();
+      input.focus();
+      return;
+    }
+    const toggle = e.target.closest(".chat-meta-tools");
+    if (toggle) {
+      toggleChatTools(toggle);
+      return;
+    }
+    const job = e.target.closest(".chat-link[data-job]");
+    if (job) {
+      document.querySelector('.tab[data-tab="monitor"]')?.click();
+      showMonGroup("diag");
+      loadAiOperations().then(() => openAiOperation(job.dataset.job));
+      document.querySelector(".aiops-card")?.scrollIntoView({ block: "start" });
+    }
+  });
+
+  // 작업 맡기기 팝오버 — 늘 떠 있던 선택 상자 둘을 여기로 접었다(무엇인지 알 수 없었다)
+  $("#btn-aiop-open").addEventListener("click", openAiOpPopover);
+  $("#btn-aiop-cancel").addEventListener("click", () => closeAiOpPopover(true));
+  $("#aiop-popover").addEventListener("keydown", (e) => { if (e.key === "Escape") closeAiOpPopover(true); });
+
+  // 데이터 보호 한 줄 — hover만 있는 네이티브 title은 키보드 사용자에게 없는 정보가 된다
+  const privacy = $("#chat-privacy");
+  const privacyTip = $("#chat-privacy-tip");
+  const showTip = () => { privacyTip.hidden = false; };
+  const hideTip = () => { privacyTip.hidden = true; };
+  privacy.addEventListener("mouseenter", showTip);
+  privacy.addEventListener("mouseleave", hideTip);
+  privacy.addEventListener("focus", showTip);
+  privacy.addEventListener("blur", hideTip);
+  privacy.addEventListener("keydown", (e) => { if (e.key === "Escape") hideTip(); });
+
+  renderChat();
+  renderChatList();
 }
 
 // ---------- 감사 로그 검색 (Specification 동적 필터) ----------
@@ -3390,13 +4320,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadMe();
   setupModes();
   loadMcpCommand();
-  loadInstances();
-  loadHealthScore();     // 함대 전체 통합 헬스 스코어 (D8) — 나쁜 순 정렬, 대시보드 상단 상시 뷰
-  loadBackupFreshness(); // 함대 전체 백업 신선도 (D7) — 인스턴스 선택과 무관한 상시 뷰
+  // 함대 카드 둘은 "등록된 인스턴스가 있는가"에 따라 문장이 달라진다 — 목록을 안 뒤에 부른다(B6).
+  // 병렬로 쏘면 목록보다 먼저 도착한 카드가 "등록된 인스턴스가 없습니다"로 굳는다
+  loadInstances().catch(() => {}).then(() => {
+    loadHealthScore();     // 함대 전체 통합 헬스 스코어 (D8) — 나쁜 순 정렬, 대시보드 상단 상시 뷰
+    loadBackupFreshness(); // 함대 전체 백업 신선도 (D7) — 인스턴스 선택과 무관한 상시 뷰
+  });
   setupTabs();
   setupMonitorNav();
   setupLive();
   setupTooltip();        // 네이티브 title을 예쁜 커스텀 툴팁으로 자동 승격(전역 위임)
+  setupSqlTip();         // 표의 SQL 셀은 강조된 전용 툴팁을 쓴다(B3) — title을 쓰지 않는다
   setupInstanceFilter(); // 검색·필터 이벤트 연결(검색·필터 구동 렌더)
   setupPresets();
   setupAiOperations();
@@ -3405,33 +4339,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#detail-sql").addEventListener("scroll", () => { const h = $("#detail-sql-hl"); if (h) { h.scrollTop = $("#detail-sql").scrollTop; h.scrollLeft = $("#detail-sql").scrollLeft; } });
   setupChartDrag();
   setupCopyButtons();
+  setupQueryDetail();
+  watchRowDetails();   // 표 행 안 상세의 폭을 스크롤 상자의 보이는 폭에 맞춘다(B6fix)
+  setupMcpCard();      // 제공 도구 접기(B4)
+  setupUsersCard();    // 역할 적용/취소·새 사용자 조건(B4)
   loadMcpTools();
   $("#btn-query").addEventListener("click", runQuery);
   $("#btn-compare").addEventListener("click", runCompare);
-  $("#btn-explain").addEventListener("click", runExplain);
-  $("#btn-schema").addEventListener("click", runReferencedSchema);
-  $("#btn-antipattern").addEventListener("click", runAntiPatterns);
-  $("#btn-ai").addEventListener("click", runAiAnalysis);
-  // "인덱스 제안" 버튼은 섹션을 펼치고, 섹션 안의 "시뮬레이션" 버튼이 실제 호출한다(후보 컬럼 입력이 필요해서)
-  $("#btn-advisor").addEventListener("click", () => {
-    $("#advisor-section").hidden = false;
-    // 가상 인덱스(HypoPG)는 PostgreSQL 전용이다 — 눌러서 UNSUPPORTED를 받기 전에 미리 알린다(159절)
-    const hint = $("#advisor-unsupported");
-    const pg = state.instance && state.instance.type === "POSTGRESQL";
-    hint.hidden = pg;
-    if (!pg && state.instance) {
-      hint.textContent = `${state.instance.type}는 가상 인덱스 시뮬레이션을 지원하지 않습니다 — `
-        + "실제 인덱스를 만들어야 계획을 비교할 수 있고, 그건 대상 DB를 바꾸는 일이라 이 기능의 범위 밖입니다. "
-        + "대신 실행계획 보기와 안티패턴 신호로 후보를 좁히세요.";
-    }
-    $("#advisor-columns").focus();
-  });
-  $("#btn-advisor-run").addEventListener("click", runIndexAdvisor);
   // 관제에서 본 쿼리를 요청자가 워크벤치의 새 워크시트로 가져간다(행 값 조회는 워크벤치의 조회 계정·마스킹을 거친다)
   $("#btn-to-workbench").addEventListener("click", () => handToWorkbench("sql", $("#detail-sql").value.trim()));
   $("#btn-user-create").addEventListener("click", createUser);
-  $("#btn-deep").addEventListener("click", runDeepDiagnose);
-  $("#btn-inquiry").addEventListener("click", runInquiry);
   $("#btn-schema-diff").addEventListener("click", runSchemaDiff);
   $("#btn-param-diff").addEventListener("click", runParamDiff);
   $("#btn-config-drift").addEventListener("click", loadConfigDrift);
@@ -3443,11 +4360,63 @@ document.addEventListener("DOMContentLoaded", async () => {
   incidentDefaults();
   $("#btn-ddl-noop").addEventListener("click", () => runOnlineDdl(false));
   $("#btn-ddl-exec").addEventListener("click", () => runOnlineDdl(true));
-  $("#btn-diagnose").addEventListener("click", runDiagnose);
-  $("#diagnose-question").addEventListener("keydown", (e) => { if (e.key === "Enter") runDiagnose(); });
+  wireChat();
   $("#audit-search-btn").addEventListener("click", loadAudit);
   $("#audit-reset-btn").addEventListener("click", () => {
     ["audit-principal", "audit-action", "audit-outcome"].forEach((id) => { $(`#${id}`).value = ""; });
     loadAudit();
   });
 });
+
+// 쿼리 상세의 조작 계층 (B3) — 토글 다섯·더보기 메뉴·다시 조회·SQL ID 복사·안티패턴 접기.
+// 버튼은 id로 하나씩 잡는다: 토글 묶음이 헤더에서 줄바꿈돼도 리스너는 그대로 살아 있다.
+function setupQueryDetail() {
+  Object.keys(DETAIL_VIEWS).forEach((key) => {
+    $("#btn-" + key).addEventListener("click", () => toggleDetailView(key));
+  });
+  // 섹션 제목의 "다시 조회"는 위임으로 잡는다 — 결과를 다시 그려도 버튼이 새로 생기지 않는다
+  $("#query-detail").addEventListener("click", (e) => {
+    const refresh = e.target.closest("[data-refresh]");
+    if (refresh) refreshDetailView(refresh.dataset.refresh);
+  });
+  // 더보기 — 항목은 실행이 아니라 섹션 열기다(실행은 그 안의 주 버튼이 한다)
+  $("#btn-detail-more").addEventListener("click", () => {
+    if ($("#detail-more-menu").hidden) openDetailMore(); else closeDetailMore();
+  });
+  $("#btn-deep").addEventListener("click", () => openDetailSection("#deep-section"));
+  $("#btn-inquiry").addEventListener("click", () => openDetailSection("#inquiry-section"));
+  $("#btn-deep-run").addEventListener("click", runDeepDiagnose);
+  $("#btn-inquiry-send").addEventListener("click", runInquiry);
+  document.addEventListener("click", (e) => {
+    if (!$("#detail-more-menu").hidden && !e.target.closest(".detail-more-wrap")) closeDetailMore();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("#detail-more-menu").hidden) closeDetailMore(true);
+  });
+  $("#btn-advisor-run").addEventListener("click", runIndexAdvisor);
+  // 안티패턴 "다른 쿼리 N개 보기" — 결과를 다시 그리므로 위임으로 잡는다
+  $("#antipattern-result").addEventListener("click", (e) => {
+    const more = e.target.closest(".ap-more");
+    if (!more) return;
+    const box = document.getElementById(more.getAttribute("aria-controls"));
+    const open = more.getAttribute("aria-expanded") === "true";
+    more.setAttribute("aria-expanded", String(!open));
+    box.hidden = open;
+    more.textContent = open ? `다른 쿼리 ${more.dataset.more}개 보기` : "접기";
+  });
+  // SQL ID 복사 — 화면에 보이는 것은 짧은 값이라 전체 값은 상태에서 꺼낸다
+  $("#btn-copy-qid").addEventListener("click", async () => {
+    const full = state.currentQuery ? String(state.currentQuery.queryId ?? "") : "";
+    const btn = $("#btn-copy-qid");
+    if (!full) return;
+    try {
+      await navigator.clipboard.writeText(full);
+      btn.textContent = "복사됨";
+      setTimeout(() => { btn.textContent = "복사"; }, 1500);
+    } catch (e) { /* http 컨텍스트 등 클립보드 불가 환경 — 버튼은 그대로 둔다 */ }
+  });
+}
+
+// 워크벤치는 별도 ES 모듈이라 이 파일의 함수를 직접 부를 수 없다 — 드롭다운을 복제하지 않게 하나만 내보낸다(B5).
+// 관제의 인스턴스 필터와 워크벤치의 인스턴스 고르기가 같은 모양·동작이어야 한다.
+window.dbtowerEnhanceSelect = enhanceSelect;

@@ -2,6 +2,7 @@ package io.dbtower.registry;
 
 import io.dbtower.registry.internal.domain.InstanceCredential;
 import io.dbtower.registry.internal.persistence.InstanceCredentialRepository;
+import io.dbtower.security.SecretUnreadableException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,15 +30,23 @@ public class ConsoleCredentialService {
     /** 콘솔 실행용 자격증명. 미설정이면 empty — 호출자는 이를 "기능 꺼짐"으로 다룬다(fail-closed). */
     public Optional<ConsoleCredential> find(Long instanceId, CredentialPurpose purpose) {
         registry.findById(instanceId);
-        return repository.findByInstanceIdAndPurpose(instanceId, purpose)
-                .map(c -> new ConsoleCredential(c.getUsername(), c.getPassword()));
+        try {
+            return repository.findByInstanceIdAndPurpose(instanceId, purpose)
+                    .map(c -> new ConsoleCredential(c.getUsername(), c.getPassword()));
+        } catch (RuntimeException e) {
+            // 컨버터 예외는 JPA·Spring이 한두 겹 감싸 올린다 — 원인 사슬에서 "비밀을 못 읽었다"를 찾아 사람이 할 일로 바꾼다
+            for (Throwable t = e; t != null; t = t.getCause()) {
+                if (t instanceof SecretUnreadableException) {
+                    throw new CredentialUnreadableException(purpose, e);
+                }
+            }
+            throw e;
+        }
     }
 
     public List<CredentialSummary> summaries(Long instanceId) {
         registry.findById(instanceId);
-        return repository.findByInstanceIdOrderByPurposeAsc(instanceId).stream()
-                .map(ConsoleCredentialService::summary)
-                .toList();
+        return repository.findSummaries(instanceId);
     }
 
     @Transactional

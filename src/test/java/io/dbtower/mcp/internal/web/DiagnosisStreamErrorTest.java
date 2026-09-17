@@ -62,7 +62,7 @@ class DiagnosisStreamErrorTest {
 
     @Test
     void 대상_조회_실패는_원문_없이_502와_errorId로_온다() throws Exception {
-        when(diagnosisService.diagnose(anyLong(), anyString(), anyString(), anyString(), any(DiagnosisListener.class)))
+        when(diagnosisService.diagnose(anyLong(), anyString(), anyString(), anyString(), any(), any(DiagnosisListener.class)))
                 .thenThrow(new OperatorException(RAW));
         String body = stream("\"status\":502");
         assertThat(body).contains("event:error").contains("errorId=").doesNotContain("10.1.2.3").doesNotContain("payments_prod");
@@ -70,7 +70,7 @@ class DiagnosisStreamErrorTest {
 
     @Test
     void 그_밖의_실패도_원문_없이_500과_errorId로_온다() throws Exception {
-        when(diagnosisService.diagnose(anyLong(), anyString(), anyString(), anyString(), any(DiagnosisListener.class)))
+        when(diagnosisService.diagnose(anyLong(), anyString(), anyString(), anyString(), any(), any(DiagnosisListener.class)))
                 .thenThrow(new RuntimeException("claude CLI 실패: /Users/ops/.claude/credentials " + RAW));
         String body = stream("\"status\":500");
         assertThat(body).contains("errorId=").doesNotContain("credentials").doesNotContain("10.1.2.3");

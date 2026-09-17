@@ -8,9 +8,16 @@ const TIER = { READ: ["읽기", "read"], NEEDS_APPROVAL: ["변경 · 승인 필�
 const SOURCE = { AI: "AI 제안", RUN: "직접 실행", RESTORE: "되돌림" };
 const time = (t) => localTime(t);
 
+// 이 칸이 무엇을 하는 곳인지에 대한 안내 — 입력창 아래에 떠 있던 문장을 대화 맨 위로 옮겼다.
+// 대화가 쌓인 뒤에는 입력창 근처의 작은 글씨를 아무도 다시 읽지 않고, 대화가 있든 없든 같은 자리에 있어야
+// "무엇이 실행되고 무엇이 기록되는가"가 이 칸의 규칙으로 먼저 읽힌다(문구는 그대로).
+const POLICY = "조회는 조회 전용 계정·읽기 전용 트랜잭션으로 즉시 실행되고, 변경은 승인 티켓으로, "
+  + "위험한 문장은 차단됩니다. 모든 실행과 대화는 기록됩니다.";
+
 export function renderTimeline(container, items, { currentVersion, pending, onApply, onPreview, onRestore }) {
+  const policy = `<div class="wb-chat-policy">${esc(POLICY)}</div>`;
   if (!items.length && !pending) {
-    container.innerHTML = `<div class="wb-empty">
+    container.innerHTML = policy + `<div class="wb-empty">
       이 워크시트에서 보고 싶은 데이터를 말로 설명하면 AI가 SQL을 제안합니다.<br>
       AI는 실행하지 않습니다. 제안을 편집기로 가져와 직접 실행하세요.<br>
       <b>선택</b>을 켜고 결과 열이나 스키마의 테이블을 누르면 질문에 붙습니다.</div>`;
@@ -55,7 +62,7 @@ export function renderTimeline(container, items, { currentVersion, pending, onAp
   const intro = hasTalk || pending ? "" : `<div class="wb-empty wb-empty-inline">
     아직 대화가 없습니다 — 아래에 보고 싶은 데이터를 말로 설명하면 AI가 SQL을 제안합니다.<br>
     아래 기록은 이 워크시트에 저장된 버전입니다.</div>`;
-  container.innerHTML = intro
+  container.innerHTML = policy + intro
     + items.map((it) => (it.type === "MESSAGE" ? message(it.message) : `<div class="msg ai">${card(it.version)}</div>`)).join("")
     + (pending ? `<div class="msg user">${esc(pending.question)}</div>${pendingBubble(pending)}` : "");
   container.scrollTop = container.scrollHeight;

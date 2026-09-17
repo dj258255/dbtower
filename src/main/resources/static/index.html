@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#0b1220">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DBTower — 이기종 DBMS 운영 관리 플랫폼</title>
+<title>DBTower</title>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="workbench.css">
 </head>
@@ -18,7 +18,6 @@
   <div class="brand">
     <img class="brand-logo" src="favicon.svg" alt="" width="28" height="28">
     <span class="brand-name">DBTower</span>
-    <span class="brand-tag">이기종 DBMS 운영 관리 플랫폼</span>
   </div>
   <!-- 관제와 워크벤치는 한 제품의 두 모드다(149절) — 페이지를 옮기지 않고 전환한다. 역할에 없는 모드는 감춘다(loadMe) -->
   <div class="mode-switch" role="tablist" aria-label="화면 모드">
@@ -61,8 +60,11 @@
 
   <main class="workspace">
 
+    <!-- 등록된 인스턴스가 한 대도 없을 때 — 함대 카드 둘은 빈 채로 같은 문장을 두 번 말하게 되므로 접고, 여기 한 줄만 둔다(B6) -->
+    <section id="inst-onboarding" class="panel empty-onboarding" hidden></section>
+
     <!-- 함대 개요 — 인스턴스 선택과 무관한 전체 뷰 두 개를 나란히 -->
-    <div class="fleet-row">
+    <div class="fleet-row" id="fleet-row">
       <!-- 통합 헬스 스코어 (D8) — 5기종 전체를 한 점수·등급으로, 나쁜 순으로. 어디부터 볼지 기계가 정렬 -->
       <section class="panel health-score-panel">
         <h2 class="panel-title">헬스 스코어
@@ -140,62 +142,84 @@
             <tbody></tbody>
           </table>
         </div>
-        <!-- 쿼리 상세: EXPLAIN + AI 분석 -->
+        <!-- 쿼리 상세: 실행계획·AI 분석·인덱스 제안을 한 자리에서. 버튼은 토글이다 — 늘 여덟 개가 떠 있으면
+             무엇이 열려 있는지 알 수 없고 누르는 즉시 실행되는 것과 섞인다(B3) -->
         <div id="query-detail" class="detail" hidden>
           <div class="detail-head">
-            <span id="detail-qid" class="qid"></span>
-            <span class="detail-actions">
-              <button id="btn-explain" class="btn btn-primary btn-small">실행계획 보기</button>
-              <button id="btn-schema" class="btn btn-small">관련 테이블 구조</button>
-              <button id="btn-ai" class="btn btn-dark btn-small">AI 분석</button>
-              <button id="btn-advisor" class="btn btn-small">인덱스 제안</button>
-              <button id="btn-antipattern" class="btn btn-small">안티패턴 신호</button>
-              <button id="btn-deep" class="btn btn-small">심층 진단</button>
-              <button id="btn-to-workbench" class="btn btn-small" hidden>워크벤치에서 열기</button>
-              <button id="btn-inquiry" class="btn btn-small">DB팀에 문의</button>
+            <span class="detail-id">
+              <span class="qid-label">SQL ID</span>
+              <span id="detail-qid" class="qid"></span>
+              <button id="btn-copy-qid" class="qid-copy" type="button">복사</button>
+            </span>
+            <div class="detail-views" role="group" aria-label="쿼리 분석 보기">
+              <button id="btn-explain" class="seg-btn" type="button" aria-pressed="false">실행계획</button>
+              <button id="btn-schema" class="seg-btn" type="button" aria-pressed="false">테이블 구조</button>
+              <button id="btn-ai" class="seg-btn" type="button" aria-pressed="false">AI 분석</button>
+              <button id="btn-advisor" class="seg-btn" type="button" aria-pressed="false">인덱스 제안</button>
+              <button id="btn-antipattern" class="seg-btn" type="button" aria-pressed="false">안티패턴</button>
+            </div>
+            <span class="detail-tail">
+              <button id="btn-to-workbench" class="btn btn-small" type="button" hidden>워크벤치에서 열기</button>
+              <span class="detail-more-wrap">
+                <button id="btn-detail-more" class="btn btn-small detail-more" type="button" aria-label="더보기" aria-haspopup="true" aria-expanded="false" aria-controls="detail-more-menu">
+                  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="3" cy="7" r="1.3" fill="currentColor"/><circle cx="7" cy="7" r="1.3" fill="currentColor"/><circle cx="11" cy="7" r="1.3" fill="currentColor"/></svg>
+                </button>
+                <!-- 드물게 쓰는 둘. 누르는 즉시 실행하지 않는다 — 섹션만 열고 실행은 그 안의 주 버튼이 한다 -->
+                <div id="detail-more-menu" class="detail-more-menu" hidden>
+                  <button id="btn-deep" type="button">심층 진단</button>
+                  <button id="btn-inquiry" type="button">DB팀에 문의</button>
+                </div>
+              </span>
             </span>
           </div>
           <div class="detail-section">
-            <h3>SQL 쿼리 <span class="hint">(통계의 정규화 텍스트 — 파라미터 자리(?, $1)는 실제 값으로 고쳐서 실행계획을 확인하세요)</span></h3>
+            <h3>SQL 쿼리 <span class="hint">통계의 정규화 문장입니다. ?, $1 자리는 실제 값으로 바꿔 실행계획을 보세요.</span></h3>
             <div class="sql-editor">
               <pre id="detail-sql-hl" class="sql-hl" aria-hidden="true"></pre>
               <textarea id="detail-sql" class="codeblock sql-edit" rows="7" spellcheck="false"></textarea>
             </div>
           </div>
           <div class="detail-section" id="plan-section" hidden>
-            <h3>실행계획 결과</h3>
+            <h3>실행계획 결과 <button class="section-refresh" type="button" hidden data-refresh="explain">다시 조회</button></h3>
             <pre id="detail-plan" class="codeblock"></pre>
             <div id="detail-findings" class="findings"></div>
           </div>
           <div class="detail-section" id="advisor-section" hidden>
-            <h3>인덱스 제안 <span class="hint">(PostgreSQL만 — HypoPG 가상 인덱스로 실제 생성 없이 before/after 비용 비교. 타 기종은 미지원)</span></h3>
+            <h3>인덱스 제안 <span class="hint">HypoPG 가상 인덱스로 만들지 않고 비용을 비교합니다.</span>
+              <button class="section-refresh" type="button" hidden data-refresh="advisor">다시 조회</button></h3>
             <div class="advisor-input">
               <input id="advisor-columns" class="advisor-cols" placeholder="후보 인덱스 컬럼 — 예: users(category)" spellcheck="false" />
               <button id="btn-advisor-run" class="btn btn-primary btn-small">시뮬레이션</button>
             </div>
-            <div id="advisor-unsupported" class="hint advisor-unsupported" hidden></div>
             <div id="advisor-result" class="findings"></div>
           </div>
           <div class="detail-section" id="antipattern-section" hidden>
-            <h4>안티패턴 신호 <span class="hint">통계 뷰만 읽는다 — 실행계획을 뜨지 않는 값싼 후보 좁히기</span></h4>
+            <h3>안티패턴 신호 <span class="hint">통계 뷰만 읽습니다. 실행계획을 뜨지 않는 빠른 후보 좁히기.</span>
+              <button class="section-refresh" type="button" hidden data-refresh="antipattern">다시 조회</button></h3>
             <div id="antipattern-result" class="findings"></div>
           </div>
           <div class="detail-section" id="schema-section" hidden>
-            <h3>관련 테이블 구조 <span class="hint">(쿼리가 참조하는 테이블의 컬럼·인덱스·대략 행수 — 조인 컬럼 인덱스·타입 불일치 진단용. 문의 시 자동 첨부됩니다)</span></h3>
+            <h3>테이블 구조 <span class="hint">쿼리가 참조하는 테이블의 컬럼·인덱스·대략 행 수. 문의에 자동 첨부됩니다.</span>
+              <button class="section-refresh" type="button" hidden data-refresh="schema">다시 조회</button></h3>
             <div id="schema-result" class="findings"></div>
           </div>
           <div class="detail-section" id="ai-section" hidden>
-            <h3>AI 1차 분석 <span class="hint">(docs/ai-analysis-rules.md 판단 기준 기반)</span></h3>
+            <h3>AI 분석 <span class="hint">docs/ai-analysis-rules.md 기준</span>
+              <button class="section-refresh" type="button" hidden data-refresh="ai">다시 조회</button></h3>
             <div id="ai-stage" class="hint ai-stage" role="status"></div>
             <pre id="detail-ai" class="codeblock ai"></pre>
           </div>
           <div class="detail-section" id="deep-section" hidden>
-            <h3>심층 원인 진단 <span class="hint">(실제 실행 계획으로 "왜 인덱스를 못 타나"를 짚습니다 — 쿼리를 실제 실행하므로 운영자·관리자, 타임아웃 적용. 파라미터 자리는 실제 값으로 채우세요)</span></h3>
+            <h3>심층 진단</h3>
+            <p class="hint">쿼리를 실제로 실행해 계획을 봅니다. 운영자 이상만, 시간 제한이 걸립니다. 파라미터 자리(?, $1)는 실제 값으로 바꾸세요.</p>
+            <div class="section-run"><button id="btn-deep-run" class="btn btn-primary btn-small" type="button">진단 실행</button></div>
             <div id="deep-result" class="findings"></div>
           </div>
           <div class="detail-section" id="inquiry-section" hidden>
-            <h3>DB팀 문의 <span class="hint">(현재 패널의 쿼리·실행계획·규칙 지적·AI 분석을 함께 첨부합니다)</span></h3>
+            <h3>DB팀에 문의</h3>
             <textarea id="inquiry-note" class="codeblock" rows="3" placeholder="비고 (선택): 상황·요청 사항을 적어주세요"></textarea>
+            <p class="hint">함께 첨부됩니다: 쿼리 · 실행계획 · 규칙 지적 · AI 분석</p>
+            <div class="section-run"><button id="btn-inquiry-send" class="btn btn-primary btn-small" type="button">문의 보내기</button></div>
             <div id="inquiry-result" class="findings"></div>
           </div>
         </div>
@@ -224,7 +248,7 @@
         <!-- 성능 -->
         <div class="mon-group" data-group="perf">
           <div class="monitor-card metric-card">
-            <h3>Metric <span class="hint">(Prometheus exporter 시계열 — CPU는 호스트 수준 node_exporter, Connections는 기종 exporter · 미수집은 사유를 그대로 표기)</span>
+            <h3>Metric <span class="hint">Prometheus 시계열입니다. 미수집은 사유를 그대로 표기합니다.</span>
               <a class="metric-full-link" href="http://localhost:13000" target="_blank" rel="noopener">전체 화면으로 보기 ↗</a></h3>
             <div class="metric-chart-box">
               <h4>CPU (%)</h4>
@@ -246,7 +270,7 @@
             <div id="command-charts" class="command-groups"></div>
           </div>
           <div class="monitor-card latency-card">
-            <h3>레이턴시 백분위 p95/p99 <span class="hint">(평균은 멀쩡한데 꼬리가 아프다 — 같은 지표라도 기종마다 원자료가 다르다)</span></h3>
+            <h3>레이턴시 백분위 p95/p99 <span class="hint">기종마다 원자료가 다릅니다 — 추정과 미지원을 섞지 않습니다.</span></h3>
             <p class="hint latency-legend">
               <span class="src-badge src-native">실측누적</span> MySQL QUANTILE(리셋 이후 누적) ·
               <span class="src-badge src-native">실측구간</span> MySQL 히스토그램 차분(최근 구간, 버킷 상한 근사) ·
@@ -263,12 +287,12 @@
             </div>
           </div>
           <div class="monitor-card slo-card">
-            <h3>SLO / 에러 버짓 <span class="hint">(사용자 경험 지표 — 인프라 지표(CPU)가 아니라 레이턴시·가용성 · Google SRE)</span></h3>
+            <h3>SLO / 에러 버짓 <span class="hint">CPU가 아니라 레이턴시·가용성으로 잽니다.</span></h3>
             <p class="hint">레이턴시 SLI는 D4a 백분위(source 표기) 우선, 미지원 기종은 평균 레이턴시로 폴백 · 가용성 SLI는 헬스 샘플 이력 · 버짓 산식은 응답 note에 명시</p>
             <div id="slo-result" class="slo-result muted">조회 중...</div>
           </div>
           <div class="monitor-card session-card">
-            <h3>세션 / 블로킹 <span class="hint">(지금 누가 누구를 막고 있나 — blockedBy가 있으면 강조)</span></h3>
+            <h3>세션 / 블로킹 <span class="hint">지금 누가 누구를 막고 있는지. 막는 쪽이 있으면 강조합니다.</span></h3>
             <div class="live-bar">
               <button type="button" class="btn btn-small live-toggle" id="live-toggle" aria-pressed="false">실시간 켜기</button>
               <span id="live-status" class="live-status" role="status">꺼짐 — 켜면 대상 조회 한 번을 보는 사람 모두가 나눠 받습니다</span>
@@ -286,7 +310,7 @@
         <!-- 진단 -->
         <div class="mon-group" data-group="diag" hidden>
           <div class="monitor-card aiops-card">
-            <h3>AI 운영 작업 <span class="hint">(Slack·경보·콘솔에서 시작된 비동기 진단 — 사실은 DBTower가 모으고 AI는 1차 소견만, 판단은 사람이 합니다)</span></h3>
+            <h3>AI 운영 작업 <span class="hint">사실은 플랫폼이 모으고 AI는 1차 소견만 냅니다.</span></h3>
             <div class="aiops-bar">
               <label class="aiops-scope"><input type="checkbox" id="aiops-all-instances"> 다른 대상 작업도 보기</label>
               <span id="aiops-status" class="muted" role="status">조회 중...</span>
@@ -300,24 +324,24 @@
             <div id="aiops-detail" class="aiops-detail" hidden></div>
           </div>
           <div class="monitor-card advisors-card">
-            <h3>Advisors <span class="hint">(자동 점검 — 읽고 조언만, 대상 DB는 바꾸지 않습니다 / 심각도별)</span></h3>
+            <h3>Advisors <span class="hint">읽고 조언만 합니다 — 대상 DB는 바꾸지 않습니다.</span></h3>
             <div id="advisors-summary" class="advisors-summary"></div>
             <div id="advisors-result" class="advisors-result muted">점검 중...</div>
           </div>
           <div class="monitor-card anomaly-card">
-            <h3>이상 감지 <span class="hint">(평소=이 요일·시간대 베이스라인 대비 z-score 이탈 — 고정 임계와 별개로 "평소와 다른가"를 본다)</span></h3>
+            <h3>이상 감지 <span class="hint">같은 요일·시간대 베이스라인 대비 이탈입니다.</span></h3>
             <div id="anomaly-result" class="anomaly-result muted">조회 중...</div>
           </div>
           <div class="monitor-card deadlock-card">
-            <h3>최근 데드락 <span class="hint">(DB가 이미 남긴 흔적을 설정 변경 0으로 읽음 — MSSQL system_health XE·MySQL INNODB STATUS. 롤링이라 "최근"만, PG는 카운터라 알림으로)</span></h3>
+            <h3>최근 데드락 <span class="hint">롤링 기록이라 최근만 보입니다 — PostgreSQL은 개별 사건이 없습니다.</span></h3>
             <div id="deadlock-result" class="anomaly-result muted">조회 중...</div>
           </div>
           <div class="monitor-card plan-change-card">
-            <h3>실행계획 변경 <span class="hint">("쿼리도 데이터도 그대로인데 느려짐 = 플랜 플립" — 회귀 감지된 쿼리만 계획을 떠서 비교, 첫 관측은 기준선)</span></h3>
+            <h3>실행계획 변경 <span class="hint">회귀 감지된 쿼리만 계획을 비교합니다. 첫 관측은 기준선입니다.</span></h3>
             <div id="plan-change-result" class="anomaly-result muted">조회 중...</div>
           </div>
           <div class="monitor-card">
-            <h3>Wait Events <span class="hint">(그 시간에 무엇을 기다렸나 — CPU/IO/Lock)</span></h3>
+            <h3>Wait Events <span class="hint">그 시간에 무엇을 기다렸는지 — CPU·IO·Lock.</span></h3>
             <div class="table-scroll">
               <table class="qtable" id="wait-table">
                 <thead></thead>
@@ -330,7 +354,7 @@
         <!-- 거버넌스 -->
         <div class="mon-group" data-group="gov" hidden>
           <div class="monitor-card review-gate-card">
-            <h3>스키마 변경 리뷰 게이트 <span class="hint">(배포 전 DDL/대량 DML을 규칙으로 자동 판정 + AI 소견 → 승인자가 승인 → 운영자가 워크벤치에서 드라이런·실행)</span></h3>
+            <h3>스키마 변경 리뷰 게이트 <span class="hint">규칙 판정 뒤 승인자가 승인하고 운영자가 실행합니다.</span></h3>
             <div class="review-submit" id="review-submit">
               <textarea id="review-sql" class="codeblock sql-edit" rows="4" spellcheck="false" placeholder="리뷰할 변경 SQL — 예: ALTER TABLE orders ADD COLUMN memo VARCHAR(64) NOT NULL"></textarea>
               <div class="review-submit-row">
@@ -342,7 +366,7 @@
             <div id="review-list" class="review-list muted">이 인스턴스의 리뷰 요청이 여기 표시됩니다.</div>
           </div>
           <div class="monitor-card config-drift-card">
-            <h3>설정 변경 이력 <span class="hint">(시간축 — 이 인스턴스의 파라미터가 언제부터 무엇이 어떻게 바뀌었나 · "누가"는 대상 DB 감사 로그의 몫 · 운영자·관리자)</span></h3>
+            <h3>설정 변경 이력 <span class="hint">파라미터 변경 이력. "누가"는 대상 DB 감사 로그 몫, 조회는 운영자부터.</span></h3>
             <div class="config-drift-controls">
               <button id="btn-config-drift" class="btn btn-primary btn-small">변경 이력 조회</button>
               <span class="hint">주기 수집이 직전 상태와 diff해 변경분만 기록 · 첫 수집은 기준선(변경 아님)</span>
@@ -350,7 +374,7 @@
             <div id="config-drift-result" class="config-drift-result muted">조회를 누르면 최근 설정 변경을 최신순으로 보여줍니다.</div>
           </div>
           <div class="monitor-card schema-diff-card">
-            <h3>Schema Diff <span class="hint">(같은 역할의 두 인스턴스 구조 비교 — 왜 저 장비만 다르지)</span></h3>
+            <h3>Schema Diff <span class="hint">두 인스턴스의 구조 차이만 표시합니다.</span></h3>
             <div class="schema-diff-controls">
               <select id="schema-left" class="schema-select"></select>
               <span class="schema-arrow">→</span>
@@ -362,7 +386,7 @@
             <div id="schema-diff-result" class="schema-diff-result muted">좌/우 인스턴스를 고르고 비교를 누르세요.</div>
           </div>
           <div class="monitor-card param-diff-card">
-            <h3>파라미터 드리프트 <span class="hint">(같은 역할 두 인스턴스 설정값 비교 — 왜 저 장비만 느리지)</span></h3>
+            <h3>파라미터 드리프트 <span class="hint">두 인스턴스의 설정값 차이만 표시합니다.</span></h3>
             <div class="schema-diff-controls">
               <select id="param-left" class="schema-select"></select>
               <span class="schema-arrow">→</span>
@@ -374,7 +398,7 @@
             <div id="param-diff-result" class="schema-diff-result muted">좌/우 인스턴스를 고르고 비교를 누르세요.</div>
           </div>
           <div class="monitor-card online-ddl-card">
-            <h3>온라인 스키마 변경 <span class="hint">(gh-ost · MySQL 전용 — 대형 테이블 ALTER를 락 최소화로)</span></h3>
+            <h3>온라인 스키마 변경 <span class="hint">MySQL 전용입니다. 기본은 dry-run(실제 테이블은 그대로).</span></h3>
             <div class="online-ddl-controls">
               <input type="text" id="ddl-table" class="ddl-input" placeholder="테이블 (예: orders)">
               <input type="text" id="ddl-alter" class="ddl-input ddl-alter" placeholder="ALTER 절 (예: ADD COLUMN memo VARCHAR(64) NULL)">
@@ -385,7 +409,7 @@
             <div id="ddl-result" class="ddl-result muted">테이블과 ALTER 절을 입력하고 dry-run으로 먼저 검증하세요.</div>
           </div>
           <div class="monitor-card audit-card">
-            <h3>감사 로그 <span class="hint">(누가 언제 무엇을 했나 — ADMIN 전용)</span></h3>
+            <h3>감사 로그 <span class="hint">누가 언제 무엇을 했는지. 조회는 ADMIN만.</span></h3>
             <div class="audit-filters">
               <input type="text" id="audit-principal" placeholder="사용자 (예: admin)">
               <input type="text" id="audit-action" placeholder="action 부분일치 (예: explain)">
@@ -405,7 +429,7 @@
         <!-- 백업·리포트 -->
         <div class="mon-group" data-group="backup" hidden>
           <div class="monitor-card backup-card">
-            <h3>백업 / 시점 복구 <span class="hint">(이력·복원 가능 창 — 실행은 API/폴러, 복원 문안 생성까지만: 실행은 사람이)</span></h3>
+            <h3>백업 / 시점 복구 <span class="hint">복원 문안까지 만듭니다 — 실행은 사람이 합니다.</span></h3>
             <div id="pitr-window" class="pitr-window muted">조회 중...</div>
             <details class="pitr-guide-box"><summary>복원 명령 문안 보기 (생성·안내 — 실행은 사람)</summary>
               <pre id="pitr-guide" class="codeblock"></pre></details>
@@ -417,7 +441,7 @@
             </div>
           </div>
           <div class="monitor-card incident-card">
-            <h3>인시던트 리포트 <span class="hint">(장애 구간을 주면 그 시간의 신호를 한 장으로 — 시점 비교·설정 변경·플랜 플립·대기·가용성 + AI 요약 · 신규 수집 0, 기존 신호 재구성 · 운영자·관리자)</span></h3>
+            <h3>인시던트 리포트 <span class="hint">기존 신호만 재구성합니다 — 신규 수집 없음, 생성은 운영자부터.</span></h3>
             <div class="incident-controls">
               <label class="hint">구간 시작 <input type="datetime-local" id="incident-from" class="incident-time"></label>
               <label class="hint">구간 끝 <input type="datetime-local" id="incident-to" class="incident-time"></label>
@@ -428,7 +452,7 @@
             <div id="incident-result" class="incident-result muted">구간을 고르고 리포트 생성을 누르세요.</div>
           </div>
           <div class="monitor-card monthly-card">
-            <h3>월간 점검 리포트 <span class="hint">(기간 전체의 건강을 한 장으로 — 헬스 스코어·백업 신선도·Advisor·용량 예측·낭비 신호·설정 변경 · 매월 자동 발행 + 수동 생성 · 운영자·관리자)</span></h3>
+            <h3>월간 점검 리포트 <span class="hint">기간 전체를 한 장으로. 매월 자동 발행, 생성은 운영자부터.</span></h3>
             <div class="incident-controls">
               <label class="hint">기간(일) <input type="number" id="monthly-days" class="incident-time" value="30" min="1" max="90" style="width:70px"></label>
               <button id="btn-monthly" class="btn btn-primary btn-small">리포트 생성</button>
@@ -442,13 +466,13 @@
         <!-- 비용·인프라 -->
         <div class="mon-group" data-group="infra" hidden>
           <div class="monitor-card finops-card">
-            <h3>비용/효율 (FinOps) <span class="hint">(낭비 후보를 신호로 — 절감액은 산출하지 않고 검토 지점까지, 대상 DB는 바꾸지 않습니다)</span></h3>
+            <h3>비용/효율 (FinOps) <span class="hint">낭비 후보까지 — 절감액은 산출하지 않습니다.</span></h3>
             <p class="hint">미사용 인덱스(사용 통계) · 중복·잉여 인덱스(D2 재사용) · 큰 테이블·과다 인덱싱 · 오버프로비저닝(연결·메모리) · 사용 통계 없는 기종은 미지원으로 정직 표기</p>
             <div id="finops-summary" class="advisors-summary"></div>
             <div id="finops-result" class="advisors-result muted">분석 중...</div>
           </div>
           <div class="monitor-card partition-card">
-            <h3>파티션 <span class="hint">(테이블이 어떻게 쪼개져 있고 각 조각이 얼마나 큰가 — 조회 전용)</span></h3>
+            <h3>파티션 <span class="hint">조회 전용 — 파티션을 만들거나 지우지 않습니다.</span></h3>
             <p class="hint">MySQL/PostgreSQL/Oracle/SQL Server는 각 카탈로그를 통합한 뷰 · MongoDB는 파티션 개념이 없어 미지원 · 파티션 없는 테이블/DB는 빈 결과</p>
             <div class="table-scroll">
               <table class="qtable" id="partition-table">
@@ -471,41 +495,50 @@
             </p>
           </div>
           <div class="monitor-card mcp-card">
-            <h3>MCP 연동 — AI 에이전트가 DBTower를 도구로 씁니다</h3>
-            <p class="muted">앱이 떠 있으면 준비 완료. 아래 명령 한 줄이면 Claude Code가 시점 비교·실행계획 분석을 직접 수행합니다.</p>
+            <h3>MCP 연동 <span class="hint">Claude Code 같은 AI 에이전트가 DBTower 읽기 도구를 씁니다.</span></h3>
+            <!-- code 안에는 명령만 둔다 — 복사 버튼이 code의 글자를 그대로 집어 가므로 설명이 섞이면 함께 복사된다 -->
             <div class="mcp-cmd-row">
-              <code id="mcp-cmd-http" class="mcp-cmd">claude mcp add --transport http dbtower http://localhost:8080/mcp   (이대로 등록하면 브라우저 로그인(OAuth)으로 내 역할만큼 도구를 씁니다 · ADMIN에게는 서비스 토큰 명령이 채워집니다)</code>
+              <code id="mcp-cmd-http" class="mcp-cmd">claude mcp add --transport http dbtower http://localhost:8080/mcp</code>
               <button class="btn btn-primary btn-small" data-copy="mcp-cmd-http">복사</button>
             </div>
+            <p id="mcp-http-note" class="hint">브라우저 로그인으로 내 역할만큼 도구를 씁니다.</p>
             <div class="mcp-cmd-row">
-              <code id="mcp-cmd-stdio" class="mcp-cmd">claude mcp add dbtower -- sh scripts/dbtower-mcp.sh   (stdio 방식 — 앱과 분리 실행)</code>
+              <code id="mcp-cmd-stdio" class="mcp-cmd">claude mcp add dbtower -- sh scripts/dbtower-mcp.sh</code>
               <button class="btn btn-small" data-copy="mcp-cmd-stdio">복사</button>
             </div>
-            <h3 class="mcp-tools-title">제공 도구 <span class="hint">(이 목록 자체가 MCP 코어의 tools/list 응답입니다)</span></h3>
-            <div id="mcp-tools" class="mcp-tools muted">불러오는 중...</div>
+            <p class="hint">앱과 따로 실행합니다.</p>
+            <button id="btn-mcp-tools" class="mcp-tools-toggle" type="button" aria-expanded="false" aria-controls="mcp-tools">제공 도구 보기</button>
+            <div id="mcp-tools" class="mcp-tools muted" hidden>불러오는 중...</div>
           </div>
           <div class="monitor-card users-card" id="users-card" hidden>
-            <h3>사용자·역할 <span class="hint">(쓰는 사람 기준 — 관제 · 요청자 · 승인자 · 운영자 · 관리자 · 역할 변경은 다음 로그인부터 · ADMIN)</span></h3>
-            <p class="hint">관제는 지표·리포트만, 요청자는 워크벤치 조회와 변경 요청, 승인자는 승인·반려와 드라이런, 운영자는 승인 티켓 실행·되돌리기와 백업·세션 종료, 관리자는 인스턴스·접속 계정·보안·감사까지. 승인자와 운영자는 서로의 일을 하지 못합니다.</p>
+            <h3>사용자·역할 <span class="hint">역할 변경은 다음 로그인부터 적용됩니다.</span></h3>
             <div class="table-scroll">
               <table class="qtable" id="users-table">
-                <thead><tr><th>사용자</th><th>역할</th><th>팀</th></tr></thead>
-                <tbody><tr><td colspan="3" class="muted">조회 중...</td></tr></tbody>
+                <thead><tr><th>사용자</th><th>역할</th><th>팀</th><th><span class="sr-only">변경</span></th></tr></thead>
+                <tbody><tr><td colspan="4" class="muted">조회 중...</td></tr></tbody>
               </table>
             </div>
-            <div class="review-submit-row">
-              <input type="text" id="user-new-name" class="ddl-input" placeholder="사용자 이름(영문·숫자·._- 3~50자)" autocomplete="off">
-              <input type="password" id="user-new-password" class="ddl-input" placeholder="비밀번호(12자 이상)" autocomplete="new-password">
-              <select id="user-new-role" aria-label="역할">
-                <option value="VIEWER">관제 (VIEWER)</option>
-                <option value="REQUESTER" selected>요청자 (REQUESTER)</option>
-                <option value="APPROVER">승인자 (APPROVER)</option>
-                <option value="OPERATOR">운영자 (OPERATOR)</option>
-                <option value="ADMIN">관리자 (ADMIN)</option>
+            <!-- 역할 설명은 표를 읽는 동안 늘 떠 있을 필요가 없다 — 필요할 때 펼친다 -->
+            <details class="users-roles">
+              <summary>역할별로 할 수 있는 일</summary>
+              <p class="hint">관제는 지표·리포트만, 요청자는 워크벤치 조회와 변경 요청, 승인자는 승인·반려와 드라이런, 운영자는 승인 티켓 실행·되돌리기와 백업·세션 종료, 관리자는 인스턴스·접속 계정·보안·감사까지. 승인자와 운영자는 서로의 일을 하지 못합니다.</p>
+            </details>
+            <div class="user-new-row">
+              <label class="user-field" for="user-new-name">사용자 이름</label>
+              <input type="text" id="user-new-name" placeholder="영문·숫자·._- 3~50자" autocomplete="off">
+              <label class="user-field" for="user-new-password">비밀번호</label>
+              <input type="password" id="user-new-password" placeholder="12자 이상" autocomplete="new-password">
+              <label class="user-field" for="user-new-role">역할</label>
+              <select id="user-new-role">
+                <option value="VIEWER">관제</option>
+                <option value="REQUESTER" selected>요청자</option>
+                <option value="APPROVER">승인자</option>
+                <option value="OPERATOR">운영자</option>
+                <option value="ADMIN">관리자</option>
               </select>
-              <button id="btn-user-create" class="btn btn-primary btn-small">사용자 만들기</button>
+              <button id="btn-user-create" class="btn btn-primary btn-small" disabled>사용자 만들기</button>
             </div>
-            <div id="users-msg" class="hint"></div>
+            <div id="users-msg" class="hint" role="status"></div>
           </div>
         </div>
       </div>
@@ -513,23 +546,58 @@
 
   </main>
 
-  <!-- 우: AI 어시스턴트 — 관제에서는 자연어 근본원인 진단. 모니터링 탭 깊숙이 있던 카드를 늘 보이는 칸으로 꺼냈다(149절, b-studio의 고정 대화 칸) -->
+  <!-- 우: AI 어시스턴트 — 자연어 진단을 채팅으로. 대화는 서버에 남는다(V46): 인스턴스를 고르면 가장 최근 대화를 열고,
+       첫 질문을 보낼 때 새 대화를 만든다. 앞선 맥락은 서버가 DB 턴에서만 만든다 — 화면은 conversationId만 보낸다 -->
   <aside class="ai-sheet" aria-label="AI 어시스턴트">
-    <div class="ai-sheet-head">
-      <span class="wb-ai-mark" aria-hidden="true"></span>
-      <div class="ai-sheet-titles">
-        <span class="ai-sheet-title">AI 어시스턴트</span>
-        <span class="ai-sheet-sub">지금 보기: 자연어 진단 · 맡기기: 비동기 AI 운영 작업 — 대상 DB는 바꾸지 않습니다</span>
+    <div class="chat-head">
+      <div class="chat-head-row">
+        <img class="chat-mark" src="favicon.svg" alt="" width="30" height="30">
+        <span class="chat-title">AI 어시스턴트</span>
+        <div class="chat-switch-wrap">
+          <button id="chat-switch" class="chat-switch" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="chat-list">
+            <span id="chat-switch-label" class="chat-switch-label">새 대화</span>
+            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 4l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <!-- 대화 목록 — 헤더 버튼 아래로 뜨는 드롭다운(떠 있는 계층이라 유리 재질) -->
+          <div id="chat-list" class="chat-list" hidden>
+            <button id="chat-new" class="chat-list-new" type="button">새 대화</button>
+            <div id="chat-list-items" class="chat-list-items"></div>
+          </div>
+        </div>
       </div>
+      <!-- 부제는 전환 버튼과 다른 줄이다 — 같은 줄에 두면 버튼이 폭을 먹어 뒷부분("읽기 도구로만 답합니다")이 잘린다(B2 2차) -->
+      <p id="chat-sub" class="chat-sub"></p>
     </div>
-    <div class="diagnose-card">
-      <div id="diagnose-result" class="diagnose-result muted">인스턴스를 고르고 무엇이 궁금한지 적어 주세요. AI가 compare·explain·wait_events 같은 읽기 도구를 필요한 만큼 불러 근거를 모으고, 근거가 없으면 모른다고 답합니다.</div>
-      <div class="diagnose-input">
-        <input type="text" id="diagnose-question" class="diagnose-q" placeholder="예: 어제 오후에 왜 느려졌어?" spellcheck="false">
-        <button id="btn-diagnose" class="btn btn-primary btn-small">진단</button>
+    <div id="chat-log" class="chat-log" role="log" aria-label="대화"></div>
+    <form id="chat-form" class="chat-composer" autocomplete="off">
+      <div class="chat-input">
+        <textarea id="diagnose-question" rows="1" placeholder="왼쪽에서 인스턴스를 고르면 물어볼 수 있습니다" spellcheck="false" disabled></textarea>
+        <button id="btn-diagnose" class="chat-send" type="submit" aria-label="보내기" disabled>
+          <svg class="chat-send-go" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+            <path d="M10 15.5V4.5M5.5 9 10 4.5 14.5 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <svg class="chat-send-stop" viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><rect x="5" y="5" width="10" height="10" rx="2" fill="currentColor"/></svg>
+        </button>
       </div>
-      <div class="aiop-submit" role="group" aria-label="AI 운영 작업 맡기기">
-        <select id="aiop-new-type" class="aiop-select" aria-label="작업 유형">
+      <!-- 같은 입력창의 글을 비동기 작업으로 맡기는 두 번째 길. 선택 상자 둘이 늘 떠 있으면 무엇인지 알 수 없어
+           팝오버로 접었다. 결과는 사실 수집·검증을 거쳐 진단 탭 카드에 붙는다 -->
+      <div class="chat-foot">
+        <span class="chat-privacy" id="chat-privacy" tabindex="0" aria-describedby="chat-privacy-tip">
+          <svg class="chat-lock" viewBox="0 0 14 14" width="12" height="12" aria-hidden="true">
+            <rect x="2.6" y="6.2" width="8.8" height="6" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.2"/>
+            <path d="M4.8 6.2V4.6a2.2 2.2 0 0 1 4.4 0v1.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+          쿼리 속 값은 ?로 가려서 보냅니다
+        </span>
+        <button id="btn-aiop-open" class="chat-delegate" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="aiop-popover" disabled>작업으로 맡기기</button>
+        <div id="chat-privacy-tip" class="chat-tip" role="tooltip" hidden>세션·Top Query·슬로우 쿼리의 SQL 문장은 값(리터럴)을 ?로 바꾼 뒤 AI에 넘깁니다. 대상 DB는 읽기만 하고 바꾸지 않습니다.</div>
+      </div>
+      <!-- 작업 맡기기 — 접수 폼은 필요할 때만 뜬다(유리 재질: 떠 있는 계층) -->
+      <div id="aiop-popover" class="aiop-popover" role="dialog" aria-label="작업으로 맡기기" hidden>
+        <p class="aiop-popover-title">작업으로 맡기기</p>
+        <p class="aiop-popover-desc">입력창의 글을 작업 설명으로 보냅니다. 사실 수집과 검증을 거친 결과가 진단 탭에 붙습니다.</p>
+        <label class="aiop-field" for="aiop-new-type">작업 유형</label>
+        <select id="aiop-new-type" class="aiop-select">
           <option value="QUERY_DIAGNOSIS">쿼리 진단</option>
           <option value="REGRESSION_EXPLANATION">회귀 원인</option>
           <option value="INCIDENT_TRIAGE">장애 초기 진단</option>
@@ -539,23 +607,24 @@
           <option value="COST_REVIEW">비용 검토</option>
           <option value="DB_TEAM_INQUIRY">DB팀 문의</option>
         </select>
-        <select id="aiop-new-window" class="aiop-select" aria-label="분석 구간">
+        <label class="aiop-field" for="aiop-new-window">분석할 구간 <span class="aiop-hint">지금 시각에서 거꾸로</span></label>
+        <select id="aiop-new-window" class="aiop-select">
           <option value="30">최근 30분</option>
           <option value="60" selected>최근 1시간</option>
           <option value="180">최근 3시간</option>
           <option value="1440">최근 24시간</option>
         </select>
-        <button id="btn-aiop-submit" class="btn btn-small">작업으로 맡기기</button>
+        <div class="aiop-popover-actions">
+          <button id="btn-aiop-submit" class="btn btn-primary btn-small" type="button" disabled>맡기기</button>
+          <button id="btn-aiop-cancel" class="btn btn-small" type="button">취소</button>
+        </div>
       </div>
-      <div id="aiop-submit-status" class="aiop-submit-status muted" role="status"></div>
-      <p class="hint ai-sheet-note">ANTHROPIC_API_KEY 또는 claude CLI가 있어야 합니다. 질문과 도구 호출은 감사 기록에 남습니다.</p>
-    </div>
+      <!-- 접수 결과는 대화에 한 줄로 남는다. 이 영역은 화면 낭독기에 같은 문장을 알린다(눈에는 대화 줄 하나만 보인다) -->
+      <div id="aiop-submit-status" class="sr-only" role="status"></div>
+    </form>
   </aside>
 </div>
 
-<footer class="foot">
-  DBTower — DbmsOperator 추상화 위의 컨트롤 플레인. MySQL / PostgreSQL / SQL Server / Oracle / MongoDB.
-</footer>
 </div>
 
 <!-- 워크벤치 모드 — 처음 전환할 때 workbench/main.js를 불러와 붙인다(app.js setMode). 마크업은 147절 워크벤치 그대로 -->
@@ -573,26 +642,28 @@
         <span id="wb-schema-title" class="wb-side-title">스키마</span>
         <span id="wb-schema-count" class="wb-count"></span>
       </div>
-      <input id="wb-tree-filter" class="wb-search" type="search" placeholder="테이블·컬럼 검색" autocomplete="off">
-      <div id="wb-tree" class="wb-tree muted">인스턴스를 고르세요</div>
-      <p class="hint wb-tree-hint">클릭 이름 넣기 · 더블클릭 미리보기 · 선택 모드에서 채팅에 붙이기</p>
-    </section>
-
-    <section class="wb-side-block wb-sheets-block">
-      <div class="wb-side-head">
-        <button id="wb-sheets-toggle" class="wb-disclosure" aria-expanded="true" aria-controls="wb-sheets">
-          <span class="wb-chevron" aria-hidden="true"></span><span class="wb-side-title">워크시트</span>
-        </button>
-        <button id="wb-sheet-add" class="wb-mini-btn" title="새 워크시트">+ 새로</button>
+      <!-- 트리 사용법은 늘 떠 있는 줄이 아니라 검색칸 옆 정보 아이콘의 툴팁이다(B5) — 마우스 올림과 초점 둘 다에서 뜬다 -->
+      <div class="wb-search-row">
+        <input id="wb-tree-filter" class="wb-search" type="search" placeholder="테이블·컬럼 검색" autocomplete="off">
+        <span class="wb-info-wrap">
+          <button id="wb-tree-info" class="wb-info" type="button" aria-label="스키마 트리 사용법" aria-describedby="wb-tree-tip" aria-expanded="false" data-info="wb-tree-tip">
+            <svg viewBox="0 0 14 14" width="13" height="13" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M7 6.3v3.9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="7" cy="4.2" r=".85" fill="currentColor"/></svg>
+          </button>
+          <span id="wb-tree-tip" class="wb-info-tip" role="tooltip" hidden>클릭 이름 넣기 · 더블클릭 미리보기 · 선택 모드에서 채팅에 붙이기</span>
+        </span>
       </div>
-      <ul id="wb-sheets" class="wb-sheets"></ul>
+      <div id="wb-tree" class="wb-tree muted">인스턴스를 고르세요</div>
     </section>
   </aside>
 
   <main id="wb-main" class="wb-main">
-    <div class="wb-sheetbar">
-      <input id="wb-title" class="wb-title" maxlength="100" aria-label="워크시트 이름">
-      <span id="wb-version" class="wb-version"></span>
+    <!-- 워크시트는 "지금 편집 중인 문서"라 편집기 바로 위 탭 줄에 있다(B5) — 왼쪽 목록은 없앴다 -->
+    <div class="wb-tabs">
+      <div id="wb-sheets" class="wb-sheet-tabs" role="tablist" aria-label="워크시트"></div>
+      <!-- 활성 탭 안으로 옮겨 다니는 두 요소. id는 그대로 유지한다(이름 편집은 활성 탭 더블클릭 때만) -->
+      <span id="wb-version" class="wb-version" hidden></span>
+      <input id="wb-title" class="wb-tab-title" maxlength="100" aria-label="워크시트 이름" hidden>
+      <button id="wb-sheet-add" class="btn btn-small wb-tab-add" type="button" title="새 워크시트" aria-label="새 워크시트">+</button>
     </div>
     <div class="editor" id="wb-editor">
       <pre class="editor-highlight" aria-hidden="true"><code id="wb-highlight"></code></pre>
@@ -653,7 +724,7 @@
 
   <aside class="wb-right" aria-label="AI 어시스턴트">
     <div class="wb-right-head">
-      <span class="wb-ai-mark" aria-hidden="true"></span>
+      <img class="wb-ai-mark" src="favicon.svg" alt="" width="30" height="30">
       <div class="wb-right-titles">
         <span class="wb-side-title">AI 어시스턴트</span>
         <span class="wb-right-sub">SQL을 제안만 합니다. 실행은 편집기에서</span>
@@ -666,14 +737,13 @@
         <div id="wb-chips" class="wb-chips"></div>
         <textarea id="wb-ask" rows="3" placeholder="보고 싶은 데이터를 설명해주세요. 예: 어제 결제 실패 건을 고객 등급별로"></textarea>
         <div class="wb-composer-bar">
-          <button id="wb-pick" class="wb-icon-btn" title="선택 모드: 결과 열이나 스키마의 테이블·컬럼을 눌러 질문에 붙입니다" aria-pressed="false">선택</button>
+          <button id="wb-pick" class="btn btn-small" title="선택 모드: 결과 열이나 스키마의 테이블·컬럼을 눌러 질문에 붙입니다" aria-pressed="false">선택</button>
           <label id="wb-share-wrap" class="wb-share" hidden><input type="checkbox" id="wb-share"> 결과 함께 보내기</label>
           <span class="wb-spacer"></span>
           <button id="wb-send" class="btn btn-primary btn-small">보내기</button>
         </div>
       </div>
       <div id="wb-share-note" class="hint wb-share-note"></div>
-      <p class="hint wb-policy">조회는 조회 전용 계정·읽기 전용 트랜잭션으로 즉시 실행되고, 변경은 승인 티켓으로, 위험한 문장은 차단됩니다. 모든 실행과 대화는 기록됩니다.</p>
     </div>
   </aside>
 </div>

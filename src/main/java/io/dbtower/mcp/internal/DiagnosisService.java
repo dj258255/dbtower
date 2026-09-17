@@ -190,6 +190,25 @@ public class DiagnosisService {
 
     public DiagnosisResult diagnose(long instanceId, String instanceType, String instanceName,
                                     String question, DiagnosisListener listener) {
+        return diagnose(instanceId, instanceType, instanceName, question, List.of(), listener);
+    }
+
+    /**
+     * 앞선 대화 한 턴 — 웹 콘솔 채팅이 보낸 질문과 그때의 답. <b>사실이 아니라 대화의 맥락이다.</b>
+     * 후속 질문("그 쿼리 실행계획은?")이 무엇을 가리키는지 풀 때만 쓰고, 여기 적힌 수치는 근거가 되지 못한다.
+     */
+    public record PriorTurn(String question, String answer) {
+    }
+
+    /**
+     * 앞선 대화를 맥락으로 실어 진단한다 — 채팅 화면이 질문마다 새로 진단하면 "그 쿼리"를 알아듣지 못했다.
+     *
+     * <p>앞 턴은 최근 {@value #HISTORY_TURNS}개만, 질문·답을 잘라서, <b>줄바꿈을 공백으로 접어</b> 싣는다. 화면이 보낸 글이
+     * 줄을 바꿔 "사용자 질문:"을 흉내 내면 모델이 그것을 이번 질문으로 읽을 수 있기 때문이다. 감사에는 이번 질문만 남긴다 —
+     * 앞 질문은 그때 이미 남았다.</p>
+     */
+    public DiagnosisResult diagnose(long instanceId, String instanceType, String instanceName,
+                                    String question, List<PriorTurn> history, DiagnosisListener listener) {
         if (!aiEnabled) {
             return new DiagnosisResult(false, backend, question, null, null, "none", 0, List.of(),
                     "AI 백엔드가 없습니다(ANTHROPIC_API_KEY 미설정 + claude CLI 없음) — 자연어 진단이 비활성입니다. "
@@ -208,6 +227,7 @@ public class DiagnosisService {
                 .append(", 기종=").append(instanceType)
                 .append(", 이름=").append(instanceName)
                 .append(". 현재 시각=").append(LocalDateTime.now()).append("\n\n")
+                .append(historyBlock(history))
                 .append("사용자 질문: ").append(question)
                 .append("\n\n지금 첫 판단을 내려라. call_tool 또는 final JSON 하나만 출력한다.");
         List<ToolCallTrace> traces = new ArrayList<>();
@@ -414,6 +434,64 @@ public class DiagnosisService {
 
     private static String argsText(JsonNode arguments) {
         return arguments == null || arguments.isMissingNode() ? "{}" : arguments.toString();
+    }
+
+    static final int HISTORY_TURNS = 3;
+    private static final int HISTORY_QUESTION_CAP = 300;
+    private static final int HISTORY_ANSWER_CAP = 800;
+    /** 최근 3턴보다 앞선 질문을 한 줄로 접을 때의 상한 — 개수와 질문 길이. */
+    private static final int EARLIER_QUESTION_LIMIT = 10;
+    private static final int EARLIER_QUESTION_CAP = 80;
+
+    /**
+     * 앞선 대화를 참고용 맥락으로 — 비었으면 빈 문자열(예전 프롬프트와 글자 하나 다르지 않다).
+     *
+     * <p>최근 {@value #HISTORY_TURNS}턴은 질문과 답을 함께 싣고, 그보다 앞선 턴은 <b>질문만</b> 한 줄로 접어
+     * "[더 앞선 질문]"에 이어 붙인다. 앞선 답을 요약해 싣지 않는 이유 둘: 요약은 매 진단마다 모델 호출을 써서
+     * 비용이 붙고 요약 오류가 사실처럼 남으며, 애초에 이 진단은 앞선 답을 근거로 쓰지 않는다
+     * (근거는 도구로 다시 확인한다 — 아래 지시). 질문만 있으면 "그 쿼리"가 무엇을 가리키는지 풀기에 충분하다.
+     */
+    static String historyBlock(List<PriorTurn> history) {
+        if (history == null || history.isEmpty()) {
+            return "";
+        }
+        List<PriorTurn> all = history.stream()
+                .filter(t -> t != null && t.question() != null && !t.question().isBlank())
+                .toList();
+        if (all.isEmpty()) {
+            return "";
+        }
+        int recentFrom = Math.max(0, all.size() - HISTORY_TURNS);
+        List<PriorTurn> recent = all.subList(recentFrom, all.size());
+        List<PriorTurn> earlier = all.subList(0, recentFrom);
+
+        StringBuilder block = new StringBuilder()
+                .append("[앞선 대화] 같은 사람이 이 대상에 대해 방금 나눈 대화다. 후속 질문이 앞 대화를 가리키면(\"그 쿼리\", \"아까 그 시각\") ")
+                .append("뜻을 풀 때만 써라. 여기 적힌 수치·결론은 확인된 사실이 아니므로 근거로 인용하지 말고, 필요한 수치는 도구로 다시 확인하라.\n");
+        if (!earlier.isEmpty()) {
+            // 최근 쪽 10개만 남긴다 — 아주 옛 질문일수록 이번 질문과 이어질 가능성이 낮다
+            List<PriorTurn> head = earlier.subList(Math.max(0, earlier.size() - EARLIER_QUESTION_LIMIT), earlier.size());
+            block.append("[더 앞선 질문] ");
+            for (int i = 0; i < head.size(); i++) {
+                if (i > 0) {
+                    block.append(" / ");
+                }
+                block.append(oneLine(head.get(i).question(), EARLIER_QUESTION_CAP));
+            }
+            block.append('\n');
+        }
+        int n = 1;
+        for (PriorTurn t : recent) {
+            block.append("앞 질문 ").append(n).append(": ").append(oneLine(t.question(), HISTORY_QUESTION_CAP)).append('\n');
+            String answer = t.answer() == null || t.answer().isBlank() ? "(답 없음)" : oneLine(t.answer(), HISTORY_ANSWER_CAP);
+            block.append("앞 답 ").append(n).append(": ").append(answer).append('\n');
+            n++;
+        }
+        return block.append('\n').toString();
+    }
+
+    private static String oneLine(String text, int max) {
+        return truncate(text.replaceAll("\\s+", " ").trim(), max);
     }
 
     private static String truncate(String text, int max) {

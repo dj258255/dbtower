@@ -3,12 +3,13 @@
    감춘 것이 그대로 보이면 누를 수 없는 버튼이 된다(워크벤치 workbench.css와 같은 규칙) */
 [hidden] { display: none !important; }
 :root {
-  --bg: #f5f6f8;
+  /* 하늘 원톤(175절) — 브랜드·조작 요소만 하늘색이고, 초록·주황·빨강은 구간·증감을 뜻하는 색이라 그대로 둔다 */
+  --bg: #eef7fd;
   --panel: #ffffff;
-  --line: #e3e6ea;
-  --text: #1e232a;
-  --muted: #667085;         /* 흰 바탕 대비 4.8:1 — 예전 #7b8494(3.9:1)는 작은 글씨 기준(4.5:1)에 못 미쳤다(138절) */
-  --primary: #4f5ef7;       /* 조회(파랑) */
+  --line: #dbe7f0;
+  --text: #0b2a45;          /* 배경 대비 13.52:1 */
+  --muted: #52697d;         /* 흰 바탕 5.71:1, 배경 5.27:1 — 예전 #7b8494(3.9:1)는 작은 글씨 기준(4.5:1)에 못 미쳤다(138절) */
+  --primary: #0a6aa8;       /* 선택·링크·초점. 흰 바탕 5.77:1 */
   --target: #22a06b;        /* 조회 구간(초록) */
   --base: #f08c2d;          /* 비교 구간(주황) */
   --up: #d6404f;            /* 증가(빨강) */
@@ -40,7 +41,6 @@ body {
   padding: 2px 7px; border-radius: 6px; font-size: 15px;
 }
 .brand-name { font-weight: 800; font-size: 18px; letter-spacing: -0.3px; }
-.brand-tag { color: var(--muted); font-size: 12.5px; margin-left: 6px; }
 .topnav a { color: var(--muted); text-decoration: none; margin-left: 16px; font-size: 13px; }
 .topnav a:hover { color: var(--text); }
 
@@ -91,7 +91,7 @@ body {
   transform: translateY(-70%) rotate(45deg); transition: transform .15s;
 }
 .cs-btn.open::after { transform: translateY(-30%) rotate(225deg); }
-.cs-btn:hover { border-color: #b9c0cc; }
+.cs-btn:hover { border-color: var(--primary); }
 .cs-panel {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 40;
   background: #fff; border: 1px solid var(--line); border-radius: 8px;
@@ -103,7 +103,7 @@ body {
 
 /* 함대 개요 — 헬스 스코어 + 백업 신선도 나란히 */
 /* 함대 개요 — 반응형: 각 패널이 600px 이상 확보되면 2열, 아니면 1열로 쌓인다(짤림 방지) */
-.fleet-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 16px; }
+.fleet-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(600px, 100%), 1fr)); gap: 16px; }
 .fleet-row .panel { margin-bottom: 16px; min-width: 0; }
 /* 한 줄 표가 패널보다 넓으면 잘리지 말고 가로 스크롤 */
 #score-result, #freshness-result { overflow-x: auto; }
@@ -143,10 +143,10 @@ body {
   border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
   cursor: pointer; min-width: 0; background: #fff; transition: border-color .15s, background .15s;
 }
-.instance-card:hover { border-color: #b9c0cc; background: #fafbfc; }
+.instance-card:hover { border-color: rgba(10, 106, 168, .35); background: #fafdff; }
 .instance-card.selected {
   border-color: var(--primary); background: #f5f6ff;
-  box-shadow: inset 3px 0 0 var(--primary), 0 0 0 1px rgba(79,94,247,.15);
+  box-shadow: inset 3px 0 0 var(--primary), 0 0 0 1px rgba(10, 106, 168, .18);
 }
 .instance-name { font-weight: 700; display: flex; align-items: center; gap: 6px; font-size: 13.5px; flex-wrap: wrap; }
 .db-icon { flex: none; vertical-align: middle; }
@@ -206,21 +206,21 @@ input[type="datetime-local"] {
   border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 4px 9px;
   cursor: pointer; font-size: 12.5px; color: var(--muted);
 }
-.preset:hover { color: var(--text); border-color: #b9c0cc; }
+.preset:hover { color: var(--primary); border-color: var(--primary); }
 
 /* 버튼 */
 /* 버튼은 유리 재질로 통일한다(162절). 유리를 "뜨는 계층에만" 쓰던 규칙의 예외이자 확장이다 —
    버튼은 콘텐츠가 아니라 손이 닿는 조작 계층이라, 표·카드가 불투명해도 그 위에서 떠 보이는 편이 맞다.
    색 버튼은 흰 글자를 반투명 위에 얹으면 대비가 무너져서(primary 4.91 -> 4.26, danger 4.46 -> 4.02,
    accent는 불투명에서도 2.47로 원래 미달) 방향을 뒤집었다: 색을 옅게 깔고 글자를 같은 계열 진한 색으로 둔다.
-   계산 결과 primary 7.62 · accent 5.70 · danger 6.89 · dark 14.97로 전부 4.5:1을 넘는다. */
+   계산 결과 primary 6.49(175절, 하늘) · accent 5.70 · danger 6.89 · dark 14.97로 전부 4.5:1을 넘는다. */
 .btn {
   border: 1px solid var(--glass-hairline);
   background: var(--glass-fill-strong);
   -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-shine), 0 1px 2px rgba(30, 41, 59, .07);
+  box-shadow: var(--glass-shine), 0 1px 2px rgba(11, 42, 69, .07);
   color: var(--text);
-  border-radius: 8px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+  border-radius: 10px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
   text-decoration: none; display: inline-block;
   transition: background-color .12s ease, box-shadow .12s ease;
 }
@@ -228,8 +228,8 @@ input[type="datetime-local"] {
 .btn:active { box-shadow: inset 0 1px 2px rgba(30, 41, 59, .12); }
 .btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 /* 색 버튼 — 옅은 색 유리 + 같은 계열 진한 글자(대비는 위 주석의 계산값) */
-.btn-primary { background: rgba(79, 94, 247, .18); border-color: rgba(79, 94, 247, .34); color: #2b34a8; }
-.btn-primary:hover { background: rgba(79, 94, 247, .26); }
+.btn-primary { background: #e0f0fa; border-color: rgba(10, 106, 168, .32); color: #075985; }
+.btn-primary:hover { background: #d0e7f6; }
 .btn-accent { background: rgba(240, 140, 45, .18); border-color: rgba(240, 140, 45, .38); color: #8a4d05; }
 .btn-accent:hover { background: rgba(240, 140, 45, .26); }
 .btn-danger { background: rgba(214, 64, 79, .16); border-color: rgba(214, 64, 79, .34); color: #8e1f2b; }
@@ -251,7 +251,15 @@ input[type="datetime-local"] {
 .chart-tools { display: inline-flex; gap: 6px; }
 .chart-wrap { position: relative; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
 #activity-chart { display: block; cursor: crosshair; }
-.center { text-align: center; padding: 40px 0; }
+/* 빈 차트 자리표시 — 빈 상자를 크게 남기지 않고 한 줄로 줄인다(139·B6). 쓰는 곳은 전부 차트의 빈 자리다 */
+.center { text-align: center; padding: 14px 0; }
+/* 인스턴스가 0대일 때의 안내 한 줄 — 이때는 함대 카드 둘을 접고 이 한 줄만 남긴다(B6) */
+.empty-onboarding { padding: 16px 18px; }
+.empty-onboarding-line { margin: 0; font-size: 13px; line-height: 1.7; word-break: keep-all; }
+.empty-onboarding-line code {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px;
+  background: rgba(10, 106, 168, .08); border-radius: 5px; padding: 1px 5px;
+}
 
 /* 탭 */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
@@ -289,6 +297,22 @@ input[type="datetime-local"] {
      무시돼(146절: 1512px에서 표 1,186px > 상자 1,022px, 인라인 상세까지 옆으로 잘림) max-width:0 + width:100%로 건다 */
   max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* 표의 SQL 툴팁 (B3) — 네이티브 title은 강조 없는 글자라 "SELECT 이런 곳"이 어디까지인지 한눈에 안 들어온다.
+   문서에 하나만 두고 재사용한다(겹쳐 뜨는 것을 구조적으로 막는다). 밝은 카드라 색은 .qtext와 같은 규칙을 쓴다.
+   최대 높이를 넘으면 툴팁 안에서 스크롤한다 — 스크롤하려면 포인터를 받아야 해서 pointer-events는 살려 둔다 */
+.sql-tip {
+  position: fixed; z-index: 9998;
+  width: max-content; max-width: min(640px, calc(100vw - 32px)); max-height: 26em; overflow: auto;
+  padding: 10px 12px; border-radius: 10px;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre;
+  color: #0b2a45; background: rgba(255, 255, 255, .97);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border: 1px solid rgba(11, 42, 69, .14);
+  box-shadow: inset 0 1px 0 #fff, 0 10px 30px rgba(15, 20, 30, .18), 0 1px 2px rgba(15, 20, 30, .12);
+}
+.sql-tip[hidden] { display: none; }
+/* 툴팁의 짝 — 초점으로도 뜨므로 셀에 초점 표시가 있어야 한다(표 셀 안쪽이라 outline-offset을 음수로) */
+[data-sql-tip]:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 /* Wait 이벤트명(RESOURCE_SEMAPHORE_QUERY_COMPILE 등)도 길면 말줄임 — 전체는 hover 툴팁으로 */
 /* 세션 표(162절) — 자동 표 레이아웃에서 max-width는 무시된다(AGENTS.md 화면 규칙).
    말줄임을 걸 열은 max-width: 0 + width로 비율을 준다. Query 열(8번째)이 가장 길어 그 열에 남는 폭을 몰아준다. */
@@ -328,13 +352,59 @@ input[type="datetime-local"] {
 
 /* 상세 */
 .detail { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-top: 14px; background: #fafbfc; }
-/* 버튼 7개와 64자 SQL ID가 한 줄에 안 들어가면 줄을 바꾼다 — 줄바꿈이 없으면 상세 폭이 버튼 줄 길이로 벌어진다 */
+/* 버튼 다섯(토글)과 짧게 줄인 SQL ID, 워크벤치·더보기가 한 줄에 안 들어가면 줄을 바꾼다 —
+   줄바꿈이 없으면 상세 폭이 버튼 줄 길이로 벌어진다 */
 .detail-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
 .qid {
-  font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #0a7d4f;
-  background: rgba(34,160,107,.1); padding: 2px 8px; border-radius: 5px; overflow-wrap: anywhere;
+  font: 600 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #0b2a45; white-space: nowrap;
 }
-.detail-actions { display: inline-flex; flex-wrap: wrap; gap: 8px; }
+.detail-id { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
+.qid-label { font-size: 11.5px; color: var(--muted); }
+/* 전체 값은 title에 남고 복사 버튼이 그 값을 집어 간다 — 화면에는 줄여 보이고 값은 숨기지 않는다 */
+.qid-copy {
+  border: 0; background: none; padding: 2px 6px; border-radius: 6px; cursor: pointer;
+  font: inherit; font-size: 11.5px; font-weight: 600; color: var(--primary);
+}
+.qid-copy:hover:not(:disabled) { background: rgba(10, 106, 168, .09); }
+.qid-copy:disabled { color: #9aa9b5; cursor: default; }
+.qid-copy:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* 보기 토글 — 모양은 모니터링 서브내비(세그먼트 컨트롤)와 같다. 다만 그 클래스(.mon-tab)를 빌려 쓰지 않는다:
+   setupMonitorNav가 문서 전체의 .mon-tab을 잡아 이 버튼을 누르면 모니터 그룹이 통째로 숨는다 */
+.detail-views { display: inline-flex; flex-wrap: wrap; gap: 3px; background: #eceef3; padding: 3px; border-radius: 10px; }
+.seg-btn {
+  border: 1px solid transparent; background: transparent; color: var(--muted);
+  padding: 4px 11px; border-radius: 7px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  white-space: nowrap;
+}
+.seg-btn:hover { color: var(--text); }
+.seg-btn[aria-pressed="true"] { background: #fff; color: var(--primary); border-color: rgba(10, 106, 168, .24); box-shadow: 0 1px 2px rgba(16, 24, 40, .1); }
+.seg-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.detail-tail { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.detail-more-wrap { position: relative; display: inline-flex; }
+.detail-more { padding: 4px 8px; line-height: 1; }
+/* 더보기 메뉴 — 떠 있는 계층이라 유리 재질 */
+.detail-more-menu {
+  position: absolute; top: calc(100% + 5px); right: 0; z-index: 45;
+  min-width: 152px; padding: 4px; border-radius: 10px;
+  background: var(--glass-fill-strong);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-hairline);
+  box-shadow: var(--glass-shine), var(--glass-shadow);
+}
+.detail-more-menu[hidden] { display: none; }
+.detail-more-menu button {
+  display: block; width: 100%; text-align: left; border: 0; background: none; font: inherit;
+  font-size: 12.5px; color: #0b2a45; padding: 7px 10px; border-radius: 7px; cursor: pointer; white-space: nowrap;
+}
+.detail-more-menu button:hover { background: rgba(255, 255, 255, .78); }
+/* 섹션 제목 줄의 "다시 조회" — 보관된 결과를 버리고 같은 SQL로 새로 조회한다 */
+.section-refresh {
+  margin-left: 8px; border: 0; background: none; padding: 2px 6px; border-radius: 6px; cursor: pointer;
+  font: inherit; font-size: 11.5px; font-weight: 600; color: var(--primary);
+}
+.section-refresh:hover { background: rgba(10, 106, 168, .09); }
+.section-refresh:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.section-run { margin: 8px 0; }
 /* 상세 섹션 헤더 — 파란 좌측 액센트 바(레퍼런스처럼 섹션 구분을 또렷하게) */
 .detail-section h3 {
   font-size: 13px; margin: 14px 0 7px; padding-left: 9px;
@@ -346,13 +416,16 @@ input[type="datetime-local"] {
 /* 상세는 표 열 폭 계산에 끼지 않는다(width:0) — 끼면 실행계획 표(12열)가 Top Query 표 전체를 벌린다(146절: 1280px에서 902px).
    셀 폭은 min-width로 채우고, 넓은 실행계획은 코드블록 안에서 옆으로 스크롤된다 */
 #top-table tr.detail-host .detail { margin: 10px 12px 14px; box-sizing: border-box; width: 0; min-width: calc(100% - 24px); }
+/* 폭 맞춤 래퍼 — 셀은 표 폭(max-content)만큼 넓어지므로, 그 안에서 왼쪽 고정 + '스크롤 상자의 보이는 폭'(JS가 준다)을 쓴다.
+   그래야 가로 스크롤이 있는 좁은 화면에서도 상세 오른쪽(토글·더보기)이 화면 안에 있다(B6fix).
+   표가 화면에 들어오면 상자 폭 = 셀 폭이라 146절과 같은 결과가 된다(넓은 화면은 그대로) */
+.row-detail-fit { position: sticky; left: 0; box-sizing: border-box; max-width: 100%; }
 .advisor-input { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .advisor-cols {
   flex: 1; border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px;
   font-size: 13px; font-family: inherit; color: var(--text); background: #fff;
 }
-/* 가상 인덱스 미지원 기종 안내(159절) — 눌러서 UNSUPPORTED를 받기 전에 미리 보인다 */
-.advisor-unsupported { margin: -2px 0 8px; line-height: 1.6; }
+/* 가상 인덱스는 PostgreSQL 전용이라 버튼 자체를 감춘다(B3, 159절) — 미지원 안내 요소도 함께 없앴다 */
 .advisor-status { font-weight: 700; margin-right: 6px; }
 .advisor-status.advised { color: var(--down); }
 .advisor-status.no-benefit { color: var(--muted); }
@@ -397,14 +470,19 @@ input[type="datetime-local"] {
 .t-com { color: #6b7684; font-style: italic; }
 .t-op { color: #aab4c2; }
 
-/* 흰 표·카드의 SQL 토큰 — 위 색은 어두운 편집기 전용이라 밝은 바탕에서는 대비가 부족하다. */
-.qtext .t-kw { color: #3446c5; }
-.qtext .t-fn { color: #7b2cbf; }
-.qtext .t-str { color: #087f5b; }
-.qtext .t-num { color: #9a5b00; }
-.qtext .t-id { color: #334155; }
-.qtext .t-com { color: #667085; }
-.qtext .t-op { color: #475569; }
+/* 흰 표·카드의 SQL 토큰 — 위 색은 어두운 편집기 전용이라 밝은 바탕에서는 대비가 부족하다.
+   .chat-sql(채팅 답의 코드 블록)과 .sql-tip(표의 SQL 툴팁)은 같은 색을 두 곳에 적지 않으려고 선택자만 넓혔다.
+   대비는 흰 바탕(#fff) 기준 실측 계산값이다 — 키워드·함수는 175절 이후 남아 있던 보라(#3446c5·#7b2cbf)를 걷어내고
+   하늘 원톤 계열로 바꿨다: 키워드 #075985 = 7.56:1, 함수 #0f766e = 5.47:1.
+   나머지는 그대로 두되 대비를 확인했다: 문자열 #087f5b 5.00, 숫자 #9a5b00 5.43, 식별자 #334155 10.36,
+   주석 #667085 4.97, 연산자 #475569 7.58 — 전부 작은 글씨 기준(4.5:1)을 넘는다 */
+.qtext .t-kw, .chat-sql .t-kw, .sql-tip .t-kw { color: #075985; }
+.qtext .t-fn, .chat-sql .t-fn, .sql-tip .t-fn { color: #0f766e; }
+.qtext .t-str, .chat-sql .t-str, .sql-tip .t-str { color: #087f5b; }
+.qtext .t-num, .chat-sql .t-num, .sql-tip .t-num { color: #9a5b00; }
+.qtext .t-id, .chat-sql .t-id, .sql-tip .t-id { color: #334155; }
+.qtext .t-com, .chat-sql .t-com, .sql-tip .t-com { color: #667085; }
+.qtext .t-op, .chat-sql .t-op, .sql-tip .t-op { color: #475569; }
 
 /* 표 형태 실행계획(MySQL 클래식 EXPLAIN) — 다크 코드블록 위 모노스페이스 표(레퍼런스 #236) */
 .plan-table { border-collapse: collapse; width: 100%; font-size: 11.5px; }
@@ -460,54 +538,147 @@ input[type="datetime-local"] {
 /* 쿼리 상세 AI 분석 단계 줄(143절) — 계획 도착·쓰는 중·완료 시간을 본문과 떨어뜨려 흐리게 */
 .ai-stage { margin: -4px 0 6px; font-variant-numeric: tabular-nums; }
 .ai-stage:empty { display: none; }
-.btn-danger { border-color: var(--up); color: var(--up); }
-.btn-danger:hover { background: var(--up); color: #fff; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 
 /* MCP 카드 */
-.mcp-card { margin-top: 0; padding-top: 16px; }
-.mcp-cmd-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.mcp-card { margin-top: 0; padding-top: 16px; container-type: inline-size; }
+.mcp-cmd-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .mcp-cmd {
   flex: 1; background: #14181f; color: #9fe8c1; border-radius: 6px; padding: 8px 12px;
   font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
   overflow-x: auto; white-space: nowrap;
 }
-.mcp-tools-title { margin-top: 16px; }
-.mcp-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
-.mcp-tool {
-  border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: #fff;
+/* 명령 아래 보조 줄 — code 안에 설명을 섞으면 복사할 때 함께 딸려 온다(B4) */
+.mcp-cmd-row + .hint { margin: 0 0 10px; }
+/* 제공 도구 — 접힌 채로 시작하고, 펼치면 이름 한 줄 + 설명 두 줄 목록을 두 열로 깐다 */
+.mcp-tools-toggle {
+  display: block; width: 100%; margin-top: 12px; padding: 7px 10px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--line); background: #fff;
+  font: inherit; font-size: 12.5px; font-weight: 600; color: var(--primary); text-align: center;
 }
-.mcp-tool b { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; color: var(--primary); }
-.mcp-tool p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.mcp-tools-toggle:hover { background: #eef7fd; border-color: #b9d2e4; }
+.mcp-tools-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.mcp-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+.mcp-tools[hidden] { display: none; }
+/* 항목을 누르면 그 항목만 펼쳐진다 — 설명이 길어도 툴팁에 기대지 않는다 */
+.mcp-tool {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; background: #fff;
+  font: inherit;
+}
+.mcp-tool:hover { border-color: #b9d2e4; }
+.mcp-tool:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.mcp-tool b { display: block; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; color: var(--primary); }
+/* 접힌 상태는 두 줄에서 말줄임, 펼치면 전체가 보인다 */
+.mcp-tool p {
+  margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.mcp-tool[aria-expanded="true"] p { display: block; overflow: visible; }
+/* 두 열로 두다가 담는 칸이 좁아지면 한 열로 접는다(뷰포트가 아니라 @container — 151절).
+   기준을 720px로 두면 이 카드(관제 칸 폭)가 늘 한 열이라 두 열의 뜻이 없다 */
+@container (max-width: 560px) { .mcp-tools { grid-template-columns: minmax(0, 1fr); } }
 
 .muted { color: var(--muted); }
 .foot { text-align: center; color: var(--muted); font-size: 12px; padding: 20px 0 40px; }
 .loading { opacity: .5; pointer-events: none; }
 
-/* ---------- 로그인 (A1) ---------- */
+/* ---------- 로그인 — 단색 하늘, 효과는 입력 묶음에만 ----------
+   이 화면에서 사람이 하는 일은 하나다(들어간다). 위계는 효과가 아니라 글자 크기와 자리로 만든다.
+   예전 화면이 "AI가 만든 것 같다"는 말을 들은 이유를 하나씩 뺐다 — 세 색 광원·그라데이션 배경, 빈 배경 한가운데 떠 있는 둥근 카드,
+   번쩍이는 강조 버튼과 색 번짐 그림자, 구분선 밑 불릿 안내. 남긴 것은 단색 배경, 입력 한 묶음, 칸 안의 화살표 버튼, 그 아래 안내 상자 하나다.
+   배경 위에 비칠 것이 없으면 유리 효과는 장식일 뿐이라 흐림·반사광을 넣지 않는다.
+   대비(배경 #eef7fd, 묶음 표면 기준): 제목 13.5:1, 입력 글자 14.5:1, 라벨 5.7:1, 포커스 라벨 5.7:1, 오류 6.1:1, 안내 상자 글자 5.4:1,
+   묶음 테두리 배경 3.1:1·안 3.3:1(비텍스트 3:1), 버튼 채움 묶음 대비 5.7:1, 흰 화살표 5.8:1 이상. 로그인 규칙은 이 블록에만 둔다 */
 .login-body {
-  display: flex; align-items: center; justify-content: center;
-  min-height: 100vh; background: var(--bg, #f5f6f8);
+  min-height: 100vh; margin: 0; padding: 0 16px;
+  display: flex; flex-direction: column;
+  background: #eef7fd; color: #0b2a45;
 }
-.login-box {
-  background: #fff; border: 1px solid #e3e6ea; border-radius: 12px;
-  padding: 40px 44px; width: 360px; box-shadow: 0 4px 16px rgba(0,0,0,.06);
+/* 공용 배경의 광원을 로그인에서는 끈다 */
+.login-body::before { display: none; }
+
+.login {
+  flex: 1; width: min(360px, 100%); margin: 0 auto; padding: 48px 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
 }
-.login-brand { justify-content: center; align-items: center; display: flex; gap: 10px; }
-.login-tag { text-align: center; color: #8a94a0; font-size: 13px; margin: 6px 0 24px; }
-.login-form { display: flex; flex-direction: column; gap: 6px; }
-.login-form label { font-size: 13px; color: #4a5560; margin-top: 8px; }
-.login-form input {
-  padding: 10px 12px; border: 1px solid #d4d9df; border-radius: 8px; font-size: 14px;
+.login-logo { width: 56px; height: 56px; border-radius: 14px; }
+.login-title { margin: 16px 0 32px; font-size: 28px; font-weight: 600; letter-spacing: -.02em; color: #0b2a45; }
+
+.login-form { width: 100%; margin: 0; }
+.login-group {
+  background: rgba(255, 255, 255, .86); border: 1px solid #7090a7; border-radius: 14px; overflow: hidden;
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
-.login-form input:focus { outline: 2px solid #4c6ef5; border-color: transparent; }
-.login-btn { margin-top: 18px; padding: 11px; font-size: 14px; }
-.login-error {
-  background: #fdecec; color: #c0392b; border: 1px solid #f5c6c6;
-  border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 14px;
+/* 어느 칸에 있든 묶음 전체가 초점을 보인다 — 칸마다 링을 두르면 묶음 안에서 링이 잘린다 */
+.login-group:focus-within { border-color: #0a6aa8; box-shadow: 0 0 0 3px rgba(10, 106, 168, .2); }
+
+.login-field { position: relative; }
+.login-field + .login-field { border-top: 1px solid #d5e3ee; margin-left: 16px; }
+.login-field + .login-field input { padding-left: 0; }
+.login-field + .login-field label { left: 0; }
+.login-field input {
+  display: block; width: 100%; height: 56px; margin: 0; padding: 20px 16px 6px;
+  border: 0; background: transparent; outline: none;
+  font: inherit; font-size: 16px; color: #0b2a45;
 }
-.login-hint { margin-top: 20px; font-size: 12px; color: #8a94a0; line-height: 1.6; }
-.login-hint code { background: #f0f2f5; padding: 1px 5px; border-radius: 4px; }
+/* 공용 input:focus-visible의 보라 윤곽선이 파일 뒤쪽에 있어 이긴다 — 묶음의 overflow:hidden에 잘려 아랫변만 선처럼 남았다.
+   초점은 묶음 테두리(:focus-within)가 보이므로 칸 자체의 윤곽선만 끈다 */
+.login-field input:focus-visible { outline: none; }
+.login-field:has(.login-submit) input { padding-right: 56px; }
+/* 라벨이 칸 안에 떠 있다가, 초점이 오거나 값이 들어가면 위로 작게 올라간다 — 자리표시자만 두면 입력하는 순간 무슨 칸인지 사라진다 */
+.login-field label {
+  position: absolute; left: 16px; top: 18px; pointer-events: none;
+  font-size: 16px; color: #52697d;
+  transform-origin: left top; transition: transform .15s ease, color .15s ease;
+}
+.login-field input:focus + label,
+.login-field input:not(:placeholder-shown) + label,
+.login-field input:-webkit-autofill + label {
+  transform: translateY(-11px) scale(.72);
+}
+.login-field input:focus + label { color: #0a6aa8; }
+/* 자동 완성이 칸을 노랗게·파랗게 칠하면 묶음 안에 판자가 붙은 것처럼 보인다 */
+.login-field input:-webkit-autofill {
+  -webkit-text-fill-color: #0b2a45; caret-color: #0b2a45;
+  -webkit-box-shadow: 0 0 0 1000px #fff inset;
+}
+
+.login-submit {
+  position: absolute; right: 11px; top: 11px;
+  width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%;
+  display: grid; place-items: center; cursor: pointer;
+  background: #0a6aa8; color: #fff;
+  transition: background-color .15s ease;
+}
+.login-submit:hover { background: #0b5f96; }
+.login-submit:active { background: #084e7c; }
+.login-submit:focus-visible { outline: 3px solid rgba(10, 106, 168, .45); outline-offset: 2px; }
+
+/* 상자를 씌우지 않는다 — 글자 색과 문장으로 충분하다. display를 바꾸지 않아 hidden 속성이 그대로 먹는다 */
+.login-error { margin: 14px 0 0; font-size: 13.5px; color: #b42318; text-align: center; word-break: keep-all; }
+
+/* 안내 상자 — 입력 묶음 바로 아래, 같은 폭으로 끝선을 맞춘다. 입력 묶음보다 튀면 안 되므로 흰 면·3:1 테두리 대신
+   배경보다 한 단계 짙은 하늘 면과 옅은 헤어라인만 둔다(누르는 요소가 아니라 경계 대비 기준이 없다). 그림자·아이콘은 넣지 않는다.
+   글자 5.4:1, 코드 12.5:1. 한국어는 기본값이면 음절 어디서든 줄을 끊어 "않 / 았다면"처럼 낱말이 갈렸다 — 띄어쓰기에서만 끊는다 */
+.login-note {
+  width: 100%; margin: 16px 0 0; padding: 12px 14px;
+  background: #e2eff8; border: 1px solid #cfe1ee; border-radius: 12px;
+  font-size: 13px; line-height: 1.6; color: #4a6275; text-align: left; word-break: keep-all;
+}
+.login-note code { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #0b2a45; white-space: nowrap; }
+
+@media (prefers-reduced-transparency: reduce) {
+  .login-group { background: #fff; }
+}
+@media (prefers-contrast: more) {
+  .login-group { background: #fff; border-color: #0b2a45; }
+  .login-field label, .login-note { color: #0b2a45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-group, .login-field label, .login-submit { transition: none; }
+}
+
 .user-chip { color: #4a5560; font-size: 13px; margin-right: 4px; }
 .user-chip .role-badge {
   background: #eef1f5; border-radius: 10px; padding: 2px 8px; font-size: 11px; margin-left: 4px;
@@ -570,27 +741,6 @@ input[type="datetime-local"] {
   white-space: pre-wrap; word-break: break-word;
 }
 
-/* 자연어 근본원인 진단 (D3) */
-.diagnose-card { margin-bottom: 14px; }
-.diagnose-input { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
-.diagnose-q {
-  flex: 1; min-width: 280px; padding: 7px 10px; border: 1px solid #d4d9df;
-  border-radius: 7px; font-size: 13px; background: #fff;
-}
-.diagnose-result { border-radius: 8px; padding: 4px 2px; font-size: 13px; margin-top: 8px; }
-.diagnose-answer { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
-.diagnose-answer-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
-.diagnose-rootcause { font-weight: 700; margin-bottom: 6px; }
-.diagnose-text { white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
-.diagnose-steps-head { font-size: 11.5px; margin-bottom: 6px; }
-.diagnose-step { border-left: 3px solid var(--line); padding: 4px 0 4px 10px; margin-bottom: 6px; }
-.diagnose-step-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.diagnose-step-args { font-size: 11px; word-break: break-all; }
-.diagnose-step-reason { font-size: 12px; color: #555; margin-top: 2px; }
-.diagnose-note { font-size: 12px; margin-top: 8px; }
-.conf-high { background: #1f7a4d; }
-.conf-medium { background: #a15c00; }
-.conf-low { background: #6b7280; }
 
 .schema-add { background: #eef9f2; color: #1f7a4d; border-left-color: var(--target); }   /* 추가=초록(right에만) */
 .schema-del { background: #fdeef0; color: #c0392b; border-left-color: var(--up); }        /* 삭제=빨강(left에만) */
@@ -605,7 +755,7 @@ input[type="datetime-local"] {
 .sev-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 700; color: #fff; }
 .sev-CRITICAL { background: #d6404f; }
 .sev-WARNING { background: #f08c2d; }
-.sev-INFO { background: #4f5ef7; }
+.sev-INFO { background: #0a6aa8; }
 .advisor-check { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
 .advisor-check.status-OK { opacity: 0.72; }
 .advisor-check.status-UNSUPPORTED { opacity: 0.55; }
@@ -617,13 +767,13 @@ input[type="datetime-local"] {
 .advisor-status-UNSUPPORTED { color: var(--base); }
 .advisor-status-ERROR { color: var(--muted); }
 .advisor-check.status-SHARED { opacity: 0.62; }
-.advisor-status-SHARED { color: #4f5ef7; }
+.advisor-status-SHARED { color: #0a6aa8; }
 /* FinOps 낭비 종류 배지 — 후보 한 줄에서 종류(미사용 인덱스 등)를 작은 알약으로 */
 .finops-kind { font-size: 11px; font-weight: 600; color: var(--muted); background: #eef0f3; border-radius: 4px; padding: 1px 6px; }
 .advisor-finding { border-left: 3px solid var(--line); background: #fafbfc; border-radius: 4px; padding: 7px 10px; margin-top: 8px; }
 .advisor-finding.sev-border-CRITICAL { border-left-color: #d6404f; }
 .advisor-finding.sev-border-WARNING { border-left-color: #f08c2d; }
-.advisor-finding.sev-border-INFO { border-left-color: #4f5ef7; }
+.advisor-finding.sev-border-INFO { border-left-color: #0a6aa8; }
 .advisor-finding-head { display: flex; align-items: center; gap: 8px; }
 .advisor-finding-title { font-weight: 600; font-size: 12.5px; }
 .advisor-finding-detail { color: var(--text); font-size: 12.5px; margin-top: 4px; }
@@ -648,7 +798,7 @@ input[type="datetime-local"] {
 /* 톤 통일 — 키보드 포커스 시 일관된 파란 링(버튼·입력·탭·커스텀 드롭다운) */
 button:focus-visible, input:focus-visible, select:focus-visible,
 .cs-btn:focus-visible, .mon-tab:focus-visible, .tab:focus-visible, .instance-card:focus-visible {
-  outline: 2px solid rgba(79, 94, 247, .5); outline-offset: 1px;
+  outline: 2px solid rgba(10, 106, 168, .55); outline-offset: 1px;
 }
 .verify-badge { display: inline-block; padding: 1px 7px; border-radius: 8px; font-size: 11px; font-weight: 700; }
 .verify-VERIFIED { background: #e3f5ec; color: #1a7a52; }
@@ -719,7 +869,7 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 .score-grade-F td:first-child { box-shadow: inset 3px 0 0 #d6404f; }
 /* 신호별 기여 분해(행 클릭 시) */
 .score-detail { display: flex; flex-direction: column; gap: 4px; padding: 6px 4px; }
-.score-contrib { display: grid; grid-template-columns: 90px 78px 44px 1fr; align-items: center; gap: 8px; font-size: 12.5px; }
+.score-contrib { display: grid; grid-template-columns: 90px 78px 44px minmax(0, 1fr); align-items: center; gap: 8px; font-size: 12.5px; }
 .score-contrib-signal { font-weight: 700; }
 .score-contrib-penalty { color: #d6404f; font-weight: 700; text-align: right; }
 .score-contrib-summary { color: var(--muted); }
@@ -739,7 +889,7 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 .score-contrib > .type-badge { justify-self: start; }
 .score-state-badge-OK { background: #22a06b; }
 .score-state-badge-PENALIZED { background: #f08c2d; }
-.score-state-badge-INSUFFICIENT_DATA { background: #7b8494; }
+.score-state-badge-INSUFFICIENT_DATA { background: #52697d; }
 .score-state-badge-ERROR { background: #b0563a; }
 
 /* 안티패턴 신호 (테마 C, 158절) — 축마다 값과 그 값을 준 지표 이름을 함께 보인다.
@@ -766,12 +916,21 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 .ap-none { color: #5b6475; font-weight: 600; }
 .ap-src { color: #5b6475; font-size: 10.5px; overflow-wrap: anywhere; }
 .ap-note { font-size: 11px; line-height: 1.5; }
+/* "다른 쿼리 N개 보기" — 지금 쿼리 한 행이 먼저고 나머지는 접어 둔다(B3). 늘 20행이 펼쳐져 있으면
+   지금 보는 쿼리의 신호가 그 벽에 묻힌다 */
+.ap-more {
+  display: block; width: 100%; margin-top: 8px; padding: 7px 10px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--line); background: #fff;
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--primary); text-align: center;
+}
+.ap-more:hover { background: #eef7fd; border-color: #b9d2e4; }
+.ap-more:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 /* 관련 테이블 구조 (심화 아크 2) */
 .schema-table b { font-family: var(--mono, monospace); }
 .schema-idx, .schema-cols { margin-top: 3px; font-size: 12px; line-height: 1.5; word-break: break-word; }
 .schema-cols { color: var(--text-muted, #6b7280); }
-.idx-u { color: #6366f1; font-weight: 600; margin: 0 1px; }
+.idx-u { color: #0a6aa8; font-weight: 600; margin: 0 1px; }
 
 /* 테이블 상세 정보 아코디언 (심화 아크 3) — 펼친 안은 워크벤치와 같은 렌더러·스타일(workbench/table-detail.js, workbench.css, 151절) */
 .td-toggle { margin-left: 8px; padding: 1px 8px; font-size: 11px; }
@@ -792,6 +951,7 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 /* 차트 호버 — 커서에 가장 가까운 점의 정확 수치·시각 (Grafana류 툴팁) */
 .chart-tip {
   position: fixed;
+  max-width: calc(100vw - 16px);
   transform: translate(-50%, -100%);
   background: #1f2430;
   color: #fff;
@@ -813,7 +973,7 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 .instance-meta { margin-top: 5px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .team-badge {
   font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 10px;
-  background: #eef1ff; color: #4f5ef7; border: 1px solid #dfe4ff;
+  background: #e0f0fa; color: #075985; border: 1px solid #cfe1ee;
 }
 /* 조직 태그 배지 (V30) — 환경/리전/클러스터. 색으로 차원을 구분해 카드에서 한눈에 */
 .tag-badge { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 10px; border: 1px solid transparent; }
@@ -843,9 +1003,15 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 .repl-role { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; margin-left: 4px; }
 .role-primary { background: #e6f4ea; color: #137333; }
 .role-replica { background: #e8f0fe; color: #1a56db; }
-.command-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+/* 1fr은 최소 폭이 내용이라 좁은 화면에서 두 열이 버티지 못한다(139절) — minmax(0,1fr)로 두고,
+   담는 칸이 좁아지면(관제 카드 560px 아래) 한 열로 접는다. 뷰포트가 아니라 칸 폭 기준이다 */
+.command-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.metric-card { container-type: inline-size; }
+@container (max-width: 560px) {
+  .command-grid { grid-template-columns: minmax(0, 1fr); }
+}
 .command-box h4 { margin-bottom: 4px; }
-.cmd-legend { display: flex; gap: 14px; font-size: 11px; color: #7b8494; margin-top: 2px; }
+.cmd-legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); margin-top: 2px; }
 /* 명령/행 연산 묶음 — Query Activity·Row Operation 그룹 헤더로 쿼리는 쿼리끼리 */
 .command-groups { margin-top: 12px; display: flex; flex-direction: column; gap: 18px; }
 .command-group-title {
@@ -921,43 +1087,31 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 :root {
   --glass-fill: rgba(255, 255, 255, .56);
   --glass-fill-strong: rgba(255, 255, 255, .8);
-  --glass-dark: rgba(23, 27, 36, .78);
-  --glass-hairline: rgba(15, 23, 42, .09);
+  --glass-dark: rgba(11, 32, 52, .86);
+  --glass-hairline: rgba(11, 42, 69, .10);
   --glass-blur: blur(22px) saturate(180%);
   --glass-shine: inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 -1px 0 rgba(255, 255, 255, .25);
   --glass-shadow: 0 10px 30px rgba(30, 41, 59, .10), 0 1px 2px rgba(30, 41, 59, .06);
   --card-shadow: 0 1px 2px rgba(30, 41, 59, .05), 0 6px 18px rgba(30, 41, 59, .05);
 }
 
-/* 유리가 비칠 배경 — 옅은 광원 셋. 고정 가상 요소라 스크롤해도 다시 그리지 않는다 */
-body { background: #eef1f6; }
-body::before {
-  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
-  background:
-    radial-gradient(900px 600px at 6% -8%, rgba(99, 102, 241, .20), transparent 62%),
-    radial-gradient(820px 560px at 100% 0%, rgba(20, 184, 166, .15), transparent 60%),
-    radial-gradient(1000px 720px at 55% 112%, rgba(236, 72, 153, .10), transparent 62%);
-}
+/* 배경은 단색이다(175절) — 전에는 보라·청록·분홍 광원 셋을 깔았는데, 아무 정보도 없이 눈을 먼저 끄는 장식이었다 */
+body { background: var(--bg); }
 
 /* 뜨는 계층 — 유리 */
-.topbar, .sidebar, .cs-panel, .login-box {
+.topbar, .sidebar, .cs-panel {
   background: var(--glass-fill);
   -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-hairline);
   box-shadow: var(--glass-shine), var(--glass-shadow);
 }
 .topbar { border-width: 0 0 1px; box-shadow: var(--glass-shine), 0 4px 18px rgba(30, 41, 59, .06); }
-/* 유리 위 보조 글자 — 광원이 가장 진한 자리에서 #667085는 4.27:1로 기준(4.5:1)에 못 미쳐, 유리 안에서만 한 단계 진하게(5.12:1) */
-.topbar, .sidebar, .cs-panel, .login-box { --muted: #5b6475; }
+/* 유리 위 보조 글자 — 배경이 단색이 되어 유리 안팎이 같은 값으로 4.5:1을 넘는다 */
 .sidebar { border-radius: 18px; }
-/* 위쪽에 맺히는 빛 — 재질감은 가장자리 하이라이트와 이 한 겹이 전부다(움직이는 효과는 넣지 않는다) */
-.sidebar, .login-box {
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, .5) 0%, rgba(255, 255, 255, .12) 28%, rgba(255, 255, 255, 0) 55%);
-}
 /* 유리 위에 겹치는 유리는 흐림이 부모 안에서만 먹어 흐려진다 — 드롭다운은 더 불투명하게 */
 .cs-panel { background: var(--glass-fill-strong); border-radius: 12px; }
-.cs-opt:hover { background: rgba(79, 94, 247, .07); }
-.cs-btn, .instance-filter input[type="search"] { border-radius: 10px; background: rgba(255, 255, 255, .72); border-color: var(--glass-hairline); }
+.cs-opt:hover { background: rgba(10, 106, 168, .07); }
+.cs-btn, .instance-filter input[type="search"] { background: rgba(255, 255, 255, .72); }
 .instance-card { border-radius: 12px; background: rgba(255, 255, 255, .7); border-color: var(--glass-hairline); }
 .instance-card:hover { background: rgba(255, 255, 255, .9); border-color: rgba(15, 23, 42, .16); }
 .instance-card.selected { background: #fff; }
@@ -968,56 +1122,98 @@ body::before {
   box-shadow: var(--glass-shine); padding: 4px;
 }
 .tabs { display: flex; width: fit-content; gap: 2px; }
-.mon-tab, .tab { border-radius: 999px; border-bottom: 0; padding: 6px 16px; }
-.mon-tab.active, .tab.active {
+/* .tab은 알약(999px), .mon-tab은 쿼리 상세의 세그먼트(.seg-btn)와 같은 높이·모서리·선택색을 쓴다(B4).
+   클래스를 공유하지 않는 이유는 B3와 같다 — setupMonitorNav가 문서 전체의 .mon-tab을 잡는다 */
+.tab { border-radius: 999px; border-bottom: 0; padding: 6px 16px; }
+.mon-tab { border-radius: 7px; border-bottom: 0; padding: 4px 11px; font-size: 12.5px; }
+.tab.active {
   background: #fff; color: var(--primary);
   box-shadow: 0 1px 3px rgba(30, 41, 59, .14), inset 0 1px 0 #fff;
 }
+
+/* 입력 조작 — 검색·드롭다운·날짜·select를 한 모양으로(175절). 전에는 모서리 6·7·8·10px, 테두리 네 가지 색이 섞여 있었다.
+   테두리 #7090a7은 흰 바탕 3.37:1로 조작 요소 경계 기준(3:1)을 넘는다 — 전의 #e3e6ea는 1.25:1이라 칸이 어디까지인지 보이지 않았다 */
+:root { --control-line: #7090a7; }
+/* 텍스트·숫자 입력도 같은 규칙으로(B6) — 전에는 범위를 좁게 잡아 #monthly-days(type=number)처럼
+   클래스가 없는 칸이 브라우저 기본 모양으로 남았다 */
+.cs-btn, .instance-filter input[type="search"], .instance-filter-row select, input[type="datetime-local"],
+input[type="text"], input[type="number"], .audit-filters input, .preset, .ddl-input, .advisor-cols {
+  border: 1px solid var(--control-line); border-radius: 10px;
+}
+.cs-btn, .instance-filter input[type="search"], input[type="datetime-local"],
+input[type="text"], input[type="number"], .audit-filters input { min-height: 32px; }
+.instance-filter input[type="search"]:focus-visible, input[type="datetime-local"]:focus-visible,
+input[type="text"]:focus-visible, input[type="number"]:focus-visible,
+.audit-filters input:focus-visible, .cs-btn:focus-visible {
+  outline: 2px solid var(--primary); outline-offset: 1px;
+}
+/* 체크박스는 크롬 기본 파랑이 남아 있었다 — 글자색 하나로 브랜드 색을 따른다(B6) */
+input[type="checkbox"] { accent-color: var(--primary); }
+.preset { border-radius: 999px; }
+
+/* 표 안의 역할 select — 이 표의 다른 칸과 같은 규칙을 쓴다(전에는 규칙이 없어 브라우저 기본 모양이었다, B6).
+   줄 높이를 키우지 않게 세로 여백만 줄인다. 표 안이라 .cs 드롭다운은 쓰지 않는다(가로 스크롤 상자를 벗어난다) */
+#users-table [data-user-role] {
+  padding: 2px 6px; font: inherit; font-size: 12.5px; background: #fff; color: var(--text); max-width: 100%;
+}
+#users-table [data-user-role]:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+/* 사용자·역할 카드 (B4). 새 사용자 줄의 입력·select는 175절 입력 규칙(테두리 --control-line, 모서리 10px, 높이 32px)을
+   그대로 쓴다 — 전에는 .ddl-input(모서리 6px)이라 같은 카드 안에서 칸 모양이 갈렸다 */
+.users-roles { margin-top: 10px; }
+.users-roles summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--primary); }
+.users-roles[open] summary { margin-bottom: 6px; }
+.users-roles p { margin: 0; }
+.user-new-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.user-field { font-size: 11.5px; font-weight: 600; color: var(--muted); margin-right: -4px; }
+.user-new-row input, .user-new-row select {
+  border: 1px solid var(--control-line); border-radius: 10px; min-height: 32px;
+  padding: 4px 9px; font: inherit; font-size: 12.5px; background: #fff; color: var(--text);
+}
+.user-new-row input { min-width: 170px; }
+.user-new-row input:focus-visible, .user-new-row select:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+/* 행에 남는 자리는 역할 칸이 먹는다 — 이름·비밀번호는 고정 폭, 버튼은 오른쪽 끝 */
+.user-new-row select { flex: 1 1 110px; min-width: 110px; }
+/* 관제의 다른 필터와 같은 드롭다운을 쓰므로 늘어나는 상자는 .cs 쪽이 된다 */
+.user-new-row .cs { flex: 1 1 110px; }
+.user-new-row #btn-user-create { flex: none; margin-left: auto; }
+/* 역할 적용·취소 — select를 바꾼 행에만 나타난다(바꾸는 즉시 서버로 보내지 않는다) */
+.user-role-actions { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.user-role-actions[hidden] { display: none; }
+.user-role-warn { font-size: 11.5px; color: #b42318; }
+/* 결과 줄 — 성공은 보조 글자, 실패는 오류 색(채팅의 .chat-error와 같은 계열) */
+#users-msg.is-error { color: #b42318; }
 
 /* 콘텐츠 계층 — 불투명, 모서리·그림자만 유리 계층과 맞춘다 */
 .panel, .monitor-card, .overview-card { border-radius: 16px; border-color: rgba(15, 23, 42, .07); box-shadow: var(--card-shadow); }
 .detail { border-radius: 12px; }
 .summary-strip { border-radius: 12px; background: rgba(255, 255, 255, .8); }
 
-/* 버튼 — 재질은 위쪽 .btn 블록이 유리로 정의한다(162절). 여기서는 모서리만 맞춘다.
-   전에 있던 짙은 그라데이션 .btn-primary 재정의는 유리 버튼을 덮어써서 걷어냈다 —
+/* 버튼 — 재질·모서리는 위쪽 .btn 블록 한 곳에서만 정의한다(162·175절).
    같은 선택자를 두 곳에서 칠하면 나중 것만 보이고 앞의 대비 계산이 무의미해진다. */
-.btn { border-radius: 10px; }
 .user-chip .role-badge { background: rgba(255, 255, 255, .6); border: 1px solid var(--glass-hairline); box-shadow: var(--glass-shine); }
 
 /* 어두운 유리 — 툴팁 */
-.tooltip, .chart-tip {
+.tooltip, .chart-tip, .chat-tip {
   background: var(--glass-dark);
   -webkit-backdrop-filter: blur(14px) saturate(160%); backdrop-filter: blur(14px) saturate(160%);
   border: 1px solid rgba(255, 255, 255, .08);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 10px 28px rgba(15, 20, 30, .28);
 }
 
-/* 로그인 — 배경 광원 위의 유리 카드 */
-.login-body { background: #eef1f6; }
-/* 로그인은 뒤에 콘텐츠가 없어 유리가 비칠 것이 광원뿐이다 — 이 화면에서만 광원을 조금 진하게 */
-.login-body::before {
-  background:
-    radial-gradient(700px 520px at 18% 12%, rgba(99, 102, 241, .30), transparent 62%),
-    radial-gradient(640px 480px at 88% 22%, rgba(20, 184, 166, .22), transparent 60%),
-    radial-gradient(760px 560px at 55% 96%, rgba(236, 72, 153, .16), transparent 62%);
-}
-.login-box { border-radius: 24px; width: 380px; }
-.login-form input { background: rgba(255, 255, 255, .72); border-color: rgba(15, 23, 42, .12); border-radius: 10px; }
-
 /* 접근성·호환 — 유리를 끄면 같은 자리에 불투명 표면이 온다(iOS의 "투명도 줄이기"처럼 더 불투명하게) */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  :root { --glass-fill: rgba(255, 255, 255, .96); --glass-fill-strong: #fff; --glass-dark: #1f2430; }
+  :root { --glass-fill: rgba(255, 255, 255, .96); --glass-fill-strong: #fff; --glass-dark: #0b2034; }
 }
 @media (prefers-reduced-transparency: reduce) {
-  :root { --glass-fill: rgba(255, 255, 255, .97); --glass-fill-strong: #fff; --glass-dark: #1f2430; --glass-blur: none; }
-  body::before { display: none; }
+  :root { --glass-fill: rgba(255, 255, 255, .97); --glass-fill-strong: #fff; --glass-dark: #0b2034; --glass-blur: none; }
   .mon-subnav, .tabs, .instance-card, .cs-btn, .summary-strip { background: #fff; }
   .tooltip, .chart-tip { -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 @media (prefers-contrast: more) {
   :root { --glass-fill: #fff; --glass-fill-strong: #fff; --glass-hairline: rgba(15, 23, 42, .4); --glass-blur: none; }
-  .mon-subnav, .tabs, .instance-card, .cs-btn { background: #fff; border-color: rgba(15, 23, 42, .4); }
+  .mon-subnav, .tabs, .instance-card { background: #fff; border-color: rgba(15, 23, 42, .4); }
+  .cs-btn { background: #fff; }
 }
 @media (prefers-reduced-motion: reduce) {
   .btn { transition: none; }
@@ -1039,11 +1235,9 @@ body::before {
 }
 @media (max-width: 640px) {
   .topbar { padding: 8px 12px; gap: 10px; }
-  .brand-tag { display: none; }
   .topnav { display: flex; align-items: center; gap: 12px; min-width: 0; overflow-x: auto; white-space: nowrap; }
   .topnav a { margin-left: 0; }
   .instance-filter-row .cs { flex-basis: 100%; }
-  .login-box { width: calc(100vw - 32px); padding: 32px 22px; }
 }
 
 /* ---------- 한 셸의 두 모드 (VERIFICATION 149절) ----------
@@ -1064,36 +1258,224 @@ body::before {
 .mode-tab:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 .app-shell { grid-template-columns: 280px minmax(0, 1fr) 340px; }
+/* ---------- AI 어시스턴트 채팅 ----------
+   질문마다 앞 답을 덮던 결과 상자를 웹 채팅으로 바꿨다 — 대화가 위로 쌓이고 입력창은 늘 맨 아래.
+   칸은 높이가 정해진 세로 줄이라 대화만 안에서 스크롤한다. 로그인 화면과 같은 말투로 그라데이션·광택·색 번짐을 넣지 않는다.
+   대비(칸 #fbfdff 기준): 본문 14.4:1, 보조 5.6:1, 강조·링크 5.7:1, 오류 6.5:1, 내 말풍선 12.5:1, 시스템 줄 5.3:1,
+   입력·선택 테두리 3.3:1(비텍스트), 보내기 버튼 5.8:1·흰 화살표 5.8:1 */
 .ai-sheet {
-  position: sticky; top: 66px; max-height: calc(100vh - 84px);
-  display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 18px;
-  background-color: var(--glass-fill);
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, .5) 0%, rgba(255, 255, 255, .12) 28%, rgba(255, 255, 255, 0) 55%);
+  position: sticky; top: 66px; height: calc(100vh - 84px);
+  display: flex; flex-direction: column; padding: 0; border-radius: 18px; overflow: hidden;
+  background: #fbfdff; border: 1px solid #dbe5ee; box-shadow: 0 1px 2px rgba(11, 42, 69, .05);
+  color: #0b2a45; --muted: #52697d;
+}
+/* 헤더 — 워크벤치 AI 칸(.wb-right-head)과 같은 모양: 30px 로고 + 제목, 오른쪽에 대화 전환.
+   부제는 둘째 줄로 내렸다 — 첫 줄에 두면 전환 버튼이 폭을 먹어 뒷부분이 잘린다(B2 2차) */
+.chat-head { padding: 14px 14px 10px; border-bottom: 1px solid #e6eef4; }
+.chat-head-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.chat-mark { flex: none; width: 30px; height: 30px; border-radius: 9px; display: block; }
+.chat-title { flex: none; font-size: 14px; font-weight: 700; white-space: nowrap; }
+/* 누구에게 묻는지가 가장 중요한 맥락이다 — 대상을 헷갈리면 답이 통째로 틀린다.
+   로고 오른쪽 열에서 시작해 칸 폭 전체를 쓴다(왼쪽 여백 = 로고 30 + 간격 10) */
+.chat-sub { display: flex; min-width: 0; margin: 3px 0 0 40px; font-size: 11.5px; color: #52697d; }
+/* 넘치면 인스턴스 이름만 줄어들고 고정 문구는 온전히 남는다 — 이 줄의 요점이 거기 있다.
+   이름과의 사이 여백은 CSS로 준다: flex 항목 경계에서는 글자 앞 공백이 사라져 "이름· 문구"로 붙는다(B3 2차) */
+.chat-sub-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-sub-fixed { flex: none; margin-left: .3em; white-space: nowrap; }
+
+.chat-switch-wrap { position: relative; margin-left: auto; min-width: 0; max-width: 45%; }
+.chat-switch {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  border: 1px solid #cfe1ee; background: #fff; color: #0b2a45; border-radius: 999px;
+  padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer;
+}
+.chat-switch:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.chat-switch:disabled { color: #9aa9b5; border-color: #e4ebf1; cursor: default; }
+.chat-switch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.chat-switch-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-switch svg { flex: none; color: #52697d; transition: transform .15s ease; }
+.chat-switch[aria-expanded="true"] svg { transform: rotate(180deg); }
+
+/* 대화 목록 — 헤더 버튼 아래로 뜨는 드롭다운. 떠 있는 계층이라 유리 재질(뒤의 대화가 비친다) */
+.chat-list {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
+  width: 264px; max-width: calc(100vw - 44px); max-height: 300px; overflow-y: auto; padding: 5px;
+  border-radius: 12px;
+  background: var(--glass-fill-strong);
   -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-hairline); box-shadow: var(--glass-shine), var(--glass-shadow);
-  --muted: #5b6475;
+  border: 1px solid var(--glass-hairline);
+  box-shadow: var(--glass-shine), var(--glass-shadow);
 }
-.ai-sheet-head { display: flex; align-items: center; gap: 10px; }
-.ai-sheet-titles { display: flex; flex-direction: column; min-width: 0; }
-.ai-sheet-title { font-size: 14px; font-weight: 700; }
-.ai-sheet-sub { font-size: 11.5px; color: var(--muted); }
-.ai-sheet .diagnose-card { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; }
-/* 진단 결과는 읽는 콘텐츠라 유리 위의 불투명에 가까운 흰 카드로 — 보조 글자는 흰 바탕 기준색으로 되돌린다 */
-.ai-sheet .diagnose-result {
-  flex: 1; min-height: 140px; overflow: auto; background: rgba(255, 255, 255, .94);
-  border: 1px solid rgba(15, 23, 42, .06); border-radius: 14px; padding: 10px 12px; --muted: #667085;
+.chat-list[hidden] { display: none; }
+.chat-list-new {
+  display: block; width: 100%; text-align: left; border: 0; background: none; font: inherit;
+  font-size: 12.5px; font-weight: 600; color: var(--primary); padding: 7px 10px; border-radius: 8px; cursor: pointer;
 }
-.ai-sheet .diagnose-input { display: flex; gap: 6px; }
-.ai-sheet .diagnose-q { flex: 1; min-width: 0; border-radius: 12px; }
-.ai-sheet-note { margin: 0; font-size: 11px; }
+.chat-list-new:hover { background: rgba(255, 255, 255, .75); }
+.chat-list-items { margin-top: 2px; }
+.chat-list-row { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
+.chat-list-row:hover, .chat-list-row:focus-within { background: rgba(255, 255, 255, .75); }
+.chat-list-item {
+  flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; text-align: left;
+  border: 0; background: none; font: inherit; font-size: 12.5px; color: #0b2a45;
+  padding: 7px 4px 7px 10px; border-radius: 8px; cursor: pointer;
+}
+.chat-list-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-list-time { flex: none; font-size: 11px; color: #52697d; }
+.chat-list-row.sel .chat-list-title { color: var(--primary); font-weight: 600; }
+/* 삭제는 hover·초점일 때만 보인다 — 늘 보이면 목록이 삭제 버튼의 벽이 된다. Tab으로도 닿는다 */
+.chat-list-del {
+  flex: none; width: 24px; height: 24px; margin-right: 3px; border: 0; border-radius: 6px;
+  background: none; color: #52697d; cursor: pointer; display: grid; place-items: center;
+  opacity: 0; transition: opacity .12s ease, color .12s ease;
+}
+.chat-list-row:hover .chat-list-del, .chat-list-row:focus-within .chat-list-del { opacity: 1; }
+.chat-list-del:hover { color: #b42318; background: rgba(214, 64, 79, .12); }
+/* 삭제 확인은 그 자리에서 바뀐다 — window.confirm은 화면 밖으로 시선을 끌고 무엇을 지우는지 보이지 않는다 */
+.chat-list-confirm { display: flex; align-items: center; gap: 6px; padding: 5px 8px 5px 10px; font-size: 12px; color: #52697d; }
+.chat-list-confirm span { flex: 1; min-width: 0; }
+.chat-list-confirm button { border: 0; background: none; font: inherit; font-size: 12px; padding: 3px 7px; border-radius: 6px; cursor: pointer; }
+.chat-list-yes { color: #b42318; font-weight: 600; }
+.chat-list-yes:hover { background: rgba(214, 64, 79, .12); }
+.chat-list-no { color: #52697d; }
+.chat-list-no:hover { background: rgba(11, 42, 69, .07); }
+.chat-list-empty { padding: 8px 10px; font-size: 12px; color: #52697d; }
+
+.chat-log { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; overscroll-behavior: contain; }
+.chat-empty { margin: auto 0; font-size: 13px; line-height: 1.6; word-break: keep-all; }
+.chat-empty p { margin: 0 0 6px; }
+.chat-empty-sub { color: #52697d; font-size: 12.5px; }
+.chat-suggest { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 12px; }
+.chat-chip {
+  border: 1px solid #cfe1ee; background: #fff; color: #0b2a45; border-radius: 999px;
+  padding: 6px 12px; font: inherit; font-size: 12.5px; text-align: left; cursor: pointer;
+}
+.chat-chip:hover { background: #eef7fd; border-color: #b9d2e4; }
+
+.chat-msg { font-size: 13.5px; line-height: 1.65; word-break: keep-all; overflow-wrap: anywhere; }
+.chat-user { display: flex; justify-content: flex-end; }
+.chat-bubble { max-width: 88%; padding: 8px 12px; border-radius: 14px 14px 4px 14px; background: #e2eff8; white-space: pre-wrap; }
+/* AI 답은 말풍선에 넣지 않는다 — 긴 글과 근거를 폭 전체로 읽게 한다 */
+.chat-ai { display: flex; flex-direction: column; gap: 8px; }
+.chat-system { align-self: center; max-width: 100%; font-size: 12px; color: #52697d; background: #f1f6fa; padding: 6px 10px; border-radius: 10px; text-align: center; }
+.chat-link { border: 0; background: none; padding: 0; font: inherit; color: #0a6aa8; cursor: pointer; text-decoration: underline; }
+
+/* 도구 호출 — CLI처럼 한 줄씩. 답이 끝나도 접지 않는다: "무엇을 보고 한 말인가"가 이 제품의 원칙이다 */
+.chat-tools-used { display: flex; flex-direction: column; gap: 6px; }
+.chat-tool { min-width: 0; }
+.chat-tool-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.chat-tool-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #0a6aa8; transform: translateY(-1px); }
+.chat-tool.is-rejected .chat-tool-dot { background: #b42318; }
+.chat-tool-name { flex: none; font: 600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #0b2a45; }
+.chat-tool-args { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #52697d; }
+.chat-tool-why { padding-left: 12px; font-size: 12px; line-height: 1.5; color: #52697d; }
+.chat-tool.is-rejected .chat-tool-why { color: #b42318; }
+
+.chat-stage { font-size: 12.5px; color: #52697d; display: flex; align-items: center; gap: 6px; }
+.chat-stage-dot { width: 6px; height: 6px; border-radius: 50%; background: #0a6aa8; animation: chat-pulse 1.2s ease-in-out infinite; }
+@keyframes chat-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+.chat-root { margin: 0; font-weight: 600; }
+.chat-root-k { display: inline-block; margin-right: 6px; font-size: 11.5px; font-weight: 600; color: #0a6aa8; }
+/* 답 서식 — chatAnswerHtml이 만든 블록만. 모델이 실제로 쓰는 것(문단·목록·코드·굵게)만 그린다 */
+.chat-text p { margin: 0 0 8px; }
+.chat-text p:last-child, .chat-text ul:last-child, .chat-text ol:last-child, .chat-text pre:last-child { margin-bottom: 0; }
+.chat-text ul, .chat-text ol { margin: 0 0 8px; padding-left: 20px; }
+.chat-text li { margin: 0 0 3px; }
+.chat-text strong { font-weight: 700; }
+.chat-text code { font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: #eef4f8; border-radius: 4px; padding: 1px 4px; }
+/* 코드 블록은 불투명(읽는 화면은 유리 금지) — 색 토큰은 .chat-sql 선택자로 .qtext와 같은 규칙을 쓴다 */
+.chat-text pre {
+  margin: 0 0 8px; padding: 10px 12px; border-radius: 10px; overflow-x: auto;
+  background: #f4f8fb; border: 1px solid #e2ecf4;
+}
+.chat-text pre code { display: block; padding: 0; background: none; border-radius: 0; white-space: pre; }
+.chat-meta { font-size: 11.5px; color: #52697d; }
+/* "도구 2개 (...)" — 눌러서 도구 줄 목록을 펼친다. 답이 길어도 근거를 먼저 보이지 않게 기본은 접힘 */
+.chat-meta-tools { border: 0; background: none; padding: 0; font: inherit; color: var(--primary); cursor: pointer; }
+.chat-meta-tools:hover { text-decoration: underline; }
+.chat-meta-tools:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+.chat-note { font-size: 12px; color: #52697d; }
+.chat-error { font-size: 12.5px; color: #b42318; }
+
+/* 입력 — 칸 바닥에 붙는다 */
+.chat-composer { position: relative; padding: 10px 12px 12px; border-top: 1px solid #e6eef4; background: #fbfdff; }
+.chat-input {
+  position: relative; display: flex; align-items: flex-end; gap: 8px;
+  background: #fff; border: 1px solid #7090a7; border-radius: 14px; padding: 6px 6px 6px 12px;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.chat-input:focus-within { border-color: #0a6aa8; box-shadow: 0 0 0 3px rgba(10, 106, 168, .18); }
+.chat-input textarea {
+  flex: 1; min-width: 0; resize: none; border: 0; outline: none; background: transparent;
+  font: inherit; font-size: 13.5px; line-height: 1.5; color: #0b2a45; padding: 5px 0; max-height: 148px; overflow-y: hidden;
+}
+/* 공용 input:focus-visible 윤곽선이 파일 뒤쪽에 있어 이긴다 — 초점은 입력 테두리가 보이므로 칸 자체의 윤곽선은 끈다(172절) */
+.chat-input textarea:focus-visible { outline: none; }
+.chat-input textarea:disabled { background: transparent; color: #52697d; }
+.chat-send {
+  flex: none; width: 32px; height: 32px; border: 0; border-radius: 50%; padding: 0;
+  display: grid; place-items: center; cursor: pointer; background: #0a6aa8; color: #fff;
+  transition: background-color .15s ease;
+}
+.chat-send:hover:not(:disabled) { background: #0b5f96; }
+.chat-send:disabled { background: #c9d6e0; cursor: default; }
+.chat-send:focus-visible { outline: 3px solid rgba(10, 106, 168, .45); outline-offset: 2px; }
+.chat-send .chat-send-stop, .chat-send.is-stop .chat-send-go { display: none; }
+.chat-send.is-stop .chat-send-stop { display: block; }
+
+/* 입력 아래 줄 — 왼쪽은 데이터 보호 한 줄, 오른쪽은 작업 맡기기. 선택 상자 둘은 팝오버로 접었다:
+   늘 떠 있는 상자는 무엇을 하는 것인지 알 수 없었고, 입력창에서 할 일(질문 보내기)을 가렸다 */
+.chat-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; min-width: 0; }
+.chat-privacy {
+  display: inline-flex; align-items: center; gap: 5px; min-width: 0;
+  font-size: 11.5px; color: #52697d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-privacy:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 4px; }
+.chat-lock { flex: none; }
+/* 툴팁은 초점으로도 뜬다 — 마우스 hover만 있는 네이티브 title은 키보드 사용자에게 없는 정보가 된다.
+   색·유리는 .tooltip/.chart-tip과 같은 규칙을 쓴다(아래 공용 선택자) */
+.chat-tip { position: absolute; left: 12px; right: 12px; bottom: calc(100% - 4px); z-index: 30; padding: 9px 11px; border-radius: 10px; font-size: 11.5px; line-height: 1.55; word-break: keep-all; }
+.chat-tip[hidden] { display: none; }
+.chat-delegate {
+  margin-left: auto; flex: none; border: 0; background: none; padding: 4px 2px;
+  font: inherit; font-size: 12.5px; font-weight: 600; color: #0a6aa8; cursor: pointer; white-space: nowrap;
+}
+.chat-delegate:hover:not(:disabled) { text-decoration: underline; }
+.chat-delegate:disabled { color: #9aa9b5; cursor: default; }
+.chat-delegate:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+
+/* 작업 맡기기 팝오버 — 입력창 위로 뜬다(떠 있는 계층이라 유리) */
+.aiop-popover {
+  position: absolute; left: 12px; right: 12px; bottom: calc(100% - 6px); z-index: 35;
+  display: flex; flex-direction: column; padding: 12px 13px 13px; border-radius: 14px;
+  background: var(--glass-fill-strong);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-hairline);
+  box-shadow: var(--glass-shine), var(--glass-shadow);
+}
+.aiop-popover[hidden] { display: none; }
+.aiop-popover-title { margin: 0; font-size: 13px; font-weight: 700; }
+.aiop-popover-desc { margin: 3px 0 8px; font-size: 11.5px; line-height: 1.5; color: #52697d; word-break: keep-all; }
+.aiop-field { margin: 6px 0 3px; font-size: 11.5px; font-weight: 600; color: #52697d; }
+.aiop-hint { font-weight: 400; }
+.aiop-popover-actions { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
+.aiop-popover-actions #btn-aiop-submit { margin-right: auto; }
+
+/* 눈에는 안 보이고 화면 낭독기에는 읽히는 영역 */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-stage-dot { animation: none; }
+  .chat-input, .chat-send { transition: none; }
+}
 @media (min-width: 1800px) {
   .app-shell { grid-template-columns: 340px minmax(0, 1fr) 400px; }
 }
 @media (max-width: 1280px) {
   /* AI 칸을 작업면 아래 한 줄로 — 세 칸이면 작업면이 표를 담지 못할 만큼 좁아진다 */
   .app-shell { grid-template-columns: 280px minmax(0, 1fr); }
-  .ai-sheet { grid-column: 1 / -1; position: static; max-height: none; }
-  .ai-sheet .diagnose-result { max-height: 50vh; }
+  .ai-sheet { grid-column: 1 / -1; position: static; height: auto; }
+  .ai-sheet .chat-log { max-height: 60vh; }
 }
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: minmax(0, 1fr); }
@@ -1142,11 +1524,10 @@ body::before {
   :root:not([data-theme="light"]) .aiops-scope { color: #98a2b3; }
 }
 
-/* AI 칸의 두 번째 경로 — 지금 보기(진단) 아래에 작업 맡기기 */
-.aiop-submit { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-.aiop-select { flex: 1 1 auto; min-width: 0; padding: 4px 8px; font-size: 12.5px; border-radius: 7px;
-  border: 1px solid var(--line, #e4e7ec); background: #fff; color: #344054; }
-.aiop-submit-status { margin-top: 6px; font-size: 12px; min-height: 1em; overflow-wrap: anywhere; }
+/* 작업 맡기기 팝오버의 유형·구간 — 누르는 요소라 테두리는 비텍스트 대비 3:1(#7090a7, 3.4:1).
+   모서리는 다른 입력과 같은 10px(B6 — 전에는 여기만 8px이었다) */
+.aiop-select { width: 100%; min-width: 0; height: 28px; padding: 0 8px; font-size: 12px; border-radius: 10px;
+  border: 1px solid #7090a7; background: #fff; color: #0b2a45; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .aiop-select { background: #161a21; border-color: #333a45; color: #d5dae2; }
 }

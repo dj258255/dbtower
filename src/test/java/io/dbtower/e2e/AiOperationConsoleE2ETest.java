@@ -136,9 +136,11 @@ class AiOperationConsoleE2ETest {
     @Test
     void 버튼을_연달아_두_번_눌러도_작업은_한_건만_생긴다() {
         Page page = consoleAs(REQUESTER);
+        // 작업 유형·구간은 팝오버 안에 있다 — 입력창에 글이 있어야 여는 버튼이 살아난다(syncChatComposer)
+        page.fill("#diagnose-question", PROMPT);
+        page.click("#btn-aiop-open");
         page.selectOption("#aiop-new-type", "QUERY_DIAGNOSIS");
         page.selectOption("#aiop-new-window", "60");
-        page.fill("#diagnose-question", PROMPT);
 
         // 사람이 두 번 누르는 속도 그대로 — 사이에 응답을 기다리지 않는다. 응답을 기다린 뒤 두 번째를 누르면
         // 그것은 "두 번 누르기"가 아니라 "두 번 맡기기"라 이 테스트가 확인하려는 것이 아니다
@@ -186,9 +188,11 @@ class AiOperationConsoleE2ETest {
 
     /** 접수 폼을 채워 맡기고, 화면이 만든 작업 id를 카드의 행에서 읽어 온다(data-job이 전체 id다). */
     private String submitJob(Page page, String type, String windowMinutes) {
+        // 유형·구간은 입력창 아래 팝오버 안에 있다 — 글을 먼저 넣어야 여는 버튼이 살아난다(syncChatComposer)
+        page.fill("#diagnose-question", PROMPT);
+        page.click("#btn-aiop-open");
         page.selectOption("#aiop-new-type", type);
         page.selectOption("#aiop-new-window", windowMinutes);
-        page.fill("#diagnose-question", PROMPT);
         page.click("#btn-aiop-submit");
         Locator row = page.locator("#aiops-table tbody .aiop-row").first();
         row.waitFor();

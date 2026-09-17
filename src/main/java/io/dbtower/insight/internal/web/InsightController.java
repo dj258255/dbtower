@@ -162,9 +162,20 @@ public class InsightController {
         return operatorFactory.create(registryService.findById(id)).waitEvents(DbmsOperator.clampLimit(limit));
     }
 
+    /**
+     * 슬로우 쿼리 — 쿼리 문장은 세션·상위 쿼리와 같은 규칙으로 리터럴을 가린다(144절).
+     *
+     * <p>왜 이 경로만 늦게 가렸나: 세션·상위 쿼리는 응답을 만들 때 가리고 있었는데 슬로우 쿼리는 원문을 그대로
+     * 돌려주고 있었다. MySQL slow_log.sql_text·MongoDB system.profile에는 사용자가 친 값이 그대로 남아
+     * (PostgreSQL만 pg_stat_statements가 $1로 정규화해 준다), AI 진단이 이 도구를 부르면 그 값이 transcript로 나갔다.
+     * 화면도 같은 응답을 쓰므로 표에서도 값이 보이지 않는다 — 가리는 자리를 응답 한 곳으로 모아 두 경로가 갈라지지 않게 한다.
+     */
     @GetMapping("/slow-queries")
     public List<SlowQuery> slowQueries(@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
-        return operatorFactory.create(registryService.findById(id)).slowQueries(DbmsOperator.clampLimit(limit));
+        return operatorFactory.create(registryService.findById(id)).slowQueries(DbmsOperator.clampLimit(limit)).stream()
+                .map(s -> new SlowQuery(queryMasker.apply(s.queryText()), s.elapsedMs(), s.rowsExamined(),
+                        s.capturedAt(), s.userHost(), s.lockMs(), s.rowsSent(), s.planSummary()))
+                .toList();
     }
 
     /**

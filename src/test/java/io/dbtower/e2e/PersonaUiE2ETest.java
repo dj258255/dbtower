@@ -278,7 +278,8 @@ class PersonaUiE2ETest {
                 }
                 """);
         assertThat(rendered.subList(0, 6)).containsExactly(3, 1, 2, 2, 1, true);
-        assertThat(rendered.subList(6, 8)).containsExactly("rgb(52, 70, 197)", "rgb(51, 65, 85)");
+        // 색은 175절 하늘 원톤 기준(B3에서 남아 있던 보라를 걷어냈다) — 키워드 #075985 7.56:1, 식별자 #334155 10.36:1
+        assertThat(rendered.subList(6, 8)).containsExactly("rgb(7, 89, 133)", "rgb(51, 65, 85)");
         assertThat(rendered.get(8)).isEqualTo(
                 "SELECT COUNT(`id`), 'ok', 42 FROM `orders` WHERE note = '<img src=x onerror=alert(1)>'");
     }

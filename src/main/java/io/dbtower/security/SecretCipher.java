@@ -146,11 +146,13 @@ public class SecretCipher {
 
     /** encrypt가 만든 base64를 평문으로. 변조된 값은 GCM 태그 검증에서 예외로 드러난다 */
     public String decrypt(String encoded) {
-        requireEnabled();
+        if (key == null) {
+            throw new SecretUnreadableException("암호화 키 미설정 — enabled()를 먼저 확인해야 한다");
+        }
         try {
             byte[] all = Base64.getDecoder().decode(encoded);
             if (all.length <= IV_BYTES) {
-                throw new IllegalStateException("암호문이 IV보다 짧습니다 — 손상된 값");
+                throw new SecretUnreadableException("암호문이 IV보다 짧습니다 — 손상된 값");
             }
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
             cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(TAG_BITS, all, 0, IV_BYTES));
@@ -158,7 +160,7 @@ public class SecretCipher {
             return new String(plain, StandardCharsets.UTF_8);
         } catch (GeneralSecurityException | IllegalArgumentException e) {
             // AEADBadTagException(변조·키 불일치)과 base64 손상을 하나의 의미로 — "이 값은 이 키로 만든 것이 아니다"
-            throw new IllegalStateException("복호화 실패 — 변조되었거나 다른 키로 암호화된 값", e);
+            throw new SecretUnreadableException("복호화 실패 — 변조되었거나 다른 키로 암호화된 값", e);
         }
     }
 
