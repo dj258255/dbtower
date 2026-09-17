@@ -496,9 +496,22 @@
               </table>
             </div>
             <!-- 역할 설명은 표를 읽는 동안 늘 떠 있을 필요가 없다 — 필요할 때 펼친다 -->
-            <details class="users-roles">
+            <!-- 역할별 할 일을 한 문단이 아니라 역할마다 한 줄로(#40). 내용은 서버의 PlatformRoles.capabilities와 같다 -->
+            <details class="users-roles" open>
               <summary>역할별로 할 수 있는 일</summary>
-              <p class="hint">관제는 지표·리포트만, 요청자는 워크벤치 조회와 변경 요청, 승인자는 승인·반려와 드라이런, 운영자는 승인 티켓 실행·되돌리기와 백업·세션 종료, 관리자는 인스턴스·접속 계정·보안·감사까지. 승인자와 운영자는 서로의 일을 하지 못합니다.</p>
+              <dl class="role-list">
+                <div class="role-item"><dt><span class="role-name">관제</span><span class="role-code">VIEWER</span></dt>
+                  <dd>지표·비교·리포트 조회<span class="role-who">온콜, 팀장</span></dd></div>
+                <div class="role-item"><dt><span class="role-name">요청자</span><span class="role-code">REQUESTER</span></dt>
+                  <dd>워크벤치 조회, 변경 요청 올리기·취소<span class="role-who">개발자, 데이터 요청자</span></dd></div>
+                <div class="role-item"><dt><span class="role-name">승인자</span><span class="role-code">APPROVER</span></dt>
+                  <dd>변경 요청 승인·반려, 드라이런<span class="role-who">DBA 리드</span></dd></div>
+                <div class="role-item"><dt><span class="role-name">운영자</span><span class="role-code">OPERATOR</span></dt>
+                  <dd>승인된 티켓 실행·되돌리기, 드라이런, 백업·세션 종료·심층 진단·온라인 스키마 변경<span class="role-who">DBA, 운영 담당</span></dd></div>
+                <div class="role-item"><dt><span class="role-name">관리자</span><span class="role-code">ADMIN</span></dt>
+                  <dd>인스턴스·접속 계정·사용자·보안·감사·정책 설정, 그리고 모든 역할의 일<span class="role-who">플랫폼 관리자</span></dd></div>
+              </dl>
+              <p class="role-note">승인자와 운영자는 요청자의 일을 함께 할 수 있지만, <b>서로의 일은 하지 못합니다</b> — 승인한 사람이 곧바로 실행하지 않게 나눴습니다.</p>
             </details>
             <div class="user-new-row">
               <label class="user-field" for="user-new-name">사용자 이름</label>
