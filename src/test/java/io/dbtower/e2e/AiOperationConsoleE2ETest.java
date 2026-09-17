@@ -139,8 +139,8 @@ class AiOperationConsoleE2ETest {
         // 작업 유형·구간은 팝오버 안에 있다 — 입력창에 글이 있어야 여는 버튼이 살아난다(syncChatComposer)
         page.fill("#diagnose-question", PROMPT);
         page.click("#btn-aiop-open");
-        page.selectOption("#aiop-new-type", "QUERY_DIAGNOSIS");
-        page.selectOption("#aiop-new-window", "60");
+        pick(page, page.locator("#aiop-new-type"), "QUERY_DIAGNOSIS");
+        pick(page, page.locator("#aiop-new-window"), "60");
 
         // 사람이 두 번 누르는 속도 그대로 — 사이에 응답을 기다리지 않는다. 응답을 기다린 뒤 두 번째를 누르면
         // 그것은 "두 번 누르기"가 아니라 "두 번 맡기기"라 이 테스트가 확인하려는 것이 아니다
@@ -191,8 +191,8 @@ class AiOperationConsoleE2ETest {
         // 유형·구간은 입력창 아래 팝오버 안에 있다 — 글을 먼저 넣어야 여는 버튼이 살아난다(syncChatComposer)
         page.fill("#diagnose-question", PROMPT);
         page.click("#btn-aiop-open");
-        page.selectOption("#aiop-new-type", type);
-        page.selectOption("#aiop-new-window", windowMinutes);
+        pick(page, page.locator("#aiop-new-type"), type);
+        pick(page, page.locator("#aiop-new-window"), windowMinutes);
         page.click("#btn-aiop-submit");
         Locator row = page.locator("#aiops-table tbody .aiop-row").first();
         row.waitFor();
@@ -240,4 +240,12 @@ class AiOperationConsoleE2ETest {
     private String base() {
         return "http://localhost:" + port;
     }
+    /** 커스텀 드롭다운에서 값을 고른다 — 네이티브 select는 감춰져 있고, 사람이 누르는 것은 버튼과 떠 있는 목록이다(#40) */
+    static void pick(Page page, Locator select, String value) {
+        String label = (String) select.evaluate("(s, v) => [...s.options].find((o) => o.value === v).text", value);
+        select.locator("xpath=..").locator(".cs-btn").click();
+        page.getByRole(com.microsoft.playwright.options.AriaRole.OPTION,
+                new Page.GetByRoleOptions().setName(label).setExact(true)).click();
+    }
+
 }

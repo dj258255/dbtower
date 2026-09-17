@@ -142,7 +142,7 @@ class MonitorAdminE2ETest {
         assertThat(users.findByUsername(TARGET).orElseThrow().getRole()).isEqualTo(PlatformUser.Role.VIEWER);
 
         // 바꾸면 그 행에만 적용·취소가 나타난다 — 아직 요청은 나가지 않는다
-        select.selectOption("OPERATOR");
+        pick(page, select, "OPERATOR");
         assertThat(row.locator("[data-role-apply]")).isVisible();
         assertThat(row.locator("[data-role-cancel]")).isVisible();
         page.waitForTimeout(700);
@@ -157,7 +157,7 @@ class MonitorAdminE2ETest {
         assertThat(rolePatches).isEmpty();
 
         // 적용을 눌러야 나간다
-        row.locator("[data-user-role]").selectOption("OPERATOR");
+        pick(page, row.locator("[data-user-role]"), "OPERATOR");
         row.locator("[data-role-apply]").click();
         page.waitForCondition(() -> !rolePatches.isEmpty());
         assertThat(rolePatches).as("적용이 역할 변경을 부르지 않았다").hasSize(1);
@@ -174,7 +174,7 @@ class MonitorAdminE2ETest {
         row.waitFor();
         assertThat(row.locator(".user-role-warn")).isHidden();
 
-        row.locator("[data-user-role]").selectOption("OPERATOR");
+        pick(page, row.locator("[data-user-role]"), "OPERATOR");
         assertThat(row.locator(".user-role-warn")).isVisible();
         assertThat(row.locator(".user-role-warn")).hasText("내 관리자 권한이 없어집니다");
         row.scrollIntoViewIfNeeded();
@@ -182,7 +182,7 @@ class MonitorAdminE2ETest {
 
         // 다른 사람을 내릴 때는 경고가 뜨지 않는다
         Locator other = page.locator("#users-table tbody tr").filter(new Locator.FilterOptions().setHasText(TARGET));
-        other.locator("[data-user-role]").selectOption("OPERATOR");
+        pick(page, other.locator("[data-user-role]"), "OPERATOR");
         assertThat(other.locator(".user-role-warn")).isHidden();
     }
 
@@ -206,7 +206,7 @@ class MonitorAdminE2ETest {
         // 이 시점부터 목록 조회를 붙잡아 둔다 — 취소가 이 응답을 기다리면 값이 OPERATOR로 남는다
         page.route("**/api/security/users", route -> { /* 붙잡아 둔다 */ });
 
-        row.locator("[data-user-role]").selectOption("OPERATOR");
+        pick(page, row.locator("[data-user-role]"), "OPERATOR");
         assertThat(row.locator("[data-role-apply]")).isVisible();
         row.locator("[data-role-cancel]").click();
 
@@ -324,4 +324,12 @@ class MonitorAdminE2ETest {
             throw new UncheckedIOException(e);
         }
     }
+    /** 커스텀 드롭다운에서 값을 고른다 — 네이티브 select는 감춰져 있고, 사람이 누르는 것은 버튼과 떠 있는 목록이다(#40) */
+    static void pick(Page page, Locator select, String value) {
+        String label = (String) select.evaluate("(s, v) => [...s.options].find((o) => o.value === v).text", value);
+        select.locator("xpath=..").locator(".cs-btn").click();
+        page.getByRole(com.microsoft.playwright.options.AriaRole.OPTION,
+                new Page.GetByRoleOptions().setName(label).setExact(true)).click();
+    }
+
 }
