@@ -821,6 +821,8 @@ function handleInstanceDeepLink(list) {
       $("#base-to").value = toLocalInput(at);
       $("#target-from").value = toLocalInput(at);
       $("#target-to").value = toLocalInput(new Date(Math.min(at.getTime() + span, Date.now())));
+      setRangePreset("custom");
+      $("#time-more").open = true;
       runCompare();
     });
   }
@@ -859,11 +861,8 @@ async function selectInstance(instance, card) {
   $("#result-panel").hidden = false;
 
   // 기본 구간: 조회 = 최근 30분, 비교 = 그 직전 30분
-  const now = new Date();
-  $("#target-to").value = toLocalInput(now);
-  $("#target-from").value = toLocalInput(new Date(now - 30 * 60000));
-  $("#base-to").value = toLocalInput(new Date(now - 30 * 60000));
-  $("#base-from").value = toLocalInput(new Date(now - 60 * 60000));
+  applyRangeMinutes(30);
+  setRangePreset("30");
   state.selections = {};
 
   // 실시간이 켜진 채 대상을 바꾸면 새 대상으로 갈아탄다 — 추이는 대상이 다르면 이어 그릴 수 없어 비운다
@@ -1758,17 +1757,13 @@ function setupChartDrag() {
     const prefix = state.dragMode; // 'target' | 'base'
     $(`#${prefix}-from`).value = toLocalInput(sel.from);
     $(`#${prefix}-to`).value = toLocalInput(sel.to);
+    if (prefix === "target") setRangePreset("custom");
   });
 
   $("#mode-target").addEventListener("click", () => toggleDragMode("target"));
   $("#mode-base").addEventListener("click", () => toggleDragMode("base"));
   $("#metric-qps").addEventListener("click", () => setChartMetric("qps"));
   $("#metric-cpu").addEventListener("click", () => setChartMetric("cpu"));
-  // 차트 헤더 조회 버튼 — 비교 구간까지 드래그했으면 비교 조회, 아니면 단독 조회
-  $("#chart-query").addEventListener("click", () => {
-    if ($("#base-from").value && $("#base-to").value && state.selections.base) runCompare();
-    else runQuery();
-  });
 }
 
 function toggleDragMode(mode) {
@@ -1782,7 +1777,6 @@ function setChartMetric(metric) {
   state.chartMetric = metric;
   $("#metric-qps").classList.toggle("active", metric === "qps");
   $("#metric-cpu").classList.toggle("active", metric === "cpu");
-  $("#chart-metric-label").textContent = metric === "cpu" ? "CPU %" : "QPS";
   drawChart();
 }
 
@@ -4645,17 +4639,46 @@ function showMonGroup(name) {
   scheduleAiOpsRefresh();
 }
 
+// 기간 선택(#61) — 최근 N분을 고르면 조회 구간과 그 직전 같은 길이의 비교 구간을 채우고 바로 조회한다.
+// "직접 지정"일 때만 날짜 칸을 보인다. 드래그·딥링크가 구간을 덮어쓰면 setRangePreset("custom")으로 맞춘다
+function applyRangeMinutes(mins) {
+  const now = new Date();
+  $("#target-to").value = toLocalInput(now);
+  $("#target-from").value = toLocalInput(new Date(now - mins * 60000));
+  $("#base-to").value = toLocalInput(new Date(now - mins * 60000));
+  $("#base-from").value = toLocalInput(new Date(now - 2 * mins * 60000));
+}
+
+function syncRangeText() {
+  const custom = $("#range-preset").value === "custom";
+  $("#target-inputs").hidden = !custom;
+  const tf = $("#target-from").value, tt = $("#target-to").value;
+  // 같은 날이면 끝은 시각만 — "09-17 21:20 ~ 21:50"
+  const text = tf && tt ? `${tf.slice(5).replace("T", " ")} ~ ${tt.slice(0, 10) === tf.slice(0, 10) ? tt.slice(11) : tt.slice(5).replace("T", " ")}` : "";
+  $("#range-text").textContent = custom ? "" : text;
+}
+
+function setRangePreset(value) {
+  const sel = $("#range-preset");
+  sel.value = value;
+  sel._csSync?.();
+  syncRangeText();
+}
+
 function setupPresets() {
-  document.querySelectorAll(".preset").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const mins = Number(btn.dataset.mins);
-      const now = new Date();
-      $("#target-to").value = toLocalInput(now);
-      $("#target-from").value = toLocalInput(new Date(now - mins * 60000));
-      $("#base-to").value = toLocalInput(new Date(now - mins * 60000));
-      $("#base-from").value = toLocalInput(new Date(now - 2 * mins * 60000));
-    });
+  const sel = $("#range-preset");
+  enhanceSelect(sel);
+  sel.addEventListener("change", () => {
+    if (sel.value !== "custom") {
+      applyRangeMinutes(Number(sel.value));
+      syncRangeText();
+      if (state.instance) runQuery();
+      return;
+    }
+    syncRangeText();
+    $("#target-from").focus();
   });
+  ["#target-from", "#target-to"].forEach((id) => $(id).addEventListener("change", syncRangeText));
 }
 
 // ---------- 한 셸의 두 모드(149절) — 관제와 워크벤치를 페이지 이동 없이 전환한다 ----------

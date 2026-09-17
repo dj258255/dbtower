@@ -106,7 +106,7 @@ body {
 }
 .cs-panel-floating { position: fixed; right: auto; z-index: 1000; }
 /* 표 칸·툴바 안의 드롭다운은 내용 폭만 — 사이드바 필터용 flex:1이 여기서는 칸 전체로 늘어났다(#45) */
-#users-table .cs, .wb-toolbar .cs { flex: none; width: auto; min-width: 110px; }
+#users-table .cs, .wb-toolbar .cs, .time-main .cs { flex: none; width: auto; min-width: 110px; }
 .cs-opt { padding: 6px 10px; border-radius: 6px; font-size: var(--fs-small); cursor: pointer; white-space: nowrap; }
 .cs-opt:hover { background: #f2f4f8; }
 .cs-opt.sel { background: #eef1ff; color: var(--primary); font-weight: 600; }
@@ -206,7 +206,7 @@ body {
 /* 시간대 선택 */
 .time-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
 .range-label {
-  font-size: var(--fs-small); font-weight: 700; padding: 3px 9px; border-radius: 6px; min-width: 150px; text-align: center;
+  font-size: var(--fs-small); font-weight: 700; padding: 3px 9px; border-radius: 6px; text-align: center;
 }
 .target-label { background: rgba(34,160,107,.12); color: var(--target); }
 .base-label { background: rgba(240,140,45,.14); color: #c26a12; }
@@ -215,12 +215,18 @@ input[type="datetime-local"] {
   border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font-size: var(--fs-body);
   font-family: inherit; color: var(--text); background: #fff;
 }
-.presets { display: inline-flex; gap: 4px; }
-.preset {
-  border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 4px 9px;
-  cursor: pointer; font-size: var(--fs-small); color: var(--muted);
-}
-.preset:hover { color: var(--primary); border-color: var(--primary); }
+/* 한 줄: 제목 · 기간 · 구간 글자 · 조회(#61). 조회는 오른쪽 끝에 붙여 이 영역의 주 동작이 하나로 보이게 한다 */
+.time-main { margin-bottom: 0; gap: 10px; }
+.time-main .time-title { margin: 0 4px 0 0; }
+.time-main #btn-query { margin-left: auto; }
+.range-text { font-size: var(--fs-body); color: var(--muted); font-variant-numeric: tabular-nums; }
+.range-inputs { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.range-inputs[hidden] { display: none; }
+.time-more { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.time-more > summary { cursor: pointer; font-size: var(--fs-body); font-weight: 600; color: var(--muted); list-style-position: inside; }
+.time-more > summary:hover { color: var(--primary); }
+.time-more[open] > summary { margin-bottom: 10px; }
+.chart-drag-label { font-size: var(--fs-body); font-weight: 500; align-self: center; }
 
 /* 버튼 */
 /* 토스식 버튼(#40) — 테두리·광택·유리 없이 채운 면 하나로 누를 수 있음을 말한다. 162절의 유리 버튼은 표·카드 위에서
@@ -1164,7 +1170,7 @@ body { background: var(--bg); }
 /* 텍스트·숫자 입력도 같은 규칙으로(B6) — 전에는 범위를 좁게 잡아 #monthly-days(type=number)처럼
    클래스가 없는 칸이 브라우저 기본 모양으로 남았다 */
 .cs-btn, .instance-filter input[type="search"], .instance-filter-row select, input[type="datetime-local"],
-input[type="text"], input[type="number"], .audit-filters input, .preset, .ddl-input, .advisor-cols {
+input[type="text"], input[type="number"], .audit-filters input, .ddl-input, .advisor-cols {
   border: 1px solid var(--control-line); border-radius: 10px;
 }
 .cs-btn, .instance-filter input[type="search"], input[type="datetime-local"],
@@ -1176,7 +1182,6 @@ input[type="text"]:focus-visible, input[type="number"]:focus-visible,
 }
 /* 체크박스는 크롬 기본 파랑이 남아 있었다 — 글자색 하나로 브랜드 색을 따른다(B6) */
 input[type="checkbox"] { accent-color: var(--primary); }
-.preset { border-radius: 999px; }
 
 /* 표 안의 역할 select — 이 표의 다른 칸과 같은 규칙을 쓴다(전에는 규칙이 없어 브라우저 기본 모양이었다, B6).
    줄 높이를 키우지 않게 세로 여백만 줄인다. 표 안이라 .cs 드롭다운은 쓰지 않는다(가로 스크롤 상자를 벗어난다) */
@@ -1251,7 +1256,7 @@ input[type="checkbox"] { accent-color: var(--primary); }
 /* ---------- 좁은 화면 (VERIFICATION 139절) ----------
    한 열 그리드의 1fr은 최소 폭이 내용(nowrap 표)의 최소 폭이라, 표가 열을 화면 밖으로 밀어 페이지 전체가 옆으로 넘쳤다 — minmax(0, 1fr)로 열이 화면을 넘지 않게 하고
    넓은 표는 자기 영역 안에서 스크롤한다. 버튼·탭 글자는 줄바꿈하지 않는다(좁을 때 "조회"가 세로로 한 글자씩 쌓였다) */
-.btn, .preset, .mon-tab, .tab { white-space: nowrap; }
+.btn, .mon-tab, .tab { white-space: nowrap; }
 .chart-head { flex-wrap: wrap; gap: 8px; }
 .chart-tools { flex-wrap: wrap; }
 .mon-subnav, .tabs { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }
