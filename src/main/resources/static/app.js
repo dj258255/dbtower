@@ -871,7 +871,7 @@ async function loadAdvisors(force) {
 // 사실(DBTower가 모음)과 AI 소견(모델이 만듦)을 한 덩어리로 보여주지 않는다. 검증 안 된 수치가 있으면 소견보다 먼저 세운다.
 const AIOP_TYPE_LABEL = {
   QUERY_DIAGNOSIS: "쿼리 진단", REGRESSION_EXPLANATION: "회귀 원인", BACKUP_RISK_REVIEW: "백업 위험",
-  SLO_RISK_REVIEW: "SLO 위험", ADVISOR_SUMMARY: "Advisor 요약", COST_REVIEW: "비용 검토",
+  SLO_RISK_REVIEW: "SLO 위험", ADVISOR_SUMMARY: "점검 조언 요약", COST_REVIEW: "비용 검토",
   INCIDENT_TRIAGE: "장애 초기 진단", DB_TEAM_INQUIRY: "DB팀 문의", PERIODIC_REPORT: "정기 리포트",
 };
 const AIOP_STATUS_LABEL = {
@@ -1126,7 +1126,7 @@ async function loadFinOps(force) {
 // ---------- 통합 헬스 스코어 (D8) — 흩어진 신호를 인스턴스별 한 점수로, 나쁜 순으로 ----------
 // 인스턴스 선택과 무관한 함대 전체 뷰. "어디부터 볼지"를 서버가 정렬해 내려주고, 행 클릭 시 감점 사유를 분해한다.
 const SCORE_SIGNAL_LABEL = {
-  HEALTH: "가용성", ANOMALY: "이상 감지", ADVISOR: "Advisors", SLO: "SLO / 버짓", BACKUP: "백업 신선도",
+  HEALTH: "가용성", ANOMALY: "이상 감지", ADVISOR: "점검 조언", SLO: "SLO / 버짓", BACKUP: "백업 신선도",
   // CPU가 아니라 "동시 실행 압박" — 기종마다 세는 단위가 달라 요약 문구에 무엇을 읽었는지 담긴다(162절)
   RESOURCE: "자원 압박",
 };
@@ -1179,7 +1179,7 @@ async function loadHealthScore() {
       <tbody class="score-group" data-id="${s.instanceId}">
         <tr class="score-row score-grade-${esc(s.grade)}">
           <td><span class="cell-inst">${engineIcon(s.type)} ${esc(s.instanceName)}</span>
-            ${s.down ? '<span class="score-down">DOWN</span>' : ""}
+            ${s.down ? '<span class="score-down">다운</span>' : ""}
             ${s.partial ? '<span class="score-partial-dot" title="일부 신호가 데이터 부족·수집 실패">부분</span>' : ""}</td>
           <td class="num score-num">${s.score}<span class="score-outof">/100</span></td>
           <td><span class="grade-badge grade-${esc(s.grade)}">${esc(s.grade)}</span></td>
@@ -1381,8 +1381,8 @@ async function loadCommandMetrics(from, to) {
       <h4>${esc(s.name)}</h4>
       <svg id="cmd-chart-${idx}" width="100%" height="120" preserveAspectRatio="none"></svg>
       <div id="cmd-empty-${idx}" class="muted center" hidden></div>
-      <div class="cmd-legend"><span>Mean <b>${fmtStat(s.mean)}</b></span>
-        <span>Max <b>${fmtStat(s.max)}</b></span><span>Min <b>${fmtStat(s.min)}</b></span></div>
+      <div class="cmd-legend"><span>평균 <b>${fmtStat(s.mean)}</b></span>
+        <span>최대 <b>${fmtStat(s.max)}</b></span><span>최소 <b>${fmtStat(s.min)}</b></span></div>
     </div>`;
   box.innerHTML = Object.entries(groups).map(([g, items]) => `
     <div class="command-group">
@@ -1708,8 +1708,8 @@ async function runQuery(force) {
   // Plan 컬럼은 값이 있는 기종(MongoDB — profiler가 계획 요약을 저장)에서만 그린다.
   const hasPlan = stats.some((q) => q.plan);
   table.querySelector("thead").innerHTML = `
-    <tr><th>Load</th><th>Query</th><th class="num">Call/sec</th>
-        <th class="num">Latency(ms)</th><th class="num">${esc(rowsLabel)} (평균)</th>${hasPlan ? "<th>Plan</th>" : ""}</tr>`;
+    <tr><th>부하</th><th>쿼리</th><th class="num">호출/초</th>
+        <th class="num">지연(ms)</th><th class="num">${esc(rowsLabel)} (평균)</th>${hasPlan ? "<th>계획</th>" : ""}</tr>`;
   table.querySelector("tbody").innerHTML = stats.map((q, idx) => `
     <tr data-idx="${idx}">
       <td class="num">${fmtNum(q.loadPct)}%</td>
@@ -1771,11 +1771,11 @@ async function runCompare() {
   const rows = [...result.queries].sort((a, b) => targetLoad(b) - targetLoad(a));
   const table = $("#top-table");
   table.querySelector("thead").innerHTML = `
-    <tr><th class="num">Load</th><th>Query</th><th class="num">QPS</th><th class="num">Latency(ms)</th><th class="num">${esc(rowsLabel)}/call</th></tr>`;
+    <tr><th class="num">부하</th><th>쿼리</th><th class="num">QPS</th><th class="num">지연(ms)</th><th class="num">${esc(rowsLabel)}/호출</th></tr>`;
   table.querySelector("tbody").innerHTML = rows.map((q, idx) => `
     <tr data-idx="${idx}" class="${q.newQuery ? "new-query" : ""}">
       <td>${deltaCell(baseLoad(q), targetLoad(q), loadPctChange(baseLoad(q), targetLoad(q)))}</td>
-      <td class="qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${q.newQuery ? '<span class="badge-new">NEW</span>' : ""}${queryTextHtml(q.queryText)}</td>
+      <td class="qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${q.newQuery ? '<span class="badge-new">신규</span>' : ""}${queryTextHtml(q.queryText)}</td>
       <td>${deltaCell(q.baseQps, q.targetQps, q.qpsChangePct)}</td>
       <td>${deltaCell(q.baseAvgMs, q.targetAvgMs, q.latencyChangePct, msDigits(q.baseAvgMs, q.targetAvgMs))}</td>
       <td>${deltaCell(q.baseRowsPerCall, q.targetRowsPerCall, q.rowsPerCallChangePct, 0)}</td>
@@ -2439,8 +2439,8 @@ async function loadSlow(force) {
   const table = $("#slow-table");
   // 기종별로 확보 가능한 필드가 달라 미확보는 "—"로 표기(MySQL: User@host·Lock·Rows_sent, Mongo: Plan)
   table.querySelector("thead").innerHTML = `
-    <tr><th>Captured <span class="muted" title="브라우저 시간대로 변환 표시 — 원문(UTC)은 툴팁">(로컬)</span></th><th>User@host</th><th class="num">Query(ms)</th><th class="num">Lock(ms)</th>
-        <th class="num">Rows_sent</th><th class="num">Rows_examined</th><th>Plan</th><th>Query</th></tr>`;
+    <tr><th>수집 시각 <span class="muted" title="브라우저 시간대로 변환 표시 — 원문(UTC)은 툴팁">(로컬)</span></th><th>사용자@호스트</th><th class="num">쿼리(ms)</th><th class="num">잠금(ms)</th>
+        <th class="num">보낸 행</th><th class="num">검사한 행</th><th>계획</th><th>쿼리</th></tr>`;
   const dash = (v) => (v == null || v < 0) ? '<span class="muted">—</span>' : null;
   if (targetSkipped(table.querySelector("tbody"), () => loadSlow(true), 8, force)) return;
   try {
@@ -2780,7 +2780,7 @@ async function loadOverview(force) {
           ${meta ? `<span class="ov-meta muted">${meta}</span>` : ""}
         </div>
         <div class="ov-health">
-          <span class="ov-status ${o.down ? "ov-down" : "ov-up"}">${o.down ? "DOWN" : "UP"}</span>
+          <span class="ov-status ${o.down ? "ov-down" : "ov-up"}">${o.down ? "다운" : "정상"}</span>
           <span class="ov-grade grade-${esc(o.grade)}">${esc(o.grade)} · ${esc(String(o.healthScore))}</span>
         </div>
       </div>
@@ -2924,7 +2924,7 @@ async function loadPlanChanges() {
 async function loadWaitEvents(force) {
   const table = $("#wait-table");
   table.querySelector("thead").innerHTML = `
-    <tr><th>Category</th><th>Event</th><th class="num">Count</th><th class="num">Total(ms)</th></tr>`;
+    <tr><th>분류</th><th>이벤트</th><th class="num">횟수</th><th class="num">합계(ms)</th></tr>`;
   if (targetSkipped(table.querySelector("tbody"), () => loadWaitEvents(true), 4, force)) return;
   try {
     const rows = await targetApi(`/api/instances/${state.instance.id}/wait-events?limit=20`);
@@ -2956,7 +2956,7 @@ const LATENCY_SOURCE = {
 async function loadLatencyPercentiles(force) {
   const table = $("#latency-table");
   table.querySelector("thead").innerHTML = `
-    <tr><th>Source</th><th>Query</th><th class="num">p95(ms)</th><th class="num">p99(ms)</th></tr>`;
+    <tr><th>출처</th><th>쿼리</th><th class="num">p95(ms)</th><th class="num">p99(ms)</th></tr>`;
   if (targetSkipped(table.querySelector("tbody"), () => loadLatencyPercentiles(true), 4, force)) return;
   try {
     const rows = await targetApi(`/api/instances/${state.instance.id}/latency-percentiles?limit=20`);
@@ -3057,8 +3057,8 @@ async function loadSloReport(force) {
 async function loadPartitions(force) {
   const table = $("#partition-table");
   table.querySelector("thead").innerHTML = `
-    <tr><th>Table</th><th>Partition</th><th>Method</th><th>Boundary</th>
-        <th class="num">Rows</th><th class="num">Size</th></tr>`;
+    <tr><th>테이블</th><th>파티션</th><th>방식</th><th>경계</th>
+        <th class="num">행 수</th><th class="num">크기</th></tr>`;
   if (targetSkipped(table.querySelector("tbody"), () => loadPartitions(true), 6, force)) return;
   try {
     const rows = await targetApi(`/api/instances/${state.instance.id}/partitions?limit=50`);
@@ -3089,8 +3089,8 @@ async function loadSessions(force) {
   const canKill = can("TARGET_OPERATE");
   const cols = canKill ? 8 : 7;
   table.querySelector("thead").innerHTML = `
-    <tr><th class="num">PID</th><th>User</th><th>State</th><th>Wait</th>
-        <th class="num">BlockedBy</th><th class="num">Elapsed(ms)</th><th>Query</th>${canKill ? "<th>Action</th>" : ""}</tr>`;
+    <tr><th class="num">PID</th><th>사용자</th><th>상태</th><th>대기</th>
+        <th class="num">막는 PID</th><th class="num">경과(ms)</th><th>쿼리</th>${canKill ? "<th>동작</th>" : ""}</tr>`;
   if (targetSkipped(table.querySelector("tbody"), () => loadSessions(true), cols, force)) return;
   try {
     renderSessionRows(await targetApi(`/api/instances/${state.instance.id}/sessions?limit=50`));
@@ -3202,7 +3202,7 @@ function onLiveFrame(f) {
   }
   if (f.status === "ERROR") {
     // 마지막으로 성공한 표는 남긴다 — 순간 실패로 표가 비면 "세션이 다 사라졌다"로 읽힌다
-    setLiveStatus(`LIVE · ${time} 조회 실패: ${f.error ?? ""}${gap}`, "err");
+    setLiveStatus(`실시간 · ${time} 조회 실패: ${f.error ?? ""}${gap}`, "err");
     return;
   }
   const s = f.summary;
@@ -3210,7 +3210,7 @@ function onLiveFrame(f) {
   if (live.history.length > LIVE_HISTORY) live.history.shift();
   drawLiveSpark();
   const paused = live.hover ? " · 표 위에 포인터가 있어 표 갱신을 멈춤" : "";
-  setLiveStatus(`LIVE · ${time} · 세션 ${s.total} · 막힘 ${s.blocked} · 대기 ${s.waiting} · 최장 ${fmtNum(s.longestMs)}ms · 수집 ${fmtNum(f.collectMs)}ms${gap}${paused}`,
+  setLiveStatus(`실시간 · ${time} · 세션 ${s.total} · 막힘 ${s.blocked} · 대기 ${s.waiting} · 최장 ${fmtNum(s.longestMs)}ms · 수집 ${fmtNum(f.collectMs)}ms${gap}${paused}`,
     s.blocked > 0 ? "warn" : "ok");
   if (live.hover) live.pending = f.sessions;
   else renderSessionRows(f.sessions);
@@ -3312,11 +3312,11 @@ async function runSchemaDiff() {
     + (f.onDelete && f.onDelete !== "NO ACTION" ? ` ON DELETE ${esc(f.onDelete)}` : "");
 
   if (d.addedTables.length) {
-    parts.push('<div class="schema-block"><h4>추가된 테이블 <span class="hint">(right에만)</span></h4>' +
+    parts.push('<div class="schema-block"><h4>추가된 테이블 <span class="hint">(오른쪽에만)</span></h4>' +
       d.addedTables.map((t) => line("schema-add", "+", `${esc(t.name)} ${tableMeta(t)}`)).join("") + "</div>");
   }
   if (d.removedTables.length) {
-    parts.push('<div class="schema-block"><h4>삭제된 테이블 <span class="hint">(left에만)</span></h4>' +
+    parts.push('<div class="schema-block"><h4>삭제된 테이블 <span class="hint">(왼쪽에만)</span></h4>' +
       d.removedTables.map((t) => line("schema-del", "−", `${esc(t.name)} ${tableMeta(t)}`)).join("") + "</div>");
   }
   d.changedTables.forEach((t) => {
@@ -3379,15 +3379,15 @@ async function runParamDiff() {
       </tr>`).join("");
     parts.push(`<div class="schema-block"><h4>값이 다른 파라미터 <span class="hint">(${d.changed.length})</span></h4>
       <div class="table-scroll"><table class="qtable param-diff-table">
-        <thead><tr><th>name</th><th>left</th><th>right</th></tr></thead>
+        <thead><tr><th>이름</th><th>왼쪽</th><th>오른쪽</th></tr></thead>
         <tbody>${rows}</tbody></table></div></div>`);
   }
   if (d.leftOnly.length) {
-    parts.push('<div class="schema-block"><h4>left에만 있는 파라미터</h4>' +
+    parts.push('<div class="schema-block"><h4>왼쪽에만 있는 파라미터</h4>' +
       d.leftOnly.map((p) => line("schema-del", "−", `${esc(p.name)} = ${esc(p.value)}`)).join("") + "</div>");
   }
   if (d.rightOnly.length) {
-    parts.push('<div class="schema-block"><h4>right에만 있는 파라미터</h4>' +
+    parts.push('<div class="schema-block"><h4>오른쪽에만 있는 파라미터</h4>' +
       d.rightOnly.map((p) => line("schema-add", "+", `${esc(p.name)} = ${esc(p.value)}`)).join("") + "</div>");
   }
   box.innerHTML = parts.join("");

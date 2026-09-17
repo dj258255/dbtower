@@ -50,7 +50,7 @@ class DocumentationScreenshotTest {
             rows.first().waitFor();
             assertThat(rows.count()).isGreaterThan(0);
             assertThat(page.locator("#top-table .qtext .t-kw").count()).isGreaterThan(0);
-            assertThat(page.locator("#top-table")).containsText("Latency(ms)");
+            assertThat(page.locator("#top-table")).containsText("지연(ms)");
             assertThat((Boolean) page.evaluate("""
                     [...document.querySelectorAll('#top-table tbody tr td:first-child')]
                       .map((cell) => Number.parseFloat(cell.textContent))
