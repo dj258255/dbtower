@@ -973,21 +973,68 @@ function renderAiOperations() {
     $("#aiops-detail").hidden = true;
     return;
   }
+  parkAiopDetail();   // tbody를 갈아 끼우기 전에 상세를 빼 둔다 — 행 안에 있으면 함께 지워진다
   body.innerHTML = rows.map((j) => {
     const name = j.instanceId ? (state.instances.find((i) => i.id === j.instanceId)?.name ?? `#${j.instanceId}`) : "범위 전체";
-    return `<tr class="aiop-row${j.jobId === aiops.openId ? " open" : ""}" data-job="${esc(j.jobId)}">
+    return `<tr class="aiop-row${j.jobId === aiops.openId ? " open" : ""}" data-job="${esc(j.jobId)}" tabindex="0">
       <td><span class="aiop-badge aiop-${esc(j.status)}">${esc(AIOP_STATUS_LABEL[j.status] ?? j.status)}</span></td>
       <td>${esc(AIOP_TYPE_LABEL[j.type] ?? j.type)}</td>
       <td>${esc(name)}</td>
       <td>${esc(j.requester)} <span class="muted">(${esc(AIOP_TRIGGER_LABEL[j.trigger] ?? j.trigger)})</span></td>
       <td>${esc(String(j.requestedAt).replace("T", " ").slice(0, 19))}</td>
-      <td><button type="button" class="btn btn-small aiop-open">보기</button></td>
+      <td class="aiop-toggle-cell"><button type="button" class="aiop-open" aria-expanded="${j.jobId === aiops.openId}" aria-label="작업 펼치기">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button></td>
     </tr>`;
   }).join("");
-  body.querySelectorAll(".aiop-row").forEach((tr) => {
-    tr.querySelector(".aiop-open").addEventListener("click", () => openAiOperation(tr.dataset.job));
+  // 목록을 다시 그려도(5초 갱신) 펼친 상세는 그 행 아래로 곧바로 되돌린다 — 응답을 기다리는 동안 표 밑으로 튀지 않게
+  if (aiops.openId && rows.some((j) => j.jobId === aiops.openId)) {
+    placeAiopDetail(aiops.openId);
+    openAiOperation(aiops.openId, { quiet: true });
+  } else {
+    parkAiopDetail();
+  }
+}
+
+/**
+ * 작업 상세를 누른 행 바로 아래에 펼친다(#40) — 전에는 "보기"를 누르면 표 밑의 상세 칸에 떠서, 행과 상세가 떨어져
+ * 스크롤을 오가며 봐야 했다. 상위 쿼리 표와 같은 방식: 행을 누르면 그 아래 한 칸에 펼치고 다시 누르면 접는다.
+ */
+function placeAiopDetail(jobId) {
+  const box = $("#aiops-detail");
+  const tr = document.querySelector(`#aiops-table .aiop-row[data-job="${CSS.escape(jobId)}"]`);
+  if (!box || !tr) return;
+  let host = document.querySelector("#aiops-table tr.aiop-detail-host");
+  if (!host) {
+    host = document.createElement("tr");
+    host.className = "aiop-detail-host";
+    host.innerHTML = '<td class="aiop-detail-cell" colspan="6"></td>';
+  }
+  host.firstElementChild.appendChild(box);
+  tr.after(host);
+  document.querySelectorAll("#aiops-table .aiop-row").forEach((r) => {
+    const on = r.dataset.job === jobId;
+    r.classList.toggle("open", on);
+    r.querySelector(".aiop-open")?.setAttribute("aria-expanded", String(on));
   });
-  if (aiops.openId && rows.some((j) => j.jobId === aiops.openId)) openAiOperation(aiops.openId, { quiet: true });
+}
+
+/** 상세를 표 밖(카드 아래) 원래 자리로 돌린다 — 목록을 다시 그리거나, 표에 없는 작업(딥링크)을 열 때 */
+function parkAiopDetail() {
+  const box = $("#aiops-detail");
+  const card = $("#aiops-table")?.closest(".monitor-card");
+  if (box && card && box.parentElement !== card) card.appendChild(box);
+  document.querySelector("#aiops-table tr.aiop-detail-host")?.remove();
+}
+
+function closeAiOperation() {
+  aiops.openId = null;
+  const box = $("#aiops-detail");
+  if (box) box.hidden = true;
+  parkAiopDetail();
+  document.querySelectorAll("#aiops-table .aiop-row").forEach((r) => {
+    r.classList.remove("open");
+    r.querySelector(".aiop-open")?.setAttribute("aria-expanded", "false");
+  });
 }
 
 // 참고 자료 본문은 600자짜리 런북 발췌라 화면에서는 줄인다 — 전체는 API 응답에 그대로 있다
@@ -1001,6 +1048,8 @@ const aiopList = (title, items, extra = "", cap = 0) => (items && items.length)
 async function openAiOperation(jobId, opts = {}) {
   const box = $("#aiops-detail");
   aiops.openId = jobId;
+  if (document.querySelector(`#aiops-table .aiop-row[data-job="${CSS.escape(jobId)}"]`)) placeAiopDetail(jobId);
+  else parkAiopDetail();
   if (!opts.quiet) { box.hidden = false; box.innerHTML = `<div class="muted">불러오는 중...</div>`; }
   let job;
   try {
@@ -1029,19 +1078,26 @@ async function openAiOperation(jobId, opts = {}) {
   const failure = job.failureReason ? `<div class="aiop-block aiop-warn"><h4>실패 사유</h4><p>${esc(job.failureReason)}</p></div>` : "";
   let result = "";
   if (r) {
+    // 읽는 순서대로(#40): 먼저 믿으면 안 되는 것(검증 안 됨·승인 필요) → AI 소견(문단·목록 서식) → 다음 조치 → 근거·판정.
+    // 수십 줄짜리 "모은 사실"과 런북 발췌는 기본으로 접는다 — 펼쳐 두면 소견이 그 아래로 밀려 보이지 않았다
     const opinion = r.aiOpinion
-      ? `<div class="aiop-block aiop-opinion"><h4>AI 1차 소견 <span class="muted">(판단은 사람이 합니다 · ${esc(r.backend ?? "")} · ${esc(r.promptVersion ?? "")})</span></h4><p>${esc(r.aiOpinion)}</p></div>`
+      ? `<div class="aiop-block aiop-opinion"><h4>AI 1차 소견 <span class="muted">판단은 사람이 합니다</span></h4><div class="chat-text">${chatAnswerHtml(r.aiOpinion)}</div></div>`
       : `<div class="aiop-block muted"><h4>AI 1차 소견</h4><p>없음 — 규칙 판정만 제공합니다</p></div>`;
+    const folded = (title, items, cap = 0) => (items && items.length)
+      ? `<details class="aiop-fold"><summary>${esc(title)} <span class="muted">${items.length}개</span></summary><ul>${items.map((i) => {
+          const text = cap && i.length > cap ? `${i.slice(0, cap)}…` : i;
+          return `<li>${esc(text)}</li>`;
+        }).join("")}</ul></details>` : "";
     result = [
       aiopList("검증되지 않은 내용", r.unverifiedClaims, "aiop-warn"),
-      aiopList("규칙 판정", r.ruleFindings),
+      r.approvalRequired ? `<div class="aiop-block aiop-warn"><h4>승인 필요</h4><p>대상 DB를 바꿀 수 있는 조치가 언급됐습니다. 실행은 워크벤치 변경 요청으로 승인을 받습니다.</p></div>` : "",
       opinion,
-      aiopList("근거", r.evidence),
-      aiopList("불확실한 점", r.uncertainties),
       aiopList("다음 조치", r.nextActions),
-      r.approvalRequired ? `<div class="aiop-block aiop-warn"><h4>승인</h4><p>대상 DB를 바꿀 수 있는 조치가 언급됐습니다. 실행은 워크벤치 변경 요청으로 승인을 받습니다.</p></div>` : "",
-      aiopList("DBTower가 모은 사실", r.facts),
-      aiopList("참고 자료 (과거 사례·런북 — 현재 사실이 아닙니다)", r.references, "", AIOP_ITEM_CAP),
+      aiopList("불확실한 점", r.uncertainties),
+      aiopList("근거", r.evidence),
+      aiopList("규칙 판정", r.ruleFindings),
+      `<div class="aiop-folds">${folded("DBTower가 모은 사실", r.facts)}${folded("참고 자료 — 과거 사례·런북(현재 사실이 아닙니다)", r.references, AIOP_ITEM_CAP * 2)}</div>`,
+      r.backend || r.promptVersion ? `<div class="aiop-meta muted">${esc([r.backend, r.promptVersion].filter(Boolean).join(" · "))}</div>` : "",
     ].join("");
   } else if (AIOP_ACTIVE.has(job.status)) {
     result = `<div class="aiop-block muted"><p>진행 중입니다. 사실을 모으고 분석이 끝나면 여기에 결과가 붙습니다.</p></div>`;
@@ -1067,6 +1123,17 @@ async function aiOperationAction(jobId, action) {
 // 진행 중 작업이 있고 이 카드가 실제로 보일 때만 갱신한다 — 안 보는 화면이 폴링을 계속하면 서버만 바쁘다
 function setupAiOperations() {
   $("#aiops-all-instances")?.addEventListener("change", renderAiOperations);
+  const tbody = $("#aiops-table tbody");
+  const toggle = (tr) => { if (aiops.openId === tr.dataset.job) closeAiOperation(); else openAiOperation(tr.dataset.job); };
+  tbody?.addEventListener("click", (e) => {
+    if (e.target.closest(".aiop-detail-host")) return;          // 펼친 상세 안의 클릭(취소·재시도·접기)은 행 토글이 아니다
+    const tr = e.target.closest(".aiop-row");
+    if (tr) toggle(tr);
+  });
+  tbody?.addEventListener("keydown", (e) => {
+    const tr = e.target.closest(".aiop-row");
+    if (tr && (e.key === "Enter" || e.key === " ") && e.target === tr) { e.preventDefault(); toggle(tr); }
+  });
   $("#btn-aiop-submit")?.addEventListener("click", submitAiOperation);
   document.addEventListener("visibilitychange", scheduleAiOpsRefresh);
 }

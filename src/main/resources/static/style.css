@@ -1577,3 +1577,21 @@ input[type="checkbox"] { accent-color: var(--primary); }
 .inquiry-note { display: block; width: 100%; box-sizing: border-box; min-height: 96px; resize: vertical; border: 1px solid var(--control-line); border-radius: 10px; padding: 10px 12px; font: 13.5px/1.6 inherit; font-family: inherit; color: var(--text); background: #fff; }
 .inquiry-note:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
+/* AI 운영 작업 — 행을 누르면 그 아래 펼친다(#40) */
+#aiops-table .aiop-row { cursor: pointer; }
+#aiops-table .aiop-row:hover > td { background: #f7fbff; }
+#aiops-table .aiop-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.aiop-toggle-cell { width: 36px; text-align: right; }
+.aiop-open { border: 0; background: transparent; color: var(--muted); width: 28px; height: 28px; border-radius: 8px; display: inline-grid; place-items: center; cursor: pointer; }
+.aiop-open:hover { background: #f2f4f6; color: var(--text); }
+.aiop-open svg { transition: transform .15s ease; }
+.aiop-open[aria-expanded="true"] svg { transform: rotate(180deg); }
+.aiop-detail-host > td { background: #fbfdff; padding: 4px 12px 14px; }
+.aiop-detail-host .aiops-detail { margin-top: 0; border-top: 0; padding-top: 8px; }
+.aiop-opinion .chat-text { font-size: 13px; line-height: 1.7; color: var(--text); }
+.aiop-folds { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.aiop-fold { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; background: #fff; }
+.aiop-fold summary { cursor: pointer; font-size: 12.5px; font-weight: 600; }
+.aiop-fold ul { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.aiop-meta { margin-top: 8px; font-size: 11.5px; }
+
