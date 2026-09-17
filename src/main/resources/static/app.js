@@ -1996,6 +1996,9 @@ function watchRowDetails() {
 }
 
 function openDetail(query, tr) {
+  // 누른 행이 화면에서 어디 있었는지 기억한다 — 위쪽 행에 열려 있던 상세가 빠지면 누른 행이 그만큼 위로 튀어,
+  // 새 상세가 "누른 곳 위로 열리는" 것처럼 보였다(#40). 끝에서 같은 자리로 되돌린다
+  const anchorTop = tr ? tr.getBoundingClientRect().top : null;
   state.currentQuery = query;
   $("#btn-to-workbench").hidden = !can("WORKBENCH");
   $("#query-detail").hidden = false;
@@ -2031,7 +2034,15 @@ function openDetail(query, tr) {
   state.lastPlan = null;
   state.lastFindings = [];
   state.lastAi = null;
-  $("#query-detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  if (tr && anchorTop != null) {
+    const moved = tr.getBoundingClientRect().top - anchorTop;
+    if (Math.abs(moved) > 1) window.scrollBy(0, moved);
+    // 누른 행이 화면 아래쪽이라 상세가 안 보이면, 행을 위로 올려 상세 머리가 보이게 한다(아래로 펼쳐진 채)
+    const r = tr.getBoundingClientRect();
+    if (r.bottom + 200 > window.innerHeight) window.scrollBy({ top: r.top - 96, behavior: "smooth" });
+  } else {
+    $("#query-detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
 }
 
 function closeDetail() {
