@@ -712,28 +712,66 @@ function enhanceSelect(sel) {
   sync();
   sel._csSync = sync;
   let panel = null;
-  const close = () => { if (panel) { panel.remove(); panel = null; btn.classList.remove("open"); document.removeEventListener("click", onDoc, true); } };
-  const onDoc = (e) => { if (!wrap.contains(e.target)) close(); };
+  // 패널은 body에 붙이고 버튼 바로 아래에 고정 위치로 연다(#40). 전에는 칸 안(position:absolute)에 붙여, 가로 스크롤 상자·
+  // overflow:hidden 칸(사용자 표·워크벤치 왼쪽·팝오버) 안에서는 잘렸고, 그래서 그런 자리에는 네이티브 select를 남겼다 —
+  // 네이티브 목록은 macOS에서 선택 항목을 버튼 위치에 맞추느라 위로 열렸다. 늘 아래로 연다: 아래 공간이 모자라면 높이를 줄이고 스크롤한다
+  const place = () => {
+    if (!panel) return;
+    const r = btn.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom - 12;
+    panel.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - Math.max(r.width, 160) - 8))}px`;
+    panel.style.top = `${r.bottom + 4}px`;
+    panel.style.minWidth = `${r.width}px`;
+    panel.style.maxHeight = `${Math.max(140, Math.min(300, below))}px`;
+  };
+  const close = () => {
+    if (!panel) return;
+    panel.remove(); panel = null; btn.classList.remove("open"); btn.setAttribute("aria-expanded", "false");
+    document.removeEventListener("click", onDoc, true);
+    window.removeEventListener("scroll", onScroll, true);
+    window.removeEventListener("resize", close);
+  };
+  const onDoc = (e) => { if (!wrap.contains(e.target) && !(panel && panel.contains(e.target))) close(); };
+  // 패널 안 스크롤은 그대로 두고, 바깥이 스크롤되면 버튼과 떨어지므로 닫는다
+  // 스크롤 이벤트는 다음 프레임에 온다 — 열면서 올린 스크롤(아래)이 방금 연 패널을 닫지 않게 여는 순간의 것은 넘긴다
+  let openedAt = 0;
+  const onScroll = (e) => { if (panel && !panel.contains(e.target) && performance.now() - openedAt > 250) close(); };
+  btn.setAttribute("aria-haspopup", "listbox");
+  btn.setAttribute("aria-expanded", "false");
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
     if (panel) { close(); return; }
     panel = document.createElement("div");
-    panel.className = "cs-panel";
+    panel.className = "cs-panel cs-panel-floating";
+    panel.setAttribute("role", "listbox");
     [...sel.options].forEach((o, i) => {
       const it = document.createElement("div");
       it.className = "cs-opt" + (i === sel.selectedIndex ? " sel" : "");
+      it.setAttribute("role", "option");
+      it.setAttribute("aria-selected", String(i === sel.selectedIndex));
       it.innerHTML = label(o);
       it.addEventListener("click", () => {
         sel.selectedIndex = i; sync();
-        sel.dispatchEvent(new Event("change"));
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
         close();
       });
       panel.appendChild(it);
     });
-    wrap.appendChild(panel);
+    document.body.appendChild(panel);
+    // 아래 공간이 목록보다 좁으면 페이지를 먼저 그만큼 올린다 — 위로 뒤집어 열지 않는다(#40).
+    // 패널을 연 뒤에 스크롤이 일어나면(항목이 화면 밖이라 브라우저·사용자가 내리면) 버튼과 떨어져 닫혀 버린다
+    const want = Math.min(300, panel.scrollHeight);
+    const below = window.innerHeight - btn.getBoundingClientRect().bottom - 12;
+    openedAt = performance.now();
+    if (below < want) window.scrollBy(0, want - below);
+    place();
     btn.classList.add("open");
+    btn.setAttribute("aria-expanded", "true");
     document.addEventListener("click", onDoc, true);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", close);
   });
+  sel._csClose = close;
 }
 
 function handleInstanceDeepLink(list) {
@@ -2619,6 +2657,8 @@ async function loadUsers() {
     </tr>`).join("");
   tbody.querySelectorAll("[data-user-role]").forEach((sel) => {
     sel.addEventListener("change", () => markRoleDirty(sel));
+    // 표 안에서도 다른 화면과 같은 드롭다운으로(#40) — 패널이 body에 떠서 가로 스크롤 상자에 잘리지 않는다
+    enhanceSelect(sel);
   });
 }
 
@@ -2644,7 +2684,7 @@ function markRoleDirty(sel) {
  */
 function cancelRoleChange(tr) {
   const sel = tr.querySelector("[data-user-role]");
-  if (sel) sel.value = tr.dataset.role;
+  if (sel) { sel.value = tr.dataset.role; if (sel._csSync) sel._csSync(); }
   tr.querySelector(".user-role-actions").hidden = true;
   tr.querySelector(".user-role-warn").hidden = true;
 }
@@ -2682,6 +2722,8 @@ function setupUsersCard() {
     $(`#${id}`).addEventListener("input", syncUserCreateButton));
   // 역할 고르기도 다른 화면과 같은 드롭다운으로(B6) — 이 파일의 $는 querySelector라 id에는 #을 붙인다
   enhanceSelect($("#user-new-role"));
+  // 작업 맡기기 팝오버의 유형·구간도 같은 드롭다운으로 — 패널이 body에 뜨므로 팝오버 경계에 잘리지 않는다(#40)
+  ["#aiop-new-type", "#aiop-new-window"].forEach((id) => { const el = $(id); if (el) enhanceSelect(el); });
   syncUserCreateButton();
 }
 
