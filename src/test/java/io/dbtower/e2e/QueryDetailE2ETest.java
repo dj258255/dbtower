@@ -265,6 +265,37 @@ class QueryDetailE2ETest {
         assertThat(page.locator("#mode-workbench")).isHidden();
     }
 
+    /**
+     * 보던 화면이 주소에 남는다(#60) — 탭·모니터링 그룹·펼친 상세를 바꾸면 주소가 따라가고, 뒤로 가기는 그 단계로,
+     * 새로고침은 같은 화면으로 돌아온다. 전에는 새로고침·링크 공유가 첫 화면으로 돌아갔다.
+     */
+    @Test
+    void 탭과_펼친_상세가_주소에_남고_뒤로_가기와_새로고침이_그_화면으로_돌아온다() {
+        Page page = consoleAs(USER);
+
+        page.locator(".tab[data-tab='monitor']").click();
+        assertThat(page).hasURL(Pattern.compile("tab=monitor"));
+        page.locator(".mon-tab[data-mon='diag']").click();
+        assertThat(page).hasURL(Pattern.compile("tab=monitor&mon=diag"));
+
+        page.goBack();
+        assertThat(page).hasURL(Pattern.compile("tab=monitor(?!&mon)"));
+        assertThat(page.locator(".mon-tab[data-mon='perf']")).hasClass(Pattern.compile("active"));
+        page.goBack();
+        assertThat(page.locator(".tab[data-tab='top']")).hasClass(Pattern.compile("active"));
+        assertThat(page).not().hasURL(Pattern.compile("tab="));
+
+        page.locator("#top-table tbody tr").first().locator("td").first().click();
+        assertThat(page.locator("#query-detail")).isVisible();
+        assertThat(page).hasURL(Pattern.compile("q=" + QID));
+
+        page.reload();
+        assertThat(page.locator("#query-detail")).isVisible();
+        assertThat(page.locator("#detail-qid")).hasText("a1b2c3…8f90");
+        assertThat(page).hasURL(Pattern.compile("q=" + QID));
+        System.out.printf("MEASURE 새로고침 뒤 주소: %s%n", page.url());
+    }
+
     /** 관제 화면을 그 인스턴스로 연다. 표를 그릴 응답은 라우트로 대신 채운다. */
     private Page consoleAs(String username) {
         return consoleAs(username, null);
