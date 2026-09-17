@@ -312,13 +312,14 @@ const fmtBytes = (v) => {
 };
 
 // 증감 셀: "target값 (▲ diff)" 표기. changePct가 null(base 0)이면 화살표 생략
-function deltaCell(base, target, changePct, digits = 2) {
-  const t = fmtNum(target, digits);
+// unit이 "%"면 증감은 퍼센트포인트(%p)다 — 부하 67%가 70%가 된 것을 "+3%"로 쓰면 비율 변화로 읽힌다
+function deltaCell(base, target, changePct, digits = 2, unit = "") {
+  const t = fmtNum(target, digits) + unit;
   if (changePct == null) return `<span class="num">${t}</span>`;
   const diff = target - base;
   const cls = diff >= 0 ? "delta-up" : "delta-down";
   const arrow = diff >= 0 ? "▲" : "▼";
-  return `<span class="num">${t} <span class="${cls}">(${arrow} ${fmtNum(Math.abs(diff), digits)})</span></span>`;
+  return `<span class="num">${t} <span class="${cls}">(${arrow} ${fmtNum(Math.abs(diff), digits)}${unit === "%" ? "%p" : unit})</span></span>`;
 }
 
 // ---------- 인스턴스 (검색·필터 구동) ----------
@@ -1633,7 +1634,7 @@ async function loadMetrics() {
   }
   state.metricsCpu = m.cpu ?? [];
   drawSimpleChart("#cpu-chart", "#cpu-empty", m.cpu ?? [], "#e5533d", m.cpuNote, "%", 100);
-  drawSimpleChart("#conn-chart", "#conn-empty", m.connections ?? [], "#6672f5", m.connectionsNote);
+  drawSimpleChart("#conn-chart", "#conn-empty", m.connections ?? [], "#0a6aa8", m.connectionsNote);
   if (state.chartMetric === "cpu") drawChart();   // 드래그 차트가 CPU 모드면 새 데이터로 다시 그린다
   loadCommandMetrics(from, to);
 }
@@ -1869,7 +1870,7 @@ function drawChart() {
     ${yTicks}${xTicks}
     ${selRect(state.selections.base, "#f08c2d")}
     ${selRect(state.selections.target, "#22a06b")}
-    <path d="${line}" fill="none" stroke="#6672f5" stroke-width="1.8"/>`;
+    <path d="${line}" fill="none" stroke="#0a6aa8" stroke-width="1.8"/>`;
 
   // 호버 정보 — QPS면 "q/s", CPU 모드면 "%" 단위로 정확 수치를 띄운다
   const unit = state.chartMetric === "cpu" ? "%" : " q/s";
@@ -2055,7 +2056,7 @@ async function runCompare() {
     <tr><th class="num">부하</th><th>쿼리</th><th class="num">QPS</th><th class="num">지연(ms)</th><th class="num">${esc(rowsLabel)}/호출</th></tr>`;
   table.querySelector("tbody").innerHTML = rows.map((q, idx) => `
     <tr data-idx="${idx}" class="${q.newQuery ? "new-query" : ""}">
-      <td>${deltaCell(baseLoad(q), targetLoad(q), loadPctChange(baseLoad(q), targetLoad(q)))}</td>
+      <td>${deltaCell(baseLoad(q), targetLoad(q), loadPctChange(baseLoad(q), targetLoad(q)), 2, "%")}</td>
       <td class="qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${q.newQuery ? '<span class="badge-new">신규</span>' : ""}${queryTextHtml(q.queryText)}</td>
       <td>${deltaCell(q.baseQps, q.targetQps, q.qpsChangePct)}</td>
       <td>${deltaCell(q.baseAvgMs, q.targetAvgMs, q.latencyChangePct, msDigits(q.baseAvgMs, q.targetAvgMs))}</td>
