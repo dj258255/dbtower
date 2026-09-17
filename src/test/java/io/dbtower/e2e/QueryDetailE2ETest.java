@@ -308,7 +308,7 @@ class QueryDetailE2ETest {
                 + "{\\\"Node Type\\\":\\\"Seq Scan\\\",\\\"Relation Name\\\":\\\"orders\\\",\\\"Alias\\\":\\\"o\\\",\\\"Total Cost\\\":45.0,\\\"Plan Rows\\\":222,"
                 + "\\\"Filter\\\":\\\"((status)::text = 'PAID'::text)\\\"}]}]}}]";
         page.route("**/explain**", route -> fulfillJson(route, "{\"plan\":\"" + plan + "\",\"findings\":[]}"));
-        page.locator("#top-table tbody tr").first().locator("td").first().click();
+        page.locator("#top-table tbody tr[data-idx]").first().locator("td").first().click();
         page.locator("#btn-explain").click();
 
         Locator nodes = page.locator("#detail-plan .plan-node");
