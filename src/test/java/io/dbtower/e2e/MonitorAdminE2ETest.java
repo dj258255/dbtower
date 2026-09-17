@@ -283,7 +283,7 @@ class MonitorAdminE2ETest {
         screenshot(page, "monitor-filter-visible.png");
     }
 
-    /** 관리자로 관제를 연다. infra 그룹(제공 도구·사용자)까지 열어 둔다. */
+    /** 관리자로 관제를 연다. 관리 그룹(제공 도구·사용자)까지 열어 둔다. */
     private Page consoleAs(String username, boolean openInfra) {
         BrowserContext context = browser.newContext(new Browser.NewContextOptions()
                 .setTimezoneId("Asia/Seoul").setViewportSize(1512, 900));
@@ -301,7 +301,7 @@ class MonitorAdminE2ETest {
         page.locator("#inst-count").waitFor();
         if (openInfra) {
             page.locator(".tab[data-tab='monitor']").click();   // Monitoring 탭 안에 서브내비가 있다
-            page.locator(".mon-tab[data-mon='infra']").click();
+            page.locator(".mon-tab[data-mon='admin']").click();
             page.locator("#users-card").waitFor();
         }
         return page;
