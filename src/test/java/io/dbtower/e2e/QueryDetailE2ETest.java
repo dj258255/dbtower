@@ -238,6 +238,33 @@ class QueryDetailE2ETest {
         screenshot(page, "querydetail-chat-list-error.png");
     }
 
+    /**
+     * 워크벤치로 넘긴 워크시트 맨 위에 출처(인스턴스·구간·쿼리·신호)가 보이고 관제로 돌아간다(#58).
+     * 전에는 SQL만 넘어가 무엇 때문에 왔는지가 워크벤치에 없었다.
+     */
+    @Test
+    void 워크벤치로_넘기면_출처_한_줄과_돌아가는_길이_보인다() {
+        Page page = consoleAs(USER);
+        page.locator("#top-table tbody tr").first().locator("td").first().click();
+        page.locator("#btn-to-workbench").click();
+
+        Locator origin = page.locator("#wb-origin");
+        assertThat(origin).isVisible();
+        assertThat(origin).containsText("관제에서 넘어옴");
+        assertThat(origin).containsText(instance.getName());
+        assertThat(origin).containsText("조회 ");
+        assertThat(origin).containsText("쿼리 a1b2c3…8f90");
+        assertThat(origin).containsText("부하 100%");
+        assertThat(origin).containsText("평균 40.2ms");
+        assertThat(page.locator("#wb-input")).isVisible();
+        System.out.printf("MEASURE 넘김 출처: %s%n", origin.textContent().replaceAll("\\s+", " "));
+        screenshot(page, "handoff-origin.png");
+
+        origin.locator("button[data-origin='back']").click();
+        assertThat(page.locator("#mode-monitor")).isVisible();
+        assertThat(page.locator("#mode-workbench")).isHidden();
+    }
+
     /** 관제 화면을 그 인스턴스로 연다. 표를 그릴 응답은 라우트로 대신 채운다. */
     private Page consoleAs(String username) {
         return consoleAs(username, null);

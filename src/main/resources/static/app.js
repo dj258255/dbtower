@@ -312,13 +312,14 @@ const fmtBytes = (v) => {
 };
 
 // 증감 셀: "target값 (▲ diff)" 표기. changePct가 null(base 0)이면 화살표 생략
-function deltaCell(base, target, changePct, digits = 2) {
-  const t = fmtNum(target, digits);
+// unit이 "%"면 증감은 퍼센트포인트(%p)다 — 부하 67%가 70%가 된 것을 "+3%"로 쓰면 비율 변화로 읽힌다
+function deltaCell(base, target, changePct, digits = 2, unit = "") {
+  const t = fmtNum(target, digits) + unit;
   if (changePct == null) return `<span class="num">${t}</span>`;
   const diff = target - base;
   const cls = diff >= 0 ? "delta-up" : "delta-down";
   const arrow = diff >= 0 ? "▲" : "▼";
-  return `<span class="num">${t} <span class="${cls}">(${arrow} ${fmtNum(Math.abs(diff), digits)})</span></span>`;
+  return `<span class="num">${t} <span class="${cls}">(${arrow} ${fmtNum(Math.abs(diff), digits)}${unit === "%" ? "%p" : unit})</span></span>`;
 }
 
 // ---------- 인스턴스 (검색·필터 구동) ----------
@@ -1062,7 +1063,7 @@ const AIOP_ITEM_CAP = 240;
 const aiopList = (title, items, extra = "", cap = 0) => (items && items.length)
   ? `<div class="aiop-block ${extra}"><h4>${esc(title)}</h4><ul>${items.map((i) => {
       const text = cap && i.length > cap ? `${i.slice(0, cap)}...` : i;
-      return `<li${cap && i.length > cap ? ` title="${esc(i)}"` : ""}>${esc(text)}</li>`;
+      return `<li${cap && i.length > cap ? ` title="${esc(i)}"` : ""}>${shortQueryIdsInText(esc(text))}</li>`;
     }).join("")}</ul></div>` : "";
 
 async function openAiOperation(jobId, opts = {}) {
@@ -1106,7 +1107,7 @@ async function openAiOperation(jobId, opts = {}) {
     const folded = (title, items, cap = 0) => (items && items.length)
       ? `<details class="aiop-fold"><summary>${esc(title)} <span class="muted">${items.length}개</span></summary><ul>${items.map((i) => {
           const text = cap && i.length > cap ? `${i.slice(0, cap)}…` : i;
-          return `<li>${esc(text)}</li>`;
+          return `<li>${shortQueryIdsInText(esc(text))}</li>`;
         }).join("")}</ul></details>` : "";
     result = [
       aiopList("검증되지 않은 내용", r.unverifiedClaims, "aiop-warn"),
@@ -1412,15 +1413,21 @@ async function loadHealthScore() {
   const summary = $("#score-summary");
   const box = $("#score-result");
   let report;
+  // 재기동 직후에는 서버가 닿지 않는 대상의 시간 초과를 기다리며 처음 계산한다(#80, 실측 15초) — 멈춘 것처럼 보이지 않게 이유를 적는다
+  const slow = setTimeout(() => {
+    if (!fleet.score) box.textContent = "헬스 스코어를 계산하는 중입니다. 응답하지 않는 DB가 있으면 시간 초과를 기다리느라 수십 초 걸릴 수 있습니다.";
+  }, 3000);
   try {
     report = await api("/api/health-score");
   } catch (e) {
     box.classList.add("muted");
     box.textContent = `조회 실패: ${apiMessage(e)}`;
+    clearTimeout(slow);
     fleet.score = null;
     renderAttention();
     return;
   }
+  clearTimeout(slow);
   fleet.score = report;
   renderAttention();
   box.classList.remove("muted");
@@ -1632,7 +1639,7 @@ async function loadMetrics() {
   }
   state.metricsCpu = m.cpu ?? [];
   drawSimpleChart("#cpu-chart", "#cpu-empty", m.cpu ?? [], "#e5533d", m.cpuNote, "%", 100);
-  drawSimpleChart("#conn-chart", "#conn-empty", m.connections ?? [], "#6672f5", m.connectionsNote);
+  drawSimpleChart("#conn-chart", "#conn-empty", m.connections ?? [], "#0a6aa8", m.connectionsNote);
   if (state.chartMetric === "cpu") drawChart();   // 드래그 차트가 CPU 모드면 새 데이터로 다시 그린다
   loadCommandMetrics(from, to);
 }
@@ -1868,7 +1875,7 @@ function drawChart() {
     ${yTicks}${xTicks}
     ${selRect(state.selections.base, "#f08c2d")}
     ${selRect(state.selections.target, "#22a06b")}
-    <path d="${line}" fill="none" stroke="#6672f5" stroke-width="1.8"/>`;
+    <path d="${line}" fill="none" stroke="#0a6aa8" stroke-width="1.8"/>`;
 
   // 호버 정보 — QPS면 "q/s", CPU 모드면 "%" 단위로 정확 수치를 띄운다
   const unit = state.chartMetric === "cpu" ? "%" : " q/s";
@@ -1999,7 +2006,7 @@ async function runQuery(force) {
       <td class="num">${fmtNum(q.rowsExaminedAvg, 0)}</td>
       ${hasPlan ? `<td>${q.plan ? `<span class="plan-badge ${/COLLSCAN/i.test(q.plan) ? "plan-bad" : "plan-ok"}">${esc(q.plan)}</span>` : '<span class="muted">—</span>'}</td>` : ""}
     </tr>`).join("");
-  bindRowClicks(stats.map((q) => ({ queryId: q.queryId, queryText: q.queryText })));
+  bindRowClicks(stats.map((q) => ({ queryId: q.queryId, queryText: q.queryText, loadPct: q.loadPct, avgLatencyMs: q.avgLatencyMs })));
 }
 
 // ---------- Top Query: 비교 조회 (증감 + NEW) ----------
@@ -2054,7 +2061,7 @@ async function runCompare() {
     <tr><th class="num">부하</th><th>쿼리</th><th class="num">QPS</th><th class="num">지연(ms)</th><th class="num">${esc(rowsLabel)}/호출</th></tr>`;
   table.querySelector("tbody").innerHTML = rows.map((q, idx) => `
     <tr data-idx="${idx}" class="${q.newQuery ? "new-query" : ""}">
-      <td>${deltaCell(baseLoad(q), targetLoad(q), loadPctChange(baseLoad(q), targetLoad(q)))}</td>
+      <td>${deltaCell(baseLoad(q), targetLoad(q), loadPctChange(baseLoad(q), targetLoad(q)), 2, "%")}</td>
       <td class="qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${q.newQuery ? '<span class="badge-new">신규</span>' : ""}${queryTextHtml(q.queryText)}</td>
       <td>${deltaCell(q.baseQps, q.targetQps, q.qpsChangePct)}</td>
       <td>${deltaCell(q.baseAvgMs, q.targetAvgMs, q.latencyChangePct, msDigits(q.baseAvgMs, q.targetAvgMs))}</td>
@@ -2387,6 +2394,16 @@ function shortQueryId(id) {
     } catch { hex = s; }
   }
   return hex.length <= 12 ? hex : `${hex.slice(0, 6)}…${hex.slice(-4)}`;
+}
+
+// AI 소견·근거·채팅 답에 섞인 PostgreSQL queryid(부호 있는 64비트 10진수)를 표와 같은 16진수 축약으로 보인다(#82).
+// 표는 feadff…4702인데 근거는 -2885330479908940062라 같은 쿼리인지 대조할 수 없었다. 표시만 바꾸고 원래 값은 title에 남긴다 —
+// 모델에 간 사실·저장된 결과는 그대로다. 절댓값 10^15 이상만 본다: 바이트·행 수·밀리초 시각(13자리)은 이만큼 크지 않다.
+// 입력은 이미 esc를 거친 문자열이어야 한다(숫자·부호만 바꾸므로 이스케이프를 깨지 않는다)
+const QUERY_ID_IN_TEXT = /(^|[^\w.])(-?\d{16,20})(?!\w|\.\d)/g;
+function shortQueryIdsInText(escaped) {
+  return escaped.replace(QUERY_ID_IN_TEXT, (m, lead, id) =>
+    `${lead}<span class="mono qid-inline" title="쿼리 ID ${id}">${shortQueryId(id)}</span>`);
 }
 
 function renderAntiPatterns(rows) {
@@ -2954,6 +2971,29 @@ async function loadMcpCommand() {
 // 대시보드에서 워크벤치로 넘기기. SQL은 URL에 싣지 않는다 — 정규화 쿼리 텍스트가 수 KB면 인코딩 후 요청 줄 상한(8KB)을 넘어
 // 400이 난다. 같은 브라우저 localStorage에 한 번 쓰고 워크벤치가 읽자마자 지운다(새 탭에서도 같은 출처라 보인다)
 const HANDOFF_PREFIX = "dbtower.handoff.";
+// 워크벤치가 "무엇 때문에 왔는지" 한 줄로 보일 출처(#58) — SQL만 넘어가 어떤 인스턴스의 어떤 구간·신호였는지 사라졌다.
+// 문장 조각만 넘기고 워크벤치는 그대로 이스케이프해 보인다
+function handoffOrigin() {
+  const parts = [state.instance.name];
+  const range = (from, to) => from && to ? `${from.slice(5).replace("T", " ")} ~ ${to.slice(0, 10) === from.slice(0, 10) ? to.slice(11) : to.slice(5).replace("T", " ")}` : "";
+  const target = range($("#target-from").value, $("#target-to").value);
+  if (target) parts.push(`조회 ${target}`);
+  if (state.compareMode) {
+    const base = range($("#base-from").value, $("#base-to").value);
+    if (base) parts.push(`비교 ${base}`);
+  }
+  const q = state.currentQuery;
+  if (q) {
+    parts.push(`쿼리 ${shortQueryId(q.queryId)}`);
+    if (q.newQuery) parts.push("신규 쿼리");
+    else if (q.qpsChangePct != null) parts.push(`QPS ${q.qpsChangePct >= 0 ? "+" : ""}${fmtNum(q.qpsChangePct, 0)}%`);
+    if (q.latencyChangePct != null) parts.push(`지연 ${q.latencyChangePct >= 0 ? "+" : ""}${fmtNum(q.latencyChangePct, 0)}%`);
+    if (q.loadPct != null) parts.push(`부하 ${fmtNum(q.loadPct)}%`);
+    if (q.avgLatencyMs != null) parts.push(`평균 ${fmtNum(q.avgLatencyMs, msDigits(q.avgLatencyMs))}ms`);
+  }
+  return { instanceId: state.instance.id, parts };
+}
+
 function handToWorkbench(kind, sql, reason = "") {
   if (!state.instance || !sql) return;
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -2962,7 +3002,7 @@ function handToWorkbench(kind, sql, reason = "") {
     Object.keys(localStorage).filter((k) => k.startsWith(HANDOFF_PREFIX)).forEach((k) => {
       try { if (Date.now() - JSON.parse(localStorage.getItem(k)).at > 10 * 60000) localStorage.removeItem(k); } catch { localStorage.removeItem(k); }
     });
-    localStorage.setItem(HANDOFF_PREFIX + id, JSON.stringify({ kind, sql, reason, at: Date.now() }));
+    localStorage.setItem(HANDOFF_PREFIX + id, JSON.stringify({ kind, sql, reason, origin: handoffOrigin(), at: Date.now() }));
   } catch {
     setInstanceNotice("브라우저 저장소를 쓸 수 없어 워크벤치로 넘기지 못했습니다. SQL을 복사해 워크벤치에 붙여 넣으세요.");
     return;
@@ -4176,7 +4216,7 @@ function chatListTime(iso) {
 // 표·제목은 지금 프롬프트 규약("JSON 하나만 출력")에서 실제로 나오지 않는다.
 // 순서가 중요하다 — esc를 먼저 걸고 토큰만 감싼다. 뒤집으면 답에 섞인 태그가 그대로 실행된다.
 function chatInline(escaped) {
-  return escaped.replace(/`([^`]+)`|\*\*([^*]+)\*\*/g,
+  return shortQueryIdsInText(escaped).replace(/`([^`]+)`|\*\*([^*]+)\*\*/g,
     (m, code, bold) => (code != null ? `<code>${code}</code>` : `<strong>${bold}</strong>`));
 }
 

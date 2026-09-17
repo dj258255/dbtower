@@ -710,10 +710,14 @@
     <div class="wb-tabs">
       <div id="wb-sheets" class="wb-sheet-tabs" role="tablist" aria-label="워크시트"></div>
       <!-- 활성 탭 안으로 옮겨 다니는 두 요소. id는 그대로 유지한다(이름 편집은 활성 탭 더블클릭 때만) -->
-      <span id="wb-version" class="wb-version" hidden></span>
+      <button type="button" id="wb-version" class="wb-version" hidden aria-haspopup="dialog" aria-expanded="false" aria-controls="wb-version-panel" title="이 워크시트의 버전 기록"></button>
       <input id="wb-title" class="wb-tab-title" maxlength="100" aria-label="워크시트 이름" hidden>
       <button id="wb-sheet-add" class="btn btn-small wb-tab-add" type="button" title="새 워크시트" aria-label="새 워크시트">+</button>
     </div>
+    <!-- 버전 기록(#63) — 대화 칸에 쌓이던 직접 실행·되돌림 카드를 여기로 모았다. body에 띄워 탭 줄의 가로 스크롤에 잘리지 않게 한다 -->
+    <div id="wb-version-panel" class="wb-version-panel" role="dialog" aria-label="버전 기록" hidden></div>
+    <!-- 관제에서 넘어온 워크시트의 출처(#58) — 어떤 인스턴스·구간·신호 때문에 왔는지와 돌아가는 길 -->
+    <div id="wb-origin" class="wb-origin" hidden></div>
     <div class="editor" id="wb-editor">
       <pre class="editor-highlight" aria-hidden="true"><code id="wb-highlight"></code></pre>
       <textarea id="wb-input" class="editor-input" spellcheck="false" autocomplete="off" autocapitalize="off"

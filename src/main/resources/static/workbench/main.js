@@ -5,7 +5,7 @@ import { request, streamEvents, esc, csrfToken, ApiError, errText, localTime } f
 import { SqlEditor, highlight } from "./editor.js";
 import { renderTree } from "./schema-tree.js";
 import { renderGrid } from "./grid.js";
-import { renderTimeline, renderChips, updatePending } from "./chat.js";
+import { renderTimeline, renderChips, updatePending, renderVersionPanel } from "./chat.js";
 import { renderDiff } from "./diff.js";
 import { TicketPanel } from "./tickets.js";
 import { renderTableDetail } from "./table-detail.js";
@@ -43,6 +43,7 @@ const state = {
   sheetError: null,
   archiveConfirm: null,
   timeline: [],
+  origins: new Map(), // 워크시트 id -> 관제에서 넘어온 출처 {instanceId, parts}(#58). 이 화면을 연 동안만 기억한다
   chips: [],
   picking: false,
   allowValues: false,
@@ -175,9 +176,34 @@ async function receiveHandoff(h) {
   }
   // 조회 SQL은 새 워크시트에 채운다 — 지금 열린 워크시트의 작업을 덮어쓰지 않게
   await createSheet("대시보드에서 넘긴 쿼리");
+  if (state.sheet && h.origin && Array.isArray(h.origin.parts)) {
+    state.origins.set(state.sheet.id, h.origin);
+    drawOrigin();
+  }
   editor.value = h.sql;
   onEdit();
   editor.focus();
+}
+
+// 넘어온 워크시트 맨 위 출처 한 줄과 관제로 돌아가는 길(#58)
+function drawOrigin() {
+  const box = $("wb-origin");
+  const o = state.sheet ? state.origins.get(state.sheet.id) : null;
+  box.hidden = !o;
+  if (!o) { box.innerHTML = ""; return; }
+  box.innerHTML = `<span class="wb-origin-label">관제에서 넘어옴</span>
+    <span class="wb-origin-parts">${o.parts.map((p) => `<span>${esc(p)}</span>`).join("")}</span>
+    <span class="wb-origin-actions">
+      <button type="button" class="link-btn" data-origin="back">관제로 돌아가기</button>
+      <button type="button" class="wb-origin-x" data-origin="close" aria-label="출처 닫기" title="닫기">×</button>
+    </span>`;
+  box.onclick = (e) => {
+    const b = e.target.closest("button[data-origin]");
+    if (!b) return;
+    if (b.dataset.origin === "close") { state.origins.delete(state.sheet.id); drawOrigin(); return; }
+    // 셸의 모드 탭을 누른 것과 같다 — 셸이 워크벤치의 현재 인스턴스로 관제를 연다
+    document.querySelector('.mode-tab[data-mode="monitor"]')?.click();
+  };
 }
 
 function bindChrome() {
@@ -202,6 +228,7 @@ function bindChrome() {
   // 툴바의 행 상한도 관제와 같은 드롭다운으로(B6) — 버튼 모양은 툴바 규칙(알약·같은 높이)이 덮는다
   enhanceSelect($("wb-limit"));
   bindInfoTips();
+  setupVersionPanel();
 }
 
 /**
@@ -413,6 +440,7 @@ async function openSheet(id) {
   $("wb-title").value = state.sheet.title;
   $("wb-version").textContent = state.sheet.latestVersion ? `최신 v${state.sheet.latestVersion}` : "버전 없음";
   editor.value = state.sheet.currentSql || "";
+  drawOrigin();
   state.chips = [];
   state.lastView = null;
   hideOverlay();
@@ -683,14 +711,13 @@ async function loadTimeline() {
   drawTimeline();
 }
 
-function drawTimeline() {
-  renderTimeline($("wb-timeline"), state.timeline, {
+function versionHandlers() {
+  return {
     currentVersion: state.sheet ? state.sheet.latestVersion : null,
-    // 흘려 받는 중인 답은 질문을 보낸 워크시트에만 그린다 — 다른 워크시트를 열면 남의 말풍선이 붙었다(148절 감사)
-    pending: state.pendingQuestion && state.sheet && state.pendingQuestion.sheetId === state.sheet.id ? state.pendingQuestion : null,
-    onApply: (sql) => { editor.value = sql; onEdit(); editor.focus(); },
-    onPreview: (sql) => previewSql(sql),
+    onApply: (sql) => { closeVersionPanel(); editor.value = sql; onEdit(); editor.focus(); },
+    onPreview: (sql) => { closeVersionPanel(); previewSql(sql); },
     onRestore: async (versionNo) => {
+      closeVersionPanel();
       const v = await request(`/api/workbench/worksheets/${state.sheet.id}/versions/${versionNo}/restore`, { method: "POST" });
       await reloadSheets();
       editor.value = v.sql;
@@ -699,7 +726,48 @@ function drawTimeline() {
       classifySoon();
       loadTimeline();
     },
+  };
+}
+
+function drawTimeline() {
+  renderTimeline($("wb-timeline"), state.timeline, {
+    ...versionHandlers(),
+    // 흘려 받는 중인 답은 질문을 보낸 워크시트에만 그린다 — 다른 워크시트를 열면 남의 말풍선이 붙었다(148절 감사)
+    pending: state.pendingQuestion && state.sheet && state.pendingQuestion.sheetId === state.sheet.id ? state.pendingQuestion : null,
   });
+  if (!$("wb-version-panel").hidden) renderVersionPanel($("wb-version-panel"), state.timeline, versionHandlers());
+}
+
+// 버전 기록 패널(#63) — 탭의 "최신 vN"에서 아래로 연다. 드롭다운과 같은 방식으로 body 좌표에 띄운다
+function openVersionPanel() {
+  const panel = $("wb-version-panel");
+  const badge = $("wb-version");
+  if (panel.parentElement !== document.body) document.body.appendChild(panel);
+  renderVersionPanel(panel, state.timeline, versionHandlers());
+  const r = badge.getBoundingClientRect();
+  panel.hidden = false;
+  const width = panel.offsetWidth;
+  panel.style.top = `${Math.round(r.bottom + 6)}px`;
+  panel.style.left = `${Math.round(Math.max(8, Math.min(r.left, window.innerWidth - width - 8)))}px`;
+  badge.setAttribute("aria-expanded", "true");
+}
+
+function closeVersionPanel() {
+  const panel = $("wb-version-panel");
+  if (panel.hidden) return;
+  panel.hidden = true;
+  $("wb-version").setAttribute("aria-expanded", "false");
+}
+
+function setupVersionPanel() {
+  $("wb-version").addEventListener("click", (e) => {
+    e.stopPropagation();
+    $("wb-version-panel").hidden ? openVersionPanel() : closeVersionPanel();
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#wb-version-panel, #wb-version")) closeVersionPanel();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeVersionPanel(); });
 }
 
 async function ask() {
