@@ -139,7 +139,8 @@ class AiOperationConsoleE2ETest {
         Page page = consoleAs(REQUESTER);
         // 작업 유형·구간은 팝오버 안에 있다 — 입력창에 글이 있어야 여는 버튼이 살아난다(syncChatComposer)
         page.fill("#diagnose-question", PROMPT);
-        page.click("#btn-aiop-open");
+        page.click(".chat-mode[data-mode='task']");   // 작업 유형·구간은 "작업으로 맡기기"를 고르고 보내면 뜬다(#57)
+        page.click("#btn-diagnose");
         pick(page, page.locator("#aiop-new-type"), "QUERY_DIAGNOSIS");
         pick(page, page.locator("#aiop-new-window"), "60");
 
@@ -216,7 +217,8 @@ class AiOperationConsoleE2ETest {
     private String submitJob(Page page, String type, String windowMinutes) {
         // 유형·구간은 입력창 아래 팝오버 안에 있다 — 글을 먼저 넣어야 여는 버튼이 살아난다(syncChatComposer)
         page.fill("#diagnose-question", PROMPT);
-        page.click("#btn-aiop-open");
+        page.click(".chat-mode[data-mode='task']");   // 작업 유형·구간은 "작업으로 맡기기"를 고르고 보내면 뜬다(#57)
+        page.click("#btn-diagnose");
         pick(page, page.locator("#aiop-new-type"), type);
         pick(page, page.locator("#aiop-new-window"), windowMinutes);
         page.click("#btn-aiop-submit");

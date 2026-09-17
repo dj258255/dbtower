@@ -979,6 +979,7 @@ async function selectInstance(instance, card) {
   // 앞 인스턴스의 펼친 상세가 새 주소에 실리지 않게 먼저 닫는다(첫 조회도 어차피 닫는다)
   if (state.currentQuery) closeDetail();
   syncMonitorUrl();
+  chat.attached = null;
   renderInstanceMatches(); // 선택 반영 — 선택 카드를 맨 위 유지·상세 펼침·하이라이트
   renderChat({ follow: true }); // AI 칸은 잠시 그대로 — 아래 로더가 서버에서 그 인스턴스 대화를 다시 읽어 그린다
   $("#time-panel").hidden = false;
@@ -1271,8 +1272,10 @@ async function submitAiOperation() {
   const btn = $("#btn-aiop-submit");
   const input = $("#diagnose-question");
   const inst = state.instance;
-  const prompt = input.value.trim();
-  if (!inst || !prompt || btn.dataset.busy) return;
+  const typed = input.value.trim();
+  const att = currentAttachment();
+  const prompt = att ? `쿼리 ${att.queryId}: ${att.sql}\n\n${typed}` : typed;
+  if (!inst || !typed || btn.dataset.busy) return;
   const turns = chatTurns();
   const say = (text, jobId) => {
     status.textContent = text;
@@ -1292,7 +1295,7 @@ async function submitAiOperation() {
       body: JSON.stringify({ type, instanceId: inst.id,
         windowMinutes: Number($("#aiop-new-window").value), prompt, trigger: "WEB" }),
     });
-    turns.push({ role: "user", text: prompt });
+    turns.push({ role: "user", text: typed, attached: att });
     input.value = "";
     autoGrowChatInput();
     closeAiOpPopover();
@@ -2188,12 +2191,11 @@ async function runCompare() {
 const DETAIL_RUN = {
   explain: () => runExplain(),
   schema: () => runReferencedSchema(),
-  ai: () => runAiAnalysis(),
   advisor: () => runIndexAdvisor(),
   antipattern: () => runAntiPatterns(),
 };
 const DETAIL_VIEWS = {
-  explain: "plan-section", schema: "schema-section", ai: "ai-section",
+  explain: "plan-section", schema: "schema-section",
   advisor: "advisor-section", antipattern: "antipattern-section",
 };
 // 어느 SQL의 결과인지 — 토글이 다시 조회할지 판단하는 근거다
@@ -2415,8 +2417,6 @@ function openDetail(query, tr) {
   $("#advisor-columns").value = "";
   $("#advisor-result").innerHTML = "";
   $("#antipattern-result").innerHTML = "";
-  $("#deep-section").hidden = true;
-  $("#deep-result").innerHTML = "";
   $("#inquiry-section").hidden = true;
   $("#inquiry-note").value = "";
   $("#inquiry-result").innerHTML = "";
@@ -2723,50 +2723,58 @@ function aiAnalysisHtml(text) {
   return verdict + chatAnswerHtml(blocks.join("\n\n"));
 }
 
-async function runAiAnalysis() {
-  const sql = $("#detail-sql").value.trim();
-  if (!sql) return;
-  const btn = $("#btn-ai");
-  const out = $("#detail-ai"), stage = $("#ai-stage");
-  btn.classList.add("loading");
-  $("#ai-section").hidden = false;
-  out.textContent = "";
-  stage.textContent = "실행계획을 조회하는 중";
-  const startedAt = Date.now();
-  let written = "", firstTextAt = null, result = null;
+// 붙인 쿼리의 판단 기준 분석(#57) — 쿼리 상세의 "AI 분석" 섹션이던 것을 대화 턴으로 옮겼다.
+// 실행계획·규칙 지적은 쿼리 상세 섹션에도 채운다(같은 결과를 두 번 조회하지 않게)
+async function runQueryAnalysisTurn(att, question) {
+  const inst = state.instance;
+  const turns = chatTurns();
+  if (!inst || !turns || chat.running) return;
+  turns.push({ role: "user", text: question || "이 쿼리를 판단 기준으로 분석해 줘", attached: att });
+  const turn = { role: "ai", kind: "analysis", status: "running", stage: "실행계획을 조회하는 중", steps: [], startedAt: Date.now() };
+  turns.push(turn);
+  const controller = new AbortController();
+  chat.running = { instanceId: inst.id, controller };
+  renderChat({ follow: true });
+  const redraw = () => { if (state.instance?.id === inst.id) renderChat(); };
+  let written = "", result = null, findings = [];
   try {
-    await streamSse(`/api/instances/${state.instance.id}/ai-analysis/stream`, { sql }, (name, data) => {
+    await streamSse(`/api/instances/${inst.id}/ai-analysis/stream`, { sql: att.sql }, (name, data) => {
       if (name === "plan") {
-        $("#plan-section").hidden = false;
-        fillPlan($("#detail-plan"), data);
-        $("#detail-findings").innerHTML = (data.findings ?? []).map((f) =>
-          `<div class="finding-item">${esc(f)}</div>`).join("");
-        stage.textContent = `실행계획을 받았습니다(${((Date.now() - startedAt) / 1000).toFixed(1)}초). AI가 판단 기준 문서 위에서 분석하는 중`;
+        findings = data.findings ?? [];
+        if (state.currentQuery && String(state.currentQuery.queryId) === String(att.queryId)) {
+          $("#plan-section").hidden = false;
+          fillPlan($("#detail-plan"), data);
+          $("#detail-findings").innerHTML = findings.map((f) => `<div class="finding-item">${esc(f)}</div>`).join("");
+        }
+        turn.stage = "AI가 판단 기준 문서 위에서 분석하는 중";
       } else if (name === "text") {
-        if (firstTextAt == null) firstTextAt = Date.now();
         written += data.delta;
-        out.innerHTML = aiAnalysisHtml(written);
-        stage.textContent = "AI가 답을 쓰는 중";
+        turn.partial = written;
+        turn.stage = "AI가 답을 쓰는 중";
       } else if (name === "result") {
         result = data;
+        return;
       } else if (name === "error") {
         throw new Error(data.message);
       }
-    });
+      redraw();
+    }, controller.signal);
     if (!result) throw new Error("분석 결과가 끝까지 오지 않았습니다(연결 끊김)");
-    out.innerHTML = result.aiAnalysis ? aiAnalysisHtml(result.aiAnalysis)
-      : `<p class="muted">AI 분석이 꺼져 있습니다(ANTHROPIC_API_KEY도 claude CLI도 없음) — 규칙 기반 지적까지만 표시합니다.</p>`;
-    const first = firstTextAt ? ` · 첫 글자 ${((firstTextAt - startedAt) / 1000).toFixed(1)}초` : "";
-    stage.textContent = `완료 ${((Date.now() - startedAt) / 1000).toFixed(1)}초${first}`;
+    turn.status = "done";
+    turn.html = result.aiAnalysis ? aiAnalysisHtml(result.aiAnalysis)
+      : `<p class="muted">AI 분석이 꺼져 있습니다(ANTHROPIC_API_KEY도 claude CLI도 없음) — 규칙 기반 지적까지만 보입니다.</p>`;
+    turn.evidence = ["실행계획", `규칙 지적 ${(result.findings ?? findings).length}개`, "판단 기준 문서(ai-analysis-rules)"];
     state.lastPlan = result.plan;
     state.lastFindings = result.findings ?? [];
     state.lastAi = result.aiAnalysis ?? null;
   } catch (e) {
-    out.innerHTML = `<p class="chat-error">분석하지 못했습니다: ${esc(apiMessage(e))}</p>`;
-    stage.textContent = "";
+    if (e.name === "AbortError") turn.status = "stopped";
+    else { turn.status = "error"; turn.error = apiMessage(e); }
   } finally {
-    btn.classList.remove("loading");
-    markDetailFresh("ai");
+    turn.took = Date.now() - turn.startedAt;
+    chat.running = null;
+    redraw();
+    syncChatComposer();
   }
 }
 
@@ -2825,96 +2833,82 @@ async function runIndexAdvisor() {
   }
 }
 
-// 심층 원인 진단 (D9) — 실제 실행 계획으로 카디널리티 괴리·근본원인을 짚는다.
+// 실제 실행 진단 (D9, #57에서 대화 턴으로) — 실제 실행 계획으로 카디널리티 괴리·근본원인을 짚는다.
 // explain(추정)과 달리 쿼리를 실제 실행하므로 운영자·관리자 전용(서버가 인가). 파라미터 자리는 실제 값이어야 한다.
-async function runDeepDiagnose() {
-  const sql = $("#detail-sql").value.trim();
-  if (!sql) return;
-  // 이 진단만 쿼리를 실제로 실행한다 — 통계의 정규화 텍스트($1·?)를 그대로 보내면 대상 DB가 바인드 단계에서
-  // 거부하고("bind message supplies 0 parameters"), 화면에는 errorId만 남아 서버 장애처럼 보인다(162절).
-  // 보내기 전에 여기서 막고 무엇을 고쳐야 하는지 적는다.
+// SQL은 붙일 때가 아니라 보낼 때의 쿼리 상세 편집칸 값이다 — 자리표시자를 값으로 바꾼 뒤 보낼 수 있어야 한다
+async function runDeepTurn(att, before = null) {
+  const inst = state.instance;
+  const turns = chatTurns();
+  if (!inst || !turns || chat.running) return;
+  const sql = state.currentQuery && String(state.currentQuery.queryId) === String(att.queryId) ? detailSql() : att.sql;
+  turns.push({ role: "user", text: before ? "수정안으로 다시 실제 실행 진단" : "이 쿼리를 실제로 실행해 진단해 줘", attached: att });
+  const turn = { role: "ai", kind: "deep", status: "running", stage: "쿼리를 대상 DB에서 실제로 실행하는 중(시간 제한)", steps: [], startedAt: Date.now() };
+  turns.push(turn);
+  // 이 진단만 쿼리를 실제로 실행한다 — 정규화 텍스트($1·?)를 그대로 보내면 대상 DB가 바인드 단계에서 거부한다(162절)
   const placeholder = sql.match(/\$\d+|(?<![\w'"])\?(?![\w'"])|:\w+/);
   if (placeholder) {
-    $("#deep-section").hidden = false;
-    $("#deep-result").innerHTML = `<div class="finding-item">파라미터 자리가 남아 있습니다 — `
-      + `<code>${esc(placeholder[0])}</code>`
-      + `<div class="muted">이 진단은 쿼리를 대상 DB에서 실제로 실행하므로 자리표시자를 그대로 보낼 수 없습니다. `
-      + `위 SQL 편집칸에서 실제 값으로 바꾼 뒤 다시 눌러 주세요(추정만 하는 "실행계획 보기"는 그대로 됩니다).</div></div>`;
+    turn.status = "done";
+    turn.took = 0;
+    turn.html = `<p>파라미터 자리 <code>${esc(placeholder[0])}</code>가 남아 있어 실행하지 않았습니다.</p>
+      <p class="muted">쿼리 상세의 SQL 편집칸에서 자리를 실제 값으로 바꾼 뒤 다시 보내 주세요. 추정만 하는 실행계획은 그대로 볼 수 있습니다.</p>`;
+    turn.evidence = [];
+    renderChat({ follow: true });
     return;
   }
-  const btn = $("#btn-deep-run");
-  btn.classList.add("loading");
-  $("#deep-section").hidden = false;
-  const result = $("#deep-result");
-  result.innerHTML = '<div class="muted">실제 실행 계획으로 진단 중... (쿼리를 실제 실행 — 타임아웃 적용)</div>';
+  const controller = new AbortController();
+  chat.running = { instanceId: inst.id, controller };
+  renderChat({ follow: true });
   try {
-    let data;
-    try {
-      data = await api(`/api/instances/${state.instance.id}/deep-diagnose`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
-      });
-    } catch (e) {
-      result.innerHTML = `<div class="finding-item">진단 실패: ${esc(apiMessage(e))}</div>`;
-      return;
-    }
-    // 표시 순서 원칙(외부 리뷰 반영): 근본원인이 있으면 "원인 -> 증상" 순으로.
-    // 괴리(증상)가 첫 카드면 사용자가 "통계 갱신(ANALYZE)"이라는 엉뚱한 처방으로 빠질 수 있다.
-    // 원인을 못 찾았을 때만 괴리가 헤드라인이 된다 — 그때는 그게 유일한 단서라서다.
-    const causes = data.rootCauses ?? [];
-    let html = "";
+    const data = await api(`/api/instances/${inst.id}/deep-diagnose`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }), signal: controller.signal,
+    });
+    turn.status = "done";
+    turn.html = deepDiagnosisHtml(data, before);
+    turn.evidence = ["실제 실행 계획", `근본 원인 ${(data.rootCauses ?? []).length}건`, data.worstGap ? `추정 괴리 ${fmtNum(data.worstGap.ratio)}배` : "추정 괴리 없음"];
+    turn.deep = { sql, att, summary: data.worstGap ? `괴리 ${fmtNum(data.worstGap.ratio)}배` : "괴리 없음", causeCount: (data.rootCauses ?? []).length };
+  } catch (e) {
+    if (e.name === "AbortError") turn.status = "stopped";
+    else { turn.status = "error"; turn.error = apiMessage(e); }
+  } finally {
+    turn.took = Date.now() - turn.startedAt;
+    chat.running = null;
+    if (state.instance?.id === inst.id) renderChat();
+    syncChatComposer();
+  }
+}
 
-    // before/after 검증 루프: 수정안 재진단이면 이전 결과와의 비교 스트립을 먼저 보여준다
-    if (state.deepBefore && state.deepBefore.sql !== sql) {
-      const b = state.deepBefore;
-      const now = data.worstGap ? `괴리 ${fmtNum(data.worstGap.ratio)}배` : "괴리 없음";
-      html += `<div class="finding-item"><strong>수정 전 -> 후</strong> — `
-        + `${esc(b.summary)} -> ${esc(now)}, 근본원인 ${b.causeCount}건 -> ${causes.length}건</div>`;
+function deepDiagnosisHtml(data, before) {
+  // 표시 순서 원칙(외부 리뷰 반영): 근본원인이 있으면 "원인 -> 증상" 순으로.
+  // 괴리(증상)가 첫 카드면 사용자가 "통계 갱신(ANALYZE)"이라는 엉뚱한 처방으로 빠질 수 있다.
+  const causes = data.rootCauses ?? [];
+  let html = "";
+  if (before) {
+    const now = data.worstGap ? `괴리 ${fmtNum(data.worstGap.ratio)}배` : "괴리 없음";
+    html += `<div class="finding-item"><strong>수정 전 -> 후</strong> — ${esc(before.summary)} -> ${esc(now)}, 근본원인 ${before.causeCount}건 -> ${causes.length}건</div>`;
+  }
+  if (causes.length) {
+    html += causes.map((c) => `<div class="finding-item"><span class="advisor-status unsupported">근본 원인 — ${esc(c.cause)}</span>`
+      + `<div class="advisor-finding-detail">신호: ${esc(c.signal)}</div>`
+      + `<div class="advisor-finding-reco">${esc(c.detail)}</div>`
+      + (c.suggestedSql ? `<button type="button" class="btn btn-small deep-retry" data-sql="${esc(c.suggestedSql)}">수정안으로 다시 진단(전후 비교)</button>` : "")
+      + `</div>`).join("");
+    if (data.worstGap) {
+      const g = data.worstGap;
+      html += `<div class="finding-item"><strong>증상 — 카디널리티 오추정</strong>(위 원인의 부산물 — 통계 갱신으로는 안 풀린다) — ${esc(g.node)}: `
+        + `추정 ${fmtNum(g.estimatedRows, 0)}행 vs 실제 ${fmtNum(g.actualRows, 0)}행(약 ${fmtNum(g.ratio)}배)</div>`;
     }
-    state.deepBefore = null;
-
-    if (causes.length) {
-      html += causes.map((c) => {
-        let card = `<div class="finding-item"><span class="advisor-status unsupported">근본 원인 — ${esc(c.cause)}</span>`
-          + `<div class="advisor-finding-detail">신호: ${esc(c.signal)}</div>`
-          + `<div class="advisor-finding-reco">${esc(c.detail)}</div>`;
-        if (c.suggestedSql) {
-          card += `<button class="btn btn-small deep-retry" data-sql="${esc(c.suggestedSql)}">수정안으로 재진단 (before/after)</button>`;
-        }
-        return card + `</div>`;
-      }).join("");
-      if (data.worstGap) {
-        const g = data.worstGap;
-        html += `<div class="finding-item"><strong>증상 — 카디널리티 오추정</strong> (위 원인의 부산물: 변형된 술어에는 `
-          + `인덱스 통계를 못 써 추정이 어긋남 — 통계 갱신으로는 안 풀린다) — ${esc(g.node)}: `
-          + `추정 ${fmtNum(g.estimatedRows, 0)}행 vs 실제 ${fmtNum(g.actualRows, 0)}행 (약 ${fmtNum(g.ratio)}배 괴리)</div>`;
-      }
+  } else {
+    if (data.worstGap) {
+      const g = data.worstGap;
+      html += `<div class="finding-item"><strong>카디널리티 오추정</strong> — ${esc(g.node)}: 추정 ${fmtNum(g.estimatedRows, 0)}행 vs 실제 ${fmtNum(g.actualRows, 0)}행(약 ${fmtNum(g.ratio)}배)</div>`;
     } else {
-      if (data.worstGap) {
-        const g = data.worstGap;
-        html += `<div class="finding-item"><strong>카디널리티 오추정</strong> — ${esc(g.node)}: `
-          + `추정 ${fmtNum(g.estimatedRows, 0)}행 vs 실제 ${fmtNum(g.actualRows, 0)}행 `
-          + `(약 ${fmtNum(g.ratio)}배 괴리)</div>`;
-      } else {
-        html += `<div class="muted">추정·실제 행수 괴리(10배+) 지점 없음 — 카디널리티는 대체로 맞음.</div>`;
-      }
-      html += `<div class="muted">근본원인 규칙 매칭 없음 — 형변환·컬럼함수·선두 누락 신호가 발견되지 않음.</div>`;
+      html += `<div class="muted">추정·실제 행수 괴리(10배+) 지점 없음 — 카디널리티는 대체로 맞음.</div>`;
     }
-    if ((data.notes ?? []).length) {
-      html += `<div class="advisor-note muted">${data.notes.map(esc).join(" · ")}</div>`;
-    }
-    html += `<h3>실제 실행 계획</h3><pre class="codeblock">${planHtml(data.plan)}</pre>`;
-    result.innerHTML = html;
-    // 수정안 원클릭 재진단 — 이전 결과 요약을 담아두고 SQL을 바꿔 다시 돌린다
-    result.querySelectorAll(".deep-retry").forEach((b) => b.addEventListener("click", () => {
-      state.deepBefore = {
-        sql,
-        summary: data.worstGap ? `괴리 ${fmtNum(data.worstGap.ratio)}배` : "괴리 없음",
-        causeCount: causes.length,
-      };
-      $("#detail-sql").value = b.dataset.sql;
-      runDeepDiagnose();
-    }));
-  } finally { btn.classList.remove("loading"); }
+    html += `<div class="muted">근본원인 규칙 매칭 없음 — 형변환·컬럼함수·선두 누락 신호가 발견되지 않음.</div>`;
+  }
+  if ((data.notes ?? []).length) html += `<div class="advisor-note muted">${data.notes.map(esc).join(" · ")}</div>`;
+  html += `<details class="plan-raw"><summary>실제 실행 계획</summary><pre class="codeblock">${planHtml(data.plan)}</pre></details>`;
+  return html;
 }
 
 // 현재 상세 패널의 쿼리·실행계획·규칙 지적·AI 분석을 모아 DB팀에 문의(웹훅 push).
@@ -4282,7 +4276,59 @@ async function streamSse(path, body, onEvent, signal) {
 // 새 대화를 만든다(빈 대화가 목록에 쌓이지 않게). 앞선 맥락은 서버가 그 대화의 DB 턴에서만 만든다 — 화면은
 // conversationId만 보낸다. 예전에는 브라우저가 만든 history를 보냈고, 그건 위조할 수 있는 입력이었다.
 // 한 번에 한 진단만 돈다(진단은 100초를 넘기도 하고, 두 스트림이 같은 칸에 번갈아 그렸다 — 148절 감사).
-const chat = { byInstance: new Map(), running: null, confirmId: null };
+const chat = { byInstance: new Map(), running: null, confirmId: null, mode: "answer", attached: null };
+
+// 쿼리 상세의 "AI에게 묻기"(#57) — 그 쿼리를 대화에 붙이고 입력칸으로 옮긴다
+function attachQueryToChat() {
+  const q = state.currentQuery;
+  const sql = detailSql();
+  if (!state.instance || !q || !sql) return;
+  chat.attached = { instanceId: state.instance.id, queryId: String(q.queryId ?? ""), sql };
+  chat.mode = "answer";
+  renderChat({ follow: true });
+  const input = $("#diagnose-question");
+  input.scrollIntoView({ block: "nearest" });
+  input.focus();
+}
+
+function currentAttachment() {
+  return chat.attached && state.instance && chat.attached.instanceId === state.instance.id ? chat.attached : null;
+}
+
+function syncChatModes() {
+  const att = currentAttachment();
+  const box = $("#chat-attach");
+  if (box) {
+    box.hidden = !att;
+    box.innerHTML = att ? `<span class="chat-attach-k">붙인 쿼리</span>
+      <span class="mono">${esc(shortQueryId(att.queryId))}</span>
+      <span class="chat-attach-sql">${esc(att.sql.replace(/\s+/g, " ").slice(0, 80))}</span>
+      <button type="button" class="chat-attach-x" aria-label="붙인 쿼리 빼기" title="빼기">×</button>` : "";
+  }
+  // 실제 실행 진단은 붙인 쿼리가 있어야 한다 — 없으면 고를 수 없고 이유를 title로 말한다
+  if (chat.mode === "deep" && !att) chat.mode = "answer";
+  document.querySelectorAll("#chat-modes .chat-mode").forEach((b) => {
+    const on = b.dataset.mode === chat.mode;
+    b.setAttribute("aria-checked", String(on));
+    b.classList.toggle("on", on);
+    if (b.dataset.mode === "deep") {
+      b.disabled = !att;
+      b.title = att ? "붙인 쿼리를 대상 DB에서 실제로 실행해 계획을 봅니다. 운영자 이상, 시간 제한"
+        : "쿼리 상세에서 \"AI에게 묻기\"로 쿼리를 붙이면 고를 수 있습니다";
+    }
+  });
+}
+
+// 보내기(#57) — 고른 방식에 따라 갈린다
+function sendChat() {
+  const input = $("#diagnose-question");
+  const question = input.value.trim();
+  const att = currentAttachment();
+  if (chat.mode === "task") { if (question) openAiOpPopover(); return; }
+  if (chat.mode === "deep") { if (att) { input.value = ""; autoGrowChatInput(); runDeepTurn(att); } return; }
+  if (att && !question) { runQueryAnalysisTurn(att, ""); return; }
+  runDiagnose(att);
+}
 const CHAT_CONFIDENCE = { high: "높음", medium: "보통", low: "낮음" };
 // 예시는 진단 도구로 실제로 답할 수 있는 것만 둔다(query_stats·compare, sessions, replication)
 const CHAT_SUGGESTIONS = ["최근 1시간 동안 느려진 쿼리가 있어?", "지금 락을 기다리는 세션이 있어?", "복제가 밀리고 있어?"];
@@ -4409,8 +4455,34 @@ function chatToolNames(steps) {
   return names;
 }
 
+// 근거 한 줄(#57) — 입구마다 모양이 달랐다(채팅은 도구·확신도, AI 분석은 소요 시간, 심층 진단은 없음). 모든 답이 같은 줄을 쓴다
+function chatEvidenceHtml(items, extra = "") {
+  const list = (items || []).filter(Boolean);
+  if (!list.length && !extra) return "";
+  return `<div class="chat-meta chat-evidence"><span class="chat-evidence-k">근거</span> ${list.map((x) => esc(x)).join(" · ")}${extra}</div>`;
+}
+
 function chatTurnHtml(t, idx) {
-  if (t.role === "user") return `<div class="chat-msg chat-user"><div class="chat-bubble">${esc(t.text)}</div></div>`;
+  if (t.role === "user") {
+    const att = t.attached ? `<div class="chat-bubble-attach">쿼리 ${esc(shortQueryId(t.attached.queryId))}</div>` : "";
+    return `<div class="chat-msg chat-user"><div class="chat-bubble">${att}${esc(t.text)}</div></div>`;
+  }
+  if (t.role === "ai" && (t.kind === "analysis" || t.kind === "deep")) {
+    const secs = (ms) => `${Math.round(ms / 100) / 10}초`;
+    let body;
+    if (t.status === "running") {
+      body = `<div class="chat-stage"><span class="chat-stage-dot" aria-hidden="true"></span><span>${esc(t.stage)}</span></div>`
+        + (t.partial ? `<div class="chat-text">${aiAnalysisHtml(t.partial)}</div>` : "");
+    } else if (t.status === "done") {
+      body = `<div class="chat-text">${t.html}</div>${chatEvidenceHtml(t.evidence, t.took >= 500 ? ` · ${secs(t.took)}` : "")}
+        <div class="chat-note">이 답은 화면에만 있고 대화 기록에는 남지 않습니다.</div>`;
+    } else if (t.status === "stopped") {
+      body = `<div class="chat-meta">화면에서 중지했습니다 · ${secs(t.took)}</div>`;
+    } else {
+      body = `<div class="chat-error">${t.kind === "deep" ? "진단" : "분석"}하지 못했습니다: ${esc(t.error)}</div>`;
+    }
+    return `<div class="chat-msg chat-ai" data-turn="${idx}">${body}</div>`;
+  }
   if (t.role === "system") {
     const link = t.jobId ? ` <button class="chat-link" type="button" data-job="${esc(t.jobId)}">결과 보기</button>` : "";
     return `<div class="chat-msg chat-system">${esc(t.text)}${link}</div>`;
@@ -4439,7 +4511,7 @@ function chatTurnHtml(t, idx) {
       body = `
         ${d.rootCause ? `<p class="chat-root"><span class="chat-root-k">근본원인</span>${esc(stripEmoji(d.rootCause))}</p>` : ""}
         <div class="chat-text">${chatAnswerHtml(d.answer) || "<p>(답변 없음)</p>"}</div>
-        <div class="chat-meta">확신도 ${esc(CHAT_CONFIDENCE[d.confidence] || d.confidence || "-")} · ${secs(t.took)}${toolsMeta}</div>
+        ${chatEvidenceHtml([`확신도 ${CHAT_CONFIDENCE[d.confidence] || d.confidence || "-"}`, secs(t.took)], toolsMeta)}
         ${d.note ? `<div class="chat-note">${esc(d.note)}</div>` : ""}`;
     }
   } else if (t.status === "stopped") {
@@ -4682,17 +4754,20 @@ async function deleteConversation(cid) {
 function syncChatComposer() {
   const input = $("#diagnose-question");
   const send = $("#btn-diagnose");
-  const openBtn = $("#btn-aiop-open");
   const submit = $("#btn-aiop-submit");
   if (!input) return;
+  syncChatModes();
+  const att = currentAttachment();
   const inst = state.instance;
   const runningHere = inst && chatRunningHere(inst.id);
   const runningElsewhere = chat.running && !runningHere;
   const hasText = input.value.trim().length > 0;
   input.disabled = !inst;
   // 0대일 때 "왼쪽에서 고르세요"는 할 수 없는 일이다 — 부제가 사실을 말하므로 여기서는 비운다(B6fix)
-  input.placeholder = inst ? "무엇이 궁금한가요?"
-    : state.instances.length ? "왼쪽에서 인스턴스를 고르면 물어볼 수 있습니다" : "";
+  input.placeholder = !inst ? (state.instances.length ? "왼쪽에서 인스턴스를 고르면 물어볼 수 있습니다" : "")
+    : chat.mode === "task" ? "맡길 일을 적어 주세요 — 보내면 작업 유형과 구간을 고릅니다"
+    : chat.mode === "deep" ? "보내면 붙인 쿼리를 실제로 실행해 진단합니다"
+    : att ? "비워 두면 이 쿼리를 판단 기준으로 분석합니다" : "무엇이 궁금한가요?";
   // 누를 수 없는 버튼은 감춘다 — 목록의 "새 대화"는 대상이 없으면 만들 것이 없다(B6fix)
   const newBtn = $("#chat-new");
   if (newBtn) newBtn.hidden = !inst;
@@ -4700,8 +4775,8 @@ function syncChatComposer() {
   send.setAttribute("aria-label", runningHere ? "중지" : "보내기");
   send.title = runningElsewhere ? "다른 인스턴스의 진단이 끝나면 보낼 수 있습니다" : "";
   // 진행 중에는 같은 버튼이 중지가 된다 — 그래서 빈 입력이어도 누를 수 있어야 한다
-  send.disabled = runningHere ? false : (!inst || !hasText || !!runningElsewhere);
-  if (openBtn) openBtn.disabled = !inst || !hasText;
+  const canSend = chat.mode === "deep" ? !!att : chat.mode === "answer" && att ? true : hasText;
+  send.disabled = runningHere ? false : (!inst || !canSend || !!runningElsewhere);
   if (submit && !submit.dataset.busy) submit.disabled = !inst || !hasText;
 }
 
@@ -4713,15 +4788,17 @@ function autoGrowChatInput() {
   input.style.overflowY = input.scrollHeight > 148 ? "auto" : "hidden";
 }
 
-async function runDiagnose() {
+async function runDiagnose(att = null) {
   const input = $("#diagnose-question");
   const inst = state.instance;
   const cs = chatState();
-  const question = input.value.trim();
-  if (!inst || !cs || !question || chat.running) return;
+  const typed = input.value.trim();
+  if (!inst || !cs || !typed || chat.running) return;
+  // 붙인 쿼리는 질문 앞에 맥락으로 싣는다 — 서버 대화 기록에도 이 문장 그대로 남는다(무엇을 물었는지가 기록에 있어야 한다)
+  const question = att ? `쿼리 ${att.queryId}에 대해: ${att.sql}\n\n${typed}` : typed;
 
   const turns = cs.turns;
-  turns.push({ role: "user", text: question });
+  turns.push({ role: "user", text: typed, attached: att });
   const turn = { role: "ai", status: "running", stage: "진단을 시작합니다", steps: [], startedAt: Date.now() };
   turns.push(turn);
   input.value = "";
@@ -4800,20 +4877,16 @@ function toggleChatTools(button) {
 
 function openAiOpPopover() {
   const popover = $("#aiop-popover");
-  const openBtn = $("#btn-aiop-open");
   if (!popover || popover.hidden === false) return;
   popover.hidden = false;
-  openBtn.setAttribute("aria-expanded", "true");
   $("#aiop-new-type").focus();
 }
 
 function closeAiOpPopover(refocus = false) {
   const popover = $("#aiop-popover");
-  const openBtn = $("#btn-aiop-open");
   if (!popover || popover.hidden) return;
   popover.hidden = true;
-  openBtn.setAttribute("aria-expanded", "false");
-  if (refocus) openBtn.focus();
+  if (refocus) $("#diagnose-question").focus();
 }
 
 function wireChat() {
@@ -4822,13 +4895,27 @@ function wireChat() {
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     if (chat.running && chat.running.instanceId === state.instance?.id) chat.running.controller.abort();
-    else runDiagnose();
+    else sendChat();
   });
   input.addEventListener("keydown", (e) => {
     // 한글은 조합 중에도 Enter가 온다 — 그때 보내면 마지막 글자가 덜 쳐진 채 나간다
     if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229) return;
     e.preventDefault();
-    if (!chat.running) runDiagnose();
+    if (!chat.running && !$("#btn-diagnose").disabled) sendChat();
+  });
+  $("#chat-modes").addEventListener("click", (e) => {
+    const b = e.target.closest(".chat-mode");
+    if (!b || b.disabled) return;
+    chat.mode = b.dataset.mode;
+    if (chat.mode !== "task") closeAiOpPopover();
+    syncChatComposer();
+    input.focus();
+  });
+  $("#chat-attach").addEventListener("click", (e) => {
+    if (!e.target.closest(".chat-attach-x")) return;
+    chat.attached = null;
+    syncChatComposer();
+    input.focus();
   });
   input.addEventListener("input", () => { autoGrowChatInput(); syncChatComposer(); });
 
@@ -4871,6 +4958,16 @@ function wireChat() {
       toggleChatTools(toggle);
       return;
     }
+    const retry = e.target.closest(".deep-retry");
+    if (retry) {
+      const turn = chatTurns()[Number(retry.closest("[data-turn]")?.dataset.turn)];
+      if (turn?.deep) {
+        $("#detail-sql").value = retry.dataset.sql;
+        updateSqlHl?.();
+        runDeepTurn({ ...turn.deep.att, sql: retry.dataset.sql }, { summary: turn.deep.summary, causeCount: turn.deep.causeCount });
+      }
+      return;
+    }
     const job = e.target.closest(".chat-link[data-job]");
     if (job) {
       document.querySelector('.tab[data-tab="monitor"]')?.click();
@@ -4881,7 +4978,6 @@ function wireChat() {
   });
 
   // 작업 맡기기 팝오버 — 늘 떠 있던 선택 상자 둘을 여기로 접었다(무엇인지 알 수 없었다)
-  $("#btn-aiop-open").addEventListener("click", openAiOpPopover);
   $("#btn-aiop-cancel").addEventListener("click", () => closeAiOpPopover(true));
   $("#aiop-popover").addEventListener("keydown", (e) => { if (e.key === "Escape") closeAiOpPopover(true); });
 
@@ -5227,9 +5323,8 @@ function setupQueryDetail() {
   $("#btn-detail-more").addEventListener("click", () => {
     if ($("#detail-more-menu").hidden) openDetailMore(); else closeDetailMore();
   });
-  $("#btn-deep").addEventListener("click", () => openDetailSection("#deep-section"));
   $("#btn-inquiry").addEventListener("click", () => openDetailSection("#inquiry-section"));
-  $("#btn-deep-run").addEventListener("click", runDeepDiagnose);
+  $("#btn-ask-ai").addEventListener("click", attachQueryToChat);
   $("#btn-inquiry-send").addEventListener("click", runInquiry);
   document.addEventListener("click", (e) => {
     if (!$("#detail-more-menu").hidden && !e.target.closest(".detail-more-wrap")) closeDetailMore();

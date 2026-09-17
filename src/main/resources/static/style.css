@@ -1679,3 +1679,16 @@ input[type="checkbox"] { accent-color: var(--primary); }
 .plan-raw { margin-top: 8px; }
 .plan-raw > summary { cursor: pointer; color: var(--muted); font-size: var(--fs-small); }
 .plan-raw .codeblock { max-height: 320px; overflow: auto; }
+/* 답 받는 방식·붙인 쿼리(#57) — 관제의 AI 입구를 대화 칸 하나로 모았다. 방식은 입력 위 세그먼트, 붙인 쿼리는 그 위 한 줄 */
+.chat-modes { display: flex; gap: 4px; margin-bottom: 8px; padding: 3px; border-radius: 10px; background: #eef2f6; }
+.chat-mode { flex: 1; border: 0; background: none; border-radius: 8px; padding: 5px 6px; font: inherit; font-size: var(--fs-caption); font-weight: 600; color: #52697d; cursor: pointer; white-space: nowrap; }
+.chat-mode.on { background: #fff; color: var(--primary); box-shadow: 0 1px 2px rgba(16, 24, 40, .1); }
+.chat-mode:disabled { color: #9aa9b5; cursor: not-allowed; }
+.chat-mode:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.chat-attach { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; padding: 5px 8px; border-radius: 8px; background: #eef7fd; font-size: var(--fs-caption); min-width: 0; }
+.chat-attach[hidden] { display: none; }
+.chat-attach-k { font-weight: 600; color: var(--primary); white-space: nowrap; }
+.chat-attach-sql { color: #52697d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.chat-attach-x { border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; font-size: var(--fs-body); padding: 0 2px; }
+.chat-bubble-attach { font-size: var(--fs-caption); opacity: .85; margin-bottom: 2px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.chat-evidence-k { font-weight: 600; margin-right: 2px; }

@@ -152,17 +152,17 @@ class QueryDetailE2ETest {
 
         // 머리줄에는 토글과 워크벤치·더보기만 있다 — 심층 진단·문의는 메뉴 안으로 들어갔다
         assertThat(page.locator(".detail-head > *")).hasCount(3);   // SQL ID + 토글 묶음 + 오른쪽 꼬리
-        assertThat(page.locator("#query-detail .seg-btn")).hasCount(5);
+        assertThat(page.locator("#query-detail .seg-btn")).hasCount(4);
         assertThat(page.locator("#btn-explain")).isVisible();
         assertThat(page.locator("#btn-schema")).isVisible();
-        assertThat(page.locator("#btn-ai")).isVisible();
+        // AI 입구는 오른쪽 대화 칸 하나다(#57) — 상세에는 그 쿼리를 대화에 붙이는 버튼만 남았다
+        assertThat(page.locator("#btn-ask-ai")).isVisible();
         assertThat(page.locator("#btn-antipattern")).isVisible();
         assertThat(page.locator("#btn-advisor")).isHidden();     // MySQL에는 HypoPG가 없다(159절)
         assertThat(page.locator("#btn-to-workbench")).isVisible();
         assertThat(page.locator("#btn-detail-more")).isVisible();
-        // 심층 진단·문의는 머리줄 버튼이 아니라 접힌 메뉴 안에 있다
-        assertThat(page.locator("#detail-more-menu #btn-deep")).hasCount(1);
-        assertThat(page.locator("#btn-deep")).isHidden();
+        // 문의는 접힌 메뉴 안에 있다. 심층 진단은 대화 칸의 "실제 실행 진단"으로 옮겼다(#57)
+        assertThat(page.locator("#btn-deep")).hasCount(0);
         assertThat(page.locator("#btn-inquiry")).isHidden();
 
         // SQL ID는 짧게 보이고 전체 값은 title에 남는다 — 64자를 통째로 보여 주던 자리
@@ -172,8 +172,6 @@ class QueryDetailE2ETest {
         // 아직 아무것도 조회하지 않았다 — "다시 조회"가 미리 떠 있으면 무엇을 다시 조회하는지 알 수 없다
         assertThat(page.locator("#query-detail [data-refresh=explain]")).isHidden();
         assertThat(page.locator("#query-detail [data-refresh=schema]")).isHidden();
-        // 심층 진단은 실행 버튼이 그 역할을 한다 — "다시 조회"를 두지 않는다
-        assertThat(page.locator("#query-detail [data-refresh=deep]")).hasCount(0);
 
         // 3) 토글 — 켜면 섹션이 열리고, 다시 누르면 닫힌다(보관된 결과는 조회 없이 다시 보인다)
         page.click("#btn-explain");
@@ -193,23 +191,26 @@ class QueryDetailE2ETest {
         assertThat(page.locator("#btn-copy-qid")).hasText("복사됨");
         assertThat((String) page.evaluate("navigator.clipboard.readText()")).isEqualTo(QID);
 
-        // 5) 더보기 → 심층 진단은 섹션만 연다. 요청은 아직 나가지 않는다
-        page.click("#btn-detail-more");
-        assertThat(page.locator("#detail-more-menu")).isVisible();
-        page.click("#btn-deep");
-        assertThat(page.locator("#deep-section")).isVisible();
-        assertThat(page.locator("#detail-more-menu")).isHidden();
-        // 섹션만 열렸지 조회는 나가지 않았고, 그래서 "다시 조회"도 없다(실행 버튼이 그 역할이다)
-        assertThat(page.locator("#deep-section .section-refresh")).hasCount(0);
-        assertThat(page.locator("#deep-result")).not().containsText("진단 실패");
+        // 5) AI에게 묻기(#57) — 쿼리를 대화에 붙이기만 한다. 실제 실행 진단은 고르고 보내야 나간다
+        assertThat(page.locator(".chat-mode[data-mode='deep']")).isDisabled();   // 붙인 쿼리가 없으면 고를 수 없다
+        page.click("#btn-ask-ai");
+        assertThat(page.locator("#chat-attach")).isVisible();
+        assertThat(page.locator("#chat-attach")).containsText("a1b2c3…8f90");
+        assertThat(page.locator("#diagnose-question")).hasAttribute("placeholder", "비워 두면 이 쿼리를 판단 기준으로 분석합니다");
+        page.click(".chat-mode[data-mode='deep']");
+        assertThat(page.locator(".chat-mode[data-mode='deep']")).hasAttribute("aria-checked", "true");
         page.waitForTimeout(700);                    // 나갔다면 이 사이에 나간다
-        assertThat(deepRequests).as("더보기가 곧바로 쿼리를 실행했다").isEmpty();
-        screenshot(page, "querydetail-more-menu.png");
+        assertThat(deepRequests).as("방식을 고르기만 했는데 쿼리를 실행했다").isEmpty();
+        screenshot(page, "querydetail-ask-ai.png");
 
-        // 실행 버튼을 눌러야 나간다
-        page.click("#btn-deep-run");
+        // 보내기를 눌러야 나가고, 답은 대화 칸에 근거 줄과 함께 쌓인다
+        page.click("#btn-diagnose");
         page.waitForCondition(() -> !deepRequests.isEmpty());
-        assertThat(deepRequests).as("실행 버튼이 진단을 부르지 않았다").hasSize(1);
+        assertThat(deepRequests).as("보내기가 진단을 부르지 않았다").hasSize(1);
+        Locator answer = page.locator("#chat-log .chat-ai").last();
+        assertThat(answer).containsText("근본원인 규칙 매칭 없음");
+        assertThat(answer.locator(".chat-evidence")).containsText("실제 실행 계획");
+        assertThat(page.locator("#chat-log .chat-user").last()).containsText("쿼리 a1b2c3…8f90");
     }
 
     /**
@@ -323,6 +324,34 @@ class QueryDetailE2ETest {
         assertThat(page.locator("#detail-plan details.plan-raw")).not().hasAttribute("open", "");
         page.locator("#detail-plan").scrollIntoViewIfNeeded();
         screenshot(page, "querydetail-plan-tree.png");
+    }
+
+    /**
+     * 쿼리를 붙이고 비워 보내면 판단 기준 분석이 대화 칸에 답으로 쌓인다(#57) — 쿼리 상세의 "AI 분석" 섹션이던 것.
+     * 근거 줄은 다른 답과 같은 모양이고, 대화 기록에 남지 않는다는 사실을 적는다.
+     */
+    @Test
+    void 붙인_쿼리를_비워_보내면_판단_기준_분석이_대화_칸에_답으로_쌓인다() {
+        Page page = consoleAs(USER);
+        String sse = "event: plan\ndata: {\"plan\":\"Seq Scan on orders\",\"findings\":[\"Seq Scan — 인덱스 부재로 테이블 풀스캔\"]}\n\n"
+                + "event: text\ndata: {\"delta\":\"풀스캔입니다.\"}\n\n"
+                + "event: result\ndata: {\"plan\":\"Seq Scan on orders\",\"findings\":[\"Seq Scan — 인덱스 부재로 테이블 풀스캔\"],\"aiAnalysis\":\"판정: 인덱스가 필요합니다. status 열이 선택도가 높습니다.\"}\n\n";
+        page.route("**/ai-analysis/stream", route -> route.fulfill(new Route.FulfillOptions()
+                .setStatus(200).setContentType("text/event-stream").setBody(sse)));
+        page.locator("#top-table tbody tr[data-idx]").first().locator("td").first().click();
+        page.click("#btn-ask-ai");
+        assertThat(page.locator("#btn-diagnose")).isEnabled();      // 붙인 쿼리가 있으면 비워도 보낼 수 있다
+        page.click("#btn-diagnose");
+
+        Locator answer = page.locator("#chat-log .chat-ai").last();
+        assertThat(answer).containsText("인덱스가 필요합니다");
+        assertThat(answer.locator(".chat-evidence")).containsText("실행계획");
+        assertThat(answer.locator(".chat-evidence")).containsText("규칙 지적 1개");
+        assertThat(answer).containsText("대화 기록에는 남지 않습니다");
+        assertThat(page.locator("#chat-log .chat-user").last()).containsText("이 쿼리를 판단 기준으로 분석해 줘");
+        // 같은 쿼리의 상세에는 실행계획·규칙 지적이 함께 채워진다(두 번 조회하지 않는다)
+        assertThat(page.locator("#detail-findings")).containsText("Seq Scan");
+        screenshot(page, "chat-query-analysis.png");
     }
 
     /** 관제 화면을 그 인스턴스로 연다. 표를 그릴 응답은 라우트로 대신 채운다. */
