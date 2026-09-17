@@ -265,15 +265,16 @@
       </div>
 
       <div id="tab-monitor" class="tab-body" hidden>
-        <!-- 카테고리 서브내비 — ~20개 섹션을 성능/진단/거버넌스/백업·리포트/비용·인프라로 묶어 한 번에 하나씩 -->
+        <!-- 카테고리 서브내비 — ~20개 섹션을 일의 종류로 묶어 한 번에 하나씩. "구성"과 "거버넌스"는 이름만으로 차이가 드러나지 않아(#64)
+             무엇을 하는 탭인지로 바꿨다: 설정 비교(설정·스키마·파라미터가 언제 어떻게 달라졌나) / 변경 승인(리뷰 게이트·온라인 스키마 변경) -->
         <div class="mon-subnav">
-          <button class="mon-tab active" data-mon="perf">성능</button>
-          <button class="mon-tab" data-mon="diag">진단</button>
-          <button class="mon-tab" data-mon="config">구성</button>
-          <button class="mon-tab" data-mon="gov">거버넌스</button>
-          <button class="mon-tab" data-mon="backup">백업·리포트</button>
-          <button class="mon-tab" data-mon="infra">비용·인프라</button>
-          <button class="mon-tab" data-mon="admin">관리</button>
+          <button class="mon-tab active" data-mon="perf" title="활동·지표·세션·대기·복제">성능</button>
+          <button class="mon-tab" data-mon="diag" title="AI 운영 작업·점검 조언·이상 감지·플랜 변경">진단</button>
+          <button class="mon-tab" data-mon="config" title="설정 변경 이력·스키마 차이·파라미터 드리프트">설정 비교</button>
+          <button class="mon-tab" data-mon="gov" title="변경 리뷰 게이트·온라인 스키마 변경">변경 승인</button>
+          <button class="mon-tab" data-mon="backup" title="백업·복원 검증·장애 리포트·월간 리포트">백업·리포트</button>
+          <button class="mon-tab" data-mon="infra" title="낭비 신호·파티션·호스트">비용·인프라</button>
+          <button class="mon-tab" data-mon="admin" title="사용자·역할·감사 로그·MCP">관리</button>
         </div>
 
         <!-- 성능 -->
