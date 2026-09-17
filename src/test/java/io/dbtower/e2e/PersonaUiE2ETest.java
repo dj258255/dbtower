@@ -207,7 +207,8 @@ class PersonaUiE2ETest {
         assertThat(status).containsText("일시정지");
 
         page.locator(".mon-tab[data-mon=\"perf\"]").click();
-        assertThat(status).containsText("LIVE", new LocatorAssertions.ContainsTextOptions().setTimeout(20_000));
+        // 상태 줄은 한국어다(B9) — "실시간 · …"
+        assertThat(status).containsText("실시간", new LocatorAssertions.ContainsTextOptions().setTimeout(20_000));
     }
 
     @Test

@@ -51,6 +51,8 @@ import io.dbtower.registry.HealthStatus;
 import org.bson.BsonTimestamp;
 import org.bson.Document;
 import org.bson.json.JsonWriterSettings;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.file.Files;
 
@@ -83,6 +85,8 @@ import java.nio.file.Files;
  * 이 경우를 카운터 리셋과 같은 방식으로 흡수한다.
  */
 public class MongoOperator implements DbmsOperator {
+
+    private static final Logger log = LoggerFactory.getLogger(MongoOperator.class);
 
     /** explain 허용 명령 — 관리 플랫폼이 임의 쓰기 명령을 실행하면 안 되기 때문 (JDBC 계열의 requireSelect와 같은 원칙) */
     private static final Set<String> EXPLAINABLE = Set.of("find", "aggregate", "count", "distinct");
@@ -128,7 +132,9 @@ public class MongoOperator implements DbmsOperator {
                 return HealthStatus.up("MongoDB " + version, System.currentTimeMillis() - start);
             });
         } catch (Exception e) {
-            return HealthStatus.down(e.getMessage());
+            // 응답에는 분류된 사유만, 원문은 서버 로그에(148절, B9)
+            log.warn("헬스체크 실패 instance={}", instance == null ? "?" : instance.getName(), e);
+            return HealthStatus.down(e);
         }
     }
 

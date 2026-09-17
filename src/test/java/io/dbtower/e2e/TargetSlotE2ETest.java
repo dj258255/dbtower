@@ -206,7 +206,8 @@ class TargetSlotE2ETest {
         // 카드마다 사유 한 줄 + 다시 시도
         assertThat(page.locator("#slow-table")).containsText("대상에 연결되지 않아 조회하지 않았습니다.");
         assertThat(page.locator("#top-table")).containsText("대상에 연결되지 않아 조회하지 않았습니다.");
-        assertThat(page.locator("#overview-card")).containsText("대상에 연결되지 않아 조회하지 않았습니다.");
+        // 탭 줄 위에 떠 있던 공용 안내 상자(운영 종합 카드)는 없앴다(B9) — 사유는 각 결과 영역이 자기 자리에서 말한다
+        assertThat(page.locator("#overview-card")).isHidden();
         // 느린 쿼리 카드는 Monitoring 탭 안이라 DOM에는 있지만 화면에는 안 보인다 — 사유·버튼은 그대로 있다
         assertThat(page.locator("#slow-table [data-target-retry]")).hasCount(1);
         // 지금 보이는 카드(Top Query)의 다시 시도는 실제로 누를 수 있는 자리에 있다

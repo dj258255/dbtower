@@ -22,6 +22,8 @@ import io.dbtower.operator.model.RestoreVerification;
 
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.HealthStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -35,6 +37,8 @@ import java.sql.SQLException;
  * 개선 아크 1에서 인스턴스별 HikariCP 풀로 교체 — before/after 실측은 docs/DESIGN.md 참고.
  */
 public abstract class AbstractJdbcOperator implements DbmsOperator {
+
+    private static final Logger log = LoggerFactory.getLogger(AbstractJdbcOperator.class);
 
     protected final DatabaseInstance instance;
     protected final BackupTools backupTools;
@@ -91,8 +95,10 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
             // 예외로 터져 "다운 알림"이 다시 침묵했다.
             //
             // health()의 계약은 "떠 있나 아닌가"다 — 어떤 이유로 실패하든 답은 down이다.
-            // 사유는 메시지에 실어 보내므로 원인이 감춰지지도 않는다.
-            return HealthStatus.down(failureMessage(e));
+            // 응답에는 분류된 사유만 싣고(화면에 드라이버 영문이 그대로 보이던 것, B9) 원문은 서버 로그에 남긴다.
+            // instance는 조회 경로가 예외로 터졌을 때 null일 수 있다(HealthFailureTest) — 그때도 health()는 던지지 않는다
+            log.warn("헬스체크 실패 instance={} 원인={}", instance == null ? "?" : instance.getName(), failureMessage(e));
+            return HealthStatus.down(e);
         }
     }
 
