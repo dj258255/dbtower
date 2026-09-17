@@ -181,6 +181,25 @@ class TargetSlotE2ETest {
     }
 
     /**
+     * 느린 대상을 기다리는 동안 남은 조회 수와 "대상 응답이 느립니다"를 말한다(#59).
+     * 전에는 카드마다 "조회 중..." 글자만 있어 마지막 카드가 수십 초 빈 채 멈춘 것처럼 보였다.
+     * 닿지 않는 주소라 대상 조회가 연결 제한 시간까지 걸린다 — 5초를 넘는 조회가 생긴다.
+     */
+    @Test
+    void 느린_대상을_기다리는_동안_남은_조회_수와_느리다는_사실을_보인다() {
+        DatabaseInstance db = instance("e2e-slot-slow");
+        Page page = login();
+        page.navigate(base() + "/?instance=" + db.getId());
+        Locator progress = page.locator("#target-progress");
+        assertThat(progress).isVisible();
+        assertThat(progress).containsText("남은 조회");
+        assertThat(progress).hasClass(java.util.regex.Pattern.compile("slow"), new com.microsoft.playwright.assertions.LocatorAssertions.HasClassOptions().setTimeout(15_000));
+        assertThat(progress).containsText("대상 DB 응답이 느립니다");
+        System.out.printf("MEASURE 진행 줄: %s%n", progress.textContent());
+        screenshot(page, "target-progress-slow.png");
+    }
+
+    /**
      * 헬스가 down으로 판정된 대상은 다시 고를 때 대상 조회를 보내지 않고, 카드마다 사유 한 줄과
      * "다시 시도"를 남긴다 — 다시 시도는 그 카드만 조회한다.
      */
