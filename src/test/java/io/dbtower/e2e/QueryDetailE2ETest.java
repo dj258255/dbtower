@@ -285,7 +285,7 @@ class QueryDetailE2ETest {
         assertThat(page.locator(".tab[data-tab='top']")).hasClass(Pattern.compile("active"));
         assertThat(page).not().hasURL(Pattern.compile("tab="));
 
-        page.locator("#top-table tbody tr").first().locator("td").first().click();
+        page.locator("#top-table tbody tr[data-idx]").first().locator("td").first().click();
         assertThat(page.locator("#query-detail")).isVisible();
         assertThat(page).hasURL(Pattern.compile("q=" + QID));
 
