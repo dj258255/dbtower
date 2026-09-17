@@ -2,7 +2,7 @@
 name: 기능 제안
 about: 개선·새 기능을 제안해주세요
 title: ''
-labels: enhancement
+labels: type:feature
 ---
 
 ## 어떤 문제를 풀고 싶나
