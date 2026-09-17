@@ -1385,7 +1385,8 @@ function goToCause(id, signal) {
   }
   // selectInstance는 구간 기본값(최근 30분 / 직전 30분)을 첫 await 전에 채운다 — 끝나기를 기다리지 않는다
   if (state.instance?.id !== id) selectInstance(inst, null);
-  const show = (el) => el?.scrollIntoView({ block: "start", behavior: "smooth" });
+  // 인스턴스를 여는 렌더(카드 목록·패널 펼침)가 같은 틱에 레이아웃을 바꿔 부드러운 스크롤이 끊겼다 — 다음 프레임에 바로 옮긴다
+  const show = (el) => requestAnimationFrame(() => el?.scrollIntoView({ block: "start" }));
   if (signal === "ANOMALY") {
     // 인스턴스의 첫 조회가 다 끝나기를 기다리지 않는다 — 느린 대상이면 그만큼 기다렸다. 먼저 출발한 단독 조회는 순번에 져 표를 덮지 않는다
     document.querySelector('.tab[data-tab="top"]').click();

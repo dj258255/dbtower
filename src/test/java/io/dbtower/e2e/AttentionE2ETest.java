@@ -155,6 +155,10 @@ class AttentionE2ETest {
         assertThat(page.locator("#tab-slow")).isVisible();
         assertThat(page.locator(".tab[data-tab='slow']")).hasClass(Pattern.compile("active"));
 
+        page.locator(".attn-chip[data-id='" + f.slow.getId() + "'][data-signal='ADVISOR']").click();
+        assertThat(page.locator(".mon-tab.active")).hasAttribute("data-mon", "diag");
+        assertThat(page.locator(".advisors-card")).isInViewport();
+
         page.locator(".attention-backup-btn").click();
         assertThat(page.locator("#fleet-row")).isVisible();
         assertThat(page.locator(".backup-freshness-panel")).isInViewport();
@@ -190,6 +194,7 @@ class AttentionE2ETest {
                 + "{\"instanceId\":" + f.slow.getId() + ",\"instanceName\":\"e2e-attn-slow\",\"type\":\"POSTGRESQL\",\"score\":63,\"grade\":\"D\",\"down\":false,\"partial\":false,\"contributions\":["
                 + contribution("SLO", "PENALIZED", 25, "SLO 위반 · 버짓 소진 535%") + ","
                 + contribution("ANOMALY", "PENALIZED", 12, "이상 쿼리 2개") + ","
+                + contribution("ADVISOR", "PENALIZED", 6, "치명 0 · 경고 2 · 정보 0") + ","
                 + contribution("HEALTH", "OK", 0, "정상") + "]},"
                 + "{\"instanceId\":" + f.ok.getId() + ",\"instanceName\":\"e2e-attn-ok\",\"type\":\"POSTGRESQL\",\"score\":96,\"grade\":\"A\",\"down\":false,\"partial\":false,\"contributions\":["
                 + contribution("HEALTH", "OK", 0, "정상") + "]}]}";
