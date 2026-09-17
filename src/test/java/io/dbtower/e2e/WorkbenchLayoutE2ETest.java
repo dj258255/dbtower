@@ -307,6 +307,35 @@ class WorkbenchLayoutE2ETest {
         assertThat(panel).isHidden();
     }
 
+    /**
+     * 결과표는 원시 값을 그대로 보이지 않는다(#62) — 부동소수 오차는 넷째 자리까지(원래 값은 title),
+     * 숫자는 오른쪽 정렬, PostgreSQL의 "<insufficient privilege>"는 권한 안내로.
+     */
+    @Test
+    void 결과표는_긴_소수와_권한_없음_원문을_다듬어_보인다() {
+        DatabaseInstance a = instance("e2e-wb-g");
+        sheets.put(a.getId(), mutableListOf(new StubSheet(1, "결과 시트", null)));
+        String result = """
+                {"result":{"columns":[{"name":"query","typeName":"text"},{"name":"total_plan_time","typeName":"float8"},{"name":"calls","typeName":"int8"},{"name":"note","typeName":"text"}],
+                 "rows":[["<insufficient privilege>",0.19754200000000002,12345,null]],
+                 "rowCount":1,"truncated":false,"elapsedMs":3,"maskedColumns":[]},"version":null}""";
+        Page page = openWorkbench(a, p -> p.route("**/api/workbench/instances/*/query", route -> fulfillJson(route, result)));
+        // 편집기는 사람의 입력 이벤트로 상태를 맞춘다 — fill로 값을 바꾸면 실행이 나가지 않았다
+        page.locator("#wb-input").click();
+        page.keyboard().type("SELECT 1");
+        page.locator("#wb-run").click();
+
+        Locator cells = page.locator("#wb-grid table.grid tbody tr").first().locator("td");
+        assertThat(cells.nth(1)).hasText("권한 없음");
+        assertThat(cells.nth(1)).hasAttribute("title", Pattern.compile("pg_read_all_stats"));
+        assertThat(cells.nth(2)).hasText("0.1975");
+        assertThat(cells.nth(2)).hasAttribute("title", "0.19754200000000002");
+        assertThat(cells.nth(2)).hasClass(Pattern.compile("num"));
+        assertThat(cells.nth(3)).hasText("12345");
+        assertThat(cells.nth(4)).hasText("NULL");
+        screenshot(page, "workbench-grid-values.png");
+    }
+
     private Page openWorkbench(DatabaseInstance target, Consumer<Page> extra) {
         BrowserContext context = browser.newContext(new Browser.NewContextOptions()
                 .setTimezoneId("Asia/Seoul").setViewportSize(1512, 900));

@@ -154,7 +154,7 @@ class AttentionE2ETest {
         assertThat(page.locator("#time-more")).hasAttribute("open", "");
         assertThat(page.locator(".tab[data-tab='top']")).hasClass(Pattern.compile("active"));
         assertThat(page.locator(".instance-card.selected")).containsText("e2e-attn-slow");
-        Locator load = page.locator("#top-table tbody tr").first().locator("td").first();
+        Locator load = page.locator("#top-table tbody tr[data-idx]").first().locator("td").first();
         assertThat(load).hasText(Pattern.compile("^85\\.71% \\(▼ 14\\.29%p\\)$"));
         System.out.printf("MEASURE 비교 표 부하 칸: %s%n", load.textContent());
     }

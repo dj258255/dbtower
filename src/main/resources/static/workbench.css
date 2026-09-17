@@ -288,6 +288,9 @@ table.grid tbody tr { cursor: pointer; }
 table.grid tbody tr:hover td { background: #f8f9ff; }
 table.grid tbody tr.selected td { background: #f3f6ff; box-shadow: inset 0 -1px 0 #c9d4ff; }
 table.grid td.null { color: var(--muted); font-style: italic; }
+/* 결과 칸 표시(#62) — 숫자는 오른쪽·고정폭, 권한 없음은 원문 대신 안내(주황 글자 #8a4d05, 흰 바탕 6.5:1) */
+table.grid td.num, table.grid th.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.grid td.no-priv { color: #8a4d05; font-style: italic; cursor: help; }
 table.grid .rownum { color: var(--muted); width: 1%; }
 /* 열 너비 끌기 손잡이 — 머리 칸 오른쪽 끝. 올리거나 끌 때만 색이 보인다 */
 .col-resize { position: absolute; top: 0; right: 0; width: 8px; height: 100%; cursor: col-resize; touch-action: none; }

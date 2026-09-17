@@ -120,8 +120,8 @@ class NarrowViewportE2ETest {
         for (ViewportSize size : VIEWPORTS) {
             Page page = open(size, "/?instance=" + db.getId());
             page.locator("#result-panel").waitFor();
-            page.locator("#top-table tbody tr").first().waitFor();
-            page.locator("#top-table tbody tr").first().click();
+            page.locator("#top-table tbody tr[data-idx]").first().waitFor();
+            page.locator("#top-table tbody tr[data-idx]").first().click();
             assertThat(page.locator("#query-detail")).isVisible();
             page.waitForTimeout(700);
 
