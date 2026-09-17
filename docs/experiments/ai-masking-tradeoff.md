@@ -11,12 +11,12 @@
 | MySQL | 8.4.11 | 100000행(VIP 2000, GOLD 18000, NORMAL 80000) | 200000행(CANCELLED 2000, PAID 190000, REFUND 8000) |
 | PostgreSQL | PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit | 100000행(NORMAL 80000, VIP 2000, GOLD 18000) | 200000행(CANCELLED 2000, PAID 190000, REFUND 8000) |
 
-- 실행 일시: 2026-09-17T00:09:40.054844+09:00
+- 실행 일시: 2026-09-18T03:04:47.084586+09:00
 - 모델: 설정값 `claude-opus-4-8` (CLI 모드는 제품이 --model을 넘기지 않으므로 실제 모델은 CLI 기본값), effort=high, max_tokens=8192, 백엔드=cli
-- 호출: 36회 = 사례 12 × 조건 3, 조건 비율 A 12회 B 12회 C 12회 
+- 호출: 45회 = 사례 15 × 조건 3, 조건 비율 A 15회 B 15회 C 15회 
 - 오류(정확도 계산에서 제외): A 0건 B 0건 C 0건 
-- 사례 세트: `src/test/resources/experiments/ai-masking-cases.json` (L=리터럴이 진단을 가르는 사례 8개, C=리터럴과 무관한 대조군 4개)
-- 프롬프트는 제품 `AiAnalysisRunner.run`과 글자 단위로 같다(`프롬프트가_제품_AiAnalysisRunner와_글자_단위로_같다` 테스트가 사례 12개 × 조건 A·B에서 확인)
+- 사례 세트: `src/test/resources/experiments/ai-masking-cases.json` (L=리터럴이 진단을 가르는 사례 11개 — 날짜·숫자 범위 크기와 날짜 함수 포함, C=리터럴과 무관한 대조군 4개)
+- 프롬프트는 제품 `AiAnalysisRunner.run`과 글자 단위로 같다(`프롬프트가_제품_AiAnalysisRunner와_글자_단위로_같다` 테스트가 사례 15개 × 조건 A·B에서 확인)
 - 노출 수는 프롬프트 문자열에서 민감 리터럴이 나온 횟수(부분 문자열 기준)다. 숫자 리터럴은 다른 수의 일부로도 세어질 수 있다(예: `1012345678`은 `01012345678` 안에서도 잡힌다)
 
 ## 표 1: 민감 리터럴 노출 수 (프롬프트 안에서 나온 횟수)
@@ -35,7 +35,10 @@
 | L8 | `2000-01-01` | 2 | 1 | 0 | 
 | C3 | `kim@exp.test` | 2 | 1 | 0 | 
 | C4 | `VIP` | 2 | 1 | 0 | 
-| **합계** |  | **31** | **14** | **1** | 
+| L9 | `99000`, `99100`, `2026-08-01` | 6 | 3 | 2 | 
+| L10 | `2020-01-01` | 2 | 1 | 0 | 
+| L11 | `2026-08-01` | 2 | 1 | 0 | 
+| **합계** |  | **41** | **19** | **3** | 
 
 사례별 내역(리터럴 × 조건)
 
@@ -58,6 +61,11 @@
 | L8 | `2000-01-01` | 2 | 1 | 0 |
 | C3 | `kim@exp.test` | 2 | 1 | 0 |
 | C4 | `VIP` | 2 | 1 | 0 |
+| L9 | `99000` | 2 | 1 | 1 |
+| L9 | `99100` | 2 | 1 | 1 |
+| L9 | `2026-08-01` | 2 | 1 | 0 |
+| L10 | `2020-01-01` | 2 | 1 | 0 |
+| L11 | `2026-08-01` | 2 | 1 | 0 |
 
 ## 표 2: 자동 채점 (acceptKeywords 중 하나라도 포함하면 정답)
 
@@ -75,7 +83,10 @@
 | L8 | PostgreSQL | 낮은 선택도(전 행): 풀스캔이 정상 | O | O | O | 
 | C3 | PostgreSQL | 컬럼에 함수 | O | O | O | 
 | C4 | PostgreSQL | 조인 키 인덱스 없음 | O | O | O | 
-| **L 사례 정답률(8)** |  |  | **100%** (8/8) | **100%** (8/8) | **100%** (8/8) |
+| L9 | MySQL | 좁은 범위: 인덱스 레인지 스캔이 맞다 | O | O | O | 
+| L10 | MySQL | 넓은 범위: 전 행이 조건을 만족해 풀스캔이 정상 | O | O | O | 
+| L11 | PostgreSQL | 컬럼에 함수: 인덱스를 못 쓴다 | O | O | O | 
+| **L 사례 정답률(11)** |  |  | **100%** (11/11) | **100%** (11/11) | **100%** (11/11) |
 | **C 사례 정답률(4)** |  |  | **100%** (4/4) | **100%** (4/4) | **100%** (4/4) |
 
 - `O`=정답, `X`=오답, `-`=오류·빈 응답이라 채점 제외. 위 정답률은 채점한 회차만 분모로 센다(괄호 안이 그 수)
@@ -84,7 +95,7 @@
 ## 계획에 리터럴이 찍혔는가 (사례별 원문 발췌)
 
 - **L1** (MySQL) 계획에 있는 민감 리터럴: `1012345678`
-  - `{ "query_block": { "select_id": 1, "cost_info": { "query_cost": "10105.75" }, "table": { "table_name": "exp_mask_customers", "access_type": "ALL", "possible_key…`
+  - `{ "query_block": { "select_id": 1, "cost_info": { "query_cost": "10094.45" }, "table": { "table_name": "exp_mask_customers", "access_type": "ALL", "possible_key…`
 - **L2** (MySQL) 계획에 있는 민감 리터럴: `%@gmail.com`, `@gmail.com`
   - `…": [ "id", "email" ], "attached_condition": "(`sample`.`exp_mask_customers`.`email` like '%@gmail.com')" } } }`
 - **L3** (MySQL) 계획에 있는 민감 리터럴: 없음
@@ -96,9 +107,9 @@
 - **C2** (MySQL) 계획에 있는 민감 리터럴: `2026-01-01`
   - `…, "created_at" ], "attached_condition": "(`sample`.`exp_mask_orders`.`created_at` >= DATE'2026-01-01')" } } }`
 - **L5** (PostgreSQL) 계획에 있는 민감 리터럴: `%@gmail.com`, `@gmail.com`
-  - `…"Total Cost": 2269.00, "Plan Rows": 21212, "Plan Width": 8, "Filter": "((email)::text ~~ '%@gmail.com'::text)" } } ]`
+  - `… "Total Cost": 2269.00, "Plan Rows": 9091, "Plan Width": 8, "Filter": "((email)::text ~~ '%@gmail.com'::text)" } } ]`
 - **L6** (PostgreSQL) 계획에 있는 민감 리터럴: `PAID`
-  - `…otal Cost": 3975.00, "Plan Rows": 190233, "Plan Width": 12, "Filter": "((status)::text = 'PAID'::text)" } } ]`
+  - `…otal Cost": 3975.00, "Plan Rows": 190313, "Plan Width": 12, "Filter": "((status)::text = 'PAID'::text)" } } ]`
 - **L7** (PostgreSQL) 계획에 있는 민감 리터럴: `137`, `281`, `499`
   - `…4,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,1…`
 - **L8** (PostgreSQL) 계획에 있는 민감 리터럴: `2000-01-01`
@@ -106,7 +117,13 @@
 - **C3** (PostgreSQL) 계획에 있는 민감 리터럴: `kim@exp.test`
   - `…al Cost": 2519.00, "Plan Rows": 500, "Plan Width": 8, "Filter": "(lower((email)::text) = 'kim@exp.test'::text)" } } ]`
 - **C4** (PostgreSQL) 계획에 있는 민감 리터럴: `VIP`
-  - `… "Total Cost": 2269.00, "Plan Rows": 2057, "Plan Width": 27, "Filter": "((grade)::text = 'VIP'::text)" } ] } ] } } ]`
+  - `… "Total Cost": 2269.00, "Plan Rows": 2047, "Plan Width": 27, "Filter": "((grade)::text = 'VIP'::text)" } ] } ] } } ]`
+- **L9** (MySQL) 계획에 있는 민감 리터럴: `99000`, `99100`, `2026-08-01`
+  - `…nt", "created_at" ], "attached_condition": "((`sample`.`exp_mask_orders`.`amount` between 99000 and 99100) and (`sample`.`exp_mask_orders`.`created_at` >= DATE'2026-08-01'))" } } }`
+- **L10** (MySQL) 계획에 있는 민감 리터럴: `2020-01-01`
+  - `…ple`.`exp_mask_orders`.`amount` > 0) and (`sample`.`exp_mask_orders`.`created_at` >= DATE'2020-01-01'))" } } }`
+- **L11** (PostgreSQL) 계획에 있는 민감 리터럴: `2026-08-01`
+  - `…dth": 8, "Filter": "(date_trunc('month'::text, (created_at)::timestamp with time zone) = '2026-08-01'::date)" } ] } } ]`
 
 ## 부록: 응답 앞 300자 (사람 검토용)
 
@@ -182,9 +199,27 @@
 - **B** (자동 채점 정답): **판단:** 규칙상 가장 유력한 원인은 두 테이블 모두 인덱스를 쓰지 않는다는 점입니다. `exp_mask_customers`는 `grade = 'VIP'` 필터로 Seq Scan을 하고(추정 2,057행), `exp_mask_orders`는 필터 없이 추정 200,000행을 전부 읽어 Hash Join에 넣습니다. 다만 조인이 Nested Loop가 아니라 Hash Join이므로 "Nested Loop + 안쪽 Seq Scan" 같은 조인 폭발 신호에는 해당하지 않습니다. 최종 결과 추정은 4,114행으로 orders 추정치의 …
 - **C** (자동 채점 정답): 이 계획에서 가장 유력한 신호는 `exp_mask_customers`의 `grade` 필터가 인덱스 없이 Seq Scan으로 처리되는 점입니다(추정 2,057행). 다만 조인은 Nested Loop가 아니라 Hash Join이라서, 판단 기준이 더 강한 신호로 보는 "Nested Loop 안쪽 Seq Scan(조인 폭발)"에는 해당하지 않습니다. `exp_mask_orders`의 Seq Scan(추정 200,000행)은 필터 없이 해시 조인의 바깥 입력으로 전체를 읽는 모양입니다. 이것만으로는 인덱스 부재라고 단정할 수 없습니다. …
 
+### L9 — 좁은 범위: 인덱스 레인지 스캔이 맞다
+
+- **A** (자동 채점 정답): [MYSQL] 규칙에 걸린 신호가 없다는 결과는 타당해 보입니다. access_type=range로 인덱스 범위 스캔이 잡혔고 using_index=true라 커버링 인덱스로 테이블 접근 없이 끝나며, 판단 기준의 근본원인 5종(암시적 형변환, 컬럼에 함수·표현식, 앞 와일드카드, 복합 인덱스 선두 누락, 통계 노후) 중 이 입력에서 근거가 보이는 것은 없습니다. attached_condition에 컬럼을 감싼 CAST나 함수가 없고 선두 컬럼 amount가 실제로 used_key_parts에 잡혀 있기 때문입니다. 한 가지만 짚자…
+- **B** (자동 채점 정답): 판단 기준의 MySQL 신호(ALL, filesort, temporary, index 풀스캔) 중 걸리는 것이 없고, access_type=range에 using_index=true라 커버링 인덱스로 테이블 접근 없이 끝나는 계획입니다(rows_examined_per_scan 200, query_cost 40.36). 다만 used_key_parts가 `amount` 하나뿐이고 `created_at`은 attached_condition에 필터로 남아 filtered 33.33%로 잡혔습니다 — B+Tree는 선두 컬럼에서 시작점을 …
+- **C** (자동 채점 정답): 규칙 기준으로 보면 이 계획에는 비효율 신호가 없습니다. access_type이 range이고 possible_keys/key가 모두 `exp_mask_orders_amount_created_idx`이며 using_index=true라 커버링 인덱스로 처리되고, filesort나 임시 테이블 신호도 없습니다. 다만 근본원인 표의 "복합 인덱스 선두 누락" 항목과 같은 원리로 하나 짚을 것이 있습니다. used_key_parts가 `amount` 하나뿐이라, 선두 컬럼에 BETWEEN 범위가 걸린 시점부터 뒤 컬럼인 `created_…
+
+### L10 — 넓은 범위: 전 행이 조건을 만족해 풀스캔이 정상
+
+- **A** (자동 채점 정답): **판정: 규칙 기반 지적이 없다는 결과는 맞지만, 판단 기준의 "복합 인덱스 시작점" 관점에서 유력한 원인이 하나 보입니다.** 1. 접근 방식은 `range` + `using_index=true`라 커버링 인덱스로 테이블 접근 없이 처리되고 있고, MySQL 규칙표의 신호(ALL, index, filesort, temporary table)에는 해당하지 않습니다. 2. 다만 `key`는 `exp_mask_orders_amount_created_idx`인데 `used_key_parts`가 `amount` 하나뿐입니다. 선두 컬럼 …
+- **B** (자동 채점 정답): [MYSQL] 1차 분석 1. 기종별 규칙표의 신호(ALL·index·filesort·임시 테이블)는 하나도 없고 `access_type=range` + `using_index=true`(커버링)라, 접근 경로 자체는 규칙상 지적할 게 없다는 판정이 맞다. 2. 다만 문서가 최종 판단자로 두는 선택도로 보면 `used_key_parts`가 `amount` 하나뿐이고 `key_length=5`라, 복합 인덱스 `exp_mask_orders_amount_created_idx`에서 `created_at`은 탐색 시작점을 좁히지 못하고 필…
+- **C** (자동 채점 정답): [MYSQL] 규칙표의 MySQL 비효율 신호(ALL, filesort, temporary, index 풀스캔)는 실제로 하나도 없다. access_type=range에 using_index=true라 커버링 인덱스로 테이블 접근 없이 인덱스만 읽는 형태이므로, 규칙이 지적하지 않은 것은 맞는 판정이다. 다만 근본원인 쪽에서 한 가지가 보인다. used_key_parts가 `amount` 하나뿐이고 key_length가 5라, 복합 인덱스 `(amount, created_at)`에서 두 번째 컬럼이 탐색 시작점을 좁히는 데 쓰이지 …
+
+### L11 — 컬럼에 함수: 인덱스를 못 쓴다
+
+- **A** (자동 채점 정답): 근본 원인은 인덱스 컬럼에 함수를 씌운 경우에 해당합니다. Filter가 `date_trunc('month', (created_at)::timestamptz) = '2026-08-01'::date`라서 옵티마이저가 표현식 결과를 미리 알 수 없고, B+Tree가 시작점을 잡지 못해 `created_at`에 인덱스가 있어도 무력화됩니다(규칙: 인덱스 무력화 근본원인 5종 중 "컬럼에 함수/표현식"). 규칙 기반 지적이 잡은 Seq Scan은 이 원인의 증상이므로, 통계 갱신(ANALYZE)이 아니라 조건 재작성 쪽을 먼저 보셔야 합니…
+- **B** (자동 채점 정답): 가장 유력한 원인은 **컬럼에 함수/표현식**입니다 — Filter가 `date_trunc('month', (created_at)::timestamp with time zone) = '2026-08-01'::date` 형태라 `created_at`이 함수 안에 갇혀 있고, 옵티마이저가 표현식 결과를 미리 알 수 없어 `created_at`에 B-Tree 인덱스가 있어도 시작점을 잡지 못해 Seq Scan으로 떨어집니다. 부가로 `(created_at)::timestamp with time zone` 캐스팅이 계획에 찍힌 점도 같은 …
+- **C** (자동 채점 정답): **근본 원인: 컬럼에 함수/표현식 (인덱스 무력화 5종 중 2번)** WHERE 절에서 `created_at`이 `date_trunc()` 안에 들어가 있습니다. 옵티마이저는 표현식 결과를 미리 알 수 없으므로 `created_at`의 일반 B-Tree 인덱스로는 시작점을 잡을 수 없고, 그래서 규칙이 지적한 Seq Scan이 나온 것으로 봅니다. Filter 문자열의 `(created_at)::timestamp with time zone` 캐스팅도 같은 방향의 신호입니다. `date_trunc(text, timestamptz)`…
+
 ## 한계
 
-- 사례 12개, 조건당 1회 호출(반복 없음)이다. 같은 조건이라도 호출마다 응답이 달라질 수 있는데 이 실험은 그 분산을 재지 않는다
+- 표 2·3은 사례 15개, 조건당 1회 호출이다. 같은 조건이라도 호출마다 응답이 달라질 수 있는데 이 실험은 그 분산을 재지 않는다
 - 자동 채점은 키워드 포함 여부만 본다. 키워드를 우연히 포함한 오답도 정답으로, 표현이 다른 정답도 오답으로 셀 수 있다
 - CLI 모드(claude CLI headless)로만 쟀다. API 경로와 프롬프트·판단 기준은 같지만 모델·샘플링은 다를 수 있고, CLI 모드에서 제품은 --model을 넘기지 않는다
 - 조건 C는 실험 장치다 — 제품에 있는 기능이 아니라, 계획까지 가렸다면 무엇이 남는지 보려고 실행기가 계획 문자열의 작은따옴표 리터럴만 바꿔 넣은 것이다. 계획에 작은따옴표로 안 찍힌 값(숫자)은 그대로 남는다

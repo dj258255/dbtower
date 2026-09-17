@@ -62,7 +62,7 @@ import static org.mockito.Mockito.when;
  * <p>{@code AiAnalysisRunner}는 AI 프롬프트에 SQL + 실행계획 + 규칙 기반 지적을 넣는데, 토글
  * ({@code dbtower.masking.mask-ai-prompt})은 <b>SQL 문장만</b> 가린다. 실행계획은 원문 그대로 들어가고
  * MySQL/PG의 실행계획에는 조건 값이 찍히므로, 토글을 켜도 값이 계획을 타고 나갈 수 있다. 이 실험은
- * 그 노출과 정확도의 대가를 같은 사례 12개로 세 조건에서 함께 잰다.
+ * 그 노출과 정확도의 대가를 같은 사례 15개로 세 조건에서 함께 잰다.
  *
  * <pre>
  * 조건 A: SQL 원문        + 계획 원문          (제품 기본값)
@@ -233,7 +233,7 @@ class AiMaskingTradeoffExperimentIT {
         // 모델을 한 번이라도 부르기 전에 프롬프트 동일성을 다시 확인한다 — 형식이 어긋나면 여기서 멈춘다
         assertPromptIdentity();
         List<MaskCase> cases = loadCases();
-        assertEquals(12, cases.size(), "사례 세트는 12개여야 한다(모델 호출 36회 = 12 × 3)");
+        assertEquals(15, cases.size(), "사례 세트는 15개여야 한다(모델 호출 45회 = 15 × 3)");
 
         AiAnalyzer analyzer = new AiAnalyzer(new SimpleMeterRegistry(), MODEL, RULES_PATH, MAX_TOKENS, EFFORT);
         if (!analyzer.isEnabled()) {
@@ -297,7 +297,7 @@ class AiMaskingTradeoffExperimentIT {
         }
 
         List<JsonNode> recorded = readResponses();
-        assertEquals(36, recorded.size(), "jsonl은 36줄(12사례 × 3조건)이어야 한다");
+        assertEquals(45, recorded.size(), "jsonl은 45줄(15사례 × 3조건)이어야 한다");
 
         Exposure exposure = exposure(cases, prompts);
         Scoring scoring = scoring(cases, recorded);
@@ -306,11 +306,11 @@ class AiMaskingTradeoffExperimentIT {
         System.out.println("[E2] 결과 기록: " + DOC_PATH.toAbsolutePath());
 
         long errors = recorded.stream().filter(n -> !n.path("error").isNull() && !n.path("error").asText().isEmpty()).count();
-        System.out.println("[E2] 호출 36회 중 오류 " + errors + "건. 조건별 자동 채점(L사례/C사례) — "
+        System.out.println("[E2] 호출 45회 중 오류 " + errors + "건. 조건별 자동 채점(L사례/C사례) — "
                 + scoring.summaryLine());
 
         // 화면에 보이는 숫자와 문서의 숫자가 같은 곳에서 나오게, 문서에 쓴 값을 그대로 다시 확인한다
-        assertEquals(36, recorded.size());
+        assertEquals(45, recorded.size());
         for (MaskCase c : cases) {
             assertTrue(prompts.get(c.id()).get("A").contains(c.sql()), "조건 A 프롬프트에 원문 SQL이 없다");
             String masked = new QueryMasker(true, true).applyForAiPrompt(c.sql());
@@ -337,7 +337,7 @@ class AiMaskingTradeoffExperimentIT {
                 "DBTOWER_EXPERIMENT_REPEAT=1 일 때만 반복 호출한다");
         assertPromptIdentity();
         List<MaskCase> cases = loadCases().stream().filter(c -> !List.of("L7", "C4").contains(c.id())).toList();
-        assertEquals(10, cases.size());
+        assertEquals(13, cases.size());
         AiAnalyzer analyzer = new AiAnalyzer(new SimpleMeterRegistry(), MODEL, RULES_PATH, MAX_TOKENS, EFFORT);
         if (!analyzer.isEnabled()) {
             fail("AI 백엔드가 OFF다 — 빈 응답을 정확도 0으로 세지 않으려 여기서 멈춘다");
@@ -537,16 +537,36 @@ class AiMaskingTradeoffExperimentIT {
         }
 
         String summaryLine() {
-            List<String> l = List.of("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8");
-            List<String> c = List.of("C1", "C2", "C3", "C4");
+            List<String> l = idsWithPrefix(scores().keySet(), "L");
+            List<String> c = idsWithPrefix(scores().keySet(), "C");
             StringBuilder sb = new StringBuilder();
             for (String condition : CONDITIONS) {
                 sb.append(condition).append(": L=").append(fmtPct(rate(condition, l)))
-                        .append("%(").append(scoredCount(condition, l)).append("/8) C=")
-                        .append(fmtPct(rate(condition, c))).append("%(").append(scoredCount(condition, c)).append("/4) ");
+                        .append("%(").append(scoredCount(condition, l)).append('/').append(l.size()).append(") C=")
+                        .append(fmtPct(rate(condition, c))).append("%(").append(scoredCount(condition, c))
+                        .append('/').append(c.size()).append(") ");
             }
             return sb.toString();
         }
+    }
+
+    /** 사례 묶음 한 줄 — 분모를 묶음 크기에서 가져온다(코드에 8·4를 적어 두니 새 사례가 들어와도 8로 남았다). */
+    private static void appendRateRow(StringBuilder sb, String group, Scoring scoring, List<String> ids) {
+        sb.append("| **").append(group).append(" 사례 정답률(").append(ids.size()).append(")** |  |  |");
+        for (String condition : CONDITIONS) {
+            sb.append(" **").append(fmtPct(scoring.rate(condition, ids))).append("%** (")
+                    .append(scoring.scoredCount(condition, ids)).append('/').append(ids.size()).append(") |");
+        }
+        sb.append('\n');
+    }
+
+    /**
+     * 사례 묶음을 id 접두사로 뽑는다 — 목록을 코드에 박아 두면 새 사례를 넣어도 채점·문서에서 조용히 빠진다
+     * (L9~L11을 넣은 회차에서 실제로 L을 8개만 셌다).
+     */
+    private static List<String> idsWithPrefix(java.util.Collection<String> ids, String prefix) {
+        return ids.stream().filter(id -> id.startsWith(prefix)).sorted(java.util.Comparator
+                .comparingInt(id -> Integer.parseInt(id.substring(prefix.length())))).toList();
     }
 
     private static String fmtPct(double v) {
@@ -604,8 +624,9 @@ class AiMaskingTradeoffExperimentIT {
 
     private static String document(List<DbEnv> envs, List<MaskCase> cases, Map<String, String> plans, Exposure exposure,
                                    Scoring scoring, List<JsonNode> recorded, String startedAt, String mode) {
-        List<String> l = List.of("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8");
-        List<String> ctl = List.of("C1", "C2", "C3", "C4");
+        List<String> caseIds = cases.stream().map(MaskCase::id).toList();
+        List<String> l = idsWithPrefix(caseIds, "L");
+        List<String> ctl = idsWithPrefix(caseIds, "C");
         StringBuilder sb = new StringBuilder();
         sb.append("# E2: 마스킹 토글이 가리는 것과 AI 진단 정확도\n\n");
         sb.append("이 문서와 `ai-masking-responses.jsonl`은 `AiMaskingTradeoffExperimentIT`가 실제 DB의 실행계획과 "
@@ -624,7 +645,7 @@ class AiMaskingTradeoffExperimentIT {
         sb.append("\n- 실행 일시: ").append(startedAt).append('\n');
         sb.append("- 모델: 설정값 `").append(MODEL).append("` (CLI 모드는 제품이 --model을 넘기지 않으므로 실제 모델은 CLI 기본값), "
                 + "effort=").append(EFFORT).append(", max_tokens=").append(MAX_TOKENS).append(", 백엔드=").append(mode).append('\n');
-        sb.append("- 호출: ").append(recorded.size()).append("회 = 사례 12 × 조건 3, 조건 비율 ");
+        sb.append("- 호출: ").append(recorded.size()).append("회 = 사례 15 × 조건 3, 조건 비율 ");
         for (String condition : CONDITIONS) {
             sb.append(condition).append(' ').append(scoring.calls().get(condition)).append("회 ");
         }
@@ -634,8 +655,8 @@ class AiMaskingTradeoffExperimentIT {
             sb.append(condition).append(' ').append(scoring.errors().get(condition)).append("건 ");
         }
         sb.append('\n');
-        sb.append("- 사례 세트: `").append(CASES_PATH).append("` (L=리터럴이 진단을 가르는 사례 8개, C=리터럴과 무관한 대조군 4개)\n");
-        sb.append("- 프롬프트는 제품 `AiAnalysisRunner.run`과 글자 단위로 같다(`프롬프트가_제품_AiAnalysisRunner와_글자_단위로_같다` 테스트가 사례 12개 × 조건 A·B에서 확인)\n");
+        sb.append("- 사례 세트: `").append(CASES_PATH).append("` (L=리터럴이 진단을 가르는 사례 11개 — 날짜·숫자 범위 크기와 날짜 함수 포함, C=리터럴과 무관한 대조군 4개)\n");
+        sb.append("- 프롬프트는 제품 `AiAnalysisRunner.run`과 글자 단위로 같다(`프롬프트가_제품_AiAnalysisRunner와_글자_단위로_같다` 테스트가 사례 15개 × 조건 A·B에서 확인)\n");
         sb.append("- 노출 수는 프롬프트 문자열에서 민감 리터럴이 나온 횟수(부분 문자열 기준)다. 숫자 리터럴은 다른 수의 일부로도 세어질 수 있다(예: `1012345678`은 `01012345678` 안에서도 잡힌다)\n\n");
 
         sb.append("## 표 1: 민감 리터럴 노출 수 (프롬프트 안에서 나온 횟수)\n\n");
@@ -674,12 +695,8 @@ class AiMaskingTradeoffExperimentIT {
             }
             sb.append('\n');
         }
-        sb.append("| **L 사례 정답률(8)** |  |  | **").append(fmtPct(scoring.rate("A", l))).append("%** (").append(scoring.scoredCount("A", l))
-                .append("/8) | **").append(fmtPct(scoring.rate("B", l))).append("%** (").append(scoring.scoredCount("B", l))
-                .append("/8) | **").append(fmtPct(scoring.rate("C", l))).append("%** (").append(scoring.scoredCount("C", l)).append("/8) |\n");
-        sb.append("| **C 사례 정답률(4)** |  |  | **").append(fmtPct(scoring.rate("A", ctl))).append("%** (").append(scoring.scoredCount("A", ctl))
-                .append("/4) | **").append(fmtPct(scoring.rate("B", ctl))).append("%** (").append(scoring.scoredCount("B", ctl))
-                .append("/4) | **").append(fmtPct(scoring.rate("C", ctl))).append("%** (").append(scoring.scoredCount("C", ctl)).append("/4) |\n");
+        appendRateRow(sb, "L", scoring, l);
+        appendRateRow(sb, "C", scoring, ctl);
         sb.append("\n- `O`=정답, `X`=오답, `-`=오류·빈 응답이라 채점 제외. 위 정답률은 채점한 회차만 분모로 센다(괄호 안이 그 수)\n");
         sb.append("- **자동 채점**이다 — 키워드 포함 여부만 본다. 최종 정확도는 사람 검토 후 확정한다(부록)\n");
 
@@ -716,7 +733,7 @@ class AiMaskingTradeoffExperimentIT {
         }
 
         sb.append("## 한계\n\n");
-        sb.append("- 사례 12개, 조건당 1회 호출(반복 없음)이다. 같은 조건이라도 호출마다 응답이 달라질 수 있는데 이 실험은 그 분산을 재지 않는다\n");
+        sb.append("- 표 2·3은 사례 15개, 조건당 1회 호출이다. 같은 조건이라도 호출마다 응답이 달라질 수 있는데 이 실험은 그 분산을 재지 않는다\n");
         sb.append("- 자동 채점은 키워드 포함 여부만 본다. 키워드를 우연히 포함한 오답도 정답으로, 표현이 다른 정답도 오답으로 셀 수 있다\n");
         sb.append("- CLI 모드(claude CLI headless)로만 쟀다. API 경로와 프롬프트·판단 기준은 같지만 모델·샘플링은 다를 수 있고, "
                 + "CLI 모드에서 제품은 --model을 넘기지 않는다\n");
