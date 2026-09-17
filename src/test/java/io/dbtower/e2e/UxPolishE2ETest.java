@@ -236,6 +236,13 @@ class UxPolishE2ETest {
         assertThat(page.locator(".tab[data-tab=\"top\"]")).hasText("상위 쿼리");
         assertThat(page.locator(".tab[data-tab=\"slow\"]")).hasText("느린 쿼리");
         assertThat(page.locator(".tab[data-tab=\"monitor\"]")).hasText("모니터링");
+        // 모니터링 탭은 무엇을 하는 탭인지로 부른다 — "구성"과 "거버넌스"는 이름만으로 차이가 드러나지 않았다(#64)
+        assertThat(page.locator(".mon-tab[data-mon=\"config\"]")).hasText("설정 비교");
+        assertThat(page.locator(".mon-tab[data-mon=\"gov\"]")).hasText("변경 승인");
+        // 선택한 카드의 상세는 접속 사실만 — 기종은 이름 옆 아이콘과 가운데 운영 종합이 말한다
+        Locator fieldNames = page.locator(".instance-card.selected .inst-field .k");
+        assertThat(fieldNames.filter(new Locator.FilterOptions().setHasText("호스트"))).hasCount(1);
+        assertThat(fieldNames.filter(new Locator.FilterOptions().setHasText("기종"))).hasCount(0);
         // 괄호 안에 설명을 몰아넣지 않는다 — 사실 한 문장과 제약만(179절)
         org.assertj.core.api.Assertions.assertThat(page.locator(".health-score-panel .hint").first().textContent())
                 .doesNotContain("(");
