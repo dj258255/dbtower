@@ -212,7 +212,18 @@ function bindInfoTips() {
   document.querySelectorAll("[data-info]").forEach((trigger) => {
     const tip = $(trigger.dataset.info);
     if (!tip) return;
-    const show = () => { tip.hidden = false; trigger.setAttribute("aria-expanded", "true"); };
+    // 툴팁은 화면 기준(fixed)으로 아이콘 아래에 두고 좌우를 화면 안으로 당긴다(#40) — 전에는 아이콘 오른쪽 끝에 맞춰
+    // 왼쪽으로 펼쳐져, overflow가 잘리는 왼쪽 칸 밖으로 나간 부분이 잘렸다
+    const show = () => {
+      tip.hidden = false;
+      const r = trigger.getBoundingClientRect();
+      const w = tip.offsetWidth;
+      tip.style.position = "fixed";
+      tip.style.top = `${r.bottom + 6}px`;
+      tip.style.right = "auto";
+      tip.style.left = `${Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))}px`;
+      trigger.setAttribute("aria-expanded", "true");
+    };
     const hide = () => { tip.hidden = true; trigger.setAttribute("aria-expanded", "false"); };
     trigger.addEventListener("mouseenter", show);
     trigger.addEventListener("mouseleave", hide);

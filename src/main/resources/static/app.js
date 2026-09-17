@@ -625,6 +625,8 @@ function setupTooltip() {
 // "SELECT가 어디부터 어디까지인가"가 읽히지 않는다(사용자 지적). 문서에 하나만 두고 재사용한다 —
 // 여러 개가 겹쳐 뜨는 것을 구조적으로 막고, 한 번에 하나만 뜬다.
 const SQL_TIP_DELAY_MS = 300;
+// 떠 있는 툴팁을 향해 포인터를 옮기는 동안 다른 행을 지나가도 참는 시간
+const SQL_TIP_SWITCH_MS = 450;
 function setupSqlTip() {
   const tip = document.createElement("div");
   tip.id = "sql-tip"; tip.className = "sql-tip"; tip.hidden = true;
@@ -639,8 +641,9 @@ function setupSqlTip() {
   };
   const place = (el) => {
     const r = el.getBoundingClientRect(), t = tip.getBoundingClientRect();
-    let top = r.bottom + 8;
-    if (top + t.height > window.innerHeight - 8) top = Math.max(8, r.top - t.height - 8);
+    // 셀 바로 아래 붙여 포인터가 지나갈 거리를 줄인다(사이에 다른 행이 끼지 않게)
+    let top = r.bottom + 2;
+    if (top + t.height > window.innerHeight - 8) top = Math.max(8, r.top - t.height - 2);
     tip.style.top = `${top}px`;
     tip.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - t.width - 8))}px`;
   };
@@ -651,14 +654,31 @@ function setupSqlTip() {
     tip.hidden = false;
     place(el);
   };
+  // 떠 있는 툴팁으로 포인터를 옮기는 길에 다른 행을 지나가도 바로 바뀌거나 닫히지 않게 짧게 기다린다(#40).
+  // 전에는 지나가는 행마다 새 툴팁을 띄우거나 닫아, 툴팁 안으로 들어가 긴 SQL을 스크롤할 수 없었다
+  let leaveTimer = null;
+  const cancelLeave = () => { clearTimeout(leaveTimer); leaveTimer = null; };
   document.addEventListener("mouseover", (e) => {
-    if (tip.contains(e.target)) return;          // 툴팁 위(스크롤바 포함)에 있으면 유지 — 안에서 스크롤할 수 있어야 한다
+    if (tip.contains(e.target)) { cancelLeave(); clearTimeout(timer); return; }
     const el = e.target.closest?.("[data-sql-tip]");
-    if (!el) { hide(); return; }
-    if (el === cell) return;
+    if (el === cell) { cancelLeave(); return; }
+    if (tip.hidden) {
+      cancelLeave();
+      if (!el) { hide(); return; }
+      clearTimeout(timer);
+      cell = el;
+      timer = setTimeout(() => show(el), SQL_TIP_DELAY_MS);
+      return;
+    }
+    // 툴팁이 떠 있는 동안: 다른 곳으로 가면 잠시 기다렸다 닫거나 바꾼다 — 그 사이 툴팁에 들어가면 취소된다
+    cancelLeave();
     clearTimeout(timer);
-    cell = el;
-    timer = setTimeout(() => show(el), SQL_TIP_DELAY_MS);
+    leaveTimer = setTimeout(() => {
+      leaveTimer = null;
+      if (!el) { hide(); return; }
+      cell = el;
+      show(el);
+    }, SQL_TIP_SWITCH_MS);
   });
   // 키보드 초점으로도 뜬다 — 마우스만 있는 툴팁은 키보드 사용자에게 없는 정보다(셀에 tabindex를 준 이유)
   document.addEventListener("focusin", (e) => {
@@ -672,7 +692,7 @@ function setupSqlTip() {
   window.addEventListener("scroll", (e) => { if (!tip.contains(e.target)) hide(); }, true);
   window.addEventListener("resize", hide);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
-  tip.addEventListener("mouseleave", hide);
+  tip.addEventListener("mouseleave", () => { cancelLeave(); leaveTimer = setTimeout(hide, SQL_TIP_SWITCH_MS); });
 }
 
 // 검색·필터 이벤트 → 재렌더(입력·선택할 때만 매칭분을 그린다). 앱 로딩 시 한 번 연결.
@@ -708,28 +728,66 @@ function enhanceSelect(sel) {
   sync();
   sel._csSync = sync;
   let panel = null;
-  const close = () => { if (panel) { panel.remove(); panel = null; btn.classList.remove("open"); document.removeEventListener("click", onDoc, true); } };
-  const onDoc = (e) => { if (!wrap.contains(e.target)) close(); };
+  // 패널은 body에 붙이고 버튼 바로 아래에 고정 위치로 연다(#40). 전에는 칸 안(position:absolute)에 붙여, 가로 스크롤 상자·
+  // overflow:hidden 칸(사용자 표·워크벤치 왼쪽·팝오버) 안에서는 잘렸고, 그래서 그런 자리에는 네이티브 select를 남겼다 —
+  // 네이티브 목록은 macOS에서 선택 항목을 버튼 위치에 맞추느라 위로 열렸다. 늘 아래로 연다: 아래 공간이 모자라면 높이를 줄이고 스크롤한다
+  const place = () => {
+    if (!panel) return;
+    const r = btn.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom - 12;
+    panel.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - Math.max(r.width, 160) - 8))}px`;
+    panel.style.top = `${r.bottom + 4}px`;
+    panel.style.minWidth = `${r.width}px`;
+    panel.style.maxHeight = `${Math.max(140, Math.min(300, below))}px`;
+  };
+  const close = () => {
+    if (!panel) return;
+    panel.remove(); panel = null; btn.classList.remove("open"); btn.setAttribute("aria-expanded", "false");
+    document.removeEventListener("click", onDoc, true);
+    window.removeEventListener("scroll", onScroll, true);
+    window.removeEventListener("resize", close);
+  };
+  const onDoc = (e) => { if (!wrap.contains(e.target) && !(panel && panel.contains(e.target))) close(); };
+  // 패널 안 스크롤은 그대로 두고, 바깥이 스크롤되면 버튼과 떨어지므로 닫는다
+  // 스크롤 이벤트는 다음 프레임에 온다 — 열면서 올린 스크롤(아래)이 방금 연 패널을 닫지 않게 여는 순간의 것은 넘긴다
+  let openedAt = 0;
+  const onScroll = (e) => { if (panel && !panel.contains(e.target) && performance.now() - openedAt > 250) close(); };
+  btn.setAttribute("aria-haspopup", "listbox");
+  btn.setAttribute("aria-expanded", "false");
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
     if (panel) { close(); return; }
     panel = document.createElement("div");
-    panel.className = "cs-panel";
+    panel.className = "cs-panel cs-panel-floating";
+    panel.setAttribute("role", "listbox");
     [...sel.options].forEach((o, i) => {
       const it = document.createElement("div");
       it.className = "cs-opt" + (i === sel.selectedIndex ? " sel" : "");
+      it.setAttribute("role", "option");
+      it.setAttribute("aria-selected", String(i === sel.selectedIndex));
       it.innerHTML = label(o);
       it.addEventListener("click", () => {
         sel.selectedIndex = i; sync();
-        sel.dispatchEvent(new Event("change"));
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
         close();
       });
       panel.appendChild(it);
     });
-    wrap.appendChild(panel);
+    document.body.appendChild(panel);
+    // 아래 공간이 목록보다 좁으면 페이지를 먼저 그만큼 올린다 — 위로 뒤집어 열지 않는다(#40).
+    // 패널을 연 뒤에 스크롤이 일어나면(항목이 화면 밖이라 브라우저·사용자가 내리면) 버튼과 떨어져 닫혀 버린다
+    const want = Math.min(300, panel.scrollHeight);
+    const below = window.innerHeight - btn.getBoundingClientRect().bottom - 12;
+    openedAt = performance.now();
+    if (below < want) window.scrollBy(0, want - below);
+    place();
     btn.classList.add("open");
+    btn.setAttribute("aria-expanded", "true");
     document.addEventListener("click", onDoc, true);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", close);
   });
+  sel._csClose = close;
 }
 
 function handleInstanceDeepLink(list) {
@@ -766,7 +824,7 @@ function handleInstanceDeepLink(list) {
   if (deepJob) ready.then(() => openDeepLinkJob(deepJob));
   // 진단 입력은 늘 보이는 AI 칸에 있다(149절) — 모니터링 탭을 열 필요 없이 질문을 채운다
   if (deepQ) { const input = $("#diagnose-question"); input.value = deepQ; autoGrowChatInput(); syncChatComposer(); input.scrollIntoView({ block: "center" }); input.focus(); }
-  if (deepView === "config-drift") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadConfigDrift(); $("#config-drift-result").scrollIntoView({ block: "center" }); }
+  if (deepView === "config-drift") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("config"); loadConfigDrift(); $("#config-drift-result").scrollIntoView({ block: "center" }); }
   if (deepView === "review") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("gov"); loadReviews(); $(".review-gate-card").scrollIntoView({ block: "center" }); }
   // 인시던트 리포트 웹훅 카드(IncidentController)와 월간 리포트의 입구 — 링크는 있었는데 처리하는 곳이 없었다(148절 감사)
   if (deepView === "incident") { document.querySelector('.tab[data-tab="monitor"]').click(); showMonGroup("backup"); $("#incident-result").scrollIntoView({ block: "center" }); }
@@ -911,21 +969,68 @@ function renderAiOperations() {
     $("#aiops-detail").hidden = true;
     return;
   }
+  parkAiopDetail();   // tbody를 갈아 끼우기 전에 상세를 빼 둔다 — 행 안에 있으면 함께 지워진다
   body.innerHTML = rows.map((j) => {
     const name = j.instanceId ? (state.instances.find((i) => i.id === j.instanceId)?.name ?? `#${j.instanceId}`) : "범위 전체";
-    return `<tr class="aiop-row${j.jobId === aiops.openId ? " open" : ""}" data-job="${esc(j.jobId)}">
+    return `<tr class="aiop-row${j.jobId === aiops.openId ? " open" : ""}" data-job="${esc(j.jobId)}" tabindex="0">
       <td><span class="aiop-badge aiop-${esc(j.status)}">${esc(AIOP_STATUS_LABEL[j.status] ?? j.status)}</span></td>
       <td>${esc(AIOP_TYPE_LABEL[j.type] ?? j.type)}</td>
       <td>${esc(name)}</td>
       <td>${esc(j.requester)} <span class="muted">(${esc(AIOP_TRIGGER_LABEL[j.trigger] ?? j.trigger)})</span></td>
       <td>${esc(String(j.requestedAt).replace("T", " ").slice(0, 19))}</td>
-      <td><button type="button" class="btn btn-small aiop-open">보기</button></td>
+      <td class="aiop-toggle-cell"><button type="button" class="aiop-open" aria-expanded="${j.jobId === aiops.openId}" aria-label="작업 펼치기">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button></td>
     </tr>`;
   }).join("");
-  body.querySelectorAll(".aiop-row").forEach((tr) => {
-    tr.querySelector(".aiop-open").addEventListener("click", () => openAiOperation(tr.dataset.job));
+  // 목록을 다시 그려도(5초 갱신) 펼친 상세는 그 행 아래로 곧바로 되돌린다 — 응답을 기다리는 동안 표 밑으로 튀지 않게
+  if (aiops.openId && rows.some((j) => j.jobId === aiops.openId)) {
+    placeAiopDetail(aiops.openId);
+    openAiOperation(aiops.openId, { quiet: true });
+  } else {
+    parkAiopDetail();
+  }
+}
+
+/**
+ * 작업 상세를 누른 행 바로 아래에 펼친다(#40) — 전에는 "보기"를 누르면 표 밑의 상세 칸에 떠서, 행과 상세가 떨어져
+ * 스크롤을 오가며 봐야 했다. 상위 쿼리 표와 같은 방식: 행을 누르면 그 아래 한 칸에 펼치고 다시 누르면 접는다.
+ */
+function placeAiopDetail(jobId) {
+  const box = $("#aiops-detail");
+  const tr = document.querySelector(`#aiops-table .aiop-row[data-job="${CSS.escape(jobId)}"]`);
+  if (!box || !tr) return;
+  let host = document.querySelector("#aiops-table tr.aiop-detail-host");
+  if (!host) {
+    host = document.createElement("tr");
+    host.className = "aiop-detail-host";
+    host.innerHTML = '<td class="aiop-detail-cell" colspan="6"></td>';
+  }
+  host.firstElementChild.appendChild(box);
+  tr.after(host);
+  document.querySelectorAll("#aiops-table .aiop-row").forEach((r) => {
+    const on = r.dataset.job === jobId;
+    r.classList.toggle("open", on);
+    r.querySelector(".aiop-open")?.setAttribute("aria-expanded", String(on));
   });
-  if (aiops.openId && rows.some((j) => j.jobId === aiops.openId)) openAiOperation(aiops.openId, { quiet: true });
+}
+
+/** 상세를 표 밖(카드 아래) 원래 자리로 돌린다 — 목록을 다시 그리거나, 표에 없는 작업(딥링크)을 열 때 */
+function parkAiopDetail() {
+  const box = $("#aiops-detail");
+  const card = $("#aiops-table")?.closest(".monitor-card");
+  if (box && card && box.parentElement !== card) card.appendChild(box);
+  document.querySelector("#aiops-table tr.aiop-detail-host")?.remove();
+}
+
+function closeAiOperation() {
+  aiops.openId = null;
+  const box = $("#aiops-detail");
+  if (box) box.hidden = true;
+  parkAiopDetail();
+  document.querySelectorAll("#aiops-table .aiop-row").forEach((r) => {
+    r.classList.remove("open");
+    r.querySelector(".aiop-open")?.setAttribute("aria-expanded", "false");
+  });
 }
 
 // 참고 자료 본문은 600자짜리 런북 발췌라 화면에서는 줄인다 — 전체는 API 응답에 그대로 있다
@@ -939,6 +1044,8 @@ const aiopList = (title, items, extra = "", cap = 0) => (items && items.length)
 async function openAiOperation(jobId, opts = {}) {
   const box = $("#aiops-detail");
   aiops.openId = jobId;
+  if (document.querySelector(`#aiops-table .aiop-row[data-job="${CSS.escape(jobId)}"]`)) placeAiopDetail(jobId);
+  else parkAiopDetail();
   if (!opts.quiet) { box.hidden = false; box.innerHTML = `<div class="muted">불러오는 중...</div>`; }
   let job;
   try {
@@ -967,19 +1074,26 @@ async function openAiOperation(jobId, opts = {}) {
   const failure = job.failureReason ? `<div class="aiop-block aiop-warn"><h4>실패 사유</h4><p>${esc(job.failureReason)}</p></div>` : "";
   let result = "";
   if (r) {
+    // 읽는 순서대로(#40): 먼저 믿으면 안 되는 것(검증 안 됨·승인 필요) → AI 소견(문단·목록 서식) → 다음 조치 → 근거·판정.
+    // 수십 줄짜리 "모은 사실"과 런북 발췌는 기본으로 접는다 — 펼쳐 두면 소견이 그 아래로 밀려 보이지 않았다
     const opinion = r.aiOpinion
-      ? `<div class="aiop-block aiop-opinion"><h4>AI 1차 소견 <span class="muted">(판단은 사람이 합니다 · ${esc(r.backend ?? "")} · ${esc(r.promptVersion ?? "")})</span></h4><p>${esc(r.aiOpinion)}</p></div>`
+      ? `<div class="aiop-block aiop-opinion"><h4>AI 1차 소견 <span class="muted">판단은 사람이 합니다</span></h4><div class="chat-text">${chatAnswerHtml(r.aiOpinion)}</div></div>`
       : `<div class="aiop-block muted"><h4>AI 1차 소견</h4><p>없음 — 규칙 판정만 제공합니다</p></div>`;
+    const folded = (title, items, cap = 0) => (items && items.length)
+      ? `<details class="aiop-fold"><summary>${esc(title)} <span class="muted">${items.length}개</span></summary><ul>${items.map((i) => {
+          const text = cap && i.length > cap ? `${i.slice(0, cap)}…` : i;
+          return `<li>${esc(text)}</li>`;
+        }).join("")}</ul></details>` : "";
     result = [
       aiopList("검증되지 않은 내용", r.unverifiedClaims, "aiop-warn"),
-      aiopList("규칙 판정", r.ruleFindings),
+      r.approvalRequired ? `<div class="aiop-block aiop-warn"><h4>승인 필요</h4><p>대상 DB를 바꿀 수 있는 조치가 언급됐습니다. 실행은 워크벤치 변경 요청으로 승인을 받습니다.</p></div>` : "",
       opinion,
-      aiopList("근거", r.evidence),
-      aiopList("불확실한 점", r.uncertainties),
       aiopList("다음 조치", r.nextActions),
-      r.approvalRequired ? `<div class="aiop-block aiop-warn"><h4>승인</h4><p>대상 DB를 바꿀 수 있는 조치가 언급됐습니다. 실행은 워크벤치 변경 요청으로 승인을 받습니다.</p></div>` : "",
-      aiopList("DBTower가 모은 사실", r.facts),
-      aiopList("참고 자료 (과거 사례·런북 — 현재 사실이 아닙니다)", r.references, "", AIOP_ITEM_CAP),
+      aiopList("불확실한 점", r.uncertainties),
+      aiopList("근거", r.evidence),
+      aiopList("규칙 판정", r.ruleFindings),
+      `<div class="aiop-folds">${folded("DBTower가 모은 사실", r.facts)}${folded("참고 자료 — 과거 사례·런북(현재 사실이 아닙니다)", r.references, AIOP_ITEM_CAP * 2)}</div>`,
+      r.backend || r.promptVersion ? `<div class="aiop-meta muted">${esc([r.backend, r.promptVersion].filter(Boolean).join(" · "))}</div>` : "",
     ].join("");
   } else if (AIOP_ACTIVE.has(job.status)) {
     result = `<div class="aiop-block muted"><p>진행 중입니다. 사실을 모으고 분석이 끝나면 여기에 결과가 붙습니다.</p></div>`;
@@ -1005,6 +1119,17 @@ async function aiOperationAction(jobId, action) {
 // 진행 중 작업이 있고 이 카드가 실제로 보일 때만 갱신한다 — 안 보는 화면이 폴링을 계속하면 서버만 바쁘다
 function setupAiOperations() {
   $("#aiops-all-instances")?.addEventListener("change", renderAiOperations);
+  const tbody = $("#aiops-table tbody");
+  const toggle = (tr) => { if (aiops.openId === tr.dataset.job) closeAiOperation(); else openAiOperation(tr.dataset.job); };
+  tbody?.addEventListener("click", (e) => {
+    if (e.target.closest(".aiop-detail-host")) return;          // 펼친 상세 안의 클릭(취소·재시도·접기)은 행 토글이 아니다
+    const tr = e.target.closest(".aiop-row");
+    if (tr) toggle(tr);
+  });
+  tbody?.addEventListener("keydown", (e) => {
+    const tr = e.target.closest(".aiop-row");
+    if (tr && (e.key === "Enter" || e.key === " ") && e.target === tr) { e.preventDefault(); toggle(tr); }
+  });
   $("#btn-aiop-submit")?.addEventListener("click", submitAiOperation);
   document.addEventListener("visibilitychange", scheduleAiOpsRefresh);
 }
@@ -1830,6 +1955,7 @@ function toggleDetailView(key) {
   // 대신 SQL이 바뀌었으면 옛 결과는 그 SQL의 것이 아니므로 버린다
   if (key === "advisor") {
     if (stale) resetAdvisor();
+    renderAdvisorCandidates();
     $("#advisor-columns").focus();
     return;
   }
@@ -1840,6 +1966,49 @@ function toggleDetailView(key) {
 function refreshDetailView(key) {
   detailView.sql[key] = "";
   DETAIL_RUN[key]();
+}
+
+/**
+ * 인덱스 제안 후보 — 쿼리의 FROM 첫 테이블과 WHERE·JOIN ON·ORDER BY에 나온 열을 뽑아 누르면 채워지게 한다(#40).
+ * 사용자가 "무엇을 적으라는 건지" 몰랐다. 서버는 자동 추천을 하지 않으므로(PostgresOperator.adviseIndex) 여기서도
+ * 추천이라 부르지 않고 "쿼리에 나온 조건 열"로만 보인다. 파싱이 틀려도 채우기만 하고 실행은 사람이 누른다.
+ */
+function advisorCandidateList(sql) {
+  let text = String(sql || "").replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
+  // 서브쿼리 안의 열은 바깥 테이블의 것이 아니다 — 괄호 속 SELECT를 먼저 지운다
+  text = text.replace(/\b[A-Za-z_]\w*\(\s*\)/g, " ? ");   // current_database() 같은 인자 없는 호출
+  for (let i = 0; i < 5 && /\(\s*select\b[^()]*\)/i.test(text); i++) text = text.replace(/\(\s*select\b[^()]*\)/gi, " ? ");
+  const from = text.match(/\bfrom\s+([A-Za-z_][\w.]*)(?:\s+(?:as\s+)?([A-Za-z_]\w*))?/i);
+  if (!from) return [];
+  const table = from[1].split(".").pop();
+  const alias = from[2] && !/^(where|join|inner|left|right|order|group|limit|on)$/i.test(from[2]) ? from[2] : null;
+  const cols = [];
+  const add = (c) => { const name = c.split(".").pop(); if (!cols.includes(name) && !/^\$?\d+$/.test(name)) cols.push(name); };
+  const scan = (part) => {
+    for (const m of part.matchAll(/([A-Za-z_][\w]*(?:\.[A-Za-z_]\w*)?)\s*(?:=|<>|!=|<=|>=|<|>|\bin\b|\blike\b|\bbetween\b|\bis\b)/gi)) {
+      const ref = m[1];
+      if (/^(and|or|not|where|on|select|case|when|then)$/i.test(ref)) continue;
+      const q = ref.includes(".") ? ref.split(".")[0] : null;
+      if (q && q !== table && q !== alias) continue;
+      add(ref);
+    }
+  };
+  const where = text.match(/\bwhere\b([\s\S]*?)(?:\bgroup\s+by\b|\border\s+by\b|\blimit\b|$)/i);
+  if (where) scan(where[1]);
+  const order = text.match(/\border\s+by\b([\s\S]*?)(?:\blimit\b|$)/i);
+  if (order) order[1].split(",").forEach((p) => { const m = p.trim().match(/^([A-Za-z_][\w.]*)/); if (m && !/^\d/.test(m[1])) { const q = m[1].includes(".") ? m[1].split(".")[0] : null; if (!q || q === table || q === alias) add(m[1]); } });
+  const out = cols.slice(0, 4).map((c) => `${table}(${c})`);
+  if (cols.length >= 2) out.push(`${table}(${cols.slice(0, 2).join(", ")})`);
+  return out;
+}
+
+function renderAdvisorCandidates() {
+  const box = $("#advisor-candidates");
+  const list = advisorCandidateList(detailSql());
+  box.hidden = !list.length;
+  box.innerHTML = list.length
+    ? `<span class="muted">쿼리에 나온 조건 열:</span> ${list.map((c) => `<button type="button" class="chip-btn" data-advisor-candidate="${esc(c)}">${esc(c)}</button>`).join("")}`
+    : "";
 }
 
 function resetAdvisor() {
@@ -1934,6 +2103,9 @@ function watchRowDetails() {
 }
 
 function openDetail(query, tr) {
+  // 누른 행이 화면에서 어디 있었는지 기억한다 — 위쪽 행에 열려 있던 상세가 빠지면 누른 행이 그만큼 위로 튀어,
+  // 새 상세가 "누른 곳 위로 열리는" 것처럼 보였다(#40). 끝에서 같은 자리로 되돌린다
+  const anchorTop = tr ? tr.getBoundingClientRect().top : null;
   state.currentQuery = query;
   $("#btn-to-workbench").hidden = !can("WORKBENCH");
   $("#query-detail").hidden = false;
@@ -1969,7 +2141,15 @@ function openDetail(query, tr) {
   state.lastPlan = null;
   state.lastFindings = [];
   state.lastAi = null;
-  $("#query-detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  if (tr && anchorTop != null) {
+    const moved = tr.getBoundingClientRect().top - anchorTop;
+    if (Math.abs(moved) > 1) window.scrollBy(0, moved);
+    // 누른 행이 화면 아래쪽이라 상세가 안 보이면, 행을 위로 올려 상세 머리가 보이게 한다(아래로 펼쳐진 채)
+    const r = tr.getBoundingClientRect();
+    if (r.bottom + 200 > window.innerHeight) window.scrollBy({ top: r.top - 96, behavior: "smooth" });
+  } else {
+    $("#query-detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
 }
 
 function closeDetail() {
@@ -2034,16 +2214,22 @@ async function runAntiPatterns() {
   }
 }
 
-// 정규화 쿼리 식별자를 사람이 읽을 길이로 줄인다. PostgreSQL queryid는 부호 있는 64비트라 음수로 찍히는데,
-// 화면에서 20자리 숫자는 서로 구분이 안 되고 "왜 마이너스인가"라는 오해만 남긴다(162절 지적).
-// 전체 값은 title로 남겨 복사·대조가 가능하게 둔다 — 줄이되 숨기지 않는다.
+// 쿼리 ID를 사람이 읽을 길이로 줄인다. 통계가 "같은 모양의 쿼리"를 묶어 붙이는 번호다(PostgreSQL queryid, MySQL digest).
+// PostgreSQL queryid는 부호 있는 64비트라 -8248214055340972226처럼 음수로 찍혀 "무슨 값인가"만 남겼다(#40, 162절).
+// 숫자 ID는 부호 없는 64비트 16진수로 바꿔 MySQL digest와 같은 모양으로 보인다 — 값 자체에 뜻이 없다는 것이 모양으로 드러난다.
+// 원래 값은 title과 복사 버튼에 그대로 남긴다(pg_stat_statements에서 찾을 때는 원래 값이 필요하다).
 function shortQueryId(id) {
-  const s = String(id ?? "");
+  const s = String(id ?? "").trim().replace("−", "-");
   if (!s) return "—";
-  if (s.length <= 12) return s;
-  const neg = s.startsWith("-") || s.startsWith("−");
-  const digits = neg ? s.slice(1) : s;
-  return `${neg ? "n" : ""}${digits.slice(0, 6)}…${digits.slice(-4)}`;
+  let hex = s;
+  if (/^-?\d+$/.test(s)) {
+    try {
+      let n = BigInt(s);
+      if (n < 0n) n += 1n << 64n;
+      hex = n.toString(16).padStart(16, "0");
+    } catch { hex = s; }
+  }
+  return hex.length <= 12 ? hex : `${hex.slice(0, 6)}…${hex.slice(-4)}`;
 }
 
 function renderAntiPatterns(rows) {
@@ -2063,26 +2249,44 @@ function renderAntiPatterns(rows) {
     ? `<div id="ap-others" hidden>${others.map((q) => apRow(q, false)).join("")}</div>
        <button type="button" class="ap-more" data-more="${others.length}" aria-expanded="false" aria-controls="ap-others">다른 쿼리 ${others.length}개 보기</button>`
     : "";
+  // 무엇을 재는지 먼저 말한다(#40) — 전에는 축 이름과 지표 원천만 있어 "무슨 기준인지" 알 수 없었다.
+  // 기준값(임계)은 서버가 정하지 않으므로 화면도 지어내지 않는다: 0은 "없음", 0보다 크면 확인할 곳이라고만 말한다
+  const legend = `<details class="ap-legend"><summary>세 신호는 무엇을 보나요?</summary>
+    <p>통계 뷰에서 읽은 이 쿼리의 <b>성질</b>입니다. 크다고 곧 문제는 아니고, 실행계획을 뜨기 전에 볼 곳을 좁히는 데 씁니다.</p>
+    <ul>
+      <li><b>인덱스 없이 훑음</b> — 인덱스를 쓰지 못하고 테이블을 통째로 읽은 정도. 0보다 크면 조건 열의 인덱스를 확인하세요.</li>
+      <li><b>디스크로 넘침</b> — 정렬·해시가 메모리를 넘어 임시 파일을 쓴 양(실행 1회당). 0보다 크면 정렬 조건이나 메모리 설정을 확인하세요.</li>
+      <li><b>행당 읽은 양</b> — 결과 한 행을 돌려주려고 읽은 양. 클수록 많이 읽고 적게 돌려줍니다.</li>
+      <li><b>미확보</b> — 이 기종의 통계에 그 값이 없습니다. 0이 아니라 모른다는 뜻입니다.</li>
+    </ul></details>`;
   // 같은 기종이면 note가 모든 행에 같다 — 행마다 반복하지 않고 목록 아래 한 번만 적는다
-  return head + tail + (rows[0].note ? `<div class="ap-note muted">${esc(rows[0].note)}</div>` : "");
+  return legend + head + tail + (rows[0].note ? `<div class="ap-note muted">${esc(rows[0].note)}</div>` : "");
 }
 
 function apRow(q, isCurrent) {
-  const axis = (m) => {
-    if (!m || m.value == null) return '<b class="ap-none">미확보</b>';
+  // 값 옆에 상태를 한 단어로 — 미확보(모름)·없음(0)·확인(0보다 큼). 지표 원천 이름은 title로 내려 칸을 비운다(#40)
+  const axis = (m, flagPositive) => {
+    if (!m || m.value == null) {
+      const why = m && m.note ? ` title="${esc(m.note)}"` : "";
+      return `<span class="ap-state ap-unknown"${why}>미확보</span>`;
+    }
     const v = m.value >= 100 ? fmtNum(m.value, 0) : fmtNum(m.value, 2);
-    return `<b>${v}</b> <span class="muted">${esc(m.unit ?? "")}</span>`;
+    const state = !flagPositive ? "" : (m.value > 0 ? '<span class="ap-state ap-check">확인</span>' : '<span class="ap-state ap-ok">없음</span>');
+    return `${state}<b>${v}</b> <span class="muted">${esc(m.unit ?? "")}</span>`;
   };
-  const src = (m) => (m ? `<div class="ap-src">${esc(m.sourceName ?? "")}</div>` : "");
+  const cell = (label, m, flag) => `<div title="${esc(m && m.sourceName ? "원천: " + m.sourceName : "")}">
+      <span class="ap-label">${label}</span><span class="ap-val">${axis(m, flag)}</span></div>`;
+  const sql = q.queryText ? q.queryText.replace(/\s+/g, " ") : "";
   return `
-    <div class="finding-item ap-row${isCurrent ? " ap-current" : ""}">
-      <div class="ap-head"><b title="${esc(String(q.queryId ?? ""))}">${esc(shortQueryId(q.queryId))}</b>
+    <div class="ap-row${isCurrent ? " ap-current" : ""}">
+      <div class="ap-head">${isCurrent ? '<span class="ap-badge">지금 보는 쿼리</span>' : ""}
+        <span class="mono" title="${esc(String(q.queryId ?? ""))}">${esc(shortQueryId(q.queryId))}</span>
         <span class="muted">실행 ${fmtNum(q.calls, 0)}회</span></div>
-      ${q.queryText ? `<div class="ap-text muted">${esc(q.queryText.replace(/\s+/g, " ").slice(0, 120))}</div>` : ""}
+      ${sql ? `<div class="ap-text qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${queryTextHtml(sql.length > 160 ? sql.slice(0, 160) + "…" : sql)}</div>` : ""}
       <div class="ap-axes">
-        <div><span class="muted">인덱스 없이 훑음</span><span class="ap-val">${axis(q.fullScan)}</span>${src(q.fullScan)}</div>
-        <div><span class="muted">디스크로 넘침</span><span class="ap-val">${axis(q.diskSpill)}</span>${src(q.diskSpill)}</div>
-        <div><span class="muted">행당 읽은 양</span><span class="ap-val">${axis(q.examinedPerRow)}</span>${src(q.examinedPerRow)}</div>
+        ${cell("인덱스 없이 훑음", q.fullScan, true)}
+        ${cell("디스크로 넘침", q.diskSpill, true)}
+        ${cell("행당 읽은 양", q.examinedPerRow, false)}
       </div>
     </div>`;
 }
@@ -2132,32 +2336,40 @@ function renderReferencedSchema(data) {
     if (t.dataBytes >= 0) facts.push(`데이터 ${fmtBytes(t.dataBytes)}`);
     if (t.indexBytes >= 0) facts.push(`인덱스 ${fmtBytes(t.indexBytes)}`);
     const rows = facts.length ? ` <span class="muted">${facts.join(" · ")}</span>` : "";
-    const idx = (t.indexes ?? []).length
-      ? (t.indexes.map((i) => {
-          const extra = [i.type ? esc(i.type) : "", i.cardinality != null ? `card≈${Number(i.cardinality).toLocaleString()}` : ""].filter(Boolean).join("·");
-          return `${esc(i.name)}${i.unique ? "<span class=\"idx-u\">[U]</span>" : ""}(${esc((i.columns ?? []).join(","))})${extra ? ` <span class="muted">${extra}</span>` : ""}`;
-        }).join(", "))
-      : '<span class="muted">없음</span>';
-    // 기본키·외래키 열 표시(151절) — 조인 열이 키를 따르는지가 계획 진단의 재료다
+    // 한 줄에 "cols: a type?, b type?…"로 이어 붙이던 것을 열 표로 바꿨다(#40) — 열 40개짜리 테이블이 글 뭉치가 됐다.
+    // 기본키·외래키 열 표시(151절)는 그대로 — 조인 열이 키를 따르는지가 계획 진단의 재료다
     const pk = new Set((t.primaryKey ?? []).map((c) => c.toLowerCase()));
     const fkCols = new Set((t.foreignKeys ?? []).flatMap((fk) => fk.columns.map((c) => c.toLowerCase())));
-    const cols = (t.columns ?? []).map((c) => {
+    const colRows = (t.columns ?? []).map((c) => {
       const key = c.name.toLowerCase();
       const marks = `${pk.has(key) ? '<span class="key-badge pk">PK</span>' : ""}${fkCols.has(key) ? '<span class="key-badge fk">FK</span>' : ""}`;
-      return `${esc(c.name)}${marks} <span class="muted">${esc(c.type)}${c.nullable ? "?" : ""}</span>`;
-    }).join(", ");
+      return `<tr><td class="mono">${esc(c.name)}${marks}</td><td class="muted mono">${esc(c.type)}</td><td>${c.nullable ? '<span class="muted">NULL 허용</span>' : "필수"}</td></tr>`;
+    }).join("");
+    const colCount = (t.columns ?? []).length;
+    const idxRows = (t.indexes ?? []).map((i) => {
+      const extra = [i.type ? esc(i.type) : "", i.cardinality != null ? `고유값 약 ${Number(i.cardinality).toLocaleString()}` : ""].filter(Boolean).join(" · ");
+      return `<li><span class="mono">${esc(i.name)}</span>${i.unique ? ' <span class="key-badge pk">UNIQUE</span>' : ""}
+        <span class="muted">(${esc((i.columns ?? []).join(", "))})${extra ? ` · ${extra}` : ""}</span></li>`;
+    }).join("");
     const fks = (t.foreignKeys ?? []).length
-      ? `<div class="schema-cols">fk: ${t.foreignKeys.map((fk) => `${esc(fk.columns.join(","))} → ${esc(fk.refTable)}(${esc(fk.refColumns.join(","))})`).join(", ")}</div>`
+      ? `<div class="schema-sub">외래키</div><ul class="schema-list">${t.foreignKeys.map((fk) =>
+          `<li class="mono">${esc(fk.columns.join(", "))} → ${esc(fk.refTable)}(${esc(fk.refColumns.join(", "))})</li>`).join("")}</ul>`
       : "";
-    html += `<div class="finding-item schema-table"><b>${esc(t.name)}</b>${rows}
-      <button class="btn btn-small td-toggle" data-table="${esc(t.name)}">상세 보기</button>
-      <div class="schema-idx">idx: ${idx}</div>
-      <div class="schema-cols">cols: ${cols}</div>
+    html += `<div class="finding-item schema-table">
+      <div class="schema-table-head"><b class="mono">${esc(t.name)}</b>${rows}
+        <button class="btn btn-small td-toggle" data-table="${esc(t.name)}">상세 보기</button></div>
+      <div class="schema-sub">인덱스 ${(t.indexes ?? []).length}개</div>
+      ${idxRows ? `<ul class="schema-list">${idxRows}</ul>` : '<div class="muted schema-empty">인덱스가 없습니다.</div>'}
       ${fks}
+      <details class="schema-cols-wrap"${colCount <= 12 ? " open" : ""}>
+        <summary>열 ${colCount}개</summary>
+        <div class="table-scroll"><table class="qtable schema-col-table"><thead><tr><th>열</th><th>타입</th><th>NULL</th></tr></thead>
+          <tbody>${colRows}</tbody></table></div>
+      </details>
       <div class="td-detail" hidden></div></div>`;
   }
   if ((data.notFound ?? []).length) {
-    html += `<div class="finding-item muted">구조 미확보: ${esc(data.notFound.join(", "))}${data.truncated ? " (스키마 상한 초과 가능)" : ""}</div>`;
+    html += `<div class="finding-item muted">구조를 읽지 못한 테이블: ${esc(data.notFound.join(", "))}${data.truncated ? " (스키마 상한 초과 가능)" : ""}</div>`;
   }
   // 렌더 직후 "상세 보기" 버튼에 아코디언 토글을 건다(테이블별 table-detail 조회)
   queueMicrotask(() => {
@@ -2193,6 +2405,28 @@ async function toggleTableDetail(btn) {
 
 // AI 분석은 흘려 받는다(143절) — 실행계획은 1초 안에 오는데 AI 답은 수십 초 걸린다. 한 번에 받으면 그동안 계획까지 같이 기다렸다.
 // 순서: plan(계획·규칙 지적) -> text(쓰이는 대로) -> result(완성본). 화면에 남기고 문의에 첨부하는 것은 완성본이다
+/**
+ * 쿼리 상세 AI 분석을 읽히게 그린다(#40). 전에는 어두운 코드 상자에 한 문단이 통째로 들어가 "글 뭉치"였다.
+ * 채팅 답과 같은 서식(문단·목록·코드·굵게, esc 뒤 토큰만)을 쓰고, 모델이 줄을 나누지 않은 긴 문단은
+ * 문장 두 개씩 끊어 보인다 — 표시만 바꾸고 저장·첨부되는 원문(state.lastAi)은 그대로다.
+ * 맨 앞 "**판정: …**"은 결론이라 따로 강조한다.
+ */
+function aiAnalysisHtml(text) {
+  let src = stripEmoji(text ?? "").replace(/\r\n?/g, "\n").trim();
+  if (!src) return "";
+  let verdict = "";
+  const m = src.match(/^\*\*(판정[^*]*)\*\*\s*/);
+  if (m) { verdict = `<p class="ai-verdict">${esc(m[1])}</p>`; src = src.slice(m[0].length); }
+  const blocks = src.split(/\n{2,}/).map((b) => {
+    if (b.includes("\n") || b.length < 260 || /^\s*([-*]|\d+\.)\s/.test(b) || b.includes("```")) return b;
+    const sentences = b.split(/(?<=[.다요])\s+(?=\S)/);
+    const groups = [];
+    for (let i = 0; i < sentences.length; i += 2) groups.push(sentences.slice(i, i + 2).join(" "));
+    return groups.join("\n\n");
+  });
+  return verdict + chatAnswerHtml(blocks.join("\n\n"));
+}
+
 async function runAiAnalysis() {
   const sql = $("#detail-sql").value.trim();
   if (!sql) return;
@@ -2215,7 +2449,7 @@ async function runAiAnalysis() {
       } else if (name === "text") {
         if (firstTextAt == null) firstTextAt = Date.now();
         written += data.delta;
-        out.textContent = stripEmoji(written);
+        out.innerHTML = aiAnalysisHtml(written);
         stage.textContent = "AI가 답을 쓰는 중";
       } else if (name === "result") {
         result = data;
@@ -2224,15 +2458,15 @@ async function runAiAnalysis() {
       }
     });
     if (!result) throw new Error("분석 결과가 끝까지 오지 않았습니다(연결 끊김)");
-    out.textContent = stripEmoji(result.aiAnalysis) ||
-      "AI 분석 비활성화 상태입니다 (ANTHROPIC_API_KEY도 claude CLI도 없음) — 규칙 기반 지적까지만 표시합니다.";
+    out.innerHTML = result.aiAnalysis ? aiAnalysisHtml(result.aiAnalysis)
+      : `<p class="muted">AI 분석이 꺼져 있습니다(ANTHROPIC_API_KEY도 claude CLI도 없음) — 규칙 기반 지적까지만 표시합니다.</p>`;
     const first = firstTextAt ? ` · 첫 글자 ${((firstTextAt - startedAt) / 1000).toFixed(1)}초` : "";
     stage.textContent = `완료 ${((Date.now() - startedAt) / 1000).toFixed(1)}초${first}`;
     state.lastPlan = result.plan;
     state.lastFindings = result.findings ?? [];
     state.lastAi = result.aiAnalysis ?? null;
   } catch (e) {
-    out.textContent = `실패: ${apiMessage(e)}`;
+    out.innerHTML = `<p class="chat-error">분석하지 못했습니다: ${esc(apiMessage(e))}</p>`;
     stage.textContent = "";
   } finally {
     btn.classList.remove("loading");
@@ -2615,6 +2849,8 @@ async function loadUsers() {
     </tr>`).join("");
   tbody.querySelectorAll("[data-user-role]").forEach((sel) => {
     sel.addEventListener("change", () => markRoleDirty(sel));
+    // 표 안에서도 다른 화면과 같은 드롭다운으로(#40) — 패널이 body에 떠서 가로 스크롤 상자에 잘리지 않는다
+    enhanceSelect(sel);
   });
 }
 
@@ -2640,7 +2876,7 @@ function markRoleDirty(sel) {
  */
 function cancelRoleChange(tr) {
   const sel = tr.querySelector("[data-user-role]");
-  if (sel) sel.value = tr.dataset.role;
+  if (sel) { sel.value = tr.dataset.role; if (sel._csSync) sel._csSync(); }
   tr.querySelector(".user-role-actions").hidden = true;
   tr.querySelector(".user-role-warn").hidden = true;
 }
@@ -2678,6 +2914,8 @@ function setupUsersCard() {
     $(`#${id}`).addEventListener("input", syncUserCreateButton));
   // 역할 고르기도 다른 화면과 같은 드롭다운으로(B6) — 이 파일의 $는 querySelector라 id에는 #을 붙인다
   enhanceSelect($("#user-new-role"));
+  // 작업 맡기기 팝오버의 유형·구간도 같은 드롭다운으로 — 패널이 body에 뜨므로 팝오버 경계에 잘리지 않는다(#40)
+  ["#aiop-new-type", "#aiop-new-window"].forEach((id) => { const el = $(id); if (el) enhanceSelect(el); });
   syncUserCreateButton();
 }
 
@@ -4562,6 +4800,12 @@ function setupQueryDetail() {
     if (e.key === "Escape" && !$("#detail-more-menu").hidden) closeDetailMore(true);
   });
   $("#btn-advisor-run").addEventListener("click", runIndexAdvisor);
+  $("#advisor-candidates").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-advisor-candidate]");
+    if (!b) return;
+    $("#advisor-columns").value = b.dataset.advisorCandidate;
+    $("#advisor-columns").focus();
+  });
   // 안티패턴 "다른 쿼리 N개 보기" — 결과를 다시 그리므로 위임으로 잡는다
   $("#antipattern-result").addEventListener("click", (e) => {
     const more = e.target.closest(".ap-more");

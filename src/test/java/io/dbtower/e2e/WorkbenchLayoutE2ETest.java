@@ -174,7 +174,7 @@ class WorkbenchLayoutE2ETest {
 
         // 관제와 같은 드롭다운(네이티브 select를 감싼 .cs)으로 바꾼다
         page.locator(".wb-left .cs-btn").click();
-        page.locator(".wb-left .cs-panel .cs-opt").filter(new Locator.FilterOptions().setHasText(b.getName())).click();
+        page.locator(".cs-panel-floating .cs-opt").filter(new Locator.FilterOptions().setHasText(b.getName())).click();
 
         assertThat(page.locator("#wb-tree .tree-root-name")).hasText("db-" + b.getId());
         assertThat(page.locator("#wb-sheets .wb-sheet-tab")).containsText("시트-B");
