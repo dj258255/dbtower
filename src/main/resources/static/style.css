@@ -243,10 +243,14 @@ body {
 .target-label { background: rgba(34,160,107,.12); color: var(--target); }
 .base-label { background: rgba(240,140,45,.14); color: #c26a12; }
 .tilde { color: var(--muted); }
+/* 날짜·시각 입력(#64) — 달력은 브라우저 것을 쓰되(키보드·접근성), 칸 모양은 드롭다운·검색칸과 같은 결로 맞춘다 */
 input[type="datetime-local"] {
-  border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font-size: var(--fs-body);
-  font-family: inherit; color: var(--text); background: #fff;
+  border: 1px solid var(--line); border-radius: 10px; padding: 5px 10px; font-size: var(--fs-body);
+  font-family: inherit; font-variant-numeric: tabular-nums; color: var(--text); background: #fff; min-height: 32px;
 }
+input[type="datetime-local"]::-webkit-calendar-picker-indicator { opacity: .55; cursor: pointer; }
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover { opacity: .9; }
+input[type="datetime-local"]::-webkit-datetime-edit-fields-wrapper { padding: 0; }
 /* 한 줄: 제목 · 기간 · 구간 글자 · 조회(#61). 조회는 오른쪽 끝에 붙여 이 영역의 주 동작이 하나로 보이게 한다 */
 .time-main { margin-bottom: 0; gap: 10px; }
 .time-main .time-title { margin: 0 4px 0 0; }
