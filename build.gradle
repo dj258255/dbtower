@@ -57,7 +57,8 @@ dependencies {
 	// 공유 세션(Phase 3) — 세션을 메타 DB에 저장해 재시작·다중 노드에서 로그인이 살아남는다
 	implementation 'org.springframework.session:spring-session-jdbc'
 	runtimeOnly 'com.h2database:h2'
-	runtimeOnly 'com.microsoft.sqlserver:mssql-jdbc'
+	// Boot BOM은 13.4.0이다. 13.6.0: 리플렉션으로 불러오는 클래스 이름 검증(보안), 13.5.1: 소켓 오류 원인 사슬 보존 (#97)
+	runtimeOnly 'com.microsoft.sqlserver:mssql-jdbc:13.6.0.jre11'
 	runtimeOnly 'com.mysql:mysql-connector-j'
 	runtimeOnly 'com.oracle.database.jdbc:ojdbc11'
 	runtimeOnly 'org.postgresql:postgresql'
