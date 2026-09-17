@@ -48,8 +48,8 @@ README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. �
 
 | 그림 | 내용 | 주의 |
 |---|---|---|
-| [architecture-detail.svg](architecture-detail.svg) | 모듈, 5개 DBMS, 신뢰 경계 | 16개 모듈 기준 — AI 운영 작업(aiops) 모듈이 아직 없다(현재 17개) |
-| [erd.svg](erd.svg) | 핵심 데이터 도메인과 증거 관계 | V41 기준 — 이후 AI 운영 작업·대화 테이블(V42~V46)이 없다 |
+| [architecture-detail.svg](architecture-detail.svg) | 17개 모듈, 5개 DBMS, 신뢰 경계, AI 운영 작업 실행면 | Flyway V47 기준(2026-09-18) |
+| [erd.svg](erd.svg) | 핵심 데이터 도메인과 증거 관계 | V47 기준 — AI 운영 작업·대화·경보 쿨다운·수집 상태 포함 |
 | [insight-flow.svg](insight-flow.svg) | 발견, AI 분석, 승인, 실행, 검증의 책임 흐름 | |
 | [deployment-flow.svg](deployment-flow.svg) | CI 게이트, 멀티아키텍처 이미지, 런타임과 IaC 범위 | |
 
