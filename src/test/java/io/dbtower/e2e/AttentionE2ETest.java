@@ -138,6 +138,15 @@ class AttentionE2ETest {
         Locator chip = page.locator(".attn-chip[data-id='" + f.slow.getId() + "'][data-signal='ANOMALY']");
         assertThat(chip).hasText("이상 감지 −12");
 
+        // 비교 결과를 가로채 표 모양까지 본다(#81) — 부하는 단위 %와 증감 %p
+        page.route("**/api/instances/*/compare?*", route -> fulfill(route, "{\"totalCallsChangePct\":120.5,\"avgLatencyChangePct\":-10,"
+                + "\"rowsExaminedChangePct\":5,\"newQueryCount\":1,\"queries\":["
+                + "{\"queryId\":\"1\",\"queryText\":\"SELECT * FROM orders WHERE status = $1\",\"newQuery\":false,"
+                + "\"baseQps\":10,\"targetQps\":30,\"qpsChangePct\":200,\"baseAvgMs\":2,\"targetAvgMs\":2,\"latencyChangePct\":0,"
+                + "\"baseRowsPerCall\":1,\"targetRowsPerCall\":1,\"rowsPerCallChangePct\":0},"
+                + "{\"queryId\":\"2\",\"queryText\":\"SELECT 1\",\"newQuery\":true,"
+                + "\"baseQps\":0,\"targetQps\":10,\"qpsChangePct\":null,\"baseAvgMs\":0,\"targetAvgMs\":1,\"latencyChangePct\":null,"
+                + "\"baseRowsPerCall\":0,\"targetRowsPerCall\":1,\"rowsPerCallChangePct\":null}]}"));
         Request compare = page.waitForRequest(
                 req -> req.url().contains("/api/instances/" + f.slow.getId() + "/compare?"), chip::click);
         System.out.printf("MEASURE 원인 지름길 비교 요청: %s%n", compare.url());
@@ -145,6 +154,9 @@ class AttentionE2ETest {
         assertThat(page.locator("#time-more")).hasAttribute("open", "");
         assertThat(page.locator(".tab[data-tab='top']")).hasClass(Pattern.compile("active"));
         assertThat(page.locator(".instance-card.selected")).containsText("e2e-attn-slow");
+        Locator load = page.locator("#top-table tbody tr").first().locator("td").first();
+        assertThat(load).hasText(Pattern.compile("^85\\.71% \\(▼ 14\\.29%p\\)$"));
+        System.out.printf("MEASURE 비교 표 부하 칸: %s%n", load.textContent());
     }
 
     @Test
