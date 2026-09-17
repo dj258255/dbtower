@@ -9,7 +9,7 @@ MySQL, PostgreSQL, SQL Server, Oracle, MongoDB를 한곳에서 관제하고 안�
 
 Java 21 + Spring Boot 4로 만들었으며 웹 콘솔은 별도 빌드 체인이 없는 정적 SPA입니다.
 
-![DBTower 관제 모드 — 하늘 원톤](docs/images/webui/169-sky-monitor-after.jpg)
+![DBTower 관제 모드 — 헬스 스코어·백업 신선도·조회 구간 한 줄·AI 어시스턴트](docs/images/webui/188-console-first-screen.jpg)
 
 ## 핵심 흐름
 
@@ -145,7 +145,7 @@ MSSQL_SA_PASSWORD='...' docker --context colima-mssql2022 run -d \
 
 직접 역할을 바꿔 가며 확인하는 순서는 [역할별 수동 테스트](docs/MANUAL-TEST.md)에 있습니다.
 
-![DBTower 워크벤치 모드 — 편집기 위 워크시트 탭](docs/images/webui/181-workbench-full.png)
+![DBTower 워크벤치 모드 — 스키마 트리, 워크시트 탭, 조회 결과, 버전 기록](docs/images/webui/196-workbench-query-result.jpg)
 
 ## 아키텍처
 

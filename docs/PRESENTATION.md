@@ -40,7 +40,7 @@ DBTower는 그 문제 정의를 출발점으로 삼아, 1인이 검증 가능한
 그래도 막히면  분석 결과를 통째로 첨부해 버튼 한 번으로 DB팀 문의
 ```
 
-![웹 콘솔 관제 모드 — 실제 MySQL Top Query와 SQL 강조를 한 화면에서(167절 재촬영)](images/webui/165-unified-monitor-query-highlighted.jpg)
+![웹 콘솔 관제 모드 — 조회 구간 한 줄과 실제 PostgreSQL Top Query, SQL 강조(185절 촬영)](images/webui/189-console-time-top-query.jpg)
 
 ## 3. 목표
 
@@ -70,7 +70,7 @@ Call/sec · Latency(ms) · Row Examined(Avg)를 기본 뷰로 보여준다 (VERI
 Call/sec은 누적 카운터라 단일 스냅샷으로는 낼 수 없어 최근 두 스냅샷의 차분으로 산출하고,
 이력이 부족하면 값을 지어내는 대신 "—"로 표기한다.
 
-![Top Query — Load·Call/sec·Latency·검사한 행(평균), 실제 MySQL 값과 SQL 강조(167절 재촬영)](images/webui/165-unified-monitor-query-highlighted.jpg)
+![Top Query — 부하·호출/초·지연·돌려주거나 바꾼 행(평균), 실제 PostgreSQL 값과 SQL 강조(185절 촬영)](images/webui/189-console-time-top-query.jpg)
 
 ### 5.2 시점 비교
 
@@ -84,9 +84,7 @@ Call/sec은 누적 카운터라 단일 스냅샷으로는 낼 수 없어 최근 
 폭증)의 대리 신호로 쓴다. 부하 주입 전후 비교에서 점조회 QPS 증가와 신규 풀스캔 쿼리 감지를
 실측했다 (VERIFICATION 3절).
 
-![시점 비교 — 조회 구간 vs 비교 구간, 증감률과 NEW 뱃지(145절 재촬영)](images/webui/112-glass-compare.jpg)
-
-![시점 비교 — Load 증감 컬럼(145절 재촬영, NEW 쿼리가 load 1위)](images/webui/112-glass-compare.jpg)
+![시점 비교 — 조회 구간 vs 비교 구간, 호출량·지연·행 증감과 신규 쿼리 표시(185절 촬영, 신규 쿼리가 부하 1위)](images/webui/197-console-compare.jpg)
 
 활용 사례 세 가지가 레퍼런스의 실전 사례와 정확히 겹친다.
 
@@ -138,7 +136,7 @@ CPU%와 Connections 그래프를 콘솔에 내장하고(Prometheus HTTP API 직�
 MySQL은 EXPLAIN FORMAT=JSON, PG는 EXPLAIN (FORMAT JSON), MSSQL은 SHOWPLAN_XML,
 MongoDB는 명령 JSON을 받는다. 안전장치로 explain은 SELECT만 허용한다 (VERIFICATION 2절).
 
-![실행계획 보기 — 쿼리 클릭에서 EXPLAIN까지(자리표시자를 값으로 채워 실행)](images/webui/126-glass-explain.jpg)
+![실행계획 보기 — 쿼리 상세의 토글에서 EXPLAIN까지(185절 촬영)](images/webui/190-querydetail-plan.jpg)
 
 ### 6.2 규칙 기반 지적 + AI 1차 분석
 
@@ -154,7 +152,7 @@ AI는 실행할 때마다 결과가 달라질 수 있다. 그래서 AI에게 판
 수 없다"고 답했다 (VERIFICATION 16-1절). API 키가 없으면 조용히 비활성화되고 규칙 기반 분석만
 남는다. 분석 실패가 알림을 막지 않는다.
 
-![AI 1차 분석 — 판단 기준 문서 위에서만 판정(142절 재촬영)](images/webui/108-glass-query-ai.jpg)
+![안티패턴 신호와 AI 1차 분석 — 규칙 지적이 계획에 맞지 않으면 AI가 근거와 함께 반박한다(185절 촬영)](images/webui/193-querydetail-antipattern-ai.jpg)
 
 ## 7. 3단계 — DB팀 문의
 
