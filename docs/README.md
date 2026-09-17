@@ -33,6 +33,7 @@ README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. �
 | 3 | [DESIGN.md](DESIGN.md) · [modules/](modules/) | 현재 아키텍처와 핵심 결정, Modulith가 생성한 모듈 의존 |
 | 4 | [MANUAL-TEST.md](MANUAL-TEST.md) | 역할별 계정으로 변경 티켓 흐름을 손으로 확인하는 절차 |
 | 5 | [VERIFICATION.md](VERIFICATION.md) | 고치려는 기능의 과거 결함과 측정 — 아래 "최근 검증 기록"에서 절 번호를 찾는다 |
+| 6 | [bulk-change-spec.md](bulk-change-spec.md) | 대량 일괄 변경의 실행 방식·안전 기준 착수 명세(#101~#105, 진행 중) |
 
 ### 리뷰어·평가자 — 설계와 근거를 확인하는 사람
 
@@ -92,6 +93,7 @@ README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. �
 | 수집, 통계, 배포 운영 시 주의점 | `operations.md` |
 | 틀렸던 적이 있어 다음 작업자가 반드시 지켜야 할 규칙 | 루트 `AGENTS.md` (근거 절 번호와 함께) |
 | 명령, 출력, 측정값, 스크린샷 | `VERIFICATION.md` 새 절 |
+| 착수 전에 정하는 실행 방식·안전 기준 | 기능별 `*-spec.md`(예: `bulk-change-spec.md`) |
 | 릴리스별 사용자 관점의 변경 사항 | 루트 `CHANGELOG.md`의 `[Unreleased]` |
 | 완료 단계, 현재 백로그, 하지 않는 범위 | `ROADMAP.md` |
 | 작업의 예상·마감·실제·어긋난 이유 | GitHub 이슈 본문·댓글(작업 템플릿) |
