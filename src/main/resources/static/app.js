@@ -403,7 +403,6 @@ function instanceCardHtml(i) {
         <span class="health-dot" id="health-${i.id}"></span>
       </div>
       <div class="instance-detail">
-        <div class="inst-field"><span class="k">기종</span><span class="v"><span class="type-badge type-${esc(i.type)}">${esc(i.type)}</span></span></div>
         <div class="inst-field"><span class="k">호스트</span><span class="v">${esc(i.host)}:${i.port}</span></div>
         <div class="inst-field"><span class="k">DB</span><span class="v">${esc(i.dbName)}${sharedNames.length ? ` <span class="server-shared-badge" title="같은 서버(${esc(serverKey)})에 등록된 다른 인스턴스: ${esc(sharedNames.join(", "))} — 서버 전역 경보(복제·세션·데드락)는 그룹당 1회">서버 공유 ×${cnt}</span>` : ""}</span></div>
         <div class="inst-field"><span class="k">응답</span><span class="v" id="ping-${i.id}">—</span></div>
