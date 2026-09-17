@@ -128,8 +128,9 @@ public class AshSamplerJob {
         }
         List<Future<?>> futures = new ArrayList<>();
         try {
-            // 틱 하나의 sampled_at은 인스턴스마다 다르지 않고 하나여야 한다 — 그래야 인스턴스
-            // 간 같은 시점을 나란히 놓고 볼 수 있고, 유니크 키도 안정적이다.
+            // 틱 시작 시각은 건너뛴 틱의 기록에만 쓴다. 샘플의 sampled_at은 인스턴스마다 실제로 조회한 시각이다(#98) —
+            // 전에는 틱 시작 시각을 모든 인스턴스에 같이 적어, 대상이 느려 조회가 2초 늦으면 기록 시각이 실제 관측보다
+            // 2초 앞서 사건 창 밖으로 벗어났다(docs/experiments/ash-backpressure.md). 인스턴스 간 비교는 seq와 초 단위로 한다
             LocalDateTime tickAt = LocalDateTime.now().truncatedTo(ChronoUnit.MILLIS);
             for (DatabaseInstance instance : registryService.findAll()) {
                 if (instance.getType() != DbmsType.POSTGRESQL || !instance.isCollectionEnabled()) {
@@ -180,8 +181,12 @@ public class AshSamplerJob {
             return;
         }
         long startNs = System.nanoTime();
+        LocalDateTime observedAt = tickAt;
         try {
-            List<SessionInfo> sessions = operatorFactory.create(instance).activeSessions(maxSessionsPerTick * 2);
+            var operator = operatorFactory.create(instance);
+            // 워커 차례·지터를 기다린 뒤 대상에 묻는 바로 그 순간을 기록한다
+            observedAt = LocalDateTime.now().truncatedTo(ChronoUnit.MILLIS);
+            List<SessionInfo> sessions = operator.activeSessions(maxSessionsPerTick * 2);
             double collectMs = (System.nanoTime() - startNs) / 1_000_000.0;
             int observed = sessions.size();
 
@@ -198,18 +203,18 @@ public class AshSamplerJob {
 
             List<AshSample> rows = new ArrayList<>(retained.size());
             for (SessionInfo s : retained) {
-                rows.add(new AshSample(id, tickAt, ingestedAt, runId, seq,
+                rows.add(new AshSample(id, observedAt, ingestedAt, runId, seq,
                         s.pid(), s.user(), s.state(), s.waitEvent(),
                         categoryOf(s.waitEvent()), s.blockedByPid(),
                         QueryFingerprint.of(s.query()), s.elapsedMs()));
             }
             writer.saveSamples(rows);
-            writeTick(instance, tickAt, seq, observed, retained.size(),
+            writeTick(instance, observedAt, seq, observed, retained.size(),
                     observed - retained.size(), collectMs, AshSampleTick.OK, null);
         } catch (RuntimeException e) {
             double collectMs = (System.nanoTime() - startNs) / 1_000_000.0;
             // 실패도 남긴다. 남기지 않으면 결측이 "활성 세션 0건"과 구분되지 않는다.
-            writeTick(instance, tickAt, seq, 0, 0, 0, collectMs,
+            writeTick(instance, observedAt, seq, 0, 0, 0, collectMs,
                     AshSampleTick.ERROR, truncate(e.getMessage()));
             log.debug("ASH 샘플 실패 instance={} cause={}", instance.getName(), e.getMessage());
         } finally {
