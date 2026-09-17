@@ -9,7 +9,7 @@ MySQL, PostgreSQL, SQL Server, Oracle, MongoDB를 한곳에서 관제하고 안�
 
 Java 21 + Spring Boot 4로 만들었으며 웹 콘솔은 별도 빌드 체인이 없는 정적 SPA입니다.
 
-![DBTower 통합 관제 모드 — 실제 MySQL Top Query와 SQL 강조](docs/images/webui/165-unified-monitor-query-highlighted.jpg)
+![DBTower 관제 모드 — 하늘 원톤](docs/images/webui/169-sky-monitor-after.jpg)
 
 ## 핵심 흐름
 
@@ -32,6 +32,7 @@ Java 21 + Spring Boot 4로 만들었으며 웹 콘솔은 별도 빌드 체인이
 | 운영 | 통합 헬스 스코어, SLO·에러 버짓, Advisors, FinOps 신호, 백업·복원 검증 |
 | 변경 관리 | 읽기 전용 워크벤치, 마스킹, 변경 리뷰, 승인 티켓 실행·되돌리기 |
 | 연동 | 웹 콘솔, MCP stdio·HTTP, Discord·Slack 웹훅, K8s·Terraform·Ansible |
+| 화면 | 관제·워크벤치를 한 페이지의 두 모드로. 관제 AI 채팅은 대화를 서버에 저장하고 대화 목록에서 이어 보며, AI로 보내는 쿼리 속 값은 `?`로 가립니다 |
 
 기종별 통계와 실행 방식이 달라도 플랫폼 코드는 같은 운영 능력을 사용합니다.
 
@@ -59,8 +60,8 @@ Java 21 + Spring Boot 4로 만들었으며 웹 콘솔은 별도 빌드 체인이
 ## 빠른 시작
 
 Docker와 Docker Compose만 있으면 앱과 전용 메타 DB를 실행할 수 있습니다.
-현재 정식 버전은 `v1.3.1`입니다. 운영에서는 재현 가능한 업그레이드를 위해 `latest` 대신
-`DBTOWER_TAG=1.3.1`처럼 버전을 고정하는 것을 권장합니다.
+현재 정식 버전은 `v1.4.0`입니다. 운영에서는 재현 가능한 업그레이드를 위해 `latest` 대신
+`DBTOWER_TAG=1.4.0`처럼 버전을 고정하는 것을 권장합니다.
 
 ```bash
 cp .env.example .env
@@ -71,7 +72,7 @@ cp .env.example .env
 ```dotenv
 DBTOWER_DB_PASSWORD=change-me-strong-password
 DBTOWER_ENCRYPTION_KEY=<openssl rand -base64 32 결과>
-DBTOWER_TAG=1.3.1
+DBTOWER_TAG=1.4.0
 ```
 
 그다음 컨테이너를 시작합니다.
@@ -144,7 +145,7 @@ MSSQL_SA_PASSWORD='...' docker --context colima-mssql2022 run -d \
 
 직접 역할을 바꿔 가며 확인하는 순서는 [역할별 수동 테스트](docs/MANUAL-TEST.md)에 있습니다.
 
-![DBTower 워크벤치 모드](docs/images/webui/143-unified-workbench-mode.jpg)
+![DBTower 워크벤치 모드 — 편집기 위 워크시트 탭](docs/images/webui/181-workbench-full.png)
 
 ## 아키텍처
 
