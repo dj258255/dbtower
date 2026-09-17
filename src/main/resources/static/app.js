@@ -2332,7 +2332,9 @@ function renderReferencedSchema(data) {
   for (const t of tables) {
     // 행수·크기·인덱스 타입/카디널리티는 tableDetail 원천 — 미확보(-1/null)면 표기 생략(위장 금지)
     const facts = [];
-    if (t.rowCountApprox >= 0) facts.push(`≈ ${t.rowCountApprox.toLocaleString()}행`);
+    // 행 수는 카탈로그 통계 추정(PostgreSQL reltuples 등)이다 — 마지막 ANALYZE 뒤에 바뀐 행은 모른다. 실제 3행이 "≈ 0행"으로 보여
+    // 테이블이 비었다고 읽혔다(#73). 추정이라고 적고, 믿으려면 워크벤치에서 COUNT로 확인하게 한다
+    if (t.rowCountApprox >= 0) facts.push(`<span title="카탈로그 통계의 추정값입니다. 마지막 ANALYZE 뒤의 변화는 반영되지 않습니다.">통계 추정 ${t.rowCountApprox.toLocaleString()}행</span>`);
     if (t.dataBytes >= 0) facts.push(`데이터 ${fmtBytes(t.dataBytes)}`);
     if (t.indexBytes >= 0) facts.push(`인덱스 ${fmtBytes(t.indexBytes)}`);
     const rows = facts.length ? ` <span class="muted">${facts.join(" · ")}</span>` : "";
