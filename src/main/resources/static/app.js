@@ -1950,6 +1950,9 @@ function detailSql() { return $("#detail-sql").value.trim(); }
 
 /**
  * 조회가 끝났다 — 그 결과가 어느 SQL의 것인지 기록하고 "다시 조회"를 보인다.
+  // 단독 조회와 비교 조회는 같은 표를 그린다 — 늦게 끝난 앞 요청이 뒤 요청의 표를 덮지 않게 순번을 같이 쓴다.
+  // 원인 지름길(#56)이 인스턴스를 열자마자 비교를 내면, 먼저 출발한 단독 조회가 나중에 도착해 비교 결과를 지웠다
+  const requestSeq = ++state.compareSeq;
  * 토글이 다시 조회할지 판단하는 근거가 이 기록이고, 한 번도 조회하지 않은 섹션에 "다시 조회"가
  * 떠 있으면 무엇을 다시 조회하는지 알 수 없다(B3 2차).
  */
@@ -1974,11 +1977,13 @@ function toggleDetailView(key) {
   // 인덱스 제안만 사람의 입력(후보 컬럼)이 필요하다 — 토글이 대신 실행하지 않고 입력칸으로 보낸다.
   // 대신 SQL이 바뀌었으면 옛 결과는 그 SQL의 것이 아니므로 버린다
   if (key === "advisor") {
+    if (requestSeq !== state.compareSeq) return;
     if (stale) resetAdvisor();
     renderAdvisorCandidates();
     $("#advisor-columns").focus();
     return;
   }
+  if (requestSeq !== state.compareSeq) return;
   if (stale) DETAIL_RUN[key]();
 }
 
