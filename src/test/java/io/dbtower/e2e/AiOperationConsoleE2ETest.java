@@ -4,6 +4,7 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Route;
 import com.microsoft.playwright.Playwright;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DatabaseInstanceRepository;
@@ -166,6 +167,31 @@ class AiOperationConsoleE2ETest {
         assertThat(page.locator("#aiops-detail")).isVisible();
         assertThat(page.locator("#aiops-detail")).containsText("회귀 원인");
         assertThat(page.locator(".aiop-row[data-job='" + jobId + "']")).hasClass(Pattern.compile("open"));
+    }
+
+    /**
+     * AI 소견·근거에 섞인 PostgreSQL queryid(부호 있는 10진수)는 표와 같은 16진수 축약으로 보이고 원래 값은 title에 남는다(#82).
+     * 결과는 모델 호출 없이 가로채 결정적으로 만든다 — 작업 자체는 실제로 접수한다.
+     */
+    @Test
+    void AI_근거의_쿼리_ID는_표와_같은_16진수로_보인다() {
+        Page page = consoleAs(REQUESTER);
+        String jobId = submitJob(page, "REGRESSION_EXPLANATION", "60");
+        page.route("**/api/ai-operations/" + jobId, route -> {
+            String body = route.fetch().text();
+            String result = "\"result\":{\"aiOpinion\":\"쿼리 `-2885330479908940062`의 평균이 그대로다.\","
+                    + "\"evidence\":[\"F9 쿼리 -2885330479908940062(SELECT version()): 평균 0.017ms\"],"
+                    + "\"facts\":[],\"references\":[],\"nextActions\":[],\"uncertainties\":[],\"ruleFindings\":[],\"unverifiedClaims\":[]}";
+            String patched = body.replaceFirst("\"result\":null", result).replaceFirst("\"status\":\"[A-Z_]+\"", "\"status\":\"COMPLETED\"");
+            route.fulfill(new Route.FulfillOptions().setStatus(200).setContentType("application/json").setBody(patched));
+        });
+        page.navigate(base() + "/?aiop=" + jobId);
+
+        Locator evidence = page.locator("#aiops-detail .aiop-block li .qid-inline").first();
+        assertThat(evidence).hasText("d7f53f…96e2");
+        assertThat(evidence).hasAttribute("title", "쿼리 ID -2885330479908940062");
+        assertThat(page.locator("#aiops-detail .aiop-opinion .qid-inline")).hasText("d7f53f…96e2");
+        assertThat(page.locator("#aiops-detail")).not().containsText("-2885330479908940062");
     }
 
     @Test
