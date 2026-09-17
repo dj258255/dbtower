@@ -2186,26 +2186,44 @@ function renderAntiPatterns(rows) {
     ? `<div id="ap-others" hidden>${others.map((q) => apRow(q, false)).join("")}</div>
        <button type="button" class="ap-more" data-more="${others.length}" aria-expanded="false" aria-controls="ap-others">다른 쿼리 ${others.length}개 보기</button>`
     : "";
+  // 무엇을 재는지 먼저 말한다(#40) — 전에는 축 이름과 지표 원천만 있어 "무슨 기준인지" 알 수 없었다.
+  // 기준값(임계)은 서버가 정하지 않으므로 화면도 지어내지 않는다: 0은 "없음", 0보다 크면 확인할 곳이라고만 말한다
+  const legend = `<details class="ap-legend"><summary>세 신호는 무엇을 보나요?</summary>
+    <p>통계 뷰에서 읽은 이 쿼리의 <b>성질</b>입니다. 크다고 곧 문제는 아니고, 실행계획을 뜨기 전에 볼 곳을 좁히는 데 씁니다.</p>
+    <ul>
+      <li><b>인덱스 없이 훑음</b> — 인덱스를 쓰지 못하고 테이블을 통째로 읽은 정도. 0보다 크면 조건 열의 인덱스를 확인하세요.</li>
+      <li><b>디스크로 넘침</b> — 정렬·해시가 메모리를 넘어 임시 파일을 쓴 양(실행 1회당). 0보다 크면 정렬 조건이나 메모리 설정을 확인하세요.</li>
+      <li><b>행당 읽은 양</b> — 결과 한 행을 돌려주려고 읽은 양. 클수록 많이 읽고 적게 돌려줍니다.</li>
+      <li><b>미확보</b> — 이 기종의 통계에 그 값이 없습니다. 0이 아니라 모른다는 뜻입니다.</li>
+    </ul></details>`;
   // 같은 기종이면 note가 모든 행에 같다 — 행마다 반복하지 않고 목록 아래 한 번만 적는다
-  return head + tail + (rows[0].note ? `<div class="ap-note muted">${esc(rows[0].note)}</div>` : "");
+  return legend + head + tail + (rows[0].note ? `<div class="ap-note muted">${esc(rows[0].note)}</div>` : "");
 }
 
 function apRow(q, isCurrent) {
-  const axis = (m) => {
-    if (!m || m.value == null) return '<b class="ap-none">미확보</b>';
+  // 값 옆에 상태를 한 단어로 — 미확보(모름)·없음(0)·확인(0보다 큼). 지표 원천 이름은 title로 내려 칸을 비운다(#40)
+  const axis = (m, flagPositive) => {
+    if (!m || m.value == null) {
+      const why = m && m.note ? ` title="${esc(m.note)}"` : "";
+      return `<span class="ap-state ap-unknown"${why}>미확보</span>`;
+    }
     const v = m.value >= 100 ? fmtNum(m.value, 0) : fmtNum(m.value, 2);
-    return `<b>${v}</b> <span class="muted">${esc(m.unit ?? "")}</span>`;
+    const state = !flagPositive ? "" : (m.value > 0 ? '<span class="ap-state ap-check">확인</span>' : '<span class="ap-state ap-ok">없음</span>');
+    return `${state}<b>${v}</b> <span class="muted">${esc(m.unit ?? "")}</span>`;
   };
-  const src = (m) => (m ? `<div class="ap-src">${esc(m.sourceName ?? "")}</div>` : "");
+  const cell = (label, m, flag) => `<div title="${esc(m && m.sourceName ? "원천: " + m.sourceName : "")}">
+      <span class="ap-label">${label}</span><span class="ap-val">${axis(m, flag)}</span></div>`;
+  const sql = q.queryText ? q.queryText.replace(/\s+/g, " ") : "";
   return `
-    <div class="finding-item ap-row${isCurrent ? " ap-current" : ""}">
-      <div class="ap-head"><b title="${esc(String(q.queryId ?? ""))}">${esc(shortQueryId(q.queryId))}</b>
+    <div class="ap-row${isCurrent ? " ap-current" : ""}">
+      <div class="ap-head">${isCurrent ? '<span class="ap-badge">지금 보는 쿼리</span>' : ""}
+        <span class="mono" title="${esc(String(q.queryId ?? ""))}">${esc(shortQueryId(q.queryId))}</span>
         <span class="muted">실행 ${fmtNum(q.calls, 0)}회</span></div>
-      ${q.queryText ? `<div class="ap-text muted">${esc(q.queryText.replace(/\s+/g, " ").slice(0, 120))}</div>` : ""}
+      ${sql ? `<div class="ap-text qtext" data-sql-tip="${esc(q.queryText)}" tabindex="0" aria-describedby="sql-tip">${queryTextHtml(sql.length > 160 ? sql.slice(0, 160) + "…" : sql)}</div>` : ""}
       <div class="ap-axes">
-        <div><span class="muted">인덱스 없이 훑음</span><span class="ap-val">${axis(q.fullScan)}</span>${src(q.fullScan)}</div>
-        <div><span class="muted">디스크로 넘침</span><span class="ap-val">${axis(q.diskSpill)}</span>${src(q.diskSpill)}</div>
-        <div><span class="muted">행당 읽은 양</span><span class="ap-val">${axis(q.examinedPerRow)}</span>${src(q.examinedPerRow)}</div>
+        ${cell("인덱스 없이 훑음", q.fullScan, true)}
+        ${cell("디스크로 넘침", q.diskSpill, true)}
+        ${cell("행당 읽은 양", q.examinedPerRow, false)}
       </div>
     </div>`;
 }
