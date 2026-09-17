@@ -2,6 +2,7 @@ package io.dbtower.insight.internal;
 
 import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.AiAnalyzer.CallSite;
+import io.dbtower.analysis.PlanMasker;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.analysis.RuleBasedAnalyzer;
 import io.dbtower.operator.DbmsOperator;
@@ -45,7 +46,7 @@ class AiAnalysisRunnerTest {
         when(factory.create(instance)).thenReturn(operator);
         when(operator.explain(anyString())).thenReturn(PLAN);
         when(rules.analyze(DbmsType.POSTGRESQL, PLAN)).thenReturn(List.of("Seq Scan 발생"));
-        runner = new AiAnalysisRunner(factory, rules, ai, new QueryMasker(true, false));
+        runner = new AiAnalysisRunner(factory, rules, ai, new QueryMasker(true, false), new PlanMasker(true, false));
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.AiAnalyzer.CallSite;
+import io.dbtower.analysis.PlanMasker;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.analysis.RuleBasedAnalyzer;
 import io.dbtower.operator.ConnectionPools;
@@ -186,7 +187,7 @@ class AiMaskingTradeoffExperimentIT {
         when(factory.create(any())).thenReturn(operator);
         AiAnalyzer analyzer = mock(AiAnalyzer.class);
         AiAnalysisRunner runner = new AiAnalysisRunner(factory, new RuleBasedAnalyzer(), analyzer,
-                new QueryMasker(true, maskAiPrompt));
+                new QueryMasker(true, maskAiPrompt), new PlanMasker(true, false));
 
         runner.run(instanceFor(c), c.sql(), AiAnalysisRunner.Listener.NONE);
 

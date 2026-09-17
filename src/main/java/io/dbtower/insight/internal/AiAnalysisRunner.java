@@ -2,6 +2,7 @@ package io.dbtower.insight.internal;
 
 import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.AiAnalyzer.CallSite;
+import io.dbtower.analysis.PlanMasker;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.analysis.RuleBasedAnalyzer;
 import io.dbtower.analysis.TextDeltaBatcher;
@@ -43,13 +44,15 @@ public class AiAnalysisRunner {
     private final RuleBasedAnalyzer analyzer;
     private final AiAnalyzer aiAnalyzer;
     private final QueryMasker queryMasker;
+    private final PlanMasker planMasker;
 
     public AiAnalysisRunner(DbmsOperatorFactory operatorFactory, RuleBasedAnalyzer analyzer,
-                            AiAnalyzer aiAnalyzer, QueryMasker queryMasker) {
+                            AiAnalyzer aiAnalyzer, QueryMasker queryMasker, PlanMasker planMasker) {
         this.operatorFactory = operatorFactory;
         this.analyzer = analyzer;
         this.aiAnalyzer = aiAnalyzer;
         this.queryMasker = queryMasker;
+        this.planMasker = planMasker;
     }
 
     public Result run(DatabaseInstance instance, String sql, Listener listener) {
@@ -58,13 +61,17 @@ public class AiAnalysisRunner {
         listener.plan(plan, findings);
         // AI 프롬프트 마스킹은 mask-ai-prompt(기본 false)로만 켠다 — 리터럴을 가리면
         // IN절 개수·상수 분포 같은 판정 정확도가 떨어지는 트레이드오프가 있어 명시적 선택.
+        // 계획은 따로 켠다(mask-ai-plan) — 문장만 가려도 옵티마이저가 조건 값을 계획에 찍어 값이 계획을 타고 나간다
+        // (docs/experiments/ai-masking-tradeoff.md 표 1: SQL만 가려도 41개 중 19개가 프롬프트에 남았다).
+        // 화면·문의에는 가리지 않은 계획(plan)을 그대로 준다 — 사람이 보는 근거를 가리는 설정이 아니다.
+        String planForAi = planMasker.applyForAiPrompt(instance.getType(), plan);
         String context = """
                 [%s] 아래 쿼리와 실행계획을 판단 기준에 따라 분석해줘.
                 SQL:
                 %s
                 실행계획:
                 %s
-                규칙 기반 지적: %s""".formatted(instance.getType(), queryMasker.applyForAiPrompt(sql), plan,
+                규칙 기반 지적: %s""".formatted(instance.getType(), queryMasker.applyForAiPrompt(sql), planForAi,
                 findings.isEmpty() ? "(없음)" : String.join(" / ", findings));
         Optional<String> ai;
         if (listener == Listener.NONE) {

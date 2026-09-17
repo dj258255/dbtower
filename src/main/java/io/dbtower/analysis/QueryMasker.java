@@ -53,6 +53,27 @@ public class QueryMasker {
      * Spring 없이도 테스트 가능하도록 static.
      */
     public static String maskLiterals(String sql) {
+        return maskLiterals(sql, false);
+    }
+
+    /**
+     * {@code keepWildcards}면 문자열 리터럴을 벗기지 않고 따옴표와 앞뒤 {@code %} 자리만 남긴다 —
+     * {@code '%@gmail.com'}은 {@code '%?'}, {@code 'PAID'}는 {@code '?'}가 된다. 실행계획을 가릴 때 쓴다:
+     * 앞 와일드카드는 인덱스를 못 쓰는 이유 자체라, 값을 지우면서 그 모양까지 지우면 진단이 사라진다(E2' 조건 D).
+     */
+    public static String maskLiterals(String sql, boolean keepWildcards) {
+        return maskLiterals(sql, keepWildcards, true);
+    }
+
+    /**
+     * 따옴표 문자열만 가리고 숫자는 남긴다 — 계획 원문처럼 숫자가 대부분 행수·비용인 자리에 쓴다.
+     * 그 숫자를 가리면 민감정보는 줄지만 진단 재료가 사라진다({@link PlanMasker} 주석).
+     */
+    public static String maskQuotedLiterals(String sql) {
+        return maskLiterals(sql, true, false);
+    }
+
+    private static String maskLiterals(String sql, boolean keepWildcards, boolean maskNumbers) {
         if (sql == null || sql.isEmpty()) {
             return sql;
         }
@@ -64,8 +85,13 @@ public class QueryMasker {
 
             // 문자열 리터럴 '...' → ? (민감정보의 주 서식지)
             if (c == '\'') {
-                i = skipSingleQuoted(sql, i);
-                out.append('?');
+                int end = skipSingleQuoted(sql, i);
+                if (keepWildcards) {
+                    out.append(quotedWildcardShape(sql, i, end));
+                } else {
+                    out.append('?');
+                }
+                i = end;
                 continue;
             }
 
@@ -145,8 +171,9 @@ public class QueryMasker {
 
             // 숫자 리터럴 — 여기 도달한 숫자는 식별자 꼬리가 아닌 순수 리터럴( = 100, LIMIT 50, IN (1,2) )
             if (isDigit(c) || (c == '.' && i + 1 < n && isDigit(sql.charAt(i + 1)))) {
-                out.append('?');
-                i = skipNumber(sql, i);
+                int end = skipNumber(sql, i);
+                out.append(maskNumbers ? "?" : sql.substring(i, end));
+                i = end;
                 continue;
             }
 
@@ -155,6 +182,15 @@ public class QueryMasker {
             i++;
         }
         return out.toString();
+    }
+
+    /** {@code [i, end)}의 문자열 리터럴을 따옴표와 앞뒤 % 자리만 남긴 모양으로 — {@code '%값%'} -> {@code '%?%'}. */
+    private static String quotedWildcardShape(String s, int i, int end) {
+        int bodyEnd = (end <= s.length() && end > i + 1 && s.charAt(end - 1) == '\'') ? end - 1 : end;
+        String body = s.substring(i + 1, Math.max(i + 1, bodyEnd));
+        String lead = body.startsWith("%") ? "%" : "";
+        String trail = body.length() > 1 && body.endsWith("%") ? "%" : "";
+        return "'" + lead + "?" + trail + "'";
     }
 
     /** 여는 작은따옴표 위치 i에서 시작해 닫는 따옴표 다음 인덱스를 반환('' 및 \' 이스케이프 처리). */
