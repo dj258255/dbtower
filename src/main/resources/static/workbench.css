@@ -170,7 +170,16 @@ button.tree-group-head { cursor: pointer; }
 .wb-sheet-tab.active { background: #fff; color: var(--text); font-weight: 700; box-shadow: 0 1px 3px rgba(30, 41, 59, .14); }
 .wb-tab-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .wb-sheet-tab.active .wb-tab-name { color: var(--primary); }
-.wb-version { font-size: var(--fs-caption); font-weight: 500; color: #5b6475; background: #f2f3f7; border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
+.wb-version { font: inherit; font-size: var(--fs-caption); font-weight: 500; color: #5b6475; background: #f2f3f7; border: 0; border-radius: 999px; padding: 1px 7px; white-space: nowrap; cursor: pointer; }
+.wb-version:hover, .wb-version[aria-expanded="true"] { background: #e5e8eb; color: #333d4b; }
+.wb-version:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+/* 버전 기록(#63) — 떠 있는 계층이라 드롭다운과 같은 면(흰 카드 + 그림자). 길면 안에서 스크롤 */
+.wb-version-panel {
+  position: fixed; z-index: 1000; width: min(360px, calc(100vw - 16px)); max-height: min(60vh, 520px); overflow: auto;
+  background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px rgba(16, 24, 40, .14); padding: 10px;
+}
+.wb-version-head { font-weight: 600; margin: 2px 4px 8px; }
+.wb-version-panel .checkpoint + .checkpoint { margin-top: 8px; }
 .wb-sheet-tab:not(.active) .wb-version { display: none; }
 /* ×는 보관 — 활성 탭에서는 늘 보인다(지금 만지는 탭의 조작이 숨어 있으면 찾을 수 없다, B6).
    나머지 탭은 hover·초점일 때만 보여 탭 줄이 버튼 벽이 되지 않게 한다 */
