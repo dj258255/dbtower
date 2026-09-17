@@ -386,6 +386,7 @@ function instanceCardHtml(i) {
   const sharedNames = cnt > 1
     ? state.instances.filter((o) => o.id !== i.id && `${o.host.toLowerCase()}:${o.port}` === serverKey).map((o) => o.name) : [];
   const selected = state.instance && state.instance.id === i.id ? " selected" : "";
+  const collect = collectBadge(i);
   return `
     <div class="instance-card${selected}" data-id="${i.id}" data-name="${esc(i.name.toLowerCase())}"
          data-host="${esc(i.host.toLowerCase())}" data-type="${esc(i.type)}" data-team="${esc(i.teamLabel || "")}"
@@ -402,8 +403,8 @@ function instanceCardHtml(i) {
         <div class="inst-field"><span class="k">DB</span><span class="v">${esc(i.dbName)}${sharedNames.length ? ` <span class="server-shared-badge" title="같은 서버(${esc(serverKey)})에 등록된 다른 인스턴스: ${esc(sharedNames.join(", "))} — 서버 전역 경보(복제·세션·데드락)는 그룹당 1회">서버 공유 ×${cnt}</span>` : ""}</span></div>
         <div class="inst-field"><span class="k">응답</span><span class="v" id="ping-${i.id}">—</span></div>
         <div class="inst-field"><span class="k">버전</span><span class="v ver" id="ver-${i.id}" title="">—</span></div>
-        <div class="inst-field"><span class="k">수집</span><span class="v"><button class="collect-toggle ${i.collectionEnabled ? "" : "isolated"}" data-id="${i.id}"
-          title="수집 격리 토글 — 끄면 스냅샷 수집·운영 경보에서 이 인스턴스를 뺀다(등록은 유지)">${i.collectionEnabled ? "수집중" : "격리됨"}</button></span></div>
+        <div class="inst-field"><span class="k">수집</span><span class="v"><button class="collect-toggle ${collect.cls}" data-id="${i.id}"
+          title="수집 격리 토글 — 끄면 스냅샷 수집·운영 경보에서 이 인스턴스를 뺀다(등록은 유지)">${collect.label}</button></span></div>
         ${i.environment || i.region || i.cluster || i.teamLabel || i.consoleUrl || i.appSchema ? `<div class="instance-meta">
           ${i.appSchema ? `<span class="tag-badge" title="앱 스키마 — 모니터 계정이 딕셔너리·콘솔에서 볼 스키마(Oracle)">스키마 ${esc(i.appSchema)}</span>` : ""}
           ${i.environment ? `<span class="tag-badge tag-env" title="환경">${esc(i.environment)}</span>` : ""}
@@ -414,6 +415,44 @@ function instanceCardHtml(i) {
         </div>` : ""}
       </div>
     </div>`;
+}
+
+/**
+ * 수집 배지 — "수집 설정이 켜져 있음"과 "지금 실제로 수집되는가"를 가른다.
+ * down인 대상에 초록 "수집중"을 두면 화면이 거짓말을 한다(B9) — 설정은 켜져 있어도 지금은 멈춘 상태다.
+ * 토글 동작은 그대로다(배지는 표시만 바꾼다).
+ */
+function collectBadge(inst) {
+  if (!inst.collectionEnabled) return { cls: "isolated", label: "격리됨" };
+  if (targetUnreachable(inst.id)) return { cls: "paused", label: "수집 멈춤(연결 안 됨)" };
+  return { cls: "", label: "수집중" };
+}
+
+/** 이미 그려진 카드의 수집 배지만 다시 칠한다(카드 전체를 다시 그리면 선택·스크롤이 흔들린다) */
+function syncCollectBadge(id) {
+  const btn = document.querySelector(`.collect-toggle[data-id="${id}"]`);
+  const inst = state.instances.find((i) => i.id == id);
+  if (!btn || !inst) return;
+  const b = collectBadge(inst);
+  btn.textContent = b.label;
+  btn.classList.toggle("isolated", b.cls === "isolated");
+  btn.classList.toggle("paused", b.cls === "paused");
+}
+
+/**
+ * 기억해 둔 헬스 판정을 카드에 반영한다 — 검색·필터·재선택으로 카드가 다시 그려져도 사유와 배지가 남는다.
+ * down이면 응답 칸에 서버가 분류한 사유를 적는다(원문 드라이버 영문은 서버가 내려주지 않는다, 148절).
+ */
+function applyInstanceHealth(id) {
+  const h = state.instanceHealth.get(id);
+  if (!h) return;
+  const dot = $(`#health-${id}`);
+  if (dot) { dot.classList.toggle("up", h.up); dot.classList.toggle("down", !h.up); }
+  const ping = $(`#ping-${id}`);
+  if (ping) ping.textContent = h.up ? `${h.pingMillis}ms` : `연결 안 됨 — ${h.message || "알 수 없음"}`;
+  const ver = $(`#ver-${id}`);
+  if (ver && h.up && h.version) { ver.textContent = h.version; ver.title = h.version; }
+  syncCollectBadge(id);
 }
 
 // 현재 검색·필터에 걸리는 인스턴스 — 아무 조건 없으면 빈 배열(초기 빈 리스트)
@@ -494,18 +533,16 @@ function shortVersion(v) {
 // 판정이 60초를 넘겼으면(targetUnreachable이 false) 한 번 더 확인한다.
 function loadInstanceMeta(rendered) {
   rendered.forEach(async (i) => {
+    // 카드가 다시 그려졌어도 기억해 둔 판정을 먼저 칠한다 — 사유·배지가 "—"로 돌아가지 않게(B9)
+    applyInstanceHealth(i.id);
     if (targetUnreachable(i.id)) {
       const dot = $(`#health-${i.id}`); if (dot) dot.classList.add("down");
       return;
     }
     try {
       const h = await targetApi(`/api/instances/${i.id}/health`);
-      state.instanceHealth.set(i.id, { up: !!h.up, at: Date.now() });
-      const dot = $(`#health-${i.id}`); if (dot) dot.classList.add(h.up ? "up" : "down");
-      const ping = $(`#ping-${i.id}`), ver = $(`#ver-${i.id}`);
-      // 버전은 전체를 textContent에 담고 축약은 CSS(한 줄 말줄임)에 맡긴다 — 클릭하면 전체가 그대로 펼쳐지게
-      if (h.up) { if (ping) ping.textContent = `${h.pingMillis}ms`; if (ver) { ver.textContent = h.version || "—"; ver.title = h.version || ""; } }
-      else if (ping) ping.textContent = h.message;
+      state.instanceHealth.set(i.id, { up: !!h.up, at: Date.now(), pingMillis: h.pingMillis, message: h.message, version: h.version });
+      applyInstanceHealth(i.id);
     } catch { const dot = $(`#health-${i.id}`); if (dot) dot.classList.add("down"); }
     try {
       const r = await targetApi(`/api/instances/${i.id}/replication`);
@@ -2713,7 +2750,9 @@ async function loadOverview(force) {
   // 내용이 없는 빈 막대를 남기지 않는다(B4) — 전에는 먼저 펼치고 조회해, 응답이 오기 전까지 흰 줄만 보였다.
   // 대상에 닿지 않는 인스턴스에서는 그 줄이 계속 남아 화면 결함처럼 읽혔다
   box.hidden = true;
-  if (targetSkipped(box, () => loadOverview(true), 0, force)) { box.hidden = false; return; }
+  // 대상에 닿지 않으면 이 카드는 접는다 — 탭 줄 위에 "연결되지 않아 조회하지 않았습니다" 상자가 떠서
+  // 어느 카드 얘기인지 모호했다. 사유는 각 결과 영역(Top Query·Slow Query 표 등)이 자기 자리에서 말한다(B9, 182절)
+  if (!force && targetUnreachable()) return;
   try {
     const o = await targetApi(`/api/instances/${state.instance.id}/overview`);
     const rep = o.replication || {};
