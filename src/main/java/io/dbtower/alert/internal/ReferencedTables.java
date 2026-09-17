@@ -6,7 +6,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * SQL에서 참조하는 테이블 이름을 뽑는다 (심화 아크 2, I2). FROM/JOIN 뒤 식별자를 best-effort로 긁고,
+ * SQL에서 참조하는 테이블 이름을 뽑는다 (심화 아크 2, I2). FROM/JOIN과 변경 문장의 대상 뒤 식별자를 best-effort로 긁고,
  * 스키마 수식자·따옴표·대괄호를 벗겨 마지막 세그먼트만 남긴다.
  *
  * 정직: 정규식 파싱은 서브쿼리·CTE·별칭·콤마 조인에서 오탐/누락이 있다(문헌이 지적하는 취약점).
@@ -19,9 +19,12 @@ public final class ReferencedTables {
     private static final Pattern LINE_COMMENT = Pattern.compile("--.*?(?:\\r?\\n|$)");
     private static final Pattern BLOCK_COMMENT = Pattern.compile("/\\*.*?\\*/", Pattern.DOTALL);
     private static final Pattern STRING_LITERAL = Pattern.compile("'(?:[^']|'')*'");
-    // FROM 또는 JOIN 뒤의 첫 식별자(스키마 수식 포함, 따옴표/백틱/대괄호 허용)
-    private static final Pattern FROM_JOIN =
-            Pattern.compile("(?i)\\b(?:from|join)\\s+([\\w.`\"\\[\\]]+)");
+    // FROM·JOIN 뒤, 그리고 변경 문장의 대상(UPDATE t / INSERT [IGNORE] INTO t / MERGE INTO t) 뒤의 첫 식별자.
+    // DELETE FROM은 FROM으로 잡힌다. 변경 문장을 빼면 Top Query의 UPDATE 상세가 "참조 테이블을 찾지 못했습니다"였다(#73).
+    // SELECT ... FOR UPDATE [OF t]와 MySQL ON DUPLICATE KEY UPDATE col = ...의 UPDATE는 대상이 아니라 뺀다
+    private static final Pattern FROM_JOIN = Pattern.compile(
+            "(?i)(?:\\b(?:from|join)|(?<!\\bfor\\s{1,10})(?<!\\bkey\\s{1,10})\\bupdate|\\binsert\\s+(?:ignore\\s+)?into|\\bmerge\\s+into)"
+                    + "\\s+([\\w.`\"\\[\\]]+)");
 
     private ReferencedTables() {
     }
