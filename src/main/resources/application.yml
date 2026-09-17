@@ -371,6 +371,8 @@ dbtower:
   security:
     # 기계(MCP 클라이언트·자동화)용 서비스 토큰 — 미설정이면 기동마다 랜덤 생성 (fail-closed)
     api-token: ${DBTOWER_API_TOKEN:}
+    # MCP 클라이언트 전용 토큰(#99) — /mcp와 MCP 도구가 부르는 REST 경로에서만 통한다. 미설정이면 기동 시 한 번 만들어 저장
+    mcp-token: ${DBTOWER_MCP_TOKEN:}
     # 최초 기동 부트스트랩 — admin은 항상 생성(비밀번호 미설정 시 랜덤+로그 안내),
     # 역할별 계정은 비밀번호를 준 것만 생성: viewer(관제 조회), requester(워크벤치·변경 요청),
     # approver(변경 승인), operator(승인 티켓 실행·대상 DB 운영). 역할 정의는 PlatformRoles.

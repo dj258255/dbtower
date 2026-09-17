@@ -223,9 +223,9 @@ class MonitorAdminE2ETest {
         instance("e2e-mon-c", null);
         Page page = consoleAs(ADMIN, true);
 
-        // 관리자에게는 서비스 토큰이 들어간 명령이 채워지고, 보조 줄이 그 사실을 말한다
+        // 관리자에게는 MCP 전용 토큰이 들어간 명령이 채워지고, 보조 줄이 그 토큰의 범위를 말한다
         assertThat(page.locator("#mcp-cmd-http")).containsText("--header \"Authorization: Bearer");
-        assertThat(page.locator("#mcp-http-note")).hasText("서비스 토큰이 들어 있습니다. 공유하지 마세요.");
+        assertThat(page.locator("#mcp-http-note")).hasText("MCP 전용 토큰이 들어 있습니다 — 읽기·요청 도구 경로에서만 통하지만 공유하지 마세요.");
         assertThat(page.locator("#mcp-cmd-http")).not().containsText("(");
 
         assertThat(page.locator("#mcp-tools")).isHidden();
