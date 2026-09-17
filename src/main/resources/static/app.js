@@ -308,10 +308,57 @@ function renderPlanTable(rows) {
   return `<table class="plan-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
-// 실행계획 섹션 채우기 — 표(planTable)가 오면 표로, 아니면 색상 JSON/트리로.
+// 실행계획 섹션 채우기 — 표(planTable)가 오면 표로, PostgreSQL JSON이면 노드 트리로, 아니면 색상 JSON/텍스트로.
 function fillPlan(el, data) {
-  if (data.planTable && data.planTable.length) el.innerHTML = renderPlanTable(data.planTable);
-  else renderPlanInto(el, data.plan);
+  el.classList.remove("plan-tree-host");
+  if (data.planTable && data.planTable.length) { el.innerHTML = renderPlanTable(data.planTable); return; }
+  const root = pgPlanRoot(data.plan);
+  if (root) {
+    el.classList.add("plan-tree-host");
+    el.innerHTML = pgPlanTreeHtml(root)
+      + `<details class="plan-raw"><summary>원문 JSON</summary><pre class="codeblock">${planHtml(data.plan)}</pre></details>`;
+    return;
+  }
+  renderPlanInto(el, data.plan);
+}
+
+// PostgreSQL EXPLAIN (FORMAT JSON)을 노드 트리로(#83). 수백 줄의 JSON을 따라 읽어야 어느 노드가 비싼지·Seq Scan이 어디인지 보였다.
+// 한 줄에 노드 종류·대상·조건·누적 비용·추정 행, 자기 몫 비용(누적 - 자식 누적)이 가장 큰 노드를 강조한다
+function pgPlanRoot(plan) {
+  if (typeof plan !== "string" || !plan.trim().startsWith("[")) return null;
+  try {
+    const parsed = JSON.parse(plan);
+    const root = Array.isArray(parsed) && parsed[0] && parsed[0].Plan;
+    return root && typeof root["Node Type"] === "string" ? root : null;
+  } catch {
+    return null;
+  }
+}
+
+function pgPlanTreeHtml(root) {
+  const nodes = [];
+  const walk = (n, depth) => {
+    const children = Array.isArray(n.Plans) ? n.Plans : [];
+    const childCost = children.reduce((sum, c) => sum + (Number(c["Total Cost"]) || 0), 0);
+    nodes.push({ n, depth, self: Math.max(0, (Number(n["Total Cost"]) || 0) - childCost) });
+    children.forEach((c) => walk(c, depth + 1));
+  };
+  walk(root, 0);
+  const hottest = nodes.reduce((a, b) => (b.self > a.self ? b : a), nodes[0]);
+  const lines = nodes.map(({ n, depth, self }) => {
+    const target = [n["Relation Name"] && `${n["Relation Name"]}${n.Alias && n.Alias !== n["Relation Name"] ? ` ${n.Alias}` : ""}`,
+      n["Index Name"] && `인덱스 ${n["Index Name"]}`, n["Join Type"] && n["Join Type"] !== "Inner" && `${n["Join Type"]} 조인`]
+      .filter(Boolean).join(" · ");
+    const cond = n["Index Cond"] || n["Hash Cond"] || n["Merge Cond"] || n["Join Filter"] || n.Filter
+      || (Array.isArray(n["Sort Key"]) ? `정렬 ${n["Sort Key"].join(", ")}` : "");
+    const seq = /Seq Scan/.test(n["Node Type"]);
+    const hot = n === hottest.n && nodes.length > 1;
+    return `<div class="plan-node${hot ? " hot" : ""}${seq ? " seq" : ""}" style="--depth:${depth}">
+      <span class="plan-node-type">${esc(n["Node Type"])}</span>${target ? ` <span class="plan-node-target">${esc(target)}</span>` : ""}
+      <span class="plan-node-meta">비용 ${esc(fmtNum(n["Total Cost"]))} · 추정 ${esc(fmtNum(n["Plan Rows"], 0))}행${hot ? ` · <b>가장 비싼 노드</b>(자기 몫 ${esc(fmtNum(self))})` : ""}</span>
+      ${cond ? `<div class="plan-node-cond">${esc(cond)}</div>` : ""}</div>`;
+  }).join("");
+  return `<div class="plan-tree" role="tree" aria-label="실행계획">${lines}</div>`;
 }
 
 // datetime-local 입력값(로컬 시각)과 LocalDateTime(ISO) 사이 변환
@@ -2409,6 +2456,7 @@ async function runExplain() {
     $("#plan-section").hidden = false;
     // "다시 조회"는 결과를 버리고 새로 조회하는 것이다 — 옛 계획이 남아 있으면 새 결과와 구분되지 않는다
     $("#detail-plan").innerHTML = "";
+    $("#detail-plan").classList.remove("plan-tree-host");
     $("#detail-findings").innerHTML = "";
     try {
       data = await api(`/api/instances/${state.instance.id}/explain`, {

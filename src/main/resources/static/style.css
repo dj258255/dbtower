@@ -1664,3 +1664,18 @@ input[type="checkbox"] { accent-color: var(--primary); }
 @media (prefers-reduced-motion: reduce) { .skeleton span { animation: none; } }
 .target-progress { margin: 0 0 10px; padding: 6px 12px; border-radius: 10px; background: #eef7fd; color: #0a5588; font-size: var(--fs-small); }
 .target-progress.slow { background: #fff1e0; color: #8a4d05; }
+/* 실행계획 트리(#83) — 코드 블록 안에서 읽는 표시라 밝은 면으로 바꾼다. 들여쓰기는 깊이, Seq Scan은 주황 글자, 가장 비싼 노드는 옅은 주황 면 */
+.codeblock.plan-tree-host { background: #fff; color: var(--text); border: 1px solid var(--line); white-space: normal; padding: 8px; font-family: inherit; }
+.plan-tree { font-size: var(--fs-small); }
+.plan-node { padding: 5px 8px 5px calc(8px + var(--depth) * 18px); border-radius: 8px; border-left: 2px solid transparent; }
+.plan-node + .plan-node { margin-top: 2px; }
+.plan-node-type { font-weight: 600; color: #0b2a45; }
+.plan-node.seq .plan-node-type { color: #8a4d05; }
+.plan-node-target { color: #333d4b; }
+.plan-node-meta { color: var(--muted); margin-left: 6px; font-variant-numeric: tabular-nums; }
+.plan-node-cond { color: #52697d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-caption); margin-top: 2px; word-break: break-all; }
+.plan-node.hot { background: #fff1e0; border-left-color: #c26a12; }
+.plan-node.hot .plan-node-meta b { color: #8a4d05; }
+.plan-raw { margin-top: 8px; }
+.plan-raw > summary { cursor: pointer; color: var(--muted); font-size: var(--fs-small); }
+.plan-raw .codeblock { max-height: 320px; overflow: auto; }
