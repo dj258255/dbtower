@@ -15,6 +15,30 @@ function compare(a, b) {
   return String(a).localeCompare(String(b), "ko", { numeric: true });
 }
 
+// 결과 칸 표시(#62) — 원래 값은 바꾸지 않고 보이는 모양만 다듬는다. 행 상세·복사·CSV는 원래 값 그대로다.
+// - 숫자 열은 오른쪽 정렬·고정폭 숫자, 부동소수 오차(0.19754200000000002)는 소수 넷째 자리까지 보이고 원래 값은 title
+// - PostgreSQL은 조회 계정에 통계 열람 권한이 없으면 남의 세션·쿼리 문장을 "<insufficient privilege>"로 바꿔 보낸다 —
+//   원문 대신 무엇이 없어서인지와 필요한 권한 이름을 말한다(docs/least-privilege.md)
+const NUMERIC_TYPE = /^(int|integer|bigint|smallint|tinyint|mediumint|serial|bigserial|numeric|decimal|number|float|double|real|money|int[248]|float[48])/i;
+const DECIMAL_TEXT = /^-?\d+\.\d{5,}$/;
+const PG_NO_PRIVILEGE = "<insufficient privilege>";
+
+export function cellHtml(v, column, style = "") {
+  if (v === null || v === undefined) return `<td class="null"${style}>NULL</td>`;
+  if (v === PG_NO_PRIVILEGE) {
+    return `<td class="no-priv"${style} title="조회 계정에 통계 열람 권한(pg_read_all_stats)이 없어 PostgreSQL이 이 값을 숨겼습니다">권한 없음</td>`;
+  }
+  const numeric = typeof v === "number" || (NUMERIC_TYPE.test((column && column.typeName) || "") && /^-?[\d.eE+-]+$/.test(String(v)));
+  if (numeric) {
+    const raw = String(v);
+    const shown = DECIMAL_TEXT.test(raw) || (typeof v === "number" && !Number.isInteger(v) && /\.\d{5,}/.test(raw))
+      ? Number(raw).toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: 4 })
+      : raw;
+    return `<td class="num"${style} title="${esc(raw)}">${esc(shown)}</td>`;
+  }
+  return `<td title="${esc(v)}"${style}>${esc(v)}</td>`;
+}
+
 export function renderGrid(container, view, { isPicking = () => false, onPickColumn = () => {} } = {}) {
   if (!view.columns.length) {
     container.innerHTML = '<div class="muted">결과 열이 없는 문장입니다.</div>';
@@ -87,12 +111,10 @@ export function renderGrid(container, view, { isPicking = () => false, onPickCol
           ? '<input class="col-filter" disabled placeholder="가림" title="가려진 열은 서버가 값을 바꿔 보내 거를 수 없습니다">'
           : `<input class="col-filter" data-colfilter="${k}" placeholder="포함 · NULL" aria-label="${esc(c.name)} 거르기" value="${esc(state.colFilters[k])}">`;
       }
-      return `<th data-sort="${k}" title="${esc(c.typeName || "")}"${widthStyle(k)}><span class="th-label">${esc(c.name)}${badge}${arrow}</span>${filter}<span class="col-resize" data-resize="${k}" title="끌어서 너비 조절 · 두 번 눌러 원래대로"></span></th>`;
+      return `<th data-sort="${k}"${NUMERIC_TYPE.test(c.typeName || "") ? ' class="num"' : ""} title="${esc(c.typeName || "")}"${widthStyle(k)}><span class="th-label">${esc(c.name)}${badge}${arrow}</span>${filter}<span class="col-resize" data-resize="${k}" title="끌어서 너비 조절 · 두 번 눌러 원래대로"></span></th>`;
     }).join("");
     const body = slice.map(({ r, i }) =>
-      `<tr data-row="${i}"${state.selected === i ? ' class="selected"' : ""}><td class="rownum">${i + 1}</td>${r.map((v, k) => v === null
-        ? `<td class="null"${widthStyle(k)}>NULL</td>`
-        : `<td title="${esc(v)}"${widthStyle(k)}>${esc(v)}</td>`).join("")}</tr>`
+      `<tr data-row="${i}"${state.selected === i ? ' class="selected"' : ""}><td class="rownum">${i + 1}</td>${r.map((v, k) => cellHtml(v, view.columns[k], widthStyle(k))).join("")}</tr>`
     ).join("");
     const activeFilters = state.colFilters.filter(Boolean).length;
     const counted = rows.length === view.rows.length ? `${rows.length}행` : `${rows.length} / ${view.rows.length}행`;
