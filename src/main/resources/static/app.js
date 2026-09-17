@@ -1063,7 +1063,7 @@ const AIOP_ITEM_CAP = 240;
 const aiopList = (title, items, extra = "", cap = 0) => (items && items.length)
   ? `<div class="aiop-block ${extra}"><h4>${esc(title)}</h4><ul>${items.map((i) => {
       const text = cap && i.length > cap ? `${i.slice(0, cap)}...` : i;
-      return `<li${cap && i.length > cap ? ` title="${esc(i)}"` : ""}>${esc(text)}</li>`;
+      return `<li${cap && i.length > cap ? ` title="${esc(i)}"` : ""}>${shortQueryIdsInText(esc(text))}</li>`;
     }).join("")}</ul></div>` : "";
 
 async function openAiOperation(jobId, opts = {}) {
@@ -1107,7 +1107,7 @@ async function openAiOperation(jobId, opts = {}) {
     const folded = (title, items, cap = 0) => (items && items.length)
       ? `<details class="aiop-fold"><summary>${esc(title)} <span class="muted">${items.length}개</span></summary><ul>${items.map((i) => {
           const text = cap && i.length > cap ? `${i.slice(0, cap)}…` : i;
-          return `<li>${esc(text)}</li>`;
+          return `<li>${shortQueryIdsInText(esc(text))}</li>`;
         }).join("")}</ul></details>` : "";
     result = [
       aiopList("검증되지 않은 내용", r.unverifiedClaims, "aiop-warn"),
@@ -2388,6 +2388,16 @@ function shortQueryId(id) {
     } catch { hex = s; }
   }
   return hex.length <= 12 ? hex : `${hex.slice(0, 6)}…${hex.slice(-4)}`;
+}
+
+// AI 소견·근거·채팅 답에 섞인 PostgreSQL queryid(부호 있는 64비트 10진수)를 표와 같은 16진수 축약으로 보인다(#82).
+// 표는 feadff…4702인데 근거는 -2885330479908940062라 같은 쿼리인지 대조할 수 없었다. 표시만 바꾸고 원래 값은 title에 남긴다 —
+// 모델에 간 사실·저장된 결과는 그대로다. 절댓값 10^15 이상만 본다: 바이트·행 수·밀리초 시각(13자리)은 이만큼 크지 않다.
+// 입력은 이미 esc를 거친 문자열이어야 한다(숫자·부호만 바꾸므로 이스케이프를 깨지 않는다)
+const QUERY_ID_IN_TEXT = /(^|[^\w.])(-?\d{16,20})(?!\w|\.\d)/g;
+function shortQueryIdsInText(escaped) {
+  return escaped.replace(QUERY_ID_IN_TEXT, (m, lead, id) =>
+    `${lead}<span class="mono qid-inline" title="쿼리 ID ${id}">${shortQueryId(id)}</span>`);
 }
 
 function renderAntiPatterns(rows) {
@@ -4177,7 +4187,7 @@ function chatListTime(iso) {
 // 표·제목은 지금 프롬프트 규약("JSON 하나만 출력")에서 실제로 나오지 않는다.
 // 순서가 중요하다 — esc를 먼저 걸고 토큰만 감싼다. 뒤집으면 답에 섞인 태그가 그대로 실행된다.
 function chatInline(escaped) {
-  return escaped.replace(/`([^`]+)`|\*\*([^*]+)\*\*/g,
+  return shortQueryIdsInText(escaped).replace(/`([^`]+)`|\*\*([^*]+)\*\*/g,
     (m, code, bold) => (code != null ? `<code>${code}</code>` : `<strong>${bold}</strong>`));
 }
 
