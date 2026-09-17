@@ -4,6 +4,8 @@ import io.dbtower.AiStreamExecutor;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.workbench.StatementClassifier.Classification;
 import io.dbtower.workbench.internal.AgentQueryService;
+import io.dbtower.workbench.internal.BulkChangeService;
+import io.dbtower.workbench.internal.domain.BulkChangeBatch;
 import io.dbtower.workbench.internal.ChangeExecutionService;
 import io.dbtower.workbench.internal.ChangeExecutionService.ExecutionView;
 import io.dbtower.workbench.internal.ChangeExecutionService.WorkloadView;
@@ -71,15 +73,18 @@ public class WorkbenchController {
     private final ChangeExecutionService changes;
     private final AgentQueryService agents;
     private final AiStreamExecutor streams;
+    private final BulkChangeService bulk;
 
     public WorkbenchController(WorkbenchService workbench, WorksheetService worksheets, WorkbenchAssistant assistant,
-                               ChangeExecutionService changes, AgentQueryService agents, AiStreamExecutor streams) {
+                               ChangeExecutionService changes, AgentQueryService agents, AiStreamExecutor streams,
+                               BulkChangeService bulk) {
         this.workbench = workbench;
         this.worksheets = worksheets;
         this.assistant = assistant;
         this.changes = changes;
         this.agents = agents;
         this.streams = streams;
+        this.bulk = bulk;
     }
 
     /**
@@ -306,6 +311,46 @@ public class WorkbenchController {
     @PostMapping("/tickets/{reviewId}/resolve")
     public ExecutionView resolve(@PathVariable Long reviewId, @Valid @RequestBody ResolveBody req) {
         return changes.resolve(reviewId, req.applied(), req.note());
+    }
+
+    // ---------- 대량 일괄 변경 (시작·일시정지·재개는 OPERATOR, 취소는 OPERATOR·APPROVER — SecurityConfig) ----------
+
+    /** 시작은 즉시 돌아온다 — 배치 진행은 조회로 본다. 수 분~수 시간 걸리는 일을 요청 스레드가 붙잡지 않는다. */
+    @PostMapping("/tickets/{reviewId}/bulk/start")
+    public BulkChangeService.RunView bulkStart(@PathVariable Long reviewId,
+                                               @RequestBody(required = false) BulkStartBody req) {
+        return bulk.start(reviewId, req == null ? 0 : req.approvedRows());
+    }
+
+    @GetMapping("/tickets/{reviewId}/bulk")
+    public BulkChangeService.RunView bulkStatus(@PathVariable Long reviewId) {
+        return bulk.status(reviewId);
+    }
+
+    @PostMapping("/tickets/{reviewId}/bulk/pause")
+    public BulkChangeService.RunView bulkPause(@PathVariable Long reviewId) {
+        return bulk.pause(reviewId);
+    }
+
+    @PostMapping("/tickets/{reviewId}/bulk/resume")
+    public BulkChangeService.RunView bulkResume(@PathVariable Long reviewId) {
+        return bulk.resume(reviewId);
+    }
+
+    /** 취소해도 이미 커밋한 배치는 되돌리지 않는다 — 어디까지 적용됐는지는 응답의 마지막 키로 본다. */
+    @PostMapping("/tickets/{reviewId}/bulk/cancel")
+    public BulkChangeService.RunView bulkCancel(@PathVariable Long reviewId) {
+        return bulk.cancel(reviewId);
+    }
+
+    /** 배치별 기록 — 마지막 50개만. 배치가 수천 개일 수 있어 전부 내려보내지 않는다. */
+    @GetMapping("/tickets/{reviewId}/bulk/batches")
+    public List<BulkChangeBatch> bulkBatches(@PathVariable Long reviewId) {
+        return bulk.recentBatches(reviewId);
+    }
+
+    /** @param approvedRows 승인 시점에 티켓에 고정한 예상 영향 행 수. 0이면 실행 시점 대조를 건너뛴다 */
+    public record BulkStartBody(long approvedRows) {
     }
 
     @GetMapping("/tickets/{reviewId}/executions")

@@ -234,6 +234,14 @@ public class SecurityConfig {
                         // 승인 티켓을 대상 DB에 반영·되돌리고 커밋 불명을 정리하는 경로는 운영자 — 승인한 사람과 실행하는 사람을 나눈다
                         .requestMatchers(HttpMethod.POST, "/api/workbench/tickets/*/execute", "/api/workbench/tickets/*/revert",
                                 "/api/workbench/tickets/*/resolve").hasRole("OPERATOR")
+                        // 대량 일괄 변경: 시작·멈춤·재개는 실행하는 사람이, 취소는 승인자도 할 수 있다(명세의 권한 표)
+                        .requestMatchers(HttpMethod.POST, "/api/workbench/tickets/*/bulk/start",
+                                "/api/workbench/tickets/*/bulk/pause",
+                                "/api/workbench/tickets/*/bulk/resume").hasRole("OPERATOR")
+                        .requestMatchers(HttpMethod.POST, "/api/workbench/tickets/*/bulk/cancel")
+                                .hasAnyRole("OPERATOR", "APPROVER")
+                        .requestMatchers(HttpMethod.GET, "/api/workbench/tickets/*/bulk",
+                                "/api/workbench/tickets/*/bulk/batches").hasAnyRole("OPERATOR", "APPROVER", "VIEWER")
                         // 워크벤치(조회 계정으로 대상 DB의 행 값 조회·AI 제안·워크시트)는 요청자부터 — 관제 지표와 달리 데이터를 보는 경로다
                         .requestMatchers("/api/workbench/**").hasRole("REQUESTER")
                         // AI 운영 작업(169절) — 릴레이·실행기 경로는 서비스 토큰(ADMIN)만. 사람이 이 경로로 작업 단계를 건너뛰면
