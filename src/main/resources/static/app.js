@@ -1413,15 +1413,21 @@ async function loadHealthScore() {
   const summary = $("#score-summary");
   const box = $("#score-result");
   let report;
+  // 재기동 직후에는 서버가 닿지 않는 대상의 시간 초과를 기다리며 처음 계산한다(#80, 실측 15초) — 멈춘 것처럼 보이지 않게 이유를 적는다
+  const slow = setTimeout(() => {
+    if (!fleet.score) box.textContent = "헬스 스코어를 계산하는 중입니다. 응답하지 않는 DB가 있으면 시간 초과를 기다리느라 수십 초 걸릴 수 있습니다.";
+  }, 3000);
   try {
     report = await api("/api/health-score");
   } catch (e) {
     box.classList.add("muted");
     box.textContent = `조회 실패: ${apiMessage(e)}`;
+    clearTimeout(slow);
     fleet.score = null;
     renderAttention();
     return;
   }
+  clearTimeout(slow);
   fleet.score = report;
   renderAttention();
   box.classList.remove("muted");
