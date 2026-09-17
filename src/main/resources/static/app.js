@@ -16,10 +16,38 @@ const api = (path, opts = {}) => {
   if (opts.method && opts.method !== "GET") headers["X-XSRF-TOKEN"] = csrfToken();
   return fetch(path, { ...opts, headers }).then((r) => {
     if (r.status === 401) { location.href = "/login.html"; throw new Error("로그인이 필요합니다"); }
-    if (!r.ok) return r.text().then((t) => { throw new Error(`${r.status} ${t}`); });
+    if (!r.ok) return r.text().then((t) => { throw apiFailure(r.status, t); });
     // 204 No Content(대화 삭제 등)에는 본문이 없다 — r.json()이 던지면 성공이 실패로 보인다
     return r.status === 204 ? null : r.json();
   });
+};
+
+/**
+ * 실패 응답을 화면용 Error로 바꾼다.
+ *
+ * <p>전에는 `${status} ${본문}`을 그대로 메시지로 만들어 502 응답 본문(JSON)이 화면에 그대로 보였다
+ * (B9 — "쿼리 통계를 불러오지 못했습니다: 502 {"errorId":"367f…","error":"…"}"). 원문 오류(JSON·드라이버
+ * 영문·스택)는 화면에 내보내지 않는다(148절). 서버가 {"error": 사람 문장, "errorId": 원인 번호}로 주면
+ * 문장만 message에 싣고 번호는 errorId로 따로 둔다 — HTTP 상태 숫자는 문장에 넣지 않는다.
+ *
+ * <p>컨테이너 기본 오류 본문(403·404·500 — timestamp·path·error가 영문인 Boot 기본 형식)은 사람 문장이
+ * 아니므로 쓰지 않는다. 그대로 쓰면 화면에 "Forbidden"이 뜬다.
+ */
+function apiFailure(status, bodyText) {
+  let body = null;
+  try { body = bodyText ? JSON.parse(bodyText) : null; } catch { /* JSON 아님 — 아래 기본 문장 */ }
+  const whitelabel = body && typeof body === "object" && "timestamp" in body && "path" in body;
+  const human = !whitelabel && body && typeof body.error === "string" && body.error.trim() ? body.error : null;
+  const err = new Error(human || (status === 403 ? "이 작업을 할 권한이 없습니다." : "요청을 처리하지 못했습니다."));
+  err.status = status;
+  if (body && typeof body === "object" && body.errorId) err.errorId = String(body.errorId);
+  return err;
+}
+
+/** 화면에 보일 오류 문장 — errorId는 앞 8자만 덧붙여 서버 로그와 대조할 수 있게 한다(B9) */
+const apiMessage = (e) => {
+  const msg = e && e.message ? e.message : "요청을 처리하지 못했습니다.";
+  return e && e.errorId ? `${msg} (오류 번호 ${String(e.errorId).slice(0, 8)})` : msg;
 };
 
 // ---------- 대상 DB 조회 줄 (이슈 #31) ----------
@@ -448,7 +476,7 @@ function bindInstanceCards() {
         renderInstanceMatches();
       } catch (err) {
         // 경고창 대신 목록 안에 적는다 — 어느 인스턴스에서 실패했는지 맥락이 남는다(162절)
-        setInstanceNotice(`수집 토글 실패 — ${inst.name}: ${err.message}`);
+        setInstanceNotice(`수집 토글 실패 — ${inst.name}: ${apiMessage(err)}`);
       }
     });
   });
@@ -765,7 +793,7 @@ async function loadAdvisors(force) {
   try {
     report = await targetApi(`/api/instances/${state.instance.id}/advisors`);
   } catch (e) {
-    box.textContent = `점검 실패: ${e.message}`;
+    box.textContent = `점검 실패: ${apiMessage(e)}`;
     return;
   }
   box.classList.remove("muted");
@@ -824,7 +852,7 @@ async function loadAiOperations() {
   try {
     jobs = await api("/api/ai-operations?limit=30");
   } catch (e) {
-    $("#aiops-status").textContent = `조회 실패: ${e.message}`;
+    $("#aiops-status").textContent = `조회 실패: ${apiMessage(e)}`;
     body.innerHTML = `<tr><td colspan="6" class="muted">조회 실패</td></tr>`;
     return;
   }
@@ -880,7 +908,7 @@ async function openAiOperation(jobId, opts = {}) {
     job = await api(`/api/ai-operations/${encodeURIComponent(jobId)}`);
   } catch (e) {
     box.hidden = false;
-    box.innerHTML = `<div class="muted">작업을 열지 못했습니다: ${esc(e.message)}</div>`;
+    box.innerHTML = `<div class="muted">작업을 열지 못했습니다: ${esc(apiMessage(e))}</div>`;
     return;
   }
   const r = job.result;
@@ -930,7 +958,7 @@ async function aiOperationAction(jobId, action) {
   try {
     await api(`/api/ai-operations/${encodeURIComponent(jobId)}/${action}`, { method: "POST" });
   } catch (e) {
-    $("#aiops-status").textContent = `${action === "cancel" ? "취소" : "재시도"} 실패: ${e.message}`;
+    $("#aiops-status").textContent = `${action === "cancel" ? "취소" : "재시도"} 실패: ${apiMessage(e)}`;
     return;
   }
   await loadAiOperations();
@@ -985,8 +1013,8 @@ async function submitAiOperation() {
   } catch (e) {
     // 접수까지는 됐는데 그 뒤가 실패한 경우를 "접수 실패"로 적지 않는다 — 작업은 이미 만들어져 돌고 있다
     say(accepted
-      ? `접수는 됐지만 작업 목록을 갱신하지 못했습니다: ${e.message}`
-      : `작업을 접수하지 못했습니다: ${e.message}`, accepted?.jobId);
+      ? `접수는 됐지만 작업 목록을 갱신하지 못했습니다: ${apiMessage(e)}`
+      : `작업을 접수하지 못했습니다: ${apiMessage(e)}`, accepted?.jobId);
   } finally {
     delete btn.dataset.busy;
     syncChatComposer();
@@ -1022,7 +1050,7 @@ async function loadFinOps(force) {
   try {
     report = await targetApi(`/api/instances/${state.instance.id}/finops`);
   } catch (e) {
-    box.textContent = `분석 실패: ${e.message}`;
+    box.textContent = `분석 실패: ${apiMessage(e)}`;
     return;
   }
   box.classList.remove("muted");
@@ -1077,7 +1105,7 @@ async function loadHealthScore() {
     report = await api("/api/health-score");
   } catch (e) {
     box.classList.add("muted");
-    box.textContent = `조회 실패: ${e.message}`;
+    box.textContent = `조회 실패: ${apiMessage(e)}`;
     return;
   }
   box.classList.remove("muted");
@@ -1154,7 +1182,7 @@ async function loadBackupFreshness() {
     report = await api("/api/backup-freshness");
   } catch (e) {
     box.classList.add("muted");
-    box.textContent = `조회 실패: ${e.message}`;
+    box.textContent = `조회 실패: ${apiMessage(e)}`;
     return;
   }
   box.classList.remove("muted");
@@ -1256,7 +1284,7 @@ async function fillFreshnessHealth(id) {
       ? `핑 ${h.pingMillis}ms · ${shortVersion(h.version)}` : (h.message || "접속 실패");
   } catch (e) {
     row.querySelector(".score-contrib-state").textContent = "조회 실패";
-    row.querySelector(".score-contrib-summary").textContent = e.message;
+    row.querySelector(".score-contrib-summary").textContent = apiMessage(e);
     row.dataset.filled = "";
   }
 }
@@ -1283,7 +1311,7 @@ async function loadMetrics() {
   try {
     m = await api(`/api/instances/${state.instance.id}/metrics?from=${from}&to=${to}`);
   } catch (e) {
-    m = { cpu: [], cpuNote: `조회 실패: ${e.message}`, connections: [], connectionsNote: `조회 실패: ${e.message}` };
+    m = { cpu: [], cpuNote: `조회 실패: ${apiMessage(e)}`, connections: [], connectionsNote: `조회 실패: ${apiMessage(e)}` };
   }
   state.metricsCpu = m.cpu ?? [];
   drawSimpleChart("#cpu-chart", "#cpu-empty", m.cpu ?? [], "#e5533d", m.cpuNote, "%", 100);
@@ -1299,7 +1327,7 @@ async function loadCommandMetrics(from, to) {
   try {
     cm = await api(`/api/instances/${state.instance.id}/metrics/commands?from=${from}&to=${to}`);
   } catch (e) {
-    box.innerHTML = `<div class="muted">명령별 시계열 조회 실패: ${esc(e.message)}</div>`;
+    box.innerHTML = `<div class="muted">명령별 시계열 조회 실패: ${esc(apiMessage(e))}</div>`;
     return;
   }
   if (!cm.series || !cm.series.length) {
@@ -1636,7 +1664,7 @@ async function runQuery(force) {
   } catch (e) {
     // 대상 조회가 실패하면(502) 사유를 표 자리에 보인다 — 전에는 잡지 않아 표가 빈 채로 멈추고 콘솔 오류만 남았다(149절 계측 중 발견)
     $("#top-table thead").innerHTML = "";
-    $("#top-table tbody").innerHTML = `<tr><td class="muted">쿼리 통계를 불러오지 못했습니다: ${esc(e.message)}</td></tr>`;
+    $("#top-table tbody").innerHTML = `<tr><td class="muted">쿼리 통계를 불러오지 못했습니다: ${esc(apiMessage(e))}</td></tr>`;
     return;
   }
   // Call/sec는 스냅샷 차분이라 이력 없으면 null → "—". Latency/행 지표는 누적÷호출수(평균).
@@ -1673,7 +1701,7 @@ async function runCompare() {
     // 브라우저 경고창은 화면 밖으로 튀어나오고 맥락을 잃는다 — 실패한 자리에 그대로 적는다
     const sum = $("#compare-summary");
     sum.hidden = false;
-    sum.innerHTML = `<div class="finding-item">비교하지 못했습니다 — ${esc(e.message)}`
+    sum.innerHTML = `<div class="finding-item">비교하지 못했습니다 — ${esc(apiMessage(e))}`
       + `<div class="muted">구간 안에 스냅샷 배치가 2개 이상 있어야 차분을 낼 수 있습니다(수집 주기 1분).`
       + ` 구간을 넓히거나, 수집이 도는 동안 기다린 뒤 다시 조회하세요.</div></div>`;
     return;
@@ -1934,7 +1962,7 @@ async function runExplain() {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
       });
     } catch (e) {
-      $("#detail-plan").textContent = `실행 실패: ${e.message}`;
+      $("#detail-plan").textContent = `실행 실패: ${apiMessage(e)}`;
       $("#detail-findings").innerHTML = "";
       return;
     }
@@ -1962,7 +1990,7 @@ async function runAntiPatterns() {
     const rows = await api(`/api/instances/${state.instance.id}/query-anti-patterns?limit=20`);
     box.innerHTML = renderAntiPatterns(rows);
   } catch (e) {
-    box.innerHTML = `<div class="finding-item">조회 실패: ${esc(e.message)}</div>`;
+    box.innerHTML = `<div class="finding-item">조회 실패: ${esc(apiMessage(e))}</div>`;
   } finally {
     btn.classList.remove("loading");
     markDetailFresh("antipattern");
@@ -2039,7 +2067,7 @@ async function runReferencedSchema() {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
       });
     } catch (e) {
-      box.innerHTML = `<div class="finding-item">조회 실패: ${esc(e.message)}</div>`;
+      box.innerHTML = `<div class="finding-item">조회 실패: ${esc(apiMessage(e))}</div>`;
       return;
     }
     box.innerHTML = renderReferencedSchema(data);
@@ -2122,7 +2150,7 @@ async function toggleTableDetail(btn) {
     box.innerHTML = renderTableDetail(d, { columns: ref ? ref.columns : null });
     box.dataset.loaded = "1";
   } catch (e) {
-    box.innerHTML = `<div class="finding-item">상세 조회 실패: ${esc(e.message)}</div>`;
+    box.innerHTML = `<div class="finding-item">상세 조회 실패: ${esc(apiMessage(e))}</div>`;
   }
 }
 
@@ -2167,7 +2195,7 @@ async function runAiAnalysis() {
     state.lastFindings = result.findings ?? [];
     state.lastAi = result.aiAnalysis ?? null;
   } catch (e) {
-    out.textContent = `실패: ${e.message}`;
+    out.textContent = `실패: ${apiMessage(e)}`;
     stage.textContent = "";
   } finally {
     btn.classList.remove("loading");
@@ -2199,7 +2227,7 @@ async function runIndexAdvisor() {
         body: JSON.stringify({ sql, columns: columns || null }),
       });
     } catch (e) {
-      result.innerHTML = `<div class="finding-item">시뮬레이션 실패: ${esc(e.message)}</div>`;
+      result.innerHTML = `<div class="finding-item">시뮬레이션 실패: ${esc(apiMessage(e))}</div>`;
       return;
     }
     const meta = ADVISOR_STATUS[data.status] || { cls: "unsupported", label: data.status };
@@ -2259,7 +2287,7 @@ async function runDeepDiagnose() {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sql }),
       });
     } catch (e) {
-      result.innerHTML = `<div class="finding-item">진단 실패: ${esc(e.message)}</div>`;
+      result.innerHTML = `<div class="finding-item">진단 실패: ${esc(apiMessage(e))}</div>`;
       return;
     }
     // 표시 순서 원칙(외부 리뷰 반영): 근본원인이 있으면 "원인 -> 증상" 순으로.
@@ -2346,7 +2374,7 @@ async function runInquiry() {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
     } catch (e) {
-      result.innerHTML = `<div class="finding-item">문의 실패: ${esc(e.message)}</div>`;
+      result.innerHTML = `<div class="finding-item">문의 실패: ${esc(apiMessage(e))}</div>`;
       return;
     }
     result.innerHTML = data.sent
@@ -2395,7 +2423,7 @@ async function loadSlow(force) {
     // 형제 로더(top·sessions·latency·partitions·deadlocks)와 같은 모양 — 실패를 이 카드에 적고 끝낸다.
     // 여기서 던지면 selectInstance의 Promise.all이 깨지고, 그 약속에 걸린 딥링크(?aiop=·compareAt)까지 함께 사라진다(170절 9번)
     table.querySelector("tbody").innerHTML =
-      `<tr><td colspan="8" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+      `<tr><td colspan="8" class="muted">조회 실패: ${esc(apiMessage(e))}</td></tr>`;
   }
   // Mongo 보존 창 정직 표기 — system.profile은 순환(capped) 컬렉션이라 오래된 항목이 덮어써진다.
   // 로그 파일 파싱 기반 도구와 보존 범위가 다름을 숨기지 않는다. 조회가 실패해도 이 문구는 지금 대상의 것이라
@@ -2437,7 +2465,7 @@ async function loadBackupInfo() {
         <td class="qtext" title="${esc(r.detail ?? "")}">${esc((r.detail ?? "").slice(0, 90))}</td>
       </tr>`).join("") : '<tr><td colspan="5" class="muted">백업 이력이 없습니다.</td></tr>';
   } catch (e) {
-    $("#pitr-window").textContent = `조회 실패: ${e.message}`;
+    $("#pitr-window").textContent = `조회 실패: ${apiMessage(e)}`;
   }
 }
 
@@ -2457,7 +2485,7 @@ async function loadMcpTools() {
     toggle.textContent = toggle.dataset.label;
   } catch (e) {
     box.classList.remove("muted");
-    box.textContent = `도구 목록 조회 실패: ${e.message}`;
+    box.textContent = `도구 목록 조회 실패: ${apiMessage(e)}`;
     toggle.textContent = toggle.dataset.label = "제공 도구 보기";
   }
 }
@@ -2532,7 +2560,7 @@ async function loadUsers() {
   try {
     users = await api("/api/security/users");
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="4" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="muted">조회 실패: ${esc(apiMessage(e))}</td></tr>`;
     return;
   }
   // select의 영문 괄호는 뺀다 — 화면에는 역할 이름만(value는 그대로)
@@ -2588,7 +2616,7 @@ async function applyUserRole(sel) {
     });
     setUsersMsg(`${username}의 역할을 ${ROLE_LABEL[r.role] ?? r.role}(으)로 바꿨습니다. 다음 로그인부터 적용됩니다.`, false);
   } catch (e) {
-    setUsersMsg(`역할을 바꾸지 못했습니다: ${e.message}`, true);
+    setUsersMsg(`역할을 바꾸지 못했습니다: ${apiMessage(e)}`, true);
   }
   loadUsers();
 }
@@ -2626,7 +2654,7 @@ async function createUser() {
     syncUserCreateButton();
     loadUsers();
   } catch (e) {
-    setUsersMsg(`만들지 못했습니다: ${e.message}`, true);
+    setUsersMsg(`만들지 못했습니다: ${apiMessage(e)}`, true);
   }
 }
 
@@ -2723,7 +2751,7 @@ async function loadOverview(force) {
       </div>`;
     box.hidden = false;
   } catch (e) {
-    box.innerHTML = `<span class="muted">운영 종합 조회 실패: ${esc(e.message)}</span>`;
+    box.innerHTML = `<span class="muted">운영 종합 조회 실패: ${esc(apiMessage(e))}</span>`;
     box.hidden = false;
   }
 }
@@ -2737,8 +2765,8 @@ async function loadReplication(force) {
     const lag = r.lagSource === "MEASURED"
       ? `${fmtNum(r.lagSeconds, 1)}s`
       : `<span class="verify-badge ${badge ? esc(badge.cls) : "muted"}">${esc(badge ? badge.label : r.lagSource)}</span>`;
-    box.innerHTML = `role: ${esc(r.role)}<br>지연: ${lag}<br>${esc(r.detail ?? "")}`;
-  } catch (e) { box.textContent = `조회 실패: ${e.message}`; }
+    box.innerHTML = `역할: ${esc(r.role)}<br>지연: ${lag}<br>${esc(r.detail ?? "")}`;
+  } catch (e) { box.textContent = `조회 실패: ${apiMessage(e)}`; }
   loadReplicationSlots(force);
 }
 
@@ -2780,7 +2808,7 @@ async function loadDeadlocks(force) {
       </div>`;
     }).join("");
   } catch (e) {
-    box.innerHTML = `<p class="muted">조회 실패: ${esc(e.message)}</p>`;
+    box.innerHTML = `<p class="muted">조회 실패: ${esc(apiMessage(e))}</p>`;
   }
 }
 
@@ -2814,7 +2842,7 @@ async function loadAnomalies() {
     box.innerHTML = parts.join("");
   } catch (e) {
     box.className = "anomaly-result muted";
-    box.textContent = `조회 실패: ${e.message}`;
+    box.textContent = `조회 실패: ${apiMessage(e)}`;
   }
 }
 
@@ -2848,7 +2876,7 @@ async function loadPlanChanges() {
     });
   } catch (e) {
     box.className = "anomaly-result muted";
-    box.textContent = `조회 실패: ${e.message}`;
+    box.textContent = `조회 실패: ${apiMessage(e)}`;
   }
 }
 
@@ -2870,7 +2898,7 @@ async function loadWaitEvents(force) {
       </tr>`).join("") : '<tr><td colspan="4" class="muted">대기 이벤트가 없습니다.</td></tr>';
   } catch (e) {
     table.querySelector("tbody").innerHTML =
-      `<tr><td colspan="4" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+      `<tr><td colspan="4" class="muted">조회 실패: ${esc(apiMessage(e))}</td></tr>`;
   }
 }
 
@@ -2905,7 +2933,7 @@ async function loadLatencyPercentiles(force) {
     }).join("") : '<tr><td colspan="4" class="muted">백분위 데이터가 없습니다.</td></tr>';
   } catch (e) {
     table.querySelector("tbody").innerHTML =
-      `<tr><td colspan="4" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+      `<tr><td colspan="4" class="muted">조회 실패: ${esc(apiMessage(e))}</td></tr>`;
   }
 }
 
@@ -2931,7 +2959,7 @@ async function loadSloReport(force) {
     r = await targetApi(`/api/instances/${state.instance.id}/slo`);
   } catch (e) {
     box.classList.add("muted");
-    box.textContent = `조회 실패: ${e.message}`;
+    box.textContent = `조회 실패: ${apiMessage(e)}`;
     return;
   }
   const lat = r.latency, av = r.availability, eb = r.errorBudget;
@@ -3011,7 +3039,7 @@ async function loadPartitions(force) {
       </tr>`).join("") : '<tr><td colspan="6" class="muted">파티션이 있는 테이블이 없습니다.</td></tr>';
   } catch (e) {
     table.querySelector("tbody").innerHTML =
-      `<tr><td colspan="6" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+      `<tr><td colspan="6" class="muted">조회 실패: ${esc(apiMessage(e))}</td></tr>`;
   }
 }
 
@@ -3029,7 +3057,7 @@ async function loadSessions(force) {
     renderSessionRows(await targetApi(`/api/instances/${state.instance.id}/sessions?limit=50`));
   } catch (e) {
     table.querySelector("tbody").innerHTML =
-      `<tr><td colspan="${cols}" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+      `<tr><td colspan="${cols}" class="muted">조회 실패: ${esc(apiMessage(e))}</td></tr>`;
   }
 }
 
@@ -3191,7 +3219,7 @@ function wireKillButtons() {
         await loadSessions();
       } catch (e) {
         btn.disabled = false;
-        setLiveStatus(`세션 종료 실패: ${e.message}`, "bad");
+        setLiveStatus(`세션 종료 실패: ${apiMessage(e)}`, "bad");
       }
     });
   });
@@ -3230,7 +3258,7 @@ async function runSchemaDiff() {
   try {
     d = await api(`/api/schema-diff?left=${left}&right=${right}`);
   } catch (e) {
-    box.innerHTML = `<div class="schema-warning">비교 실패: ${esc(e.message)}</div>`;
+    box.innerHTML = `<div class="schema-warning">비교 실패: ${esc(apiMessage(e))}</div>`;
     return;
   }
   if (d.warning) { warnBox.hidden = false; warnBox.textContent = `주의: ${d.warning}`; }
@@ -3290,9 +3318,9 @@ async function runParamDiff() {
   try {
     d = await api(`/api/param-diff?left=${left}&right=${right}`);
   } catch (e) {
-    box.innerHTML = e.message.startsWith("403")
+    box.innerHTML = e.status === 403
       ? '<div class="schema-warning">파라미터 드리프트는 운영자·관리자만 볼 수 있습니다.</div>'
-      : `<div class="schema-warning">비교 실패: ${esc(e.message)}</div>`;
+      : `<div class="schema-warning">비교 실패: ${esc(apiMessage(e))}</div>`;
     return;
   }
   if (d.warning) { warnBox.hidden = false; warnBox.textContent = `주의: ${d.warning}`; }
@@ -3336,9 +3364,9 @@ async function loadConfigDrift() {
   try {
     rows = await api(`/api/instances/${state.instance.id}/config-drift?limit=100`);
   } catch (e) {
-    box.innerHTML = e.message.startsWith("403")
+    box.innerHTML = e.status === 403
       ? '<div class="schema-warning">설정 변경 이력은 운영자·관리자만 볼 수 있습니다.</div>'
-      : `<div class="schema-warning">조회 실패: ${esc(e.message)}</div>`;
+      : `<div class="schema-warning">조회 실패: ${esc(apiMessage(e))}</div>`;
     return;
   }
   box.className = "config-drift-result";
@@ -3385,7 +3413,7 @@ async function submitReview() {
     await loadReviews();
   } catch (e) {
     $("#review-list").className = "review-list schema-warning";
-    $("#review-list").textContent = `요청 실패: ${e.message}`;
+    $("#review-list").textContent = `요청 실패: ${apiMessage(e)}`;
   } finally { btn.disabled = false; }
 }
 
@@ -3396,7 +3424,7 @@ async function loadReviews() {
   let rows;
   try {
     rows = await api(`/api/instances/${state.instance.id}/reviews`);
-  } catch (e) { box.innerHTML = `<div class="schema-warning">조회 실패: ${esc(e.message)}</div>`; return; }
+  } catch (e) { box.innerHTML = `<div class="schema-warning">조회 실패: ${esc(apiMessage(e))}</div>`; return; }
   box.className = "review-list";
   if (!rows.length) { box.innerHTML = '<div class="muted">아직 리뷰 요청이 없습니다.</div>'; return; }
   const canDecide = can("CHANGE_APPROVE");
@@ -3441,9 +3469,9 @@ async function decideReview(id, approved) {
     });
     await loadReviews();
   } catch (e) {
-    const msg = e.message.startsWith("403")
+    const msg = e.status === 403
       ? "승인/반려는 승인자(APPROVER)·관리자만 합니다."
-      : `처리 실패: ${e.message}`;
+      : `처리 실패: ${apiMessage(e)}`;
     const box = document.getElementById("review-list");
     if (box) box.insertAdjacentHTML("afterbegin", `<div class="finding-item">${esc(msg)}</div>`);
   }
@@ -3536,7 +3564,7 @@ async function generateIncident() {
     $("#btn-incident-dl").hidden = false;
   } catch (e) {
     box.className = "incident-result schema-warning";
-    box.textContent = e.message.startsWith("403") ? "인시던트 리포트는 운영자·관리자만 생성할 수 있습니다." : `생성 실패: ${e.message}`;
+    box.textContent = e.status === 403 ? "인시던트 리포트는 운영자·관리자만 생성할 수 있습니다." : `생성 실패: ${apiMessage(e)}`;
   } finally { btn.disabled = false; }
 }
 
@@ -3567,7 +3595,7 @@ async function generateMonthly() {
     $("#btn-monthly-dl").hidden = false;
   } catch (e) {
     box.className = "incident-result schema-warning";
-    box.textContent = e.message.startsWith("403") ? "월간 리포트는 운영자·관리자만 생성할 수 있습니다." : `생성 실패: ${e.message}`;
+    box.textContent = e.status === 403 ? "월간 리포트는 운영자·관리자만 생성할 수 있습니다." : `생성 실패: ${apiMessage(e)}`;
   } finally { btn.disabled = false; }
 }
 
@@ -3601,7 +3629,7 @@ async function runOnlineDdl(execute) {
     });
   } catch (e) {
     box.className = "ddl-result schema-warning";
-    box.textContent = `요청 실패: ${e.message}`;
+    box.textContent = `요청 실패: ${apiMessage(e)}`;
     return;
   }
   const cls = { OK: "schema-same", FAILED: "schema-warning", UNSUPPORTED: "muted" }[d.status] || "muted";
@@ -3951,7 +3979,7 @@ async function loadConversations() {
     cs.error = null;
   } catch (e) {
     if (state.instance?.id !== inst.id) return;
-    cs.error = `대화 목록을 불러오지 못했습니다: ${e.message}`;
+    cs.error = `대화 목록을 불러오지 못했습니다: ${apiMessage(e)}`;
   }
   renderChat();
   renderChatList();
@@ -3993,12 +4021,12 @@ async function openConversation(cid) {
   } catch (e) {
     if (state.instance?.id !== inst.id) return;
     cs.status = "idle";
-    if (/^404\b/.test(e.message)) {
+    if (e.status === 404) {
       // 지워진 대화다 — 오류가 아니라 빈 대화로 돌아간다
       cs.conversationId = null;
       cs.list = cs.list.filter((c) => c.id !== cid);
     } else {
-      cs.error = `대화를 열지 못했습니다: ${e.message}`;
+      cs.error = `대화를 열지 못했습니다: ${apiMessage(e)}`;
     }
     renderChat();
     renderChatList();
@@ -4036,8 +4064,8 @@ async function deleteConversation(cid) {
   try {
     await api(`/api/instances/${inst.id}/conversations/${cid}`, { method: "DELETE" });
   } catch (e) {
-    if (!/^404\b/.test(e.message)) {
-      cs.error = `대화를 지우지 못했습니다: ${e.message}`;
+    if (e.status !== 404) {
+      cs.error = `대화를 지우지 못했습니다: ${apiMessage(e)}`;
       renderChat();
       renderChatList();
       return;
@@ -4150,7 +4178,7 @@ async function runDiagnose() {
       turn.status = "stopped";
     } else {
       turn.status = "error";
-      turn.error = e.message;
+      turn.error = apiMessage(e);
     }
   } finally {
     turn.took = Date.now() - turn.startedAt;
@@ -4299,9 +4327,9 @@ async function loadAudit() {
         <td class="num">${e.durationMs == null ? "-" : e.durationMs}</td>
       </tr>`).join("") : '<tr><td colspan="6" class="muted">조건에 맞는 기록이 없습니다.</td></tr>';
   } catch (e) {
-    table.querySelector("tbody").innerHTML = e.message.startsWith("403")
+    table.querySelector("tbody").innerHTML = e.status === 403
       ? '<tr><td colspan="6" class="muted">감사 로그는 ADMIN 역할만 볼 수 있습니다.</td></tr>'
-      : `<tr><td colspan="6" class="muted">조회 실패: ${esc(e.message)}</td></tr>`;
+      : `<tr><td colspan="6" class="muted">조회 실패: ${esc(apiMessage(e))}</td></tr>`;
   }
 }
 

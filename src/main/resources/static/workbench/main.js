@@ -1,7 +1,7 @@
 // 거버넌스 SQL 워크벤치 — 인스턴스·워크시트·편집기·결과 미리보기·AI 대화를 잇는다.
 // 정책(분류·계정·읽기 전용·마스킹·기록)과 판정은 전부 서버가 강제한다. 이 화면은 결과를 보여줄 뿐 판정하지 않는다.
 
-import { request, streamEvents, esc, csrfToken, ApiError, localTime } from "./api.js";
+import { request, streamEvents, esc, csrfToken, ApiError, errText, localTime } from "./api.js";
 import { SqlEditor, highlight } from "./editor.js";
 import { renderTree } from "./schema-tree.js";
 import { renderGrid } from "./grid.js";
@@ -636,7 +636,7 @@ function showFailure(e) {
   } else if (e instanceof ApiError && e.status === 422) {
     body = `<div class="wb-msg error"><strong>대상 DB가 문장을 거부했습니다</strong><pre>${esc(e.message)}</pre>`;
   } else {
-    body = `<div class="wb-msg error"><strong>실행하지 않았습니다${e instanceof ApiError ? " (" + esc(e.status) + ")" : ""}</strong><p>${esc(e.message)}</p>`;
+    body = `<div class="wb-msg error"><strong>실행하지 않았습니다${e instanceof ApiError ? " (" + esc(e.status) + ")" : ""}</strong><p>${esc(errText(e))}</p>`;
   }
   overlay.innerHTML = `${body}<div class="wb-overlay-actions">
       ${ticketButton}
@@ -921,7 +921,7 @@ async function runCompare() {
         addedLabel: `${res.right.name}에만`, removedLabel: `${res.left.name}에만`, maskedColumns: res.maskedColumns,
       });
   } catch (e) {
-    box.innerHTML = `<div class="wb-msg error"><strong>비교하지 못했습니다${e instanceof ApiError ? " (" + esc(e.status) + ")" : ""}</strong><p>${esc(e.message)}</p></div>`;
+    box.innerHTML = `<div class="wb-msg error"><strong>비교하지 못했습니다${e instanceof ApiError ? " (" + esc(e.status) + ")" : ""}</strong><p>${esc(errText(e))}</p></div>`;
   } finally {
     $("wb-cmp-run").disabled = false;
     loadHistory();
