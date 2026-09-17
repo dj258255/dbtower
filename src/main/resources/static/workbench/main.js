@@ -12,6 +12,10 @@ import { renderTableDetail } from "./table-detail.js";
 
 const $ = (id) => document.getElementById(id);
 
+// 인스턴스 고르기도 관제와 같은 드롭다운을 쓴다(B5). app.js가 window로 하나만 내보낸 것을 그대로 쓴다 —
+// 복제하면 두 화면의 드롭다운이 서로 다르게 늙는다. 없으면(다른 화면에 단독으로 붙였을 때) 네이티브 select로 남는다
+const enhanceSelect = (sel) => window.dbtowerEnhanceSelect?.(sel);
+
 // 트리 더블클릭 미리보기 — 기종마다 행 제한 문법이 달라 화면 편의용 템플릿만 둔다(실행 판정은 서버가 한다)
 const PREVIEW = {
   MYSQL: (t) => `SELECT *\nFROM ${t}\nLIMIT 50`,
@@ -32,9 +36,12 @@ const state = {
   instances: [],
   instance: null,
   schema: null,
+  schemaError: null,
   expanded: new Set(),
   sheets: [],
   sheet: null,
+  sheetError: null,
+  archiveConfirm: null,
   timeline: [],
   chips: [],
   picking: false,
@@ -112,17 +119,25 @@ async function init() {
   try {
     state.instances = await request("/api/workbench/instances");
   } catch (e) {
-    $("wb-sheets").innerHTML = `<li class="muted">인스턴스 목록을 불러오지 못했습니다: ${esc(e.message)}</li>`;
+    // 실패를 워크시트 자리에 쓰면 사용자가 보는 인스턴스 자리는 비어 있다(사용자 지적) — 원인이 보이는 곳에 적는다
+    showInstanceProblem(`인스턴스 목록을 불러오지 못했습니다: ${esc(e.message)}`);
     return;
   }
   const select = $("wb-instance");
+  // 항목 글자는 이름과 조회 계정 유무, 기종은 아이콘(data-icon)으로 — 관제 인스턴스 카드와 같은 표기(B5)
   select.innerHTML = state.instances.length
     ? state.instances.map((i) =>
-      `<option value="${esc(i.id)}">${esc(i.name)} · ${esc(i.type)}${i.readConfigured ? "" : " (조회 계정 없음)"}</option>`).join("")
+      `<option value="${esc(i.id)}" data-icon="${esc(i.type)}">${esc(i.name)}${i.readConfigured ? "" : " · 조회 계정 없음"}</option>`).join("")
     : '<option value="">볼 수 있는 인스턴스가 없습니다</option>';
+  if (!state.instances.length) {
+    showInstanceProblem("볼 수 있는 인스턴스가 없습니다 — 다른 팀 대상이거나, 아직 등록된 인스턴스가 없습니다. ADMIN이 인스턴스를 등록하면 여기에 나옵니다.");
+    return;
+  }
+  enhanceSelect(select);
   const params = new URLSearchParams(location.search);
   const wanted = params.get("instance");
   if (wanted && state.instances.some((i) => String(i.id) === wanted)) select.value = wanted;
+  select._csSync?.();   // 값이 정해진 뒤 버튼 글자를 맞춘다(드롭다운은 select를 감싼 뒤 자동으로 한 번 맞춘다)
   select.addEventListener("change", () => selectInstance(select.value, null));
   state.pendingTicket = params.get("ticket");
   if (!select.value) return;
@@ -178,29 +193,33 @@ function bindChrome() {
   $("wb-ticket-cancel").addEventListener("click", () => { $("wb-ticket-modal").hidden = true; });
   $("wb-ticket-ok").addEventListener("click", submitTicket);
   document.querySelectorAll(".wb-rtab").forEach((b) => b.addEventListener("click", () => showPane(b.dataset.pane)));
-  $("wb-sheets-toggle").addEventListener("click", () => setSheetsOpen($("wb-sheets").hidden));
-  setSheetsOpen(readSheetsOpen());
+  bindInfoTips();
 }
 
-// 워크시트 목록 접기 — 스키마 트리가 왼쪽 칸을 함께 쓰므로 목록을 접어 트리를 길게 볼 수 있게 한다. 사람마다의 편의라 브라우저에만 둔다
-const SHEETS_OPEN_KEY = "dbtower.workbench.sheetsOpen";
-
-function readSheetsOpen() {
-  try {
-    return localStorage.getItem(SHEETS_OPEN_KEY) !== "false";
-  } catch {
-    return true;
-  }
+/**
+ * 늘 떠 있던 설명 줄을 정보 아이콘 툴팁으로 옮긴다(B5). 마우스를 올릴 때와 키보드 초점일 때 둘 다 뜬다 —
+ * hover만 있는 툴팁은 키보드 사용자에게 없는 정보가 된다(B2의 데이터 보호 줄과 같은 규칙).
+ */
+function bindInfoTips() {
+  document.querySelectorAll("[data-info]").forEach((trigger) => {
+    const tip = $(trigger.dataset.info);
+    if (!tip) return;
+    const show = () => { tip.hidden = false; trigger.setAttribute("aria-expanded", "true"); };
+    const hide = () => { tip.hidden = true; trigger.setAttribute("aria-expanded", "false"); };
+    trigger.addEventListener("mouseenter", show);
+    trigger.addEventListener("mouseleave", hide);
+    trigger.addEventListener("focus", show);
+    trigger.addEventListener("blur", hide);
+    trigger.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+  });
 }
 
-function setSheetsOpen(open) {
-  $("wb-sheets").hidden = !open;
-  $("wb-sheets-toggle").setAttribute("aria-expanded", String(open));
-  try {
-    localStorage.setItem(SHEETS_OPEN_KEY, String(open));
-  } catch {
-    // 저장소를 막은 브라우저에서는 이번 화면에서만 기억한다
-  }
+/** 인스턴스 자리에 문제를 드러낸다 — 여기가 사용자가 보는 자리다(워크시트 쪽이 아니라) */
+function showInstanceProblem(message) {
+  const note = $("wb-instance-note");
+  note.hidden = false;
+  note.className = "wb-note wb-note-error";
+  note.textContent = message;
 }
 
 // ---------- 인스턴스·워크시트 ----------
@@ -209,6 +228,7 @@ async function selectInstance(id, sheetId) {
   state.instance = state.instances.find((i) => String(i.id) === String(id));
   if (!state.instance) return;
   const note = $("wb-instance-note");
+  note.className = "wb-note";
   note.hidden = state.instance.readConfigured;
   note.textContent = "이 인스턴스에는 조회 계정(READ)이 없어 실행이 거부됩니다. ADMIN이 콘솔 계정을 등록해야 합니다.";
 
@@ -218,11 +238,13 @@ async function selectInstance(id, sheetId) {
   const current = () => state.instance === inst;
 
   state.schema = null;
+  state.schemaError = null;
   state.expanded = new Set();
   $("wb-tree").textContent = "스키마를 불러오는 중...";
   request(`/api/instances/${encodeURIComponent(id)}/schema`)
     .then((schema) => { if (current()) { state.schema = schema; editor.setSchema(schema); } })
-    .catch(() => { if (current()) state.schema = null; })
+    // 실패를 state.schema=null로만 두면 트리가 "불러오지 못했습니다"만 말하고 사유를 감춘다(B5)
+    .catch((e) => { if (current()) { state.schema = null; state.schemaError = e.message; } })
     .finally(() => {
       if (!current()) return;
       drawTree();
@@ -236,7 +258,21 @@ async function selectInstance(id, sheetId) {
   state.pendingTicket = null;
   tickets.load(id, wantedTicket).then(() => { if (wantedTicket && current()) showPane("tickets"); });
 
-  const sheets = await request(`/api/workbench/instances/${encodeURIComponent(id)}/worksheets`);
+  // 워크시트 요청이 실패하면 편집기·탭이 이전 인스턴스 그대로 멈춰 있었다(사용자 지적) — 사유를 탭 줄에 적는다
+  state.sheets = [];
+  state.sheet = null;
+  state.sheetError = null;
+  drawSheets();
+  let sheets;
+  try {
+    sheets = await request(`/api/workbench/instances/${encodeURIComponent(id)}/worksheets`);
+  } catch (e) {
+    if (current()) {
+      state.sheetError = `워크시트를 불러오지 못했습니다: ${e.message}`;
+      drawSheets();
+    }
+    return;
+  }
   if (!current()) return;
   state.sheets = sheets;
   if (!state.sheets.length) {
@@ -247,26 +283,91 @@ async function selectInstance(id, sheetId) {
   openSheet(target.id);
 }
 
+/**
+ * 워크시트 탭 (B5) — 워크시트는 "지금 편집 중인 문서"라 편집기 바로 위에 붙는다(DBeaver·DataGrip의 에디터 탭).
+ * 왼쪽 목록이던 것을 옮겼다: 왼쪽은 스키마 트리가 끝까지 쓴다. 넘치면 이 줄 안에서 가로로 스크롤한다.
+ * ×는 보관이고 그 자리에서 한 번 더 묻는다(되돌릴 수 없는 요청을 한 번의 오조작으로 보내지 않는다).
+ */
 function drawSheets() {
-  $("wb-sheets").innerHTML = state.sheets.map((s) => `
-    <li data-id="${esc(s.id)}" class="${state.sheet && state.sheet.id === s.id ? "active" : ""}">
-      <span class="name">${esc(s.title)}</span>
-      <span class="ver">${s.latestVersion ? "v" + esc(s.latestVersion) : ""}</span>
-      <button class="x" data-archive="${esc(s.id)}" title="보관">×</button>
-    </li>`).join("");
-  $("wb-sheets").onclick = async (e) => {
-    const archive = e.target.closest("[data-archive]");
-    if (archive) {
-      await request(`/api/workbench/worksheets/${archive.dataset.archive}`, { method: "DELETE" });
-      await reloadSheets();
-      if (state.sheet && String(state.sheet.id) === archive.dataset.archive) {
-        state.sheets.length ? openSheet(state.sheets[0].id) : createSheet();
-      }
-      return;
+  const box = $("wb-sheets");
+  // 탭 안에 넣어 둔 두 요소를 먼저 탭 줄 밖으로 빼낸다 — 아래 innerHTML 교체가 탭과 함께 DOM에서 지워 버린다.
+  // (#wb-version·#wb-title은 id를 유지해야 해서 innerHTML로 새로 만들 수 없다)
+  const bar = document.querySelector(".wb-tabs");
+  const version = $("wb-version");
+  const title = $("wb-title");
+  bar.appendChild(version);
+  bar.appendChild(title);
+  version.hidden = true;
+  title.hidden = true;
+  if (state.sheetError) {
+    box.innerHTML = `<span class="wb-msg error">${esc(state.sheetError)}</span>`;
+    return;
+  }
+  box.innerHTML = state.sheets.map((s) => {
+    if (state.archiveConfirm === s.id) {
+      return `<span class="wb-sheet-tab wb-tab-confirm" data-id="${esc(s.id)}">
+        <span>보관할까요?</span>
+        <button type="button" class="wb-tab-yes" data-archive-yes="${esc(s.id)}">보관</button>
+        <button type="button" class="wb-tab-no" data-archive-no="1">취소</button>
+      </span>`;
     }
-    const li = e.target.closest("li[data-id]");
-    if (li) openSheet(Number(li.dataset.id));
+    const active = state.sheet && state.sheet.id === s.id;
+    return `<span class="wb-sheet-tab${active ? " active" : ""}" data-id="${esc(s.id)}" role="tab" tabindex="0" aria-selected="${active}">
+      <span class="wb-tab-name">${esc(s.title)}</span>
+      <button type="button" class="wb-tab-x" data-archive="${esc(s.id)}" title="보관" aria-label="${esc(s.title)} 보관">×</button>
+    </span>`;
+  }).join("") || '<span class="wb-tabs-empty muted">워크시트가 없습니다</span>';
+
+  // 버전 표시는 활성 탭 안 작은 글자다 — id를 유지한 채 자리만 옮긴다(이름 입력도 같은 방식, 더블클릭 때만)
+  const activeTab = box.querySelector(".wb-sheet-tab.active");
+  if (activeTab) {
+    activeTab.insertBefore(version, activeTab.querySelector(".wb-tab-x"));
+    version.hidden = !version.textContent;
+  }
+
+  box.onclick = async (e) => {
+    const yes = e.target.closest("[data-archive-yes]");
+    if (yes) { state.archiveConfirm = null; await archiveSheet(yes.dataset.archiveYes); return; }
+    if (e.target.closest("[data-archive-no]")) { state.archiveConfirm = null; drawSheets(); return; }
+    const x = e.target.closest("[data-archive]");
+    // dataset 값은 문자열이다 — 탭의 id(숫자)와 === 로 비교하면 영영 맞지 않아 확인 상자가 안 뜬다
+    if (x) { state.archiveConfirm = Number(x.dataset.archive); drawSheets(); return; }
+    const tab = e.target.closest(".wb-sheet-tab[data-id]");
+    // 이미 활성인 탭은 다시 그리지 않는다 — 다시 열면 편집기 내용을 되돌리고, 무엇보다 더블클릭(이름 바꾸기)이
+    // 첫 클릭의 재렌더로 대상이 바뀌어 아예 성립하지 않는다
+    if (tab && !tab.classList.contains("active")) openSheet(Number(tab.dataset.id));
   };
+  // 활성 탭 더블클릭 = 그 자리에서 이름 바꾸기
+  box.ondblclick = (e) => { if (e.target.closest(".wb-sheet-tab.active[data-id]")) startRename(); };
+}
+
+async function archiveSheet(id) {
+  try {
+    await request(`/api/workbench/worksheets/${encodeURIComponent(id)}`, { method: "DELETE" });
+  } catch (e) {
+    state.sheetError = `보관하지 못했습니다: ${e.message}`;
+    drawSheets();
+    return;
+  }
+  await reloadSheets();
+  if (state.sheet && String(state.sheet.id) === String(id)) {
+    state.sheets.length ? openSheet(state.sheets[0].id) : createSheet();
+  }
+}
+
+/** 활성 탭의 제목이 그 자리에서 입력으로 바뀐다(#wb-title은 원래 자리로 돌아간다) */
+function startRename() {
+  const tab = $("wb-sheets").querySelector(".wb-sheet-tab.active");
+  if (!tab || !state.sheet) return;
+  const input = $("wb-title");
+  const name = tab.querySelector(".wb-tab-name");
+  if (!name) return;
+  input.value = state.sheet.title;
+  input.hidden = false;
+  name.hidden = true;
+  tab.insertBefore(input, name);
+  input.focus();
+  input.select();
 }
 
 async function reloadSheets() {
@@ -306,10 +407,22 @@ async function openSheet(id) {
 }
 
 async function renameSheet() {
-  const title = $("wb-title").value.trim();
+  const input = $("wb-title");
+  const title = input.value.trim();
+  // 입력을 탭 밖 원래 자리로 돌려놓는다 — 다음 drawSheets가 탭을 새로 그린다
+  input.hidden = true;
+  document.querySelector(".wb-tabs").appendChild(input);
   if (!state.sheet || !title || title === state.sheet.title) return;
-  await request(`/api/workbench/worksheets/${state.sheet.id}`, { method: "PATCH", body: { title } });
+  const previous = state.sheet.title;
+  state.sheet.title = title;   // 화면을 먼저 바꾸고, 실패하면 되돌린다
+  try {
+    await request(`/api/workbench/worksheets/${state.sheet.id}`, { method: "PATCH", body: { title } });
+  } catch (e) {
+    state.sheet.title = previous;
+    state.sheetError = `이름을 바꾸지 못했습니다: ${e.message}`;
+  }
   await reloadSheets();
+  if (state.sheetError) { drawSheets(); state.sheetError = null; }
 }
 
 function onEdit() {
@@ -335,6 +448,7 @@ async function flushSave() {
 
 function drawTree() {
   renderTree($("wb-tree"), state.schema, {
+    error: state.schemaError,
     filter: $("wb-tree-filter").value,
     expanded: state.expanded,
     onInsert: (name) => editor.insert(name),
@@ -400,7 +514,10 @@ async function openTableDetail(name) {
 
 function setPicking(on) {
   state.picking = on;
-  $("wb-pick").setAttribute("aria-pressed", String(on));
+  const btn = $("wb-pick");
+  btn.setAttribute("aria-pressed", String(on));
+  // 켜짐은 주 버튼 색이다 — 색은 style.css의 .btn-primary 한 곳에만 있다(여기서 다시 칠하지 않는다)
+  btn.classList.toggle("btn-primary", on);
   document.body.classList.toggle("picking", on);
 }
 

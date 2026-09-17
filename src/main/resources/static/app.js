@@ -521,9 +521,13 @@ function enhanceSelect(sel) {
   btn.type = "button";
   btn.className = "cs-btn";
   wrap.appendChild(btn);
-  // 기종 옵션이면 브랜드 아이콘을 붙인다(engineIcon은 5기종 외엔 "" 반환이라 다른 필터엔 영향 없음)
-  const label = (txt) => engineIcon(txt) + `<span>${esc(txt)}</span>`;
-  const sync = () => { btn.innerHTML = label(sel.options[sel.selectedIndex]?.text ?? ""); };
+  // 기종 옵션이면 브랜드 아이콘을 붙인다. 항목에 data-icon이 있으면 그것을 쓴다 —
+  // 워크벤치 인스턴스처럼 항목 글자가 기종 이름이 아닌 목록도 같은 드롭다운을 쓴다(B5)
+  const label = (o) => engineIcon(o.dataset?.icon || o.text) + `<span>${esc(o.text)}</span>`;
+  const sync = () => {
+    const o = sel.options[sel.selectedIndex];
+    btn.innerHTML = o ? label(o) : "";
+  };
   sync();
   sel._csSync = sync;
   let panel = null;
@@ -537,7 +541,7 @@ function enhanceSelect(sel) {
     [...sel.options].forEach((o, i) => {
       const it = document.createElement("div");
       it.className = "cs-opt" + (i === sel.selectedIndex ? " sel" : "");
-      it.innerHTML = label(o.text);
+      it.innerHTML = label(o);
       it.addEventListener("click", () => {
         sel.selectedIndex = i; sync();
         sel.dispatchEvent(new Event("change"));
@@ -2387,6 +2391,20 @@ function markRoleDirty(sel) {
   return changed;
 }
 
+/**
+ * 취소 — 그 행을 화면이 기억하는 값(data-role)으로 되돌린다.
+ *
+ * 서버를 다시 부르지 않는다: 취소는 보낸 적 없는 요청을 무르는 일이라 돌아올 응답이 없다.
+ * 목록을 다시 받아 그리는 방식이면 화면이 서버 왕복에 묶여, 대상 조회가 몰려 연결이 밀릴 때
+ * (브라우저는 호스트당 연결이 여섯이다) 취소를 눌러도 한참 동안 아무 일도 안 일어난 것처럼 보인다.
+ */
+function cancelRoleChange(tr) {
+  const sel = tr.querySelector("[data-user-role]");
+  if (sel) sel.value = tr.dataset.role;
+  tr.querySelector(".user-role-actions").hidden = true;
+  tr.querySelector(".user-role-warn").hidden = true;
+}
+
 async function applyUserRole(sel) {
   const username = sel.dataset.userRole;
   try {
@@ -2413,7 +2431,7 @@ function setupUsersCard() {
   tbody.addEventListener("click", (e) => {
     const tr = e.target.closest("tr");
     if (!tr) return;
-    if (e.target.closest("[data-role-cancel]")) { loadUsers(); return; }
+    if (e.target.closest("[data-role-cancel]")) { cancelRoleChange(tr); return; }
     if (e.target.closest("[data-role-apply]")) applyUserRole(tr.querySelector("[data-user-role]"));
   });
   ["user-new-name", "user-new-password"].forEach((id) =>
@@ -4294,3 +4312,7 @@ function setupQueryDetail() {
     } catch (e) { /* http 컨텍스트 등 클립보드 불가 환경 — 버튼은 그대로 둔다 */ }
   });
 }
+
+// 워크벤치는 별도 ES 모듈이라 이 파일의 함수를 직접 부를 수 없다 — 드롭다운을 복제하지 않게 하나만 내보낸다(B5).
+// 관제의 인스턴스 필터와 워크벤치의 인스턴스 고르기가 같은 모양·동작이어야 한다.
+window.dbtowerEnhanceSelect = enhanceSelect;

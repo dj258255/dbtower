@@ -110,7 +110,16 @@ class QueryDetailE2ETest {
 
     @AfterEach
     void cleanup() {
-        contexts.forEach(BrowserContext::close);
+        // 라우트를 먼저 걷어낸 뒤 컨텍스트를 닫는다.
+        // 컨텍스트를 그냥 닫으면 아직 처리되지 않은 가로챈 요청의 route 이벤트가 뒤늦게 도착하고,
+        // Playwright가 그 이벤트를 처리하며 닫힌 페이지에 updateInterceptionPatterns()를 불러 TargetClosedError가 난다.
+        // 그 예외는 디스패처 스레드에서 터져 **다음** 테스트의 호출 위로 튄다(간헐 실패의 정체).
+        for (BrowserContext context : contexts) {
+            for (Page page : context.pages()) {
+                if (!page.isClosed()) page.unrouteAll();
+            }
+            context.close();
+        }
         contexts.clear();
         instances.delete(instance);
         users.findByUsername(USER).ifPresent(users::delete);

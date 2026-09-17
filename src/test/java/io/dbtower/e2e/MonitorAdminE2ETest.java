@@ -97,7 +97,16 @@ class MonitorAdminE2ETest {
 
     @AfterEach
     void cleanup() {
-        contexts.forEach(BrowserContext::close);
+        // 라우트를 먼저 걷어낸 뒤 컨텍스트를 닫는다.
+        // 컨텍스트를 그냥 닫으면 아직 처리되지 않은 가로챈 요청의 route 이벤트가 뒤늦게 도착하고,
+        // Playwright가 그 이벤트를 처리하며 닫힌 페이지에 updateInterceptionPatterns()를 불러 TargetClosedError가 난다.
+        // 그 예외는 디스패처 스레드에서 터져 **다음** 테스트의 호출 위로 튄다(간헐 실패의 정체).
+        for (BrowserContext context : contexts) {
+            for (Page page : context.pages()) {
+                if (!page.isClosed()) page.unrouteAll();
+            }
+            context.close();
+        }
         contexts.clear();
         seeded.forEach(instances::delete);
         seeded.clear();
@@ -129,6 +138,8 @@ class MonitorAdminE2ETest {
         row.waitFor();
         Locator select = row.locator("[data-user-role]");
         assertThat(select).hasValue("VIEWER");
+        // 서버가 기억하는 역할도 VIEWER다 — 앞선 테스트가 남긴 값이 아니라 매 테스트가 여기서 시작한다
+        assertThat(users.findByUsername(TARGET).orElseThrow().getRole()).isEqualTo(PlatformUser.Role.VIEWER);
 
         // 바꾸면 그 행에만 적용·취소가 나타난다 — 아직 요청은 나가지 않는다
         select.selectOption("OPERATOR");
@@ -173,6 +184,37 @@ class MonitorAdminE2ETest {
         Locator other = page.locator("#users-table tbody tr").filter(new Locator.FilterOptions().setHasText(TARGET));
         other.locator("[data-user-role]").selectOption("OPERATOR");
         assertThat(other.locator(".user-role-warn")).isHidden();
+    }
+
+    /**
+     * 취소는 서버 왕복을 기다리지 않는다 — 값을 되돌리는 일은 보낸 적 없는 요청을 무르는 것이라 서버가 필요 없다.
+     *
+     * <p>B5 2차 검증에서 이 자리가 간헐 실패했다: 취소가 loadUsers()(=GET /api/security/users)를 기다렸고,
+     * 대상 조회 폴러 열아홉 개가 브라우저의 호스트당 연결을 차지한 동안 그 요청이 밀려 값이 OPERATOR로 남았다.
+     * 여기서는 목록 조회를 아예 붙잡아 두고(= fulfill도 abort도 하지 않는다) 값이 되돌아오는지 본다.
+     * 서버가 실제로 기억하는 역할도 함께 확인해 "공유 상태 때문"이 아님을 못박는다.
+     */
+    @Test
+    void 취소는_목록_조회를_기다리지_않고_값을_되돌린다() {
+        instance("e2e-mon-h", null);
+        Page page = consoleAs(ADMIN, true);
+
+        Locator row = page.locator("#users-table tbody tr").filter(new Locator.FilterOptions().setHasText(TARGET));
+        row.waitFor();
+        assertThat(row.locator("[data-user-role]")).hasValue("VIEWER");
+
+        // 이 시점부터 목록 조회를 붙잡아 둔다 — 취소가 이 응답을 기다리면 값이 OPERATOR로 남는다
+        page.route("**/api/security/users", route -> { /* 붙잡아 둔다 */ });
+
+        row.locator("[data-user-role]").selectOption("OPERATOR");
+        assertThat(row.locator("[data-role-apply]")).isVisible();
+        row.locator("[data-role-cancel]").click();
+
+        assertThat(row.locator("[data-user-role]")).hasValue("VIEWER");
+        assertThat(row.locator("[data-role-apply]")).isHidden();
+        // 서버는 손대지 않았다 — 역할이 DB에서 바뀌어 남는 공유 상태 문제가 아니다
+        org.assertj.core.api.Assertions.assertThat(users.findByUsername(TARGET).orElseThrow().getRole())
+                .isEqualTo(PlatformUser.Role.VIEWER);
     }
 
     /** 제공 도구는 접혀 있고, 복사는 code 안의 명령만 가져간다(설명 글자가 섞이지 않는다). */

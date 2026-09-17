@@ -22,6 +22,8 @@ body.mode-workbench #mode-workbench { flex: 1; min-height: 0; display: flex; fle
 .wb-label { font-size: 12px; color: var(--muted); }
 .wb-spacer { flex: 1; }
 .wb-note { font-size: 12px; background: #fff6e5; color: #8a5a00; border-radius: 10px; padding: 6px 9px; }
+/* 인스턴스 자리에 드러내는 실패(B5) — 워크시트 자리가 아니라 사용자가 보고 있는 자리에 적는다 */
+.wb-note-error { background: #fdecee; color: #8e1f2b; }
 .wb-count {
   font-size: 11px; font-weight: 600; line-height: 16px; min-width: 16px; text-align: center;
   background: rgba(118, 118, 128, .14); color: var(--text); border-radius: 999px; padding: 0 6px;
@@ -45,6 +47,8 @@ body.mode-workbench #mode-workbench { flex: 1; min-height: 0; display: flex; fle
 .wb-left { display: flex; flex-direction: column; gap: 14px; padding: 14px 12px; overflow: hidden; }
 .wb-side-block { display: flex; flex-direction: column; gap: 7px; min-height: 0; }
 .wb-side-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 4px; }
+/* 관제 필터용 .cs는 가로 flex 줄(2개씩 두 줄)을 전제한다 — 워크벤치의 세로 칸에서는 늘어나지 않게 되돌린다 */
+.wb-left .cs { flex: none; width: 100%; }
 .wb-left select {
   width: 100%; padding: 8px 28px 8px 11px; font: inherit; font-size: 13px; font-weight: 600; color: var(--text);
   background-color: rgba(255, 255, 255, .78); border: 1px solid var(--glass-hairline); border-radius: 12px;
@@ -61,9 +65,28 @@ body.mode-workbench #mode-workbench { flex: 1; min-height: 0; display: flex; fle
 .wb-search:focus { outline: none; background-color: rgba(255, 255, 255, .92); box-shadow: 0 0 0 3px rgba(10, 106, 168, .22); }
 
 .wb-schema { flex: 1 1 auto; min-height: 180px; }
-/* 트리는 내용만큼만 자란다 — 늘 끝까지 늘리면 테이블이 몇 개뿐일 때 사용법 안내가 사이드바 바닥으로 떨어진다 */
+/* 트리는 내용만큼만 자란다 — 늘 끝까지 늘리면 테이블이 몇 개뿐일 때 트리가 사이드바 바닥으로 떨어진다 */
 .wb-tree { flex: 0 1 auto; min-height: 0; overflow: auto; font-size: 13px; margin: 0 -4px; padding: 0 4px; }
-.wb-tree-hint { margin: 0; padding: 0 4px; font-size: 11px; }
+/* 검색칸 옆 정보 아이콘 — 트리 사용법을 늘 떠 있는 줄이 아니라 여기 접어 둔다(B5) */
+.wb-search-row { position: relative; display: flex; align-items: center; gap: 4px; }
+.wb-info-wrap { position: relative; flex: none; display: inline-flex; }
+.wb-info {
+  border: 0; background: none; padding: 2px; border-radius: 6px; cursor: pointer;
+  color: var(--muted); display: grid; place-items: center;
+}
+.wb-info:hover { color: var(--primary); background: rgba(10, 106, 168, .1); }
+.wb-info:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+/* 툴팁 색·유리는 style.css의 .tooltip과 같은 값(어두운 유리) — 위치만 여기서 정한다 */
+.wb-info-tip {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30;
+  width: max-content; max-width: 260px; padding: 8px 10px; border-radius: 9px;
+  font-size: 11.5px; font-weight: 400; line-height: 1.55; word-break: keep-all; color: #f2f4f8;
+  background: var(--glass-dark);
+  -webkit-backdrop-filter: blur(14px) saturate(160%); backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, .08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 10px 28px rgba(15, 20, 30, .28);
+}
+.wb-info-tip[hidden] { display: none; }
 .tree, .tree-cols { list-style: none; margin: 0; padding: 0; }
 .tree-table + .tree-table { margin-top: 1px; }
 .tree-row { display: flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 10px; transition: background-color .12s ease; }
@@ -86,10 +109,12 @@ body.mode-workbench #mode-workbench { flex: 1; min-height: 0; display: flex; fle
 /* 열 이름이 타입보다 먼저 산다 — 긴 타입(timestamp without time zone)이 폭을 다 가져가 ordered_at이 "o…"로 잘렸다(150절 사진) */
 .tree-col span:first-child { flex: 1 1 auto; min-width: 4.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-col span:last-child { flex: 0 1 auto; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; font-size: 11px; font-family: "JetBrains Mono", "SFMono-Regular", Menlo, monospace; white-space: nowrap; }
-/* "상세"는 행에 올렸을 때와 키보드로 들어왔을 때 보인다 — hover만이면 키보드 사용자에게 없는 버튼이다 */
+/* "상세"는 행에 올렸을 때와 키보드로 들어왔을 때 보인다 — hover만이면 키보드 사용자에게 없는 버튼이다.
+   재질은 .btn과 같다(유리 바탕 + 헤어라인 테두리). 다만 트리 한 줄 안이라 크기만 작게 둔다 */
 .tree-detail {
-  border: 1px solid var(--glass-hairline); background: #fff; border-radius: 999px; font: inherit; font-size: 10.5px;
+  border: 1px solid var(--glass-hairline); background: var(--glass-fill-strong); border-radius: 999px; font: inherit; font-size: 10.5px;
   padding: 0 7px; line-height: 17px; color: var(--muted); cursor: pointer; visibility: hidden;
+  box-shadow: var(--glass-shine), 0 1px 2px rgba(11, 42, 69, .07);
 }
 .tree-row:hover .tree-detail, .tree-row:focus-within .tree-detail { visibility: visible; }
 .tree-detail:hover { color: var(--primary); border-color: rgba(10, 106, 168, .45); }
@@ -117,40 +142,52 @@ button.tree-group-head { cursor: pointer; }
 .tree-index-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "JetBrains Mono", "SFMono-Regular", Menlo, monospace; font-size: 11.5px; }
 .tree-index span:last-child { font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
-.wb-sheets-block { flex: 0 1 auto; max-height: 36%; }
-.wb-disclosure { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; cursor: pointer; font: inherit; }
+/* 워크시트 목록은 편집기 위 탭 줄로 옮겼다(B5) — 왼쪽은 스키마 트리가 끝까지 쓴다.
+   .wb-chevron은 스키마 트리의 묶음 접기 표시가 아직 쓴다 */
 .wb-chevron {
   width: 6px; height: 6px; border-right: 1.6px solid var(--muted); border-bottom: 1.6px solid var(--muted);
   transform: rotate(-45deg); transition: transform .18s ease; margin: 0 2px;
 }
-.wb-disclosure[aria-expanded="true"] .wb-chevron { transform: rotate(45deg) translate(-1px, -1px); }
-.wb-mini-btn {
-  border: 1px solid var(--glass-hairline); background: rgba(255, 255, 255, .78); color: var(--primary); cursor: pointer;
-  border-radius: 999px; font: inherit; font-size: 11.5px; font-weight: 600; padding: 2px 10px; box-shadow: inset 0 1px 0 #fff;
-}
-.wb-mini-btn:hover { background: #fff; }
-.wb-sheets { list-style: none; margin: 0; padding: 0; overflow: auto; min-height: 0; }
-.wb-sheets li {
-  display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 11px; cursor: pointer; font-size: 13px;
-  transition: background-color .12s ease;
-}
-.wb-sheets li:hover { background: rgba(255, 255, 255, .6); }
-.wb-sheets li.active { background: #fff; font-weight: 700; color: var(--primary); box-shadow: 0 1px 3px rgba(30, 41, 59, .12); }
-.wb-sheets li .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wb-sheets li .ver { font-size: 11px; color: var(--muted); font-weight: 500; }
-.wb-sheets li .x { border: 0; background: none; color: var(--muted); cursor: pointer; visibility: hidden; }
-.wb-sheets li:hover .x, .wb-sheets li:focus-within .x { visibility: visible; }
 
-/* ---------- 중: 편집기·결과 ---------- */
+/* ---------- 중: 워크시트 탭·편집기·결과 ---------- */
 .wb-main { display: flex; flex-direction: column; overflow: hidden; }
-.wb-sheetbar { display: flex; align-items: center; gap: 8px; padding: 12px 16px 8px; }
-.wb-title {
-  border: 1px solid transparent; border-radius: 9px; font: inherit; font-size: 17px; font-weight: 700; letter-spacing: -.01em;
-  padding: 3px 7px; min-width: 220px; color: var(--text); background: transparent;
+/* 탭 줄 — 워크시트는 지금 편집 중인 문서라 편집기 바로 위에 붙는다(DBeaver·DataGrip의 에디터 탭).
+   넘치면 이 줄 안에서 가로로 스크롤한다(페이지를 밀지 않는다) */
+.wb-tabs {
+  display: flex; align-items: center; gap: 6px; padding: 10px 14px 6px;
+  min-width: 0; overflow-x: auto; scrollbar-width: thin;
 }
-.wb-title:hover { background: #f5f6fa; }
-.wb-title:focus { outline: none; background: #fff; border-color: rgba(10, 106, 168, .45); box-shadow: 0 0 0 3px rgba(10, 106, 168, .16); }
-.wb-version { font-size: 11.5px; color: #5b6475; background: #f2f3f7; border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+.wb-sheet-tabs { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.wb-sheet-tab {
+  display: inline-flex; align-items: center; gap: 6px; flex: none; cursor: pointer;
+  padding: 5px 7px 5px 11px; border-radius: 9px; font-size: 12.5px; color: var(--muted);
+  background: rgba(118, 118, 128, .1); white-space: nowrap;
+}
+.wb-sheet-tab:hover { background: rgba(118, 118, 128, .16); }
+/* 활성 탭은 흰 바탕 — 지금 편집 중인 문서가 어느 것인지 한눈에 */
+.wb-sheet-tab.active { background: #fff; color: var(--text); font-weight: 700; box-shadow: 0 1px 3px rgba(30, 41, 59, .14); }
+.wb-tab-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.wb-sheet-tab.active .wb-tab-name { color: var(--primary); }
+.wb-version { font-size: 11px; font-weight: 500; color: #5b6475; background: #f2f3f7; border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
+.wb-sheet-tab:not(.active) .wb-version { display: none; }
+/* ×는 보관 — 늘 보이면 탭이 버튼 벽이 된다. hover·초점일 때만 보이고 Tab으로는 닿는다 */
+.wb-tab-x { border: 0; background: none; color: var(--muted); cursor: pointer; border-radius: 5px; padding: 0 3px; font: inherit; line-height: 1; opacity: 0; }
+.wb-sheet-tab:hover .wb-tab-x, .wb-sheet-tab:focus-within .wb-tab-x { opacity: 1; }
+.wb-tab-x:hover { color: #b42318; background: rgba(214, 64, 79, .12); }
+/* 보관 확인은 그 탭 자리에서 — window.confirm은 무엇을 보관하는지 화면에서 사라진다 */
+.wb-tab-confirm { gap: 8px; background: #fff; box-shadow: 0 1px 3px rgba(30, 41, 59, .14); color: var(--muted); }
+.wb-tab-confirm button { border: 0; background: none; font: inherit; font-size: 12px; padding: 2px 7px; border-radius: 6px; cursor: pointer; }
+.wb-tab-yes { color: #b42318; font-weight: 700; }
+.wb-tab-yes:hover { background: rgba(214, 64, 79, .12); }
+.wb-tab-no:hover { background: rgba(11, 42, 69, .07); }
+.wb-tabs-empty { font-size: 12.5px; }
+/* 활성 탭 더블클릭 → 그 자리에서 이름 편집(#wb-title). 탭 밖에 있을 때는 감춰 둔다 */
+.wb-title {
+  border: 1px solid rgba(10, 106, 168, .45); border-radius: 6px; font: inherit; font-size: 12.5px; font-weight: 700;
+  padding: 1px 6px; width: 180px; max-width: 40vw; color: var(--text); background: #fff;
+}
+.wb-title:focus { outline: none; box-shadow: 0 0 0 3px rgba(10, 106, 168, .16); }
+.wb-tab-add { flex: none; padding: 4px 10px; line-height: 1; }
 
 .editor {
   position: relative; height: 30%; min-height: 140px; margin: 0 14px;
@@ -181,37 +218,43 @@ button.tree-group-head { cursor: pointer; }
 .autocomplete li.active { background: rgba(10, 106, 168, .12); }
 .autocomplete li span:last-child { color: var(--muted); font-size: 11px; }
 
+/* 툴바 — 한 줄에 모서리·높이가 섞이면 다른 제품의 부품처럼 보인다. 여기는 전부 알약(999px) + 같은 높이로 맞춘다.
+   이유: 바로 아래 "결과" 탭 줄이 알약 트랙이라, 그 옆에서 7px(.btn-small) 버튼이 섞이면 줄마다 규칙이 달라 보인다.
+   세그먼트 묶음(결과 탭·쿼리 상세 토글)만 10px 트랙 안의 7px 렌즈를 쓴다 — 그쪽은 "여럿 중 하나"를 고르는 조작이다 */
 .wb-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; flex-wrap: wrap; }
+.wb-toolbar select,
+.wb-toolbar .btn,
+.wb-toolbar .wb-class { min-height: 28px; border-radius: 999px; }
 .wb-toolbar select {
-  padding: 4px 24px 4px 10px; border: 1px solid rgba(15, 23, 42, .1); border-radius: 999px; font: inherit; font-size: 12.5px; background-color: #fff;
+  padding: 4px 24px 4px 10px; border: 1px solid var(--control-line); font: inherit; font-size: 12.5px; background-color: #fff;
 }
 /* 실행 버튼 — 화면의 주 동작이라 이 한 개만 채운 색이다. 광택·색 그림자는 뺐다(175절). 흰 글자 대비 5.77:1, hover 7.32:1 */
 #wb-run {
-  border: 0; border-radius: 999px; padding: 5px 18px; font-weight: 700; color: #fff;
+  border: 0; padding: 5px 18px; font-weight: 700; color: #fff;
   background: #0a6aa8;
 }
 #wb-run:hover { background: #085a8f; }
 #wb-run:disabled { filter: saturate(.5); box-shadow: none; }
-#wb-export { border-radius: 999px; }
-.wb-class { font-size: 12px; border-radius: 999px; padding: 2px 10px; }
+.wb-class { font-size: 12px; padding: 2px 10px; display: inline-flex; align-items: center; }
 .wb-class.read, .badge.read { background: #e7f6ee; color: #137a4b; }
 .wb-class.change, .badge.change { background: #fff1e0; color: #a35200; }
 .wb-class.blocked, .badge.blocked { background: #fdecee; color: #b42335; }
 
 .wb-result-bar { display: flex; align-items: center; gap: 10px; padding: 0 14px 8px; min-width: 0; }
 .wb-status { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-/* 결과 탭 — 대시보드와 같은 알약 세그먼트(흰 렌즈). 밑줄 탭이 섞이면 같은 제품의 두 화면이 달라 보인다 */
+/* 결과 탭 — 쿼리 상세의 세그먼트(B3의 .seg-btn)와 같은 높이·모서리·선택색. 클래스를 공유하지 않는 이유는
+   그쪽과 같다: app.js가 문서 전체의 .mon-tab을 잡고, 여기는 워크벤치 모듈이 따로 그린다 */
 .wb-result-tabs {
-  display: flex; gap: 2px; padding: 3px; flex: none; max-width: 100%; overflow-x: auto; scrollbar-width: none;
-  background: rgba(118, 118, 128, .1); border-radius: 999px; box-shadow: inset 0 1px 1px rgba(15, 23, 42, .04);
+  display: flex; gap: 3px; padding: 3px; flex: none; max-width: 100%; overflow-x: auto; scrollbar-width: none;
+  background: #eceef3; border-radius: 10px;
 }
 .wb-rtab {
-  border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 600; padding: 5px 13px; cursor: pointer;
-  color: var(--muted); border-radius: 999px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid transparent; background: none; font: inherit; font-size: 12.5px; font-weight: 600; padding: 4px 11px; cursor: pointer;
+  color: var(--muted); border-radius: 7px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px;
   transition: background-color .15s ease, color .15s ease;
 }
 .wb-rtab:hover { color: var(--text); }
-.wb-rtab.active { background: #fff; color: var(--primary); box-shadow: 0 1px 3px rgba(30, 41, 59, .16), inset 0 1px 0 #fff; }
+.wb-rtab.active { background: #fff; color: var(--primary); border-color: rgba(10, 106, 168, .24); box-shadow: 0 1px 2px rgba(16, 24, 40, .1); }
 .wb-rtab .wb-count { background: rgba(10, 106, 168, .12); color: #075985; }
 .wb-pane { flex: 1; min-height: 0; overflow: auto; padding: 4px 14px 14px; }
 .wb-preview { position: relative; }
@@ -357,9 +400,7 @@ body.picking table.grid th:not(.rownum), body.picking .tree-name, body.picking .
 .chip button { border: 0; background: none; color: inherit; cursor: pointer; padding: 0; }
 .wb-composer textarea { width: 100%; border: 0; resize: none; font: inherit; font-size: 13.5px; outline: none; margin-top: 4px; background: transparent; color: var(--text); }
 .wb-composer-bar { display: flex; align-items: center; gap: 8px; }
-.wb-icon-btn { border: 1px solid rgba(15, 23, 42, .1); background: #fff; border-radius: 999px; font: inherit; font-size: 12px; font-weight: 600; padding: 3px 11px; cursor: pointer; color: var(--text); }
-.wb-icon-btn[aria-pressed="true"] { background: var(--primary); color: #fff; border-color: var(--primary); }
-#wb-send { border-radius: 999px; padding: 4px 16px; }
+/* 채팅 칸 버튼도 셸과 같은 .btn 재질을 쓴다(B5) — 여기서 모서리를 따로 칠하지 않는다 */
 .wb-share { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
 .wb-share-note { margin: 0 6px; font-size: 11.5px; }
 .wb-share-note:empty { display: none; }
@@ -529,7 +570,7 @@ tr.df-removed td { background: #fdf1f2; }
 }
 @media (prefers-reduced-motion: reduce) {
   .msg.ai.pending .pending-stage::before { animation: none; }
-  .editor, .wb-chevron, .wb-rtab, .tree-row, .wb-sheets li, .wb-composer { transition: none; }
+  .editor, .wb-chevron, .wb-rtab, .wb-sheet-tab, .tree-row, .wb-composer { transition: none; }
 }
 
 /* ---------- 좁은 화면 — 한 열로 접는다(139절: 1fr은 nowrap 내용 폭만큼 넓어져 minmax(0, 1fr)) ---------- */
@@ -538,11 +579,9 @@ tr.df-removed td { background: #fdf1f2; }
   .wb-shell { grid-template-columns: minmax(0, 1fr); }
   .wb-left { overflow: visible; }
   .wb-schema .wb-tree { max-height: 40vh; }
-  .wb-sheets-block { max-height: none; }
   .wb-main { min-height: 720px; }
   .wb-right { min-height: 560px; }
-  .wb-sheetbar { flex-wrap: wrap; }
-  .wb-title { min-width: 0; flex: 1 1 160px; }
+  .wb-tabs { flex-wrap: wrap; }
 }
 @media (max-width: 760px) {
   .wb-result-bar { flex-wrap: wrap; }

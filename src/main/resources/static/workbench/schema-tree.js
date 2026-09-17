@@ -11,9 +11,12 @@ const CLICK_DELAY_MS = 220;
 // 묶음 키는 테이블 이름과 겹치지 않게 NUL로 시작한다. 소스에는 이스케이프로 적는다 — 원시 NUL이 들어가면 git이 파일을 바이너리로 본다(154절)
 const VIEWS_GROUP_KEY = "\u0000group:views";
 
-export function renderTree(container, schema, { filter, expanded, onInsert, onPreview, onToggle, isPicking, onPick, onDetail = () => {} }) {
+export function renderTree(container, schema, { filter, expanded, onInsert, onPreview, onToggle, isPicking, onPick, onDetail = () => {}, error = null }) {
   if (!schema) {
-    container.innerHTML = '<div class="muted">스키마를 불러오지 못했습니다</div>';
+    // 왜 못 불러왔는지까지 보인다 — 전에는 사유 없이 "불러오지 못했습니다"만 남아 화면이 멈춘 것처럼 보였다(B5)
+    container.innerHTML = error
+      ? `<div class="wb-msg error"><strong>스키마를 불러오지 못했습니다</strong><p>${esc(error)}</p></div>`
+      : '<div class="muted">스키마를 불러오지 못했습니다</div>';
     return;
   }
   const f = (filter || "").toLowerCase();
