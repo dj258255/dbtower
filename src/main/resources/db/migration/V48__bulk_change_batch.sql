@@ -1,0 +1,43 @@
+-- 대량 일괄 변경의 배치별 기록 (#104)
+--
+-- 이 경로는 되돌리기를 행 사본이 아니라 백업에 기댄다(docs/bulk-change-spec.md). 그래서 "어디까지 적용됐는가"의
+-- 유일한 근거가 이 표다 — 취소·실패가 이미 커밋한 배치를 되돌리지 않으므로, 마지막 키가 재개 지점이자
+-- 사람이 백업 복원을 판단할 자리가 된다.
+--
+-- 노드 메모리가 아니라 메타 DB에 둔다: 실행은 한 노드에서 돌지만 진행률 조회는 어느 노드로든 간다(V47과 같은 이유).
+-- 키 값은 기종·열 타입마다 달라 문자열로 남긴다 — 비교·재개에 쓰는 값이 아니라 사람이 읽고 판단할 기록이다.
+--
+-- lag_source는 그 배치를 커밋할 때 본 복제 상태의 출처다(MEASURED / NOT_APPLICABLE / UNSUPPORTED / UNAVAILABLE).
+-- "지연 0"과 "못 쟀다"를 같은 값으로 남기지 않는다 — 나중에 이 기록으로 "왜 안 멈췄나"를 되짚을 수 있어야 한다.
+CREATE TABLE bulk_change_batch (
+    id              BIGINT       PRIMARY KEY AUTO_INCREMENT,
+    review_id       BIGINT       NOT NULL,
+    instance_id     BIGINT       NOT NULL,
+    batch_no        INT          NOT NULL,
+    from_key        VARCHAR(200),
+    to_key          VARCHAR(200) NOT NULL,
+    affected_rows   BIGINT       NOT NULL,
+    elapsed_millis  BIGINT       NOT NULL,
+    lag_seconds     DOUBLE PRECISION,
+    lag_source      VARCHAR(20),
+    committed_at    TIMESTAMP    NOT NULL
+);
+
+CREATE INDEX bulk_change_batch_review_idx ON bulk_change_batch (review_id, batch_no);
+
+-- 실행 한 건의 현재 상태 — 배치 기록의 요약이자, 재기동 뒤에도 "무엇이 중단된 채 남았나"를 알 수 있는 자리.
+-- 상태는 RUNNING / PAUSED_LAG / PAUSED_BY_USER / CANCELLED / DONE / FAILED.
+CREATE TABLE bulk_change_run (
+    review_id       BIGINT       PRIMARY KEY,
+    instance_id     BIGINT       NOT NULL,
+    table_name      VARCHAR(200) NOT NULL,
+    key_column      VARCHAR(200) NOT NULL,
+    batch_rows      INT          NOT NULL,
+    state           VARCHAR(20)  NOT NULL,
+    state_reason    VARCHAR(500),
+    last_key        VARCHAR(200),
+    affected_rows   BIGINT       NOT NULL DEFAULT 0,
+    batches         INT          NOT NULL DEFAULT 0,
+    started_at      TIMESTAMP    NOT NULL,
+    updated_at      TIMESTAMP    NOT NULL
+);

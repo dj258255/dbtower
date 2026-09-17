@@ -25,7 +25,33 @@ const OUTCOME = {
   UNCERTAIN: ["커밋 여부 불명", "o-bad"],
 };
 // 되돌릴 수 없거나 대상 DB·티켓 상태에 흔적을 남기는 동작은 한 번 더 눌러야 나간다(브라우저 확인창 대신 버튼 자체로)
-const ARMED = new Set(["execute", "execute-raw", "revert", "approve", "cancel", "resolve-applied", "resolve-not-applied"]);
+const ARMED = new Set(["execute", "execute-raw", "revert", "approve", "cancel", "resolve-applied", "resolve-not-applied",
+  "bulk-start", "bulk-cancel"]);
+
+/** 대량 일괄 변경의 상태 — 화면에 보일 말과 색 */
+const BULK_STATE = {
+  RUNNING: ["진행 중", "change"],
+  PAUSED_LAG: ["복제 지연으로 멈춤", "blocked"],
+  PAUSED_BY_USER: ["멈춤", "blocked"],
+  CANCELLED: ["취소됨", "blocked"],
+  DONE: ["완료", "change"],
+  FAILED: ["실패", "blocked"],
+};
+
+/** 진행 중인 상태 — 이 동안만 다시 물어본다 */
+const BULK_LIVE = new Set(["RUNNING", "PAUSED_LAG", "PAUSED_BY_USER"]);
+
+/**
+ * 배치를 커밋할 때 본 복제 지연. "못 쟀다"를 "0초"로 적지 않는다 — 나중에 "왜 안 멈췄나"를 되짚을 때
+ * 그 둘은 전혀 다른 답이다(ReplicationState의 규율).
+ */
+function bulkLag(b) {
+  if (b.lagSource === "MEASURED") return `${b.lagSeconds ?? 0}초`;
+  if (b.lagSource === "NOT_APPLICABLE") return "복제 없음";
+  if (b.lagSource === "UNSUPPORTED") return "못 재는 기종";
+  if (b.lagSource === "UNAVAILABLE") return "못 읽음";
+  return "-";
+}
 const OPEN = ["PENDING", "APPROVED", "EXECUTING", "ROLLING_BACK"];
 const time = (t) => localTime(t, { seconds: true });
 
@@ -41,6 +67,9 @@ export class TicketPanel {
     this.instanceId = null;
     this.tickets = [];
     this.executions = [];
+    this.bulk = null;
+    this.bulkBatches = [];
+    this.bulkTimer = null;
     this.proposals = [];
     this.selected = null;
     this.message = null;
@@ -144,7 +173,63 @@ export class TicketPanel {
     // 기다리는 동안 다른 티켓을 골랐으면 늦게 온 실행 기록으로 그 티켓을 그리지 않는다
     if (this.selected !== t.id) return;
     this.executions = executions;
+    await this.loadBulk(t.id);
     this.render();
+  }
+
+  /**
+   * 대량 일괄 변경의 진행. 기록이 없으면(404) 조용히 비운다 — 대부분의 티켓은 이 경로를 쓰지 않는다.
+   * 진행 중일 때만 다시 물어본다. 끝난 실행을 계속 물으면 보는 사람 수만큼 메타 DB 조회가 는다.
+   */
+  async loadBulk(id) {
+    clearTimeout(this.bulkTimer);
+    try {
+      this.bulk = await request(`/api/workbench/tickets/${encodeURIComponent(id)}/bulk`);
+    } catch {
+      this.bulk = null;
+      this.bulkBatches = [];
+      return;
+    }
+    try {
+      this.bulkBatches = await request(`/api/workbench/tickets/${encodeURIComponent(id)}/bulk/batches`);
+    } catch {
+      this.bulkBatches = [];
+    }
+    if (BULK_LIVE.has(this.bulk.state) && this.selected === id) {
+      this.bulkTimer = setTimeout(() => {
+        if (this.selected === id) this.loadBulk(id).then(() => this.render());
+      }, 2000);
+    }
+  }
+
+  /** 진행 패널 — 배치가 수천 개일 수 있어 마지막 것만 보인다(서버도 50개까지만 준다) */
+  bulkPanel(t) {
+    if (!this.bulk) return "";
+    const [label, cls] = BULK_STATE[this.bulk.state] || [this.bulk.state, ""];
+    const execute = this.can("CHANGE_EXECUTE");
+    const approve = this.can("CHANGE_APPROVE");
+    const button = (act, text, extra = "") =>
+      `<button class="btn btn-small ${extra}" data-act="${act}">${esc(this.armed === act ? `${text} 확인(한 번 더)` : text)}</button>`;
+    const controls = [];
+    if (BULK_LIVE.has(this.bulk.state)) {
+      if (execute && this.bulk.state === "RUNNING") controls.push(button("bulk-pause", "일시정지"));
+      if (execute && this.bulk.state === "PAUSED_BY_USER") controls.push(button("bulk-resume", "재개"));
+      if (execute || approve) controls.push(button("bulk-cancel", "취소", "btn-danger"));
+    }
+    const rows = this.bulkBatches.map((b) => `<tr>
+      <td>${esc(b.batchNo)}</td>
+      <td>${esc(b.fromKey ?? "처음")} ~ ${esc(b.toKey)}</td>
+      <td class="num">${esc(b.affectedRows)}</td>
+      <td class="num">${esc(b.elapsedMillis)}ms</td>
+      <td>${esc(bulkLag(b))}</td>
+    </tr>`).join("");
+    return `<h4 class="tk-sub">대량 일괄 변경 <span class="tk-st ${cls}">${esc(label)}</span></h4>
+      <div class="tk-body">배치 ${esc(this.bulk.batches)}개 · 바뀐 행 ${esc(this.bulk.affectedRows)} ·
+        마지막 적용 키 ${esc(this.bulk.lastAppliedKey ?? "-")}</div>
+      <div class="hint">취소해도 이미 커밋한 배치는 되돌리지 않습니다. 어디까지 적용됐는지는 마지막 키로 봅니다.</div>
+      ${controls.length ? `<div class="tk-actions">${controls.join("")}</div>` : ""}
+      ${rows ? `<table class="tk-batches"><thead><tr><th>배치</th><th>키 구간</th><th>행</th><th>소요</th><th>복제 지연</th></tr></thead>
+        <tbody>${rows}</tbody></table>` : ""}`;
   }
 
   render() {
@@ -175,6 +260,7 @@ export class TicketPanel {
       <ol class="tk-steps">${steps}</ol>
       ${this.actions(t)}
       ${message}
+      ${this.bulkPanel(t)}
       <h4 class="tk-sub">실행 기록 <span class="muted">${this.executions.length}건</span></h4>
       ${this.executions.length
         ? this.executions.map((x, i) => this.execution(t, x, i === 0)).join("")
@@ -202,6 +288,8 @@ export class TicketPanel {
       if (execute) list.push(button("execute", "실행", "btn-primary"));
       if (dryRun && this.captureHint) list.push(button("dry-run-raw", "캡처 없이 드라이런"));
       if (execute && this.captureHint) list.push(button("execute-raw", "캡처 없이 실행(되돌리기 불가)", "btn-danger"));
+      // 대량은 행 사본을 잡지 않는다 — 되돌리기를 복원 검증된 백업에 기대므로 서버가 실행 직전에 그것부터 본다
+      if (execute) list.push(button("bulk-start", "대량 일괄 실행(배치로 나눠)"));
     }
     if (t.status === "EXECUTED" && execute) list.push(button("revert-dry-run", "되돌리기 드라이런"), button("revert", "되돌리기", "btn-danger"));
     if (closer && ["PENDING", "APPROVED"].includes(t.status)) list.push(button("cancel", "티켓 취소"));
@@ -329,6 +417,10 @@ export class TicketPanel {
       cancel: [`/api/reviews/${id}/cancel`, { note: comment }],
       "resolve-applied": [`/api/workbench/tickets/${id}/resolve`, { applied: true, note }],
       "resolve-not-applied": [`/api/workbench/tickets/${id}/resolve`, { applied: false, note }],
+      "bulk-start": [`/api/workbench/tickets/${id}/bulk/start`, { approvedRows: 0 }],
+      "bulk-pause": [`/api/workbench/tickets/${id}/bulk/pause`, {}],
+      "bulk-resume": [`/api/workbench/tickets/${id}/bulk/resume`, {}],
+      "bulk-cancel": [`/api/workbench/tickets/${id}/bulk/cancel`, {}],
     };
     const [path, body] = calls[act];
     const decision = ["approve", "reject", "cancel"].includes(act) || act.startsWith("resolve");
