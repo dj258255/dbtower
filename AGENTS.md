@@ -46,8 +46,8 @@ src/main/java/io/dbtower/    Spring Modulith 모듈 17개 (순환·internal 침�
 src/main/resources/static/   웹 콘솔 (의존성 0 정적 SPA)
 integrations/    플랫폼 밖에서 도는 것들 — ai-ops-gateway(Slack 입구·Outbox 릴레이·LangGraph 실행기),
                  n8n(완료 웹훅 워크플로). 권한·사실·검증은 여기 두지 않고 DBTower API를 거친다
-docs/            DESIGN, VERIFICATION(실측 기록), PRESENTATION, ROADMAP, ai-analysis-rules,
-                 AI-OPERATIONS-AUTOMATION(AI 운영 작업 설계)
+docs/            문서 지도는 docs/README.md. DESIGN, VERIFICATION(실측 기록), ROADMAP, ai-analysis-rules,
+                 AI-OPERATIONS-AUTOMATION(AI 운영 작업 설계), experiments(실험 원자료)
 scripts/         dbtower-mcp.sh (MCP stdio 실행기)
 ```
 
@@ -113,6 +113,8 @@ scripts/         dbtower-mcp.sh (MCP stdio 실행기)
 - 색은 하늘 원톤이다(175절) — 브랜드·선택·조작은 `--primary` #0a6aa8 하나, 초록·주황·빨강은 구간·증감을 뜻하므로 바꾸지 않는다.
   정보 없는 장식(배경 광원·광택 그라데이션·무지개 표식)은 넣지 않는다. 입력 조작의 경계는 `--control-line`(흰 바탕 3.37:1)
 - 한 열로 접히는 그리드는 `1fr`이 아니라 `minmax(0, 1fr)` — `1fr`의 최소 폭은 내용(nowrap 표)이라 페이지를 옆으로 민다
+- 모니터링 탭은 "무엇을 하러 왔나"로 나눈다(184절) — 성능·진단·구성(설정·스키마·파라미터 비교)·거버넌스(변경 승인·온라인 스키마 변경)·
+  백업·리포트·비용·인프라·관리(사용자·역할·감사·MCP). 기능 이름이 아니라 일의 종류로 넣을 탭을 고른다
 - 탭은 번갈아 보는 것끼리만 묶는다 — 함께 봐야 쓰는 둘(스키마 -> 채팅 칩)을 한 탭 묶음에 넣으면 서로를 가린다.
   참고 제품의 탭을 옮길 때는 모양이 아니라 그 칸의 역할을 옮긴다(147절: TOI의 AI 재료 탭을 흉내 내 스키마·티켓을 채팅 탭에 넣었다)
 - 표 셀의 `max-width`는 자동 표 레이아웃에서 무시된다 — 말줄임 열은 `max-width: 0; width: 100%`, 표 셀 안에 끼운 상세는
