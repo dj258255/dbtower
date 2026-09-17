@@ -62,7 +62,7 @@ const apiMessage = (e) => {
 // 쥐므로(1+2=3) 나머지 3자리를 플랫폼 조회와 사용자 조작에 남긴다. 1로 낮추면 대상 조회 열두 개일 때 마지막 카드가
 // 60초 뒤에야 뜨고, 3으로 올리면 조작이 줄 설 여지가 남는다.
 const TARGET_CONCURRENCY = 2;
-const targetQueue = { active: 0, waiting: [] };
+const targetQueue = { active: 0, waiting: [], running: new Set() };
 // 인스턴스를 바꿀 때마다 올린다 — 올라간 세대의 대기분은 보내지 않고 버린다(이전 대상의 조회로 새 화면을 채우지 않는다)
 let targetScope = 0;
 
@@ -81,21 +81,51 @@ function pumpTargetQueue() {
     // 인스턴스가 바뀐 뒤 차례가 온 대기분은 보내지 않는다. 약속을 붙들어 두면 이 로더는 옛 대상의 값을 그리지 않는다
     if (!job.keep && job.gen !== targetScope) continue;
     targetQueue.active++;
+    job.startedAt = Date.now();
+    targetQueue.running.add(job);
     api(job.path, job.opts).then(
       // 대상이 바뀐 뒤 도착한 옛 응답은 버린다(약속을 붙들어 둔다) — 새 대상의 화면을 옛 값으로 덮지 않는다
       (v) => { if (job.keep || job.gen === targetScope) job.resolve(v); },
       (e) => { if (job.keep || job.gen === targetScope) job.reject(e); }
     ).finally(() => {
       targetQueue.active--;
+      targetQueue.running.delete(job);
       pumpTargetQueue();
     });
   }
+  syncTargetProgress();
+}
+
+// 대상 조회 진행 한 줄(#59) — 동시 2개 제한(#31) 뒤로 느린 대상이면 마지막 카드가 수십 초 빈 채라 화면이 멈춘 것처럼 보였다.
+// 지금 인스턴스의 남은 조회 수를 보이고, 가장 오래 기다린 조회가 5초를 넘으면 대상이 느리다고 말한다
+const TARGET_SLOW_MS = 5000;
+let targetProgressTimer = null;
+function syncTargetProgress() {
+  const line = document.getElementById("target-progress");
+  if (!line) return;
+  const current = (job) => !job.keep && job.gen === targetScope;
+  const running = [...targetQueue.running].filter(current);
+  const left = running.length + targetQueue.waiting.filter(current).length;
+  if (!left) {
+    line.hidden = true;
+    clearInterval(targetProgressTimer);
+    targetProgressTimer = null;
+    return;
+  }
+  const oldest = running.length ? Date.now() - Math.min(...running.map((j) => j.startedAt)) : 0;
+  line.hidden = false;
+  line.classList.toggle("slow", oldest >= TARGET_SLOW_MS);
+  line.textContent = oldest >= TARGET_SLOW_MS
+    ? `대상 DB 응답이 느립니다 — 남은 조회 ${left}건, 가장 오래 기다린 조회 ${Math.floor(oldest / 1000)}초`
+    : `대상 DB에서 불러오는 중 — 남은 조회 ${left}건`;
+  if (!targetProgressTimer) targetProgressTimer = setInterval(syncTargetProgress, 1000);
 }
 
 /** 인스턴스 전환 — 안 보낸 대상 조회는 버리고, 이미 보낸 것도 응답이 오면 버린다(늦은 응답이 새 화면을 덮지 않게) */
 function dropPendingTargetCalls() {
   targetScope++;
   targetQueue.waiting.length = 0;
+  syncTargetProgress();
   rowsMetricCache.clear();   // 버린 요청의 약속이 캐시에 남으면 다음 선택이 그 약속을 그대로 기다린다
 }
 
@@ -1956,6 +1986,10 @@ function rowsMetricLabel(instanceId) {
 const msDigits = (...values) => (values.some((v) => v > 0 && v < 1) ? 4 : 2);
 
 // ---------- Top Query: 단순 조회 ----------
+function skeletonRow(colspan) {
+  return `<tr class="skeleton-row"><td colspan="${colspan}"><div class="skeleton" aria-label="불러오는 중"><span></span><span></span><span></span></div></td></tr>`;
+}
+
 async function runQuery(force) {
   // 단독 조회와 비교 조회는 같은 표를 그린다 — 늦게 끝난 앞 요청이 뒤 요청의 표를 덮지 않게 순번을 같이 쓴다.
   // 원인 지름길(#56)이 인스턴스를 열자마자 비교를 내면, 먼저 출발한 단독 조회가 나중에 도착해 비교 결과를 지웠다
@@ -1979,6 +2013,8 @@ async function runQuery(force) {
     table.querySelector("thead").innerHTML = "";
     return;
   }
+  // 줄을 서 있는 동안 표 자리를 비우지 않는다(#59) — 앞 대상의 표가 남아 있거나 글자 한 줄만 있으면 멈춘 것처럼 보였다
+  table.querySelector("tbody").innerHTML = skeletonRow(6);
   let stats, rowsLabel;
   try {
     [stats, rowsLabel] = await Promise.all([
@@ -2015,6 +2051,7 @@ async function runCompare() {
   const p = (id) => $(id).value;
   if (!p("#base-from") || !p("#base-to") || !p("#target-from") || !p("#target-to")) return;
   closeDetail();
+  $("#top-table tbody").innerHTML = skeletonRow(6);
   const qs = `baseFrom=${toApiTime(p("#base-from"))}&baseTo=${toApiTime(p("#base-to"))}&targetFrom=${toApiTime(p("#target-from"))}&targetTo=${toApiTime(p("#target-to"))}`;
   let result;
   const rowsLabel = await rowsMetricLabel(state.instance.id);

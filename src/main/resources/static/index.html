@@ -85,7 +85,7 @@
           <span class="hint">인스턴스별 한 점수로 종합해 나쁜 순으로 정렬합니다 — 읽기만 하고 대상 DB는 바꾸지 않습니다.</span>
         </h2>
         <div id="score-summary" class="score-summary"></div>
-        <div id="score-result" class="score-result muted">불러오는 중...</div>
+        <div id="score-result" class="score-result muted"><div class="skeleton" aria-label="불러오는 중"><span></span><span></span><span></span></div></div>
       </section>
 
       <!-- 백업 신선도 (D7) — 전 인스턴스를 한 표로, 오래된 것·백업 없는 것을 위로 -->
@@ -94,7 +94,7 @@
           <span class="hint">모든 DB가 최근에 백업됐는지 3-2-1 기준으로 봅니다 — 백업 실행은 하지 않습니다.</span>
         </h2>
         <div id="freshness-summary" class="freshness-summary"></div>
-        <div id="freshness-result" class="freshness-result muted">불러오는 중...</div>
+        <div id="freshness-result" class="freshness-result muted"><div class="skeleton" aria-label="불러오는 중"><span></span><span></span><span></span></div></div>
       </section>
     </div>
 
@@ -154,6 +154,8 @@
     <section class="panel" id="result-panel" hidden>
       <!-- 대상별 운영 종합 (DBRE) — 이 DB가 무엇인지 + 지금 어떤지를 한눈에. GET /api/instances/{id}/overview -->
       <div id="overview-card" class="overview-card" hidden></div>
+      <!-- 대상 조회 진행(#59) — 남은 조회 수, 느리면 그 사실 -->
+      <div id="target-progress" class="target-progress" role="status" aria-live="polite" hidden></div>
       <div class="tabs">
         <button class="tab active" data-tab="top">상위 쿼리</button>
         <button class="tab" data-tab="slow">느린 쿼리</button>
