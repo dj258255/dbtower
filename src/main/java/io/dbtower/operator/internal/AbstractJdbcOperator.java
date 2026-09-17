@@ -1,6 +1,8 @@
 package io.dbtower.operator.internal;
 
 import io.dbtower.operator.OperatorException;
+import io.dbtower.operator.model.BulkBatchOutcome;
+import io.dbtower.operator.model.BulkChangePlan;
 import io.dbtower.operator.model.ChangeOutcome;
 import io.dbtower.operator.model.ChangePlan;
 import io.dbtower.operator.model.QueryResult;
@@ -312,6 +314,33 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
         } catch (SQLException e) {
             throw new OperatorException(instance.getType() + " 변경 실행 실패: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 대량 일괄 변경 — 배치마다 커넥션을 새로 얻는다. 한 커넥션을 붙잡고 수천 배치를 도는 동안 대상이 재시작하거나
+     * 유휴 타임아웃에 끊기면 그 뒤 배치가 전부 실패한다. 배치 사이에는 어차피 쉬는 간격이 있어 재연결 비용이 묻힌다.
+     */
+    @Override
+    public Object nextBulkBoundary(ConsoleCredential credential, BulkChangePlan plan, Object lastKey) {
+        try (Connection c = writeConnection(credential)) {
+            return bulkRunner().nextBoundary(c, plan, lastKey);
+        } catch (SQLException e) {
+            throw new OperatorException(instance.getType() + " 배치 경계 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public BulkBatchOutcome executeBulkBatch(ConsoleCredential credential, BulkChangePlan plan,
+                                             Object fromKey, Object toKey) {
+        try (Connection c = writeConnection(credential)) {
+            return bulkRunner().executeBatch(c, plan, fromKey, toKey);
+        } catch (SQLException e) {
+            throw new OperatorException(instance.getType() + " 배치 실행 실패: " + e.getMessage(), e);
+        }
+    }
+
+    private JdbcBulkChangeRunner bulkRunner() {
+        return new JdbcBulkChangeRunner(AbstractJdbcOperator.this::beginChange);
     }
 
     @Override
