@@ -10085,3 +10085,67 @@ DBTOWER_E2E=1 브라우저 E2E       10개 클래스 45건 통과 (UxPolishE2ETe
 - 토스 수준의 화면·흐름은 아직 아니다 — 첫 화면 우선순위, 원인 찾기 단계 수, AI 입구 다섯 곳, 글자 밀도는 UX 2차(#65)로 남겼다
 - 크롬 확장으로 사용자 표 역할 드롭다운을 처음 눌렀을 때 목록이 바로 닫혔다. 스크립트 클릭으로는 정상 — 확장의 클릭 전 자동 스크롤로 판단했고 사람 클릭으로 재현하지 못했다
 - 이번 작업은 교차 검토 모델 없이 진행했다(코더 한도·잔액 소진)
+
+## 185. 문서 대표 화면 재촬영 — 찍다가 나온 결함 셋 (2026-09-17, #69)
+
+### 왜
+
+SCREENSHOTS.md의 현재 화면과 README·PRESENTATION의 캡처가 UX 1차(184절)와 #61(글자 크기 네 단계, 조회 구간 한 줄) 전 화면이었다.
+PRESENTATION은 v1.3 보라 원톤과 그 전 유리 화면을 아직 썼다.
+
+### 촬영 조건
+
+```text
+앱       로컬 dev 프로필 jar (main + #68 + #71을 합친 로컬 빌드, 푸시하지 않은 임시 브랜치)
+대상     live-postgres-team-b — PostgreSQL 16.15, 127.0.0.1:15432/sample
+브라우저 Chrome, 창 CSS 폭 2056 -> 캡처 1512x788 JPEG, 관리자 세션
+시각     2026-09-17 22:36 ~ 23:03 KST
+```
+
+목록 위쪽이 실험 때 만든 뒤 지운 테이블(exp_change_lock)의 문장이라 실행계획이 `relation "exp_change_lock" does not exist`로 실패했다.
+대표 화면으로 쓸 수 없어 sample DB의 pg_stat_statements만 비우고(`pg_stat_statements_reset(0, sample의 oid, 0)`, 다른 DB 항목은 그대로)
+예시 조회를 돌렸다.
+
+```text
+orders JOIN customers WHERE status = ? AND amount > ? ORDER BY ordered_at DESC LIMIT 50   6,000회 x 5
+customers WHERE email = ? / orders 기간별 GROUP BY / UPDATE orders ... AND status = 'PENDING'   4,000회씩 x 4
+id 699개를 OR로 이은 SELECT (10,409자)                                                      5회
+```
+
+UPDATE는 PENDING 행이 없어 바꾼 행 0이다(`pg_stat_statements.rows = 0`, 상태 분포 REFUND 667 · FAIL 667 · PAID 666 그대로).
+
+### 새 캡처
+
+| 파일 | 화면 | 확인한 값 |
+|---|---|---|
+| 188-console-first-screen | 관제 첫 화면 | 헬스 스코어 live-postgres-team-b 68/D, 백업 없음 5, 조회 구간 "최근 30분 09-17 22:32 ~ 23:02" |
+| 189-console-time-top-query | 조회 구간 한 줄과 Top Query | 1위 orders GROUP BY 67.53%·112/초, 2위 orders JOIN 23.91% |
+| 197-console-compare | 시점 비교 | 비교 22:55~22:58, 조회 22:59~23:03 — 호출량 +9,978%, 평균 지연 -70%, 행 +529%, 신규 쿼리 4개 |
+| 190-querydetail-plan | 쿼리 상세 실행계획 | 쿼리 ID feadff…4702, Limit Total Cost 60.74 |
+| 191-querydetail-schema | 인덱스 제안 후보·테이블 구조 | 후보 orders(status)·(amount)·(ordered_at)·(status, amount), orders 2,000행·인덱스 2·외래키 1 |
+| 192-querydetail-index-simulation | 가상 인덱스 | orders(status, amount): Total Cost 60.74 -> 40.38 (33.5% 감소) |
+| 193-querydetail-antipattern-ai | 안티패턴·AI 분석 | 실행 30,000회, AI 완료 16.4초·첫 글자 8.8초 |
+| 194-monitor-aiops-inline | 진단 탭 AI 작업 | 회귀 원인 작업 c6fe50fc 펼침 |
+| 195-monitor-admin-roles | 관리 탭 | 사용자 5명, 역할별 할 수 있는 일 |
+| 196-workbench-query-result | 워크벤치 | grade·status 집계 3행 16ms |
+
+바뀐 문서: SCREENSHOTS.md(현재 화면을 새 캡처로, 이전 v1.4.0 캡처는 "게시 당시 화면"으로 내림), README 대표 이미지 둘,
+PRESENTATION의 Top Query·시점 비교·실행계획·AI 분석 캡처. 과거 파일은 덮어쓰지 않았다. 로컬 링크 깨짐 0.
+
+### 찍다가 나온 결함
+
+1. **PostgreSQL 스냅샷이 한 행도 저장되지 않았다(#70, PR #71에서 고침)** — 시점 비교가 "스냅샷 배치 0개", 그래프가 "수집된 스냅샷이 없습니다"였다.
+   로그: `스냅샷 수집 실패 ... ERROR: value too long for type character varying(4000)`. 4000자를 넘는 문장 하나가 배치 INSERT를 통째로 실패시켰다.
+   수정 전 jar에서 10,409자 문장으로 다시 실패(13:54:14Z)를 확인하고, 수정 후 `수집 완료 rows=79`, 저장된 최장 문장 4000자(13:55:54Z).
+   이 결함 동안 Top Query의 호출/초가 전부 "—"였는데, 고친 뒤 112/초 등으로 채워졌다
+2. **수집이 매번 실패하는데 카드는 초록 "수집중"(#72)** — #43은 헬스 down만 본다
+3. **UPDATE 문장의 테이블 구조가 "참조 테이블을 찾지 못했습니다"(#73)** — 같은 화면에서 customers(실제 3행)가 "0행"으로 보였다.
+   같은 시각 점검 조언이 "통계 미수집 후보: orders·payment_events"를 냈다 — 통계 추정값을 추정이라 적지 않은 것으로 보인다
+
+### 정직하게 남기는 범위
+
+- 관제 AI 채팅(172·173), 로그인(166·167), MCP(179), 좁은 화면(186·187)은 다시 찍지 않았다 — 버튼·글자 크기는 지금과 다르다
+- PRESENTATION의 그래프 드래그(127)·슬로우 쿼리(122·123)·Metric 카드(124)·MCP(110)·테이블 상세(148)는 유리 시절 캡처 그대로다
+- 실행계획이 JSON 원문 그대로라 화면이 길다(190). 활동 그래프 선 색이 하늘 원톤이 아닌 #6672f5다(197, app.js drawChart). 부하 칸 비교 모드에 % 표시가 없다(197)
+- AI 작업 근거에 쿼리 ID가 부호 있는 10진수(-2885330479908940062)로 남아 표의 16진수 표시와 다르다(194)
+- 캡처는 Chrome 확장 스크린샷이라 1512px 폭으로 줄어 저장됐다 — 글자가 작게 보인다
