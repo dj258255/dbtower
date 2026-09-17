@@ -1,6 +1,8 @@
 package io.dbtower.insight.internal.job;
 
+import io.dbtower.insight.CollectionStatus;
 import io.dbtower.insight.QuerySnapshot;
+import io.dbtower.insight.internal.CollectionStatusStore;
 import io.dbtower.insight.internal.SnapshotWriter;
 import io.dbtower.operator.DbmsOperatorFactory;
 import io.dbtower.operator.model.QueryStat;
@@ -63,6 +65,7 @@ public class SnapshotScheduler {
 
     private final RegistryService registryService;
     private final SnapshotWriter snapshotWriter;
+    private final CollectionStatusStore statusStore;
     private final DbmsOperatorFactory operatorFactory;
     private final LockProvider lockProvider;
     private final ExecutorService pool;
@@ -71,12 +74,14 @@ public class SnapshotScheduler {
 
     public SnapshotScheduler(RegistryService registryService,
                              SnapshotWriter snapshotWriter,
+                             CollectionStatusStore statusStore,
                              DbmsOperatorFactory operatorFactory,
                              LockProvider lockProvider,
                              @Value("${dbtower.snapshot.workers:4}") int workers,
                              @Value("${dbtower.snapshot.shards:1}") int shards) {
         this.registryService = registryService;
         this.snapshotWriter = snapshotWriter;
+        this.statusStore = statusStore;
         this.operatorFactory = operatorFactory;
         this.lockProvider = lockProvider;
         this.workers = Math.max(1, workers);
@@ -199,6 +204,8 @@ public class SnapshotScheduler {
             }
         }
         long start = System.currentTimeMillis();
+        // 어디서 실패했는지 — 화면이 "대상 조회 실패"와 "저장 실패"를 가른다(#72). 대상은 살아 있는데 저장이 실패한 #70이 가려졌었다
+        String stage = CollectionStatus.TARGET;
         try {
             List<QueryStat> stats = operatorFactory.create(instance).queryStats(TOP_N);
             long collectMs = System.currentTimeMillis() - start;
@@ -209,19 +216,35 @@ public class SnapshotScheduler {
                             s.queryText(), s.calls(), s.totalTimeMs(), s.rowsExamined()))
                     .toList();
 
+            stage = CollectionStatus.STORE;
             long saveStart = System.currentTimeMillis();
             snapshotWriter.saveBatch(rows);
             long saveMs = System.currentTimeMillis() - saveStart;
 
             onSuccess(instance.getId());
+            recordStatus(instance, true, capturedAt, null);
             // collect(대상 DB 조회)와 save(플랫폼 DB 저장)를 분리 측정 — 개선 아크 1, 2의 근거 데이터
             log.info("스냅샷 수집 완료 instance={} rows={} collectMs={} saveMs={}",
                     instance.getName(), rows.size(), collectMs, saveMs);
         } catch (Exception e) {
             // 한 인스턴스 실패가 나머지 수집을 막으면 안 된다
             int skip = onFailure(instance.getId());
-            log.warn("스냅샷 수집 실패 instance={} cause={} 다음_건너뛸틱={}",
-                    instance.getName(), e.getMessage(), skip);
+            recordStatus(instance, false, LocalDateTime.now(), stage);
+            log.warn("스냅샷 수집 실패 instance={} stage={} cause={} 다음_건너뛸틱={}",
+                    instance.getName(), stage, e.getMessage(), skip);
+        }
+    }
+
+    /** 수집 결과 기록이 실패해도 수집 자체는 계속한다 — 기록은 화면 표시용이다 */
+    private void recordStatus(DatabaseInstance instance, boolean success, LocalDateTime at, String stage) {
+        try {
+            if (success) {
+                statusStore.recordSuccess(instance.getId(), at);
+            } else {
+                statusStore.recordFailure(instance.getId(), at, stage);
+            }
+        } catch (Exception e) {
+            log.warn("수집 결과 기록 실패 instance={} cause={}", instance.getName(), e.getMessage());
         }
     }
 
@@ -264,5 +287,10 @@ public class SnapshotScheduler {
 
     synchronized void evict(long instanceId) {
         backoff.remove(instanceId);
+        try {
+            statusStore.evict(instanceId);
+        } catch (Exception e) {
+            log.warn("수집 결과 기록 삭제 실패 instanceId={} cause={}", instanceId, e.getMessage());
+        }
     }
 }

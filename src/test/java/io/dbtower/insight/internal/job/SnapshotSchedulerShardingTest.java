@@ -1,5 +1,6 @@
 package io.dbtower.insight.internal.job;
 
+import io.dbtower.insight.internal.CollectionStatusStore;
 import io.dbtower.insight.internal.SnapshotWriter;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.DbmsOperatorFactory;
@@ -46,7 +47,7 @@ class SnapshotSchedulerShardingTest {
 
     private SnapshotScheduler scheduler(int shards) {
         // workers=1 — 지터 0으로 결정적 실행
-        return new SnapshotScheduler(repository, writer, operatorFactory, lockProvider, 1, shards);
+        return new SnapshotScheduler(repository, writer, Mockito.mock(CollectionStatusStore.class), operatorFactory, lockProvider, 1, shards);
     }
 
     private Set<String> collectedNames() {

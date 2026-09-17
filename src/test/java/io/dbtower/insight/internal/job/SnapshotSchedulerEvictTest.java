@@ -1,5 +1,7 @@
 package io.dbtower.insight.internal.job;
 
+import io.dbtower.insight.internal.CollectionStatusStore;
+
 import io.dbtower.registry.InstanceDeletedEvent;
 import org.junit.jupiter.api.Test;
 
@@ -12,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class SnapshotSchedulerEvictTest {
 
     private SnapshotScheduler scheduler() {
-        return new SnapshotScheduler(null, null, null, null, 4, 1);
+        return new SnapshotScheduler(null, null, org.mockito.Mockito.mock(CollectionStatusStore.class), null, null, 4, 1);
     }
 
     @Test
