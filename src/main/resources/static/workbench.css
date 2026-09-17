@@ -479,6 +479,12 @@ body.picking table.grid th:not(.rownum), body.picking .tree-name, body.picking .
 .tk-ai { background: #f5f7ff; border-color: #dfe4fb; }
 .tk-block .ai-sql { margin: 0; }
 .tk-findings, .tk-steps, .tk-conflicts { margin: 0; padding-left: 18px; font-size: var(--fs-small); line-height: 1.6; }
+
+/* 대량 일괄 변경의 배치 표 — 읽는 표라 불투명하게 두고, 숫자 열은 자릿수를 맞춰 세로로 읽히게 한다 */
+.tk-batches { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: var(--fs-caption); }
+.tk-batches th, .tk-batches td { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+.tk-batches th { color: var(--muted); font-weight: 600; }
+.tk-batches td.num, .tk-batches th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .tk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .tk-comment { flex: 1; min-width: 120px; padding: 4px 10px; border: 1px solid rgba(15, 23, 42, .12); border-radius: 10px; font: inherit; font-size: var(--fs-small); }
 .tk-sub { margin: 6px 0 0; font-size: var(--fs-body); }
