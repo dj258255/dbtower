@@ -1653,3 +1653,14 @@ input[type="checkbox"] { accent-color: var(--primary); }
 .role-who { display: inline-block; margin-left: 8px; font-size: var(--fs-caption); color: #075985; background: #e8f3fb; border-radius: 999px; padding: 1px 8px; }
 .role-note { margin: 8px 2px 0; font-size: var(--fs-small); color: var(--muted); word-break: keep-all; }
 @container (max-width: 520px) { .role-item { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+
+/* 기다림 표시(#59) — 글자 "불러오는 중..."만 두면 자리가 비어 멈춘 것처럼 보였다. 자리 모양을 유지하는 옅은 막대.
+   움직임을 줄이기 설정이면 번쩍임을 끈다 */
+.skeleton { display: grid; gap: 10px; padding: 6px 0; }
+.skeleton span { display: block; height: 14px; border-radius: 6px; background: linear-gradient(90deg, #eef2f6 0%, #f7f9fb 50%, #eef2f6 100%); background-size: 200% 100%; animation: skeleton-shine 1.4s ease-in-out infinite; }
+.skeleton span:nth-child(2) { width: 86%; }
+.skeleton span:nth-child(3) { width: 64%; }
+@keyframes skeleton-shine { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton span { animation: none; } }
+.target-progress { margin: 0 0 10px; padding: 6px 12px; border-radius: 10px; background: #eef7fd; color: #0a5588; font-size: var(--fs-small); }
+.target-progress.slow { background: #fff1e0; color: #8a4d05; }
