@@ -46,8 +46,12 @@ function apiFailure(status, bodyText) {
 
 /** 화면에 보일 오류 문장 — errorId는 앞 8자만 덧붙여 서버 로그와 대조할 수 있게 한다(B9) */
 const apiMessage = (e) => {
-  const msg = e && e.message ? e.message : "요청을 처리하지 못했습니다.";
-  return e && e.errorId ? `${msg} (오류 번호 ${String(e.errorId).slice(0, 8)})` : msg;
+  let msg = e && e.message ? e.message : "요청을 처리하지 못했습니다.";
+  let id = e && e.errorId ? String(e.errorId) : null;
+  // 스트림(SSE) 오류는 본문이 아니라 문장 안에 "errorId=…"를 싣는다 — 같은 모양(앞 8자)으로 맞춘다(#42)
+  const m = msg.match(/\s*errorId=([0-9a-f-]{8,})\s*$/i);
+  if (m) { msg = msg.slice(0, m.index).trim(); id = id || m[1]; }
+  return id ? `${msg} (오류 번호 ${id.slice(0, 8)})` : msg;
 };
 
 // ---------- 대상 DB 조회 줄 (이슈 #31) ----------
