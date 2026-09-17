@@ -139,6 +139,7 @@ const state = {
   role: null,          // 로그인 주체의 대표 역할(표시용)
   username: null,      // 로그인 주체의 이름(/api/me username) — 내 작업에만 취소 버튼을 붙이는 판정에 쓴다
   caps: new Set(),     // 로그인 주체의 능력(/api/me capabilities) — 버튼·메뉴는 역할 이름이 아니라 이것으로 가른다
+  collectStatus: new Map(), // 인스턴스별 최근 수집 결과 {consecutiveFailures, stage, lastSuccessAt} — 대상은 살아 있어도 수집이 실패할 수 있다(#72)
   instanceHealth: new Map(), // 인스턴스별 {up, at} — 헬스 판정을 기억해 down인 대상에 조회를 보내지 않는다(#31)
 };
 
@@ -408,7 +409,7 @@ function instanceCardHtml(i) {
         <div class="inst-field"><span class="k">응답</span><span class="v" id="ping-${i.id}">—</span></div>
         <div class="inst-field"><span class="k">버전</span><span class="v ver" id="ver-${i.id}" title="">—</span></div>
         <div class="inst-field"><span class="k">수집</span><span class="v"><button class="collect-toggle ${collect.cls}" data-id="${i.id}"
-          title="수집 격리 토글 — 끄면 스냅샷 수집·운영 경보에서 이 인스턴스를 뺀다(등록은 유지)">${collect.label}</button></span></div>
+          title="수집 격리 토글 — 끄면 스냅샷 수집·운영 경보에서 이 인스턴스를 뺀다(등록은 유지)">${collect.label}</button><span class="collect-note" data-id="${i.id}" ${collect.note ? "" : "hidden"}>${esc(collect.note || "")}</span></span></div>
         ${i.environment || i.region || i.cluster || i.teamLabel || i.consoleUrl || i.appSchema ? `<div class="instance-meta">
           ${i.appSchema ? `<span class="tag-badge" title="앱 스키마 — 모니터 계정이 딕셔너리·콘솔에서 볼 스키마(Oracle)">스키마 ${esc(i.appSchema)}</span>` : ""}
           ${i.environment ? `<span class="tag-badge tag-env" title="환경">${esc(i.environment)}</span>` : ""}
@@ -429,6 +430,13 @@ function instanceCardHtml(i) {
 function collectBadge(inst) {
   if (!inst.collectionEnabled) return { cls: "isolated", label: "격리됨" };
   if (targetUnreachable(inst.id)) return { cls: "paused", label: "수집 멈춤(연결 안 됨)" };
+  // 대상은 응답하는데 수집이 연속으로 실패하는 경우 — #70에서 저장이 매번 실패하는 동안 초록 "수집중"이었다(#72)
+  const st = state.collectStatus.get(inst.id);
+  if (st && st.consecutiveFailures > 0) {
+    const where = st.stage === "STORE" ? "플랫폼 저장 실패" : "대상 통계 조회 실패";
+    const last = st.lastSuccessAt ? `마지막 성공 ${parseApiTime(st.lastSuccessAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "성공 기록 없음";
+    return { cls: "failing", label: "수집 실패", note: `${where} · 연속 ${st.consecutiveFailures}회 · ${last}` };
+  }
   return { cls: "", label: "수집중" };
 }
 
@@ -441,6 +449,16 @@ function syncCollectBadge(id) {
   btn.textContent = b.label;
   btn.classList.toggle("isolated", b.cls === "isolated");
   btn.classList.toggle("paused", b.cls === "paused");
+  btn.classList.toggle("failing", b.cls === "failing");
+  syncCollectNote(id, b);
+}
+
+/** 수집 실패 사유 한 줄 — 배지 아래에 적는다(title만으로는 사람이 모른다) */
+function syncCollectNote(id, b) {
+  const note = document.querySelector(`.collect-note[data-id="${id}"]`);
+  if (!note) return;
+  note.textContent = b.note || "";
+  note.hidden = !b.note;
 }
 
 /**
@@ -548,6 +566,10 @@ function loadInstanceMeta(rendered) {
       state.instanceHealth.set(i.id, { up: !!h.up, at: Date.now(), pingMillis: h.pingMillis, message: h.message, version: h.version });
       applyInstanceHealth(i.id);
     } catch { const dot = $(`#health-${i.id}`); if (dot) dot.classList.add("down"); }
+    // 수집 결과는 메타 DB만 읽는다(대상 조회 줄을 거치지 않는다)
+    api(`/api/instances/${i.id}/collection-status`)
+      .then((st) => { state.collectStatus.set(i.id, st); syncCollectBadge(i.id); })
+      .catch(() => { /* 기록을 못 읽으면 배지는 설정·헬스 기준 그대로 */ });
     try {
       const r = await targetApi(`/api/instances/${i.id}/replication`);
       const role = $(`#role-${i.id}`);

@@ -6,6 +6,8 @@ import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.Route;
+import io.dbtower.insight.CollectionStatus;
+import io.dbtower.insight.internal.CollectionStatusStore;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DatabaseInstanceRepository;
 import io.dbtower.registry.DbmsType;
@@ -26,6 +28,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -69,6 +73,9 @@ class UxPolishE2ETest {
     @Autowired
     DatabaseInstanceRepository instances;
 
+    @Autowired
+    CollectionStatusStore collectionStatus;
+
     private final List<BrowserContext> contexts = new ArrayList<>();
     private final List<DatabaseInstance> seeded = new ArrayList<>();
 
@@ -106,6 +113,7 @@ class UxPolishE2ETest {
             context.close();
         }
         contexts.clear();
+        seeded.forEach(db -> collectionStatus.evict(db.getId()));
         seeded.forEach(instances::delete);
         seeded.clear();
         users.findByUsername(USER).ifPresent(users::delete);
@@ -175,6 +183,45 @@ class UxPolishE2ETest {
         assertThat(toggle).containsText("수집 멈춤");
         assertThat(toggle.getAttribute("class")).contains("paused");
         screenshot(page, "ux-instance-down.png");
+    }
+
+    /**
+     * 대상은 응답하는데 수집이 연속 실패하면 카드가 "수집중" 대신 "수집 실패"와 어디서 실패했는지를 말한다(#72).
+     *
+     * <p>#70에서 live-postgres의 스냅샷 저장이 매번 실패하는 동안 카드는 초록 "수집중"이었다.
+     * 헬스는 up으로 가로채고(대상이 살아 있는 경우), 수집 결과는 실제 API가 메타 DB에서 읽게 행을 넣는다.
+     * 테스트 컨텍스트의 수집기도 이 닿지 않는 대상에 실패를 더할 수 있어 단계 문구는 둘 중 하나로 본다.</p>
+     */
+    @Test
+    void 대상은_살아_있는데_수집이_연속_실패하면_카드가_수집_실패와_사유를_말한다() {
+        DatabaseInstance db = instance("e2e-ux-collect-fail");
+        // 운영 앱은 JVM 기본 시간대를 UTC로 고정하고(DbtowerApplication.main) 수집기가 그 시각을 쓴다 — 테스트 JVM은 main을 거치지 않아 UTC로 맞춘다
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        collectionStatus.recordSuccess(db.getId(), now.minusMinutes(20));
+        collectionStatus.recordFailure(db.getId(), now.minusMinutes(2), CollectionStatus.STORE);
+        collectionStatus.recordFailure(db.getId(), now.minusMinutes(1), CollectionStatus.STORE);
+        Page page = login();
+        page.route("**/api/instances/*/health", route -> route.fulfill(new Route.FulfillOptions()
+                .setStatus(200).setContentType("application/json")
+                .setBody("{\"up\":true,\"version\":\"16.15\",\"pingMillis\":2,\"message\":\"OK\"}")));
+        page.navigate(base() + "/?instance=" + db.getId());
+
+        Locator toggle = page.locator(".collect-toggle[data-id='" + db.getId() + "']");
+        assertThat(toggle).containsText("수집 실패");
+        assertThat(toggle.getAttribute("class")).contains("failing");
+        Locator note = page.locator(".collect-note[data-id='" + db.getId() + "']");
+        assertThat(note).isVisible();
+        assertThat(note).containsText("연속");
+        assertThat(note).containsText("마지막 성공");
+        assertThat(note).hasText(Pattern.compile("(플랫폼 저장 실패|대상 통계 조회 실패) · 연속 \\d+회 · 마지막 성공 .+"));
+        System.out.printf("MEASURE 수집 실패 사유: %s (기록한 마지막 성공 UTC %s)%n", note.textContent(), now.minusMinutes(20));
+        screenshot(page, "ux-collect-failing.png");
+
+        // 한 번 성공하면 원래대로 — 다시 읽을 때 "수집중"
+        collectionStatus.recordSuccess(db.getId(), LocalDateTime.now(ZoneOffset.UTC));
+        page.reload();
+        assertThat(page.locator(".collect-toggle[data-id='" + db.getId() + "']")).containsText("수집중");
+        assertThat(page.locator(".collect-note[data-id='" + db.getId() + "']")).isHidden();
     }
 
     /** 화면 제목은 한국어다 — 탭·사이드바, 그리고 맨 위 두 카드에 남아 있던 긴 괄호 설명(B9 4·5절) */

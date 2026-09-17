@@ -16,6 +16,8 @@ import io.dbtower.analysis.DeepDiagnosis;
 import io.dbtower.analysis.RuleBasedAnalyzer;
 import io.dbtower.insight.BaselineService;
 import io.dbtower.insight.internal.AiAnalysisRunner;
+import io.dbtower.insight.CollectionStatus;
+import io.dbtower.insight.internal.CollectionStatusStore;
 import io.dbtower.insight.ComparisonService;
 import io.dbtower.insight.QuerySnapshotRepository;
 import io.dbtower.operator.DbmsOperator;
@@ -56,6 +58,7 @@ public class InsightController {
     private final PrometheusClient prometheusClient;
     private final QueryMasker queryMasker;
     private final AiAnalysisRunner aiAnalysisRunner;
+    private final CollectionStatusStore collectionStatusStore;
 
     public InsightController(RegistryService registryService, DbmsOperatorFactory operatorFactory,
                              ComparisonService comparisonService, RuleBasedAnalyzer analyzer,
@@ -64,7 +67,9 @@ public class InsightController {
                              BaselineService baselineService,
                              PrometheusClient prometheusClient,
                              QueryMasker queryMasker,
-                             AiAnalysisRunner aiAnalysisRunner) {
+                             AiAnalysisRunner aiAnalysisRunner,
+                             CollectionStatusStore collectionStatusStore) {
+        this.collectionStatusStore = collectionStatusStore;
         this.aiAnalysisRunner = aiAnalysisRunner;
         this.registryService = registryService;
         this.operatorFactory = operatorFactory;
@@ -303,6 +308,16 @@ public class InsightController {
     }
 
     public record RowsMetricView(RowsMetric metric, String label) {
+    }
+
+    /**
+     * 최근 스냅샷 수집 결과(#72) — 대상에 닿지 않고 메타 DB만 읽는다. 인스턴스 카드가 대상은 살아 있는데 수집이 실패하는 상태를
+     * "수집중"으로 두지 않게 한다. 기록이 없으면(아직 수집 전) 실패 0으로 돌려준다.
+     */
+    @GetMapping("/collection-status")
+    public CollectionStatus collectionStatus(@PathVariable Long id) {
+        registryService.findById(id);
+        return collectionStatusStore.find(id).orElse(new CollectionStatus(id, null, null, 0, null));
     }
 
     /** 이 인스턴스의 누적 통계 행 지표가 무엇을 세는지 — 비교 화면이 "읽은 행수"를 기종에 맞는 이름으로 적게 한다(132절) */

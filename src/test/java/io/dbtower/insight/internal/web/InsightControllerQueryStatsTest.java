@@ -33,7 +33,8 @@ class InsightControllerQueryStatsTest {
         return new InsightController(registry, factory,
                 mock(ComparisonService.class), mock(RuleBasedAnalyzer.class), mock(AiAnalyzer.class),
                 mock(DeepAnalyzer.class), mock(QuerySnapshotRepository.class), mock(BaselineService.class),
-                mock(PrometheusClient.class), queryMasker, mock(AiAnalysisRunner.class));
+                mock(PrometheusClient.class), queryMasker, mock(AiAnalysisRunner.class),
+                mock(io.dbtower.insight.internal.CollectionStatusStore.class));
     }
 
     @Test

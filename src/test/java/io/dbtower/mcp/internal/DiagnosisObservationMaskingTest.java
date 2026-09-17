@@ -77,7 +77,8 @@ class DiagnosisObservationMaskingTest {
         InsightController controller = new InsightController(registry, factory, mock(ComparisonService.class),
                 mock(RuleBasedAnalyzer.class), mock(AiAnalyzer.class), mock(DeepAnalyzer.class),
                 mock(QuerySnapshotRepository.class), baseline, mock(PrometheusClient.class),
-                new QueryMasker(true, false), mock(AiAnalysisRunner.class));
+                new QueryMasker(true, false), mock(AiAnalysisRunner.class),
+                mock(io.dbtower.insight.internal.CollectionStatusStore.class));
 
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         respond("/api/instances/1/sessions", () -> controller.sessions(1L, 50));

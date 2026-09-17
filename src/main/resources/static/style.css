@@ -202,6 +202,9 @@ body {
 /* 설정은 켜져 있으나 지금은 대상에 닿지 않는 상태 — 초록 "수집중"이 거짓말이 되지 않게 회색(B9).
    글자 대비 #52697d / #eef1f5 = 4.7:1 */
 .collect-toggle.paused { background: #eef1f5; color: #52697d; border-color: #cbd5e1; }
+/* 대상은 응답하는데 수집이 연속 실패(#72) — 주황 면. 글자 대비 #8a4d05 / #fff1e0 6.01:1(.btn-accent와 같은 짝) */
+.collect-toggle.failing { background: #fff1e0; color: #8a4d05; border-color: #f5d0a0; }
+.collect-note { display: block; margin-top: 4px; font-size: var(--fs-caption); color: #8a4d05; word-break: keep-all; }
 
 /* 시간대 선택 */
 .time-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
