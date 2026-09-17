@@ -1914,6 +1914,8 @@ function advisorCandidateList(sql) {
   let text = String(sql || "").replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
   // 서브쿼리 안의 열은 바깥 테이블의 것이 아니다 — 괄호 속 SELECT를 먼저 지운다
   text = text.replace(/\b[A-Za-z_]\w*\(\s*\)/g, " ? ");   // current_database() 같은 인자 없는 호출
+  // "id"·`id`처럼 따옴표로 감싼 식별자도 열로 읽는다 — ORM이 만든 쿼리는 대개 이 모양이다(#48)
+  text = text.replace(/["`]([A-Za-z_]\w*)["`]/g, "$1");
   for (let i = 0; i < 5 && /\(\s*select\b[^()]*\)/i.test(text); i++) text = text.replace(/\(\s*select\b[^()]*\)/gi, " ? ");
   const from = text.match(/\bfrom\s+([A-Za-z_][\w.]*)(?:\s+(?:as\s+)?([A-Za-z_]\w*))?/i);
   if (!from) return [];
