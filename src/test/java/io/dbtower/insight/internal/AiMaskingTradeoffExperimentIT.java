@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.AiAnalyzer.CallSite;
+import io.dbtower.analysis.PlanMasker;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.analysis.RuleBasedAnalyzer;
 import io.dbtower.operator.ConnectionPools;
@@ -186,7 +187,7 @@ class AiMaskingTradeoffExperimentIT {
         when(factory.create(any())).thenReturn(operator);
         AiAnalyzer analyzer = mock(AiAnalyzer.class);
         AiAnalysisRunner runner = new AiAnalysisRunner(factory, new RuleBasedAnalyzer(), analyzer,
-                new QueryMasker(true, maskAiPrompt));
+                new QueryMasker(true, maskAiPrompt), new PlanMasker(true, false));
 
         runner.run(instanceFor(c), c.sql(), AiAnalysisRunner.Listener.NONE);
 
@@ -326,7 +327,8 @@ class AiMaskingTradeoffExperimentIT {
 
     /**
      * 사례마다 1회 호출이던 E2를 반복해 응답 편차를 본다. 설계 오류로 뺀 L7·C4는 부르지 않는다.
-     * B·C는 E2 응답을 1회차로 쓰고 2·3회차만 부른다. D(계획 문자열의 값은 지우고 앞뒤 %만 남김)는 1~3회차를 부른다.
+     * B·C는 E2 응답을 1회차로 쓰고 2·3회차만 부른다. D(계획 문자열의 값은 지우고 앞뒤 %만 남김)와
+     * E(제품 {@link PlanMasker} — 조건 키 안에서 숫자까지 가림)는 1~3회차를 부른다.
      * 판정은 이 테스트가 하지 않는다 — 응답 원문을 남기고 판정은 별도 스크립트가 사람 판정과 대조한 뒤 한다.
      * 게이트: DBTOWER_EXPERIMENT=1 과 DBTOWER_EXPERIMENT_REPEAT=1
      */
@@ -350,6 +352,10 @@ class AiMaskingTradeoffExperimentIT {
             perCondition.put("B", prompt(typeOf(c), sqlFor(c, "B"), plan, findings));
             perCondition.put("C", prompt(typeOf(c), sqlFor(c, "C"), maskPlanStringLiterals(plan), findings));
             perCondition.put("D", prompt(typeOf(c), sqlFor(c, "C"), maskPlanKeepWildcards(plan), findings));
+            // 조건 E는 실험 장치가 아니라 제품 함수다 — PlanMasker가 조건 키 안에서만 가리고 숫자까지 가린다.
+            // C·D가 작은따옴표만 보는 탓에 계획의 맨숫자가 남았고(L9·L10), 그 구멍을 메운 것이 이 조건이다.
+            perCondition.put("E", prompt(typeOf(c), sqlFor(c, "C"),
+                    PlanMasker.maskPlan(typeOf(c), plan), findings));
             prompts.put(c.id(), perCondition);
         }
         Set<String> done = new TreeSet<>();
@@ -365,8 +371,8 @@ class AiMaskingTradeoffExperimentIT {
         }
         List<String[]> order = new ArrayList<>();
         for (MaskCase c : cases) {
-            for (String condition : List.of("B", "C", "D")) {
-                for (int rep = "D".equals(condition) ? 1 : 2; rep <= 3; rep++) {
+            for (String condition : List.of("B", "C", "D", "E")) {
+                for (int rep = List.of("D", "E").contains(condition) ? 1 : 2; rep <= 3; rep++) {
                     if (!done.contains(c.id() + "|" + condition + "|" + rep)) {
                         order.add(new String[]{c.id(), condition, String.valueOf(rep)});
                     }
