@@ -296,6 +296,35 @@ class QueryDetailE2ETest {
         System.out.printf("MEASURE 새로고침 뒤 주소: %s%n", page.url());
     }
 
+    /**
+     * PostgreSQL JSON 실행계획은 노드 트리로 보인다(#83) — 수백 줄 JSON 대신 노드 종류·대상·조건·비용·추정 행 한 줄씩,
+     * 자기 몫 비용이 가장 큰 노드를 강조하고 원문은 접는다.
+     */
+    @Test
+    void PostgreSQL_JSON_실행계획은_노드_트리로_보이고_가장_비싼_노드를_강조한다() {
+        Page page = consoleAs(USER);
+        String plan = "[{\\\"Plan\\\":{\\\"Node Type\\\":\\\"Limit\\\",\\\"Total Cost\\\":60.74,\\\"Plan Rows\\\":22,\\\"Plans\\\":["
+                + "{\\\"Node Type\\\":\\\"Sort\\\",\\\"Total Cost\\\":61.24,\\\"Plan Rows\\\":222,\\\"Sort Key\\\":[\\\"o.ordered_at DESC\\\"],\\\"Plans\\\":["
+                + "{\\\"Node Type\\\":\\\"Seq Scan\\\",\\\"Relation Name\\\":\\\"orders\\\",\\\"Alias\\\":\\\"o\\\",\\\"Total Cost\\\":45.0,\\\"Plan Rows\\\":222,"
+                + "\\\"Filter\\\":\\\"((status)::text = 'PAID'::text)\\\"}]}]}}]";
+        page.route("**/explain**", route -> fulfillJson(route, "{\"plan\":\"" + plan + "\",\"findings\":[]}"));
+        page.locator("#top-table tbody tr").first().locator("td").first().click();
+        page.locator("#btn-explain").click();
+
+        Locator nodes = page.locator("#detail-plan .plan-node");
+        assertThat(nodes).hasCount(3);
+        assertThat(nodes.nth(0)).containsText("Limit");
+        assertThat(nodes.nth(2)).containsText("Seq Scan");
+        assertThat(nodes.nth(2)).containsText("orders o");
+        assertThat(nodes.nth(2)).containsText("((status)::text = 'PAID'::text)");
+        assertThat(nodes.nth(2)).hasClass(Pattern.compile("hot"));
+        assertThat(nodes.nth(2)).containsText("가장 비싼 노드");
+        assertThat(nodes.nth(1)).containsText("정렬 o.ordered_at DESC");
+        assertThat(page.locator("#detail-plan details.plan-raw")).not().hasAttribute("open", "");
+        page.locator("#detail-plan").scrollIntoViewIfNeeded();
+        screenshot(page, "querydetail-plan-tree.png");
+    }
+
     /** 관제 화면을 그 인스턴스로 연다. 표를 그릴 응답은 라우트로 대신 채운다. */
     private Page consoleAs(String username) {
         return consoleAs(username, null);
