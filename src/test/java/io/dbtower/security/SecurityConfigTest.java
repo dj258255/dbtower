@@ -19,7 +19,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 원칙: 관제 조회는 VIEWER부터, 토큰 조회·인스턴스 등록은 ADMIN만, 기계는 Bearer 토큰.
  * 사람별 역할(요청자·승인자·운영자)의 행렬은 PersonaAccessTest가 본다.
  */
-@SpringBootTest(properties = "dbtower.security.api-token=test-api-token")
+@SpringBootTest(properties = {"dbtower.security.api-token=test-api-token", "dbtower.security.mcp-token=test-mcp-token"})
 @AutoConfigureMockMvc
 class SecurityConfigTest {
 
@@ -74,7 +74,7 @@ class SecurityConfigTest {
     @WithMockUser(roles = "ADMIN")
     void ADMIN은_서비스_토큰을_조회한다() throws Exception {
         mvc.perform(get("/api/security/mcp-token")).andExpect(status().isOk())
-                .andExpect(jsonPath("$.token").value("test-api-token"));
+                .andExpect(jsonPath("$.token").value("test-mcp-token"));   // MCP 카드는 MCP 전용 토큰을 준다(#99)
     }
 
     @Test
@@ -100,9 +100,41 @@ class SecurityConfigTest {
     @Test
     void Bearer_토큰_요청은_쿠키가_없으므로_CSRF_없이_동작한다() throws Exception {
         // 403(CSRF 거부)이 아니라 비즈니스 검증까지 도달해야 한다 — 빈 본문이라 4xx여도 403은 아님
-        mvc.perform(post("/mcp").header("Authorization", "Bearer test-api-token")
+        mvc.perform(post("/mcp").header("Authorization", "Bearer test-mcp-token")
                         .contentType("application/json")
                         .content("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}"))
                 .andExpect(status().isOk());
+    }
+
+    // #99 — 두 서비스 토큰은 자리가 다르다. API 토큰은 /mcp에서, MCP 토큰은 도구가 부르지 않는 REST에서 인증되지 않는다
+
+    @Test
+    void API_토큰으로는_MCP_채널에_들어가지_못한다() throws Exception {
+        mvc.perform(post("/mcp").header("Authorization", "Bearer test-api-token")
+                        .contentType("application/json")
+                        .content("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void MCP_토큰은_도구가_부르는_조회_경로에서만_통한다() throws Exception {
+        mvc.perform(get("/api/instances").header("Authorization", "Bearer test-mcp-token")).andExpect(status().isOk());
+        // 도구가 부르지 않는 관리 API — 토큰이 새도 열리지 않는다
+        mvc.perform(get("/api/security/mcp-token").header("Authorization", "Bearer test-mcp-token"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/security/users").header("Authorization", "Bearer test-mcp-token"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/instances").header("Authorization", "Bearer test-mcp-token")
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/workbench/tickets/1/execute").header("Authorization", "Bearer test-mcp-token"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void API_토큰은_지금처럼_REST에서_통한다() throws Exception {
+        mvc.perform(get("/api/security/mcp-token").header("Authorization", "Bearer test-api-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").value("test-mcp-token"));   // 카드는 MCP 전용 토큰을 준다
     }
 }

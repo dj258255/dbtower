@@ -3001,7 +3001,7 @@ async function loadMcpCommand() {
     $("#mcp-cmd-http").textContent =
       `claude mcp add --transport http dbtower http://localhost:8080/mcp --header "Authorization: Bearer ${token}"`;
     // 명령에 토큰이 들어간 순간 보조 줄도 그 사실을 말해야 한다(공유 금지)
-    $("#mcp-http-note").textContent = "서비스 토큰이 들어 있습니다. 공유하지 마세요.";
+    $("#mcp-http-note").textContent = "MCP 전용 토큰이 들어 있습니다 — 읽기·요청 도구 경로에서만 통하지만 공유하지 마세요.";
   } catch { /* ADMIN이 아니면 — 헤더 없는 등록(OAuth 브라우저 로그인) 안내를 유지 */ }
 }
 

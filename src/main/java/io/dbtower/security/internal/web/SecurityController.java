@@ -1,6 +1,6 @@
 package io.dbtower.security.internal.web;
 
-import io.dbtower.security.ApiTokenProvider;
+import io.dbtower.security.McpTokenProvider;
 import io.dbtower.security.internal.PlatformRoles;
 import io.dbtower.security.internal.domain.PlatformUser;
 import io.dbtower.security.internal.persistence.PlatformUserRepository;
@@ -30,12 +30,12 @@ import java.util.Map;
 @RequestMapping("/api")
 public class SecurityController {
 
-    private final ApiTokenProvider tokens;
+    private final McpTokenProvider mcpTokens;
     private final PlatformUserRepository users;
     private final PasswordEncoder encoder;
 
-    public SecurityController(ApiTokenProvider tokens, PlatformUserRepository users, PasswordEncoder encoder) {
-        this.tokens = tokens;
+    public SecurityController(McpTokenProvider mcpTokens, PlatformUserRepository users, PasswordEncoder encoder) {
+        this.mcpTokens = mcpTokens;
         this.users = users;
         this.encoder = encoder;
     }
@@ -54,10 +54,10 @@ public class SecurityController {
                 PlatformRoles.capabilities(granted).stream().map(Enum::name).toList(), PlatformRoles.home(granted));
     }
 
-    /** MCP 연동 카드가 등록 명령을 완성할 때 사용 — ADMIN만 (SecurityConfig) */
+    /** MCP 연동 카드가 등록 명령을 완성할 때 사용 — ADMIN만 (SecurityConfig). API 토큰이 아니라 MCP 전용 토큰이다(#99) */
     @GetMapping("/security/mcp-token")
     public Map<String, String> mcpToken() {
-        return Map.of("token", tokens.token());
+        return Map.of("token", mcpTokens.token());
     }
 
     public record TeamRequest(@Size(max = 100) String teamLabel) {

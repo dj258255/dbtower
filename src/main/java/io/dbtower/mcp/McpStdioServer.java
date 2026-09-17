@@ -16,15 +16,19 @@ import java.nio.charset.StandardCharsets;
  * 프로토콜 처리는 McpProtocolHandler 공용 — HTTP 전송(POST /mcp)과 같은 코어를 쓴다.
  *
  * 실행: scripts/dbtower-mcp.sh / 대상 주소: DBTOWER_URL (기본 http://localhost:8080),
- * 인증: DBTOWER_API_TOKEN (앱과 동일한 값 — A1 이후 REST가 인증을 요구한다)
+ * 인증: DBTOWER_MCP_TOKEN(MCP 전용, #99) — 없으면 DBTOWER_API_TOKEN. 앱과 같은 값이어야 한다
  */
 public final class McpStdioServer {
 
     public static void main(String[] args) throws Exception {
-        // 별도 프로세스라 앱과 같은 토큰을 환경변수로 받아야 한다 (DBTOWER_API_TOKEN)
+        // 별도 프로세스라 앱의 토큰을 환경변수로 받는다. 도구가 부르는 REST 경로만 통하는 MCP 전용 토큰(DBTOWER_MCP_TOKEN)을 먼저 쓴다(#99).
+        // 전의 설정(DBTOWER_API_TOKEN)도 도구 경로에서는 그대로 통하므로 읽는다
+        String token = System.getenv("DBTOWER_MCP_TOKEN");
+        if (token == null || token.isBlank()) {
+            token = System.getenv("DBTOWER_API_TOKEN");
+        }
         McpProtocolHandler handler = new McpProtocolHandler(
-                System.getenv().getOrDefault("DBTOWER_URL", "http://localhost:8080"),
-                System.getenv("DBTOWER_API_TOKEN"));
+                System.getenv().getOrDefault("DBTOWER_URL", "http://localhost:8080"), token);
         ObjectMapper mapper = new ObjectMapper();
         BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
         String line;
