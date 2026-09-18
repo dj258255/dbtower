@@ -1,0 +1,5 @@
+dbms,mode,total_ms,affected_rows,batches,writer_median_ms,writer_p95_ms,writer_max_ms,writer_commits
+MySQL,BATCH,152022,1000000,1000,2.48,10.31,637.97,76970
+MySQL,SINGLE,23209,1000000,0,4.16,10.51,22892.76,130
+PostgreSQL,BATCH,129907,1000000,1000,0.95,3.28,512.60,173167
+PostgreSQL,SINGLE,9524,1000000,0,11.59,63.72,8370.76,130
