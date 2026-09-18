@@ -1,4 +1,4 @@
--- 워크벤치 콘솔 계정 + 데모 데이터 — SQL Server 계열 (근거: docs/least-privilege.md "워크벤치 콘솔 계정", VERIFICATION 131절)
+-- 워크벤치 콘솔 계정 + 데모 데이터 — SQL Server 계열 (근거: docs/operate/least-privilege.md "워크벤치 콘솔 계정", VERIFICATION 131절)
 -- 검증 환경은 arm64 Azure SQL Edge(docker-compose.arm64.yml)다. 이미지에 sqlcmd가 없어 JDBC로 적용한다. 여러 번 실행해도 같다:
 --   DB_PASSWORD='Dbtower1234!' java -cp <mssql-jdbc.jar> scripts/ApplySql.java \
 --     "jdbc:sqlserver://127.0.0.1:11433;encrypt=false" sa docker/workbench-mssql.sql

@@ -1,4 +1,4 @@
--- 워크벤치 콘솔 계정 + 데모 데이터 — PostgreSQL (근거: docs/least-privilege.md "워크벤치 콘솔 계정")
+-- 워크벤치 콘솔 계정 + 데모 데이터 — PostgreSQL (근거: docs/operate/least-privilege.md "워크벤치 콘솔 계정")
 -- 수동 실행: docker exec -i dbtower-postgres psql -U postgres -d sample < docker/workbench-postgres.sql
 -- 여러 번 실행해도 결과가 같다.
 

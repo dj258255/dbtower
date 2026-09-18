@@ -113,6 +113,51 @@ hits=$(grep -nE "font-size: *[0-9.]+px" src/main/resources/static/style.css src/
   | grep -vE "font-size: *(18|26|28)px")
 report "화면 글자 크기 토큰 (px 직접 지정 금지)" "$hits"
 
+# 9) 문서 경로가 실제 파일을 가리키는가 — 마크다운 링크뿐 아니라 빌드·설정에 박힌 경로까지.
+#    docs/ 를 폴더로 나눈 뒤(v1.6.2) Dockerfile 의 COPY 경로가 낡은 채 남아 릴리스 빌드가 깨졌다.
+#    ci.yml 은 이미지를 빌드하지 않아 PR CI 가 전부 통과했다 — CI 는 릴리스 빌드의 대역이 아니다.
+hits=$(python3 -c '
+import re, pathlib
+SKIP = {".git", "node_modules", ".delegate", ".claude", ".gradle", "build", ".serena", ".venv", "bin"}
+root = pathlib.Path(".")
+bad = []
+
+# (1) 마크다운 링크
+link = re.compile(r"\]\(([^)\s#]+\.(?:md|svg|png|jpg|json|sql|yml|mmd|mjs|py))(?:#[^)]*)?\)")
+for p in root.rglob("*.md"):
+    if any(x in p.parts for x in SKIP):
+        continue
+    for m in link.finditer(p.read_text()):
+        t = m.group(1)
+        if t.startswith(("http://", "https://", "mailto:")):
+            continue
+        if not (p.parent / t).exists():
+            bad.append(str(p) + " -> " + t)
+
+# (2) 빌드·설정·코드에 박힌 docs/ 경로. 마이그레이션은 제외한다 —
+#     적용된 파일은 체크섬 때문에 못 고치므로 낡은 주석을 그대로 둔다(AGENTS.md 마이그레이션 절)
+path = re.compile(r"docs/[A-Za-z0-9._/-]+\.md")
+for p in root.rglob("*"):
+    if not p.is_file() or p.suffix in {".jar", ".png", ".jpg", ".svg", ".gif", ".class", ".md"}:
+        continue
+    if any(x in p.parts for x in SKIP) or "db/migration" in str(p):
+        continue
+    try:
+        text = p.read_text()
+    except Exception:
+        continue
+    for m in path.finditer(text):
+        # "lakehouse docs/CONTRACT.md" 처럼 다른 저장소의 문서를 가리키는 것은 이 검사의 대상이 아니다
+        before = text[max(0, m.start() - 40):m.start()]
+        if "lakehouse" in before:
+            continue
+        if not (root / m.group(0)).exists():
+            bad.append(str(p) + " -> " + m.group(0))
+
+print("\n".join(sorted(set(bad))))
+')
+report "문서 경로가 실제 파일을 가리킨다 (빌드·설정 포함)" "$hits"
+
 echo
 [ "$fail" -eq 0 ] && echo "규약 검사 전부 통과" || echo "규약 검사 실패 — 위 항목을 확인하세요"
 exit $fail

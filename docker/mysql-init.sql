@@ -1,4 +1,4 @@
--- DBTower 최소 권한 모니터링 계정 — MySQL (실측 근거: docs/least-privilege.md)
+-- DBTower 최소 권한 모니터링 계정 — MySQL (실측 근거: docs/operate/least-privilege.md)
 --
 -- 주의: docker-compose.yml은 이 파일을 마운트하지 않는다 (compose 무수정 정책).
 -- 수동 실행:
