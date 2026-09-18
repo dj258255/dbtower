@@ -132,6 +132,7 @@ class BulkChangeProgressE2ETest {
         assertThat(rows.nth(1)).containsText("처음 ~ 1000");
         assertThat(rows.nth(1)).containsText("못 읽음");
         assertThat(rows.nth(1)).not().containsText("0초");
+        screenshot(page, "bulk-change-batches.png");
 
         // 진행 중에는 스스로 다시 물어 상태가 바뀐다(완료까지)
         assertThat(page.locator(".tk-sub .tk-st")).hasText(Pattern.compile("완료"));
@@ -164,11 +165,33 @@ class BulkChangeProgressE2ETest {
         assertThat(page.locator("button[data-act=bulk-resume]")).isVisible();
         assertThat(page.locator("button[data-act=bulk-cancel]")).isVisible();
         assertThat(page.locator("button[data-act=bulk-pause]")).hasCount(0);
+        screenshot(page, "bulk-change-progress.png");
     }
 
-    /** 티켓 탭을 열고 첫 티켓을 고른다. 탭을 누른 직후에는 칸이 아직 숨겨져 있어 목록이 보이기를 기다린다. */
+    /** 사람이 눈으로 볼 캡처 — 단언이 잡지 못하는 배치·간격·대비를 확인한다(181·184절) */
+    private static void screenshot(Page page, String name) {
+        try {
+            java.nio.file.Path dir = java.nio.file.Path.of("build/e2e");
+            java.nio.file.Files.createDirectories(dir);
+            page.screenshot(new Page.ScreenshotOptions().setPath(dir.resolve(name)).setFullPage(true));
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * 티켓 탭을 열고 첫 티켓을 고른다.
+     *
+     * <p>탭 클릭이 워크벤치 모듈의 이벤트 바인딩보다 먼저 들어가면 칸이 열리지 않는다 — 요소는 DOM에 있고
+     * hidden인 채로 남아 "보이기를 기다리다" 20초를 넘겼다(캡처 회차에서 실제로 겪었다). 칸이 열릴 때까지 다시 누른다.
+     */
     private static void openTicket(Page page) {
-        page.click("button.wb-rtab[data-pane=tickets]");
+        Locator pane = page.locator("#wb-pane-tickets");
+        for (int i = 0; i < 10 && !pane.isVisible(); i++) {
+            page.click("button.wb-rtab[data-pane=tickets]");
+            page.waitForTimeout(500);
+        }
+        pane.waitFor(new Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.VISIBLE));
         Locator item = page.locator("#wb-pane-tickets li[data-ticket]").first();
         item.waitFor(new Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.VISIBLE));
         item.click();

@@ -28,14 +28,18 @@ const OUTCOME = {
 const ARMED = new Set(["execute", "execute-raw", "revert", "approve", "cancel", "resolve-applied", "resolve-not-applied",
   "bulk-start", "bulk-cancel"]);
 
-/** 대량 일괄 변경의 상태 — 화면에 보일 말과 색 */
+/**
+ * 대량 일괄 변경의 상태 — 화면에 보일 말과 배지 색.
+ * 색은 티켓 상태와 같은 `st-*`를 쓴다. 메시지 상자용 클래스(change·blocked)를 배지에 주면
+ * 배경 없이 검은 글자만 남아 상태가 눈에 띄지 않는다(캡처로 확인).
+ */
 const BULK_STATE = {
-  RUNNING: ["진행 중", "change"],
-  PAUSED_LAG: ["복제 지연으로 멈춤", "blocked"],
-  PAUSED_BY_USER: ["멈춤", "blocked"],
-  CANCELLED: ["취소됨", "blocked"],
-  DONE: ["완료", "change"],
-  FAILED: ["실패", "blocked"],
+  RUNNING: ["진행 중", "st-running"],
+  PAUSED_LAG: ["복제 지연으로 멈춤", "st-rejected"],
+  PAUSED_BY_USER: ["멈춤", "st-pending"],
+  CANCELLED: ["취소됨", "st-rolled"],
+  DONE: ["완료", "st-executed"],
+  FAILED: ["실패", "st-rejected"],
 };
 
 /** 진행 중인 상태 — 이 동안만 다시 물어본다 */
@@ -228,7 +232,7 @@ export class TicketPanel {
         마지막 적용 키 ${esc(this.bulk.lastAppliedKey ?? "-")}</div>
       <div class="hint">취소해도 이미 커밋한 배치는 되돌리지 않습니다. 어디까지 적용됐는지는 마지막 키로 봅니다.</div>
       ${controls.length ? `<div class="tk-actions">${controls.join("")}</div>` : ""}
-      ${rows ? `<table class="tk-batches"><thead><tr><th>배치</th><th>키 구간</th><th>행</th><th>소요</th><th>복제 지연</th></tr></thead>
+      ${rows ? `<table class="tk-batches"><thead><tr><th>배치</th><th>키 구간</th><th class="num">행</th><th class="num">소요</th><th>복제 지연</th></tr></thead>
         <tbody>${rows}</tbody></table>` : ""}`;
   }
 
