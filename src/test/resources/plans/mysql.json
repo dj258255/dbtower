@@ -1,0 +1,197 @@
+{
+  "query_block": {
+    "select_id": 1,
+    "cost_info": {
+      "query_cost": "97.96"
+    },
+    "nested_loop": [
+      {
+        "table": {
+          "table_name": "cat",
+          "access_type": "index",
+          "possible_keys": [
+            "PRIMARY"
+          ],
+          "key": "name",
+          "used_key_parts": [
+            "name"
+          ],
+          "key_length": "194",
+          "rows_examined_per_scan": 1,
+          "rows_produced_per_join": 1,
+          "filtered": "100.00",
+          "using_index": true,
+          "cost_info": {
+            "read_cost": "1.00",
+            "eval_cost": "0.10",
+            "prefix_cost": "1.10",
+            "data_read_per_join": "224"
+          },
+          "used_columns": [
+            "id"
+          ]
+        }
+      },
+      {
+        "table": {
+          "table_name": "sch",
+          "access_type": "ref",
+          "possible_keys": [
+            "PRIMARY",
+            "catalog_id"
+          ],
+          "key": "catalog_id",
+          "used_key_parts": [
+            "catalog_id"
+          ],
+          "key_length": "8",
+          "ref": [
+            "mysql.cat.id"
+          ],
+          "rows_examined_per_scan": 5,
+          "rows_produced_per_join": 5,
+          "filtered": "100.00",
+          "using_index": true,
+          "cost_info": {
+            "read_cost": "0.28",
+            "eval_cost": "0.50",
+            "prefix_cost": "1.88",
+            "data_read_per_join": "1K"
+          },
+          "used_columns": [
+            "id",
+            "catalog_id",
+            "name"
+          ]
+        }
+      },
+      {
+        "table": {
+          "table_name": "tbl",
+          "access_type": "ALL",
+          "possible_keys": [
+            "schema_id"
+          ],
+          "rows_examined_per_scan": 479,
+          "rows_produced_per_join": 11,
+          "filtered": "0.46",
+          "using_join_buffer": "hash join",
+          "cost_info": {
+            "read_cost": "79.99",
+            "eval_cost": "1.11",
+            "prefix_cost": "90.74",
+            "data_read_per_join": "348K"
+          },
+          "used_columns": [
+            "schema_id",
+            "name",
+            "type",
+            "engine",
+            "collation_id",
+            "hidden",
+            "se_private_id",
+            "tablespace_id",
+            "partition_type",
+            "created"
+          ],
+          "attached_condition": "((`mysql`.`tbl`.`schema_id` = `mysql`.`sch`.`id`) and (`mysql`.`tbl`.`name` like '%@gmail.com') and (`mysql`.`tbl`.`created` >= TIMESTAMP'2000-01-01 00:00:00') and (0 <> can_access_table(`mysql`.`sch`.`name`,`mysql`.`tbl`.`name`)) and (0 <> is_visible_dd_object(`mysql`.`tbl`.`hidden`)))"
+        }
+      },
+      {
+        "table": {
+          "table_name": "col",
+          "access_type": "eq_ref",
+          "possible_keys": [
+            "PRIMARY"
+          ],
+          "key": "PRIMARY",
+          "used_key_parts": [
+            "id"
+          ],
+          "key_length": "8",
+          "ref": [
+            "mysql.tbl.collation_id"
+          ],
+          "rows_examined_per_scan": 1,
+          "rows_produced_per_join": 11,
+          "filtered": "100.00",
+          "using_index": true,
+          "cost_info": {
+            "read_cost": "0.56",
+            "eval_cost": "1.11",
+            "prefix_cost": "92.40",
+            "data_read_per_join": "2K"
+          },
+          "used_columns": [
+            "id"
+          ]
+        }
+      },
+      {
+        "table": {
+          "table_name": "ts",
+          "access_type": "eq_ref",
+          "possible_keys": [
+            "PRIMARY"
+          ],
+          "key": "PRIMARY",
+          "used_key_parts": [
+            "id"
+          ],
+          "key_length": "8",
+          "ref": [
+            "mysql.tbl.tablespace_id"
+          ],
+          "rows_examined_per_scan": 1,
+          "rows_produced_per_join": 11,
+          "filtered": "100.00",
+          "cost_info": {
+            "read_cost": "0.56",
+            "eval_cost": "1.11",
+            "prefix_cost": "94.07",
+            "data_read_per_join": "78K"
+          },
+          "used_columns": [
+            "id",
+            "se_private_data"
+          ]
+        }
+      },
+      {
+        "table": {
+          "table_name": "stat",
+          "access_type": "eq_ref",
+          "possible_keys": [
+            "PRIMARY"
+          ],
+          "key": "PRIMARY",
+          "used_key_parts": [
+            "schema_name",
+            "table_name"
+          ],
+          "key_length": "388",
+          "ref": [
+            "mysql.sch.name",
+            "mysql.tbl.name"
+          ],
+          "rows_examined_per_scan": 1,
+          "rows_produced_per_join": 11,
+          "filtered": "100.00",
+          "cost_info": {
+            "read_cost": "2.78",
+            "eval_cost": "1.11",
+            "prefix_cost": "97.96",
+            "data_read_per_join": "5K"
+          },
+          "used_columns": [
+            "schema_name",
+            "table_name",
+            "table_rows",
+            "cached_time"
+          ],
+          "attached_condition": "<if>(found_match(stat), (if((`mysql`.`tbl`.`type` = 'VIEW'),NULL,internal_table_rows(`mysql`.`sch`.`name`,`mysql`.`tbl`.`name`,if((`mysql`.`tbl`.`partition_type` is null),`mysql`.`tbl`.`engine`,''),`mysql`.`tbl`.`se_private_id`,(`mysql`.`tbl`.`hidden` <> 'Visible'),`mysql`.`ts`.`se_private_data`,coalesce(`mysql`.`stat`.`table_rows`,0),coalesce(cast(`mysql`.`stat`.`cached_time` as unsigned),0))) > 1024), true)"
+        }
+      }
+    ]
+  }
+}

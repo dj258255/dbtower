@@ -5,11 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.AiAnalyzer.CallSite;
+import io.dbtower.analysis.PlanMasker;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.audit.AuditTrail;
 import io.dbtower.mcp.McpProtocolHandler;
 import io.dbtower.mcp.internal.DiagnosisGuard.CallerScope;
 import io.dbtower.registry.DatabaseInstance;
+import io.dbtower.registry.DbmsType;
 import io.dbtower.registry.RegistryService;
 import io.dbtower.security.ApiTokenProvider;
 import org.slf4j.Logger;
@@ -25,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.LongFunction;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -102,6 +105,8 @@ public class DiagnosisService {
     private final AiTurn ai;
     private final boolean aiEnabled;
     private final QueryMasker queryMasker;
+    private final PlanMasker planMasker;
+    private final LongFunction<DbmsType> dbmsTypeResolver;
     private final String backend;
     private final Path rulesPath;
     private final int maxSteps;
@@ -114,6 +119,7 @@ public class DiagnosisService {
                             ApiTokenProvider tokens,
                             AiAnalyzer analyzer,
                             QueryMasker queryMasker,
+                            PlanMasker planMasker,
                             RegistryService registry,
                             AuditTrail auditTrail,
                             @Value("${dbtower.ai.rules-path:docs/ai-analysis-rules.md}") String rulesPath,
@@ -122,7 +128,8 @@ public class DiagnosisService {
         this(new McpProtocolHandler("http://localhost:" + port, tokens.token()),
                 (system, user) -> analyzer.complete(CallSite.DIAGNOSE, system, user),
                 analyzer.isEnabled(), analyzer.backend(), queryMasker, rulesPath, maxSteps,
-                () -> scopeOf(registry), auditTrail::record);
+                () -> scopeOf(registry), auditTrail::record, planMasker,
+                id -> registry.findOptional(id).map(DatabaseInstance::getType).orElse(null));
     }
 
     // 테스트 생성자 — 스크립트된 AI와 (목 REST를 가리키는) 실제 MCP 핸들러를 주입해
@@ -137,7 +144,17 @@ public class DiagnosisService {
     DiagnosisService(McpProtocolHandler handler, AiTurn ai, boolean aiEnabled,
                      String backend, QueryMasker queryMasker, String rulesPath, int maxSteps,
                      Supplier<CallerScope> scopeResolver, ToolAudit audit) {
+        this(handler, ai, aiEnabled, backend, queryMasker, rulesPath, maxSteps, scopeResolver, audit,
+                new PlanMasker(true, false), id -> null);
+    }
+
+    DiagnosisService(McpProtocolHandler handler, AiTurn ai, boolean aiEnabled,
+                     String backend, QueryMasker queryMasker, String rulesPath, int maxSteps,
+                     Supplier<CallerScope> scopeResolver, ToolAudit audit,
+                     PlanMasker planMasker, LongFunction<DbmsType> dbmsTypeResolver) {
         this.handler = handler;
+        this.planMasker = planMasker;
+        this.dbmsTypeResolver = dbmsTypeResolver;
         this.ai = ai;
         this.aiEnabled = aiEnabled;
         this.backend = backend;
@@ -281,8 +298,8 @@ public class DiagnosisService {
             }
 
             String executedArgs = maskedArgs(verdict.arguments());
-            String observation = DiagnosisGuard.filterObservation(
-                    tool, callTool(tool, verdict.arguments()), scope, mapper);
+            String observation = maskPlanIfExplain(instanceId, tool, DiagnosisGuard.filterObservation(
+                    tool, callTool(tool, verdict.arguments()), scope, mapper));
             // outcome 200은 "허용되어 실행됨"이다 — 도구 자체의 실패 여부는 트레이스 결과 본문에 남는다
             audit.record("AI_TOOL " + tool + " " + executedArgs, instanceId, 200);
             String snippet = observation.length() > OBSERVATION_CAP
@@ -325,6 +342,42 @@ public class DiagnosisService {
     }
 
     /** 호출 스레드의 인증으로 본 범위 — 팀 범위면 볼 수 있는 인스턴스 id를 미리 뽑아 둔다. */
+    /**
+     * explain 결과는 도구 결과 문자열로 들어와 그대로 프롬프트에 붙는다 — {@link QueryMasker}가 SQL을 가려도
+     * 옵티마이저가 계획에 찍어 둔 조건 값은 이 경로로 나간다. AI에 붙이기 전에 가린다.
+     *
+     * <p>결과는 계획 하나가 아니라 {@code {plan, findings, planTable}} 봉투다. 세 자리가 모두 값을 실을 수
+     * 있어 셋 다 가린다 — {@code plan}은 기종별 키 한정 가림으로, 규칙 지적문과 표시용 표는 형식을 모르므로
+     * 따옴표 문자열을 지우는 쪽으로 간다.
+     *
+     * <p>봉투를 파싱하지 못하면 통째로 후자에 넘긴다. 원문을 그대로 돌려주지 않는다(fail-closed).
+     */
+    private String maskPlanIfExplain(long instanceId, String tool, String observation) {
+        if (!"explain".equals(tool) || observation == null || observation.isBlank()) {
+            return observation;
+        }
+        DbmsType type = dbmsTypeResolver.apply(instanceId);
+        try {
+            JsonNode root = mapper.readTree(observation);
+            if (!(root instanceof ObjectNode env) || !env.path("plan").isTextual()) {
+                return planMasker.applyForAiPrompt(observation);
+            }
+            String plan = env.get("plan").asText();
+            env.put("plan", type == null ? planMasker.applyForAiPrompt(plan)
+                    : planMasker.applyForAiPrompt(type, plan));
+            for (String key : List.of("findings", "planTable")) {
+                if (!env.path(key).isMissingNode()) {
+                    env.set(key, mapper.readTree(
+                            planMasker.applyForAiPrompt(env.get(key).toString())));
+                }
+            }
+            return mapper.writeValueAsString(env);
+        } catch (Exception e) {
+            log.warn("D3 진단 — explain 결과를 봉투로 읽지 못해 형식 무관 가림으로 떨어진다: {}", e.toString());
+            return planMasker.applyForAiPrompt(observation);
+        }
+    }
+
     private static CallerScope scopeOf(RegistryService registry) {
         if (registry.hasGlobalScope()) {
             return CallerScope.GLOBAL;

@@ -1,0 +1,149 @@
+{
+  "note": "#100 가림 수준 재측정 — 값이 진단을 가르는 사례 15개와 값과 무관한 대조군 3개. 조건은 NONE·FULL·STRUCTURE",
+  "cases": [
+    {
+      "id": "M1",
+      "dbms": "MySQL",
+      "sql": "SELECT id, email FROM exp_mask_customers WHERE phone = 01012345678",
+      "expectedCause": "암시적 형변환 (문자열 열 phone에 숫자 리터럴)",
+      "valueRole": "값의 타입(따옴표 없는 숫자)이 근거",
+      "sensitiveLiterals": ["01012345678", "1012345678"]
+    },
+    {
+      "id": "M2",
+      "dbms": "MySQL",
+      "sql": "SELECT id FROM exp_mask_customers WHERE email LIKE '%@gmail.com'",
+      "expectedCause": "앞 와일드카드라 email 인덱스를 쓰지 못한다",
+      "valueRole": "값 앞의 % 위치가 근거",
+      "sensitiveLiterals": ["%@gmail.com", "@gmail.com"]
+    },
+    {
+      "id": "M3",
+      "dbms": "MySQL",
+      "sql": "SELECT id FROM exp_mask_customers WHERE email LIKE 'user123%'",
+      "expectedCause": "뒤 와일드카드라 email 인덱스 범위 조회가 가능하다(정상)",
+      "valueRole": "% 가 뒤에만 있다는 것이 근거",
+      "sensitiveLiterals": ["user123%", "user123"]
+    },
+    {
+      "id": "M4",
+      "dbms": "MySQL",
+      "sql": "SELECT id, amount FROM exp_mask_orders WHERE created_at >= '2000-01-01'",
+      "expectedCause": "전 기간 조건이라 거의 모든 행이 대상, 풀스캔이 정상",
+      "valueRole": "날짜가 데이터 시작보다 훨씬 이르다는 것이 근거",
+      "sensitiveLiterals": ["2000-01-01"]
+    },
+    {
+      "id": "M5",
+      "dbms": "MySQL",
+      "sql": "SELECT id, amount FROM exp_mask_orders WHERE created_at >= '2026-08-01'",
+      "expectedCause": "최근 한 달만 필요한데 풀스캔이라 created_at 인덱스가 필요하다",
+      "valueRole": "날짜가 최근이라 선택도가 높다는 것이 근거",
+      "sensitiveLiterals": ["2026-08-01"]
+    },
+    {
+      "id": "M6",
+      "dbms": "MySQL",
+      "sql": "SELECT id, amount FROM exp_mask_orders WHERE status = 'PAID'",
+      "expectedCause": "PAID가 대부분(95%)이라 낮은 선택도, 풀스캔이 정상",
+      "valueRole": "어느 상태 값인지가 선택도를 가른다",
+      "sensitiveLiterals": ["PAID"]
+    },
+    {
+      "id": "M7",
+      "dbms": "MySQL",
+      "sql": "SELECT id, amount FROM exp_mask_orders WHERE status = 'CANCELLED'",
+      "expectedCause": "CANCELLED는 드물어(1%) 선택도가 높다, status 인덱스를 쓰는 것이 정상",
+      "valueRole": "어느 상태 값인지가 선택도를 가른다",
+      "sensitiveLiterals": ["CANCELLED"]
+    },
+    {
+      "id": "M8",
+      "dbms": "MySQL",
+      "sql": "SELECT id FROM exp_mask_orders ORDER BY id LIMIT 20 OFFSET 190000",
+      "expectedCause": "깊은 OFFSET이라 앞 19만 행을 읽고 버린다",
+      "valueRole": "OFFSET 숫자의 크기가 근거",
+      "sensitiveLiterals": ["190000"]
+    },
+    {
+      "id": "P1",
+      "dbms": "PostgreSQL",
+      "sql": "SELECT id FROM exp_mask_customers WHERE email LIKE '%@gmail.com'",
+      "expectedCause": "앞 와일드카드라 email 인덱스를 쓰지 못한다",
+      "valueRole": "값 앞의 % 위치가 근거",
+      "sensitiveLiterals": ["%@gmail.com", "@gmail.com"]
+    },
+    {
+      "id": "P2",
+      "dbms": "PostgreSQL",
+      "sql": "SELECT id FROM exp_mask_customers WHERE email LIKE 'user123%'",
+      "expectedCause": "뒤 와일드카드라 인덱스 범위 조회가 가능하다(정상)",
+      "valueRole": "% 가 뒤에만 있다는 것이 근거",
+      "sensitiveLiterals": ["user123%", "user123"]
+    },
+    {
+      "id": "P3",
+      "dbms": "PostgreSQL",
+      "sql": "SELECT id FROM exp_mask_orders WHERE amount > 10",
+      "expectedCause": "거의 모든 행이 조건을 만족해 낮은 선택도, 풀스캔이 정상",
+      "valueRole": "숫자의 크기가 선택도를 가른다",
+      "sensitiveLiterals": ["> 10"]
+    },
+    {
+      "id": "P4",
+      "dbms": "PostgreSQL",
+      "sql": "SELECT id FROM exp_mask_orders WHERE amount > 99000",
+      "expectedCause": "상위 1%만 만족해 선택도가 높다, amount 인덱스를 쓰는 것이 정상",
+      "valueRole": "숫자의 크기가 선택도를 가른다",
+      "sensitiveLiterals": ["99000"]
+    },
+    {
+      "id": "P5",
+      "dbms": "PostgreSQL",
+      "sql": "SELECT id FROM exp_mask_orders WHERE created_at >= '2000-01-01'",
+      "expectedCause": "전 기간 조건이라 거의 모든 행이 대상, 풀스캔이 정상",
+      "valueRole": "날짜가 데이터 시작보다 훨씬 이르다는 것이 근거",
+      "sensitiveLiterals": ["2000-01-01"]
+    },
+    {
+      "id": "P6",
+      "dbms": "PostgreSQL",
+      "sql": "SELECT id FROM exp_mask_orders WHERE created_at >= '2026-08-01'",
+      "expectedCause": "최근 한 달만 필요한데 풀스캔이라 created_at 인덱스가 필요하다",
+      "valueRole": "날짜가 최근이라 선택도가 높다는 것이 근거",
+      "sensitiveLiterals": ["2026-08-01"]
+    },
+    {
+      "id": "P7",
+      "dbms": "PostgreSQL",
+      "sql": "SELECT id FROM exp_mask_customers WHERE email IN ('user5@gmail.com', 'user10@gmail.com', 'user15@gmail.com', 'user20@gmail.com', 'user25@gmail.com', 'user30@gmail.com', 'user35@gmail.com', 'user40@gmail.com', 'user45@gmail.com', 'user50@gmail.com')",
+      "expectedCause": "IN 목록의 값이 열 개라 인덱스 조회를 열 번 반복한다",
+      "valueRole": "목록에 든 값의 개수가 근거",
+      "sensitiveLiterals": ["user5@gmail.com", "user50@gmail.com", "@gmail.com"]
+    },
+    {
+      "id": "C1",
+      "dbms": "MySQL",
+      "sql": "SELECT id FROM exp_mask_customers WHERE LEFT(email, 5) = 'kimab'",
+      "expectedCause": "열에 함수를 씌워 인덱스를 쓰지 못한다",
+      "valueRole": "대조군 — 값과 무관하게 구조만으로 판정된다",
+      "sensitiveLiterals": ["kimab"]
+    },
+    {
+      "id": "C2",
+      "dbms": "PostgreSQL",
+      "sql": "SELECT id FROM exp_mask_customers WHERE lower(email) = 'kim@exp.test'",
+      "expectedCause": "열에 함수를 씌워 인덱스를 쓰지 못한다",
+      "valueRole": "대조군 — 값과 무관하게 구조만으로 판정된다",
+      "sensitiveLiterals": ["kim@exp.test"]
+    },
+    {
+      "id": "C3",
+      "dbms": "PostgreSQL",
+      "sql": "SELECT c.email, o.amount FROM exp_mask_orders o JOIN exp_mask_customers c ON o.customer_id = c.id WHERE o.status = 'REFUND'",
+      "expectedCause": "조인 키 customer_id에 인덱스가 없다",
+      "valueRole": "대조군 — 값과 무관하게 구조만으로 판정된다",
+      "sensitiveLiterals": ["REFUND"]
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+Plan hash value: 2311451600
+
+--------------------------------------------------------------------------
+| Id  | Operation	  | Name | Rows  | Bytes | Cost (%CPU)| Time	 |
+--------------------------------------------------------------------------
+|   0 | SELECT STATEMENT  |	 |  1455 | 49470 |   362   (0)| 00:00:01 |
+|*  1 |  TABLE ACCESS FULL| OBJ$ |  1455 | 49470 |   362   (0)| 00:00:01 |
+--------------------------------------------------------------------------
+
+Predicate Information (identified by operation id):
+---------------------------------------------------
+
+   1 - filter("NAME" LIKE '%@GMAIL.COM' AND "OBJ#">1024 AND
+	      "CTIME">=TO_DATE(' 2000-01-01 00:00:00', 'syyyy-mm-dd hh24:mi:ss'))
+
+SQL Analysis Report (identified by operation id/Query Block Name/Object Alias):
+-------------------------------------------------------------------------------
+
+   1 -	SEL$1 / "OBJ$"@"SEL$1"
+	   -  The following columns have predicates which preclude their
+	      use as keys in index range scan. Consider rewriting the
+	      predicates.
+		"NAME"

@@ -3,6 +3,8 @@ package io.dbtower.analysis;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
+
 /**
  * 쿼리 마스킹 — 외부(웹훅·AI·MCP)로 SQL을 내보내기 직전, 값(리터럴)만 {@code ?}로 가리고
  * 구조(식별자·키워드·연산자)는 그대로 둔다.
@@ -62,7 +64,16 @@ public class QueryMasker {
      * 앞 와일드카드는 인덱스를 못 쓰는 이유 자체라, 값을 지우면서 그 모양까지 지우면 진단이 사라진다(E2' 조건 D).
      */
     public static String maskLiterals(String sql, boolean keepWildcards) {
-        return maskLiterals(sql, keepWildcards, true);
+        return maskLiterals(sql, keepWildcards, true, AiMaskLevel.STRUCTURE, Clock.systemDefaultZone());
+    }
+
+    /**
+     * 실행계획 안의 조건식 하나 — 가림 수준에 따라 값의 모양을 남기거나 통째로 지운다.
+     * {@link AiMaskLevel#STRUCTURE}면 {@code %} 자리·자릿수·날짜 거리가 남고, {@link AiMaskLevel#FULL}이면
+     * 전부 {@code ?}가 된다. 무엇이 왜 남는지는 {@link MaskShape} 주석에 있다.
+     */
+    public static String maskPlanLiterals(String expr, AiMaskLevel level, Clock clock) {
+        return maskLiterals(expr, true, true, level, clock);
     }
 
     /**
@@ -70,10 +81,11 @@ public class QueryMasker {
      * 그 숫자를 가리면 민감정보는 줄지만 진단 재료가 사라진다({@link PlanMasker} 주석).
      */
     public static String maskQuotedLiterals(String sql) {
-        return maskLiterals(sql, true, false);
+        return maskLiterals(sql, true, false, AiMaskLevel.STRUCTURE, Clock.systemDefaultZone());
     }
 
-    private static String maskLiterals(String sql, boolean keepWildcards, boolean maskNumbers) {
+    private static String maskLiterals(String sql, boolean keepWildcards, boolean maskNumbers,
+                                       AiMaskLevel level, Clock clock) {
         if (sql == null || sql.isEmpty()) {
             return sql;
         }
@@ -87,7 +99,7 @@ public class QueryMasker {
             if (c == '\'') {
                 int end = skipSingleQuoted(sql, i);
                 if (keepWildcards) {
-                    out.append(quotedWildcardShape(sql, i, end));
+                    out.append(quotedWildcardShape(sql, i, end, level, clock));
                 } else {
                     out.append('?');
                 }
@@ -172,7 +184,9 @@ public class QueryMasker {
             // 숫자 리터럴 — 여기 도달한 숫자는 식별자 꼬리가 아닌 순수 리터럴( = 100, LIMIT 50, IN (1,2) )
             if (isDigit(c) || (c == '.' && i + 1 < n && isDigit(sql.charAt(i + 1)))) {
                 int end = skipNumber(sql, i);
-                out.append(maskNumbers ? "?" : sql.substring(i, end));
+                out.append(maskNumbers
+                        ? (keepWildcards ? MaskShape.number(sql.substring(i, end), level) : "?")
+                        : sql.substring(i, end));
                 i = end;
                 continue;
             }
@@ -185,12 +199,10 @@ public class QueryMasker {
     }
 
     /** {@code [i, end)}의 문자열 리터럴을 따옴표와 앞뒤 % 자리만 남긴 모양으로 — {@code '%값%'} -> {@code '%?%'}. */
-    private static String quotedWildcardShape(String s, int i, int end) {
+    private static String quotedWildcardShape(String s, int i, int end, AiMaskLevel level, Clock clock) {
         int bodyEnd = (end <= s.length() && end > i + 1 && s.charAt(end - 1) == '\'') ? end - 1 : end;
         String body = s.substring(i + 1, Math.max(i + 1, bodyEnd));
-        String lead = body.startsWith("%") ? "%" : "";
-        String trail = body.length() > 1 && body.endsWith("%") ? "%" : "";
-        return "'" + lead + "?" + trail + "'";
+        return "'" + MaskShape.body(body, level, clock) + "'";
     }
 
     /** 여는 작은따옴표 위치 i에서 시작해 닫는 따옴표 다음 인덱스를 반환('' 및 \' 이스케이프 처리). */

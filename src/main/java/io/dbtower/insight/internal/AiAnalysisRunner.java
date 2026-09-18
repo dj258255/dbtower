@@ -3,6 +3,7 @@ package io.dbtower.insight.internal;
 import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.AiAnalyzer.CallSite;
 import io.dbtower.analysis.PlanMasker;
+import io.dbtower.analysis.TableScale;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.analysis.RuleBasedAnalyzer;
 import io.dbtower.analysis.TextDeltaBatcher;
@@ -56,7 +57,8 @@ public class AiAnalysisRunner {
     }
 
     public Result run(DatabaseInstance instance, String sql, Listener listener) {
-        String plan = operatorFactory.create(instance).explain(sql);
+        var operator = operatorFactory.create(instance);
+        String plan = operator.explain(sql);
         List<String> findings = analyzer.analyze(instance.getType(), plan);
         listener.plan(plan, findings);
         // AI 프롬프트 마스킹은 mask-ai-prompt(기본 false)로만 켠다 — 리터럴을 가리면
@@ -65,14 +67,18 @@ public class AiAnalysisRunner {
         // (docs/experiments/ai-masking-tradeoff.md 표 1: SQL만 가려도 41개 중 19개가 프롬프트에 남았다).
         // 화면·문의에는 가리지 않은 계획(plan)을 그대로 준다 — 사람이 보는 근거를 가리는 설정이 아니다.
         String planForAi = planMasker.applyForAiPrompt(instance.getType(), plan);
+        // 선택도는 비율이라 분모가 필요하다 — 계획의 추정 행수만으로는 전체의 몇 %인지 알 수 없다.
+        // 행수는 값이 아니라 규모라 가리지 않는다(TableScale 주석).
+        String scale = TableScale.describe(operator, sql);
         String context = """
                 [%s] 아래 쿼리와 실행계획을 판단 기준에 따라 분석해줘.
                 SQL:
                 %s
                 실행계획:
                 %s
-                규칙 기반 지적: %s""".formatted(instance.getType(), queryMasker.applyForAiPrompt(sql), planForAi,
-                findings.isEmpty() ? "(없음)" : String.join(" / ", findings));
+                규칙 기반 지적: %s%s""".formatted(instance.getType(), queryMasker.applyForAiPrompt(sql), planForAi,
+                findings.isEmpty() ? "(없음)" : String.join(" / ", findings),
+                scale.isEmpty() ? "" : "\n" + scale);
         Optional<String> ai;
         if (listener == Listener.NONE) {
             ai = aiAnalyzer.analyze(CallSite.EXPLAIN, context);
