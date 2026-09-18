@@ -222,3 +222,45 @@ curl -fsS http://localhost:${DBTOWER_PORT:-8080}/actuator/health
 이 저장소가 자동 게시하는 범위는 GitHub Release와 GHCR 이미지까지다. 특정 조직의 서버,
 Kubernetes 클러스터, RDS에는 자격증명과 비용 권한 없이 자동 배포하지 않는다. 런타임 반영은
 이 compose 절차나 해당 조직의 배포 시스템에서 명시적으로 수행한다.
+
+## 8. 메타 DB 가 늙는 방식 — 표마다 다르다 (#148·#149)
+
+설치한 뒤 디스크가 어떻게 자라는지는 표마다 다르다. **지우는 잡이 없는 표가 셋 있는데 이유가 각각 다르다** —
+빠뜨린 것이 아니라 정한 것이다. 이 표를 보고 디스크 계획을 세운다.
+
+### 시간이 지나면 지워지는 것
+
+| 표 | 보존 | 정리 방식 | 설정 |
+|---|---|---|---|
+| `query_snapshot_part` | 7일 | 월 파티션 DROP | `dbtower.snapshot.*` |
+| `health_sample_part` | 35일 | 월 파티션 DROP | `dbtower.slo.*` |
+| `ash_sample`·`ash_sample_tick` | 7일 | 배치 DELETE | `dbtower.ash.*` |
+| `wait_event_snapshot`·`size_snapshot`·`index_usage_snapshot`·`plan_snapshot` | 설정값 | 잡에서 DELETE | 각 모듈 설정 |
+| 백업 산출물 | 14일·최근 7개 | 파일 정리 | `dbtower.backup.*` |
+
+**파티션 DROP 과 DELETE 를 나눈 기준은 쌓이는 속도다.** 월 단위로 통째로 떼어 내면 즉시 끝나고
+dead tuple 블로트가 없다(V18 실측: 200만 행 DELETE 1.9초, VACUUM 후에도 공간 미반환).
+많이 쌓이는 표일수록 파티션이 이긴다.
+
+### 지워지지 않는 것 — 그리고 그 이유
+
+| 표 | 왜 안 지우나 | 자라는 속도 |
+|---|---|---|
+| `audit_event` | "그때 무슨 일이 있었나"를 나중에 묻기 위한 기록이다. 기한을 두면 그 물음에 답할 수 없다 | 사람의 상태 변경 수만큼 |
+| `workbench_query_log` | 같은 이유. "누가 어느 대상에서 무엇을 봤나"가 남아야 한다 | 사람이 조회를 실행한 수만큼 |
+| `login_attempt` | `username` 이 기본 키라 사용자당 한 행이고 upsert 된다 — **행이 늘지 않는다** | 사용자 수만큼(고정) |
+
+앞의 둘은 **남기는 것을 좁혀** 양을 잡는다. `audit_event` 는 `/api/**` 의 POST·PUT·DELETE 만 남기고
+GET 조회는 남기지 않는다 — 화면 폴링이 빈도의 대부분이라 그것까지 남기면 정작 봐야 할 상태 변경이 묻힌다.
+AI 운영 작업의 릴레이 선점처럼 기계가 매초 두드리는 경로도 성공 응답은 뺀다.
+
+### 지우고 싶다면
+
+감사 기록에 기한을 두어야 하는 규정이 있다면 직접 지운다. 플랫폼은 이 표를 스스로 지우지 않는다.
+
+```sql
+DELETE FROM audit_event WHERE occurred_at < now() - INTERVAL '1 year';
+DELETE FROM workbench_query_log WHERE occurred_at < now() - INTERVAL '1 year';
+```
+
+지운 뒤 `VACUUM (ANALYZE)` 로 공간을 돌려받는다. 한 번에 많이 지우면 WAL 이 몰리므로 구간을 나눈다.
