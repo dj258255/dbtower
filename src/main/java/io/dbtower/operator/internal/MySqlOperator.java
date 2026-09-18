@@ -30,6 +30,7 @@ import io.dbtower.operator.model.TableDetail;
 import io.dbtower.operator.model.TableDetail.DdlSource;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.operator.model.WaitEvent;
+import io.dbtower.operator.model.KeyRangeSyntax;
 
 import io.dbtower.registry.DatabaseInstance;
 import org.springframework.dao.DataAccessException;
@@ -331,6 +332,27 @@ public class MySqlOperator extends AbstractJdbcOperator {
     protected void beginChange(Statement st, int timeoutSeconds) throws SQLException {
         st.execute("SET SESSION innodb_lock_wait_timeout = " + timeoutSeconds);
         st.execute("SET SESSION lock_wait_timeout = " + timeoutSeconds);
+    }
+
+    /**
+     * MySQL은 행 값 비교 {@code (a, b) > (?, ?)}를 인덱스 <b>범위</b>로 내리지 않는다(#141).
+     * 문법은 받지만 계획이 {@code Covering index scan} + {@code Filter}라 배치가 뒤로 갈수록 앞 구간을 다시 훑는다.
+     *
+     * <p>실측(20만 행, 복합 PK {@code (shop_id, id)}, MySQL 8.4.11):
+     *
+     * <pre>
+     * (shop_id, id) > (1, 1)          -> 훑은 행     1,001    0.27ms
+     * (shop_id, id) > (4, 40000)      -> 훑은 행   191,000   30.5ms
+     * 펼친 형태, 같은 경계               -> 훑은 행    10,000    2.6ms
+     *   Covering index range scan using PRIMARY over (shop_id = 4 AND 40000 < id) OR (4 &lt; shop_id)
+     * </pre>
+     *
+     * <p>인덱스를 더 걸어도 훑는 행은 그대로다(보조 인덱스 {@code (shop_id, id)}로 200,000행 동일) —
+     * 없는 인덱스 문제가 아니라 옵티마이저가 조건을 시작 위치로 바꾸지 못하는 문제다.
+     */
+    @Override
+    protected KeyRangeSyntax bulkKeyRangeSyntax() {
+        return KeyRangeSyntax.EXPANDED;
     }
 
     @Override

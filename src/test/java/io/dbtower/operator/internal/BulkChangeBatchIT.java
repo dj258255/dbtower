@@ -208,6 +208,39 @@ class BulkChangeBatchIT {
         }
     }
 
+    @Test
+    @EnabledIfEnvironmentVariable(named = GATE, matches = "1")
+    @DisplayName("Oracle — 복합 기본 키를 사전순으로 훑어 누락·중복 0")
+    void oracleCompositeKey() throws SQLException {
+        seedComposite(ORACLE_URL, ORACLE_CRED);
+        OracleOperator op = new OracleOperator(instance(9308, DbmsType.ORACLE, 11521), pools, null);
+        try {
+            runCompositeAndVerify(op, ORACLE_CRED, ORACLE_URL);
+        } finally {
+            dropComposite(ORACLE_URL, ORACLE_CRED);
+        }
+    }
+
+    /**
+     * SQL Server — 복합 키가 <b>문법부터</b> 다르다(#140).
+     *
+     * <p>v1.6.0이 이 기종에서 깨진 채 나갔다. 행 값 비교 {@code (a, b) > (?, ?)}를 SQL Server가 파싱하지 못해
+     * ({@code Msg 4145}) 첫 경계 조회에서 죽었는데, 복합 키 테스트가 MySQL·PostgreSQL만 덮어 게이트를 통과했다.
+     * 기종 확장과 복합 키가 <b>곱해지는 자리</b>를 테스트가 비워 두면 이렇게 된다.
+     */
+    @Test
+    @EnabledIfEnvironmentVariable(named = MSSQL_GATE, matches = "1")
+    @DisplayName("SQL Server — 복합 기본 키를 펼친 형태로 훑어 누락·중복 0")
+    void sqlServerCompositeKey() throws SQLException {
+        seedComposite(MSSQL_URL, MSSQL_CRED);
+        MsSqlOperator op = new MsSqlOperator(instance(9309, DbmsType.MSSQL, MSSQL_PORT), pools, null);
+        try {
+            runCompositeAndVerify(op, MSSQL_CRED, MSSQL_URL);
+        } finally {
+            dropComposite(MSSQL_URL, MSSQL_CRED);
+        }
+    }
+
     /**
      * 복합 키 {@code (shop_id, id)}를 사전순으로 훑는다.
      *
@@ -219,7 +252,6 @@ class BulkChangeBatchIT {
             throws SQLException {
         BulkChangePlan plan = new BulkChangePlan("UPDATE bulk_it_composite SET note = 'done'", "kind = 'M'",
                 "bulk_it_composite", List.of("shop_id", "id"), BATCH, 30);
-        assertThat(plan.compare(">")).isEqualTo("(shop_id, id) > (?, ?)");
 
         List<BulkBatchOutcome> batches = new ArrayList<>();
         List<Object> lastKey = null;
@@ -251,9 +283,11 @@ class BulkChangeBatchIT {
 
     /** 같은 id가 여러 shop_id에 걸치도록 둔다 — 열별 부등호로는 못 자르는 모양이다. */
     private static void seedComposite(String url, ConsoleCredential cred) throws SQLException {
-        exec(url, cred, "DROP TABLE IF EXISTS bulk_it_composite",
-                "CREATE TABLE bulk_it_composite (shop_id BIGINT, id BIGINT, kind VARCHAR(4), note VARCHAR(20),"
-                        + " PRIMARY KEY (shop_id, id))");
+        dropComposite(url, cred);
+        String varchar = url.startsWith("jdbc:oracle:") ? "VARCHAR2" : "VARCHAR";
+        exec(url, cred,
+                "CREATE TABLE bulk_it_composite (shop_id NUMERIC(19), id NUMERIC(19), kind " + varchar
+                        + "(4), note " + varchar + "(20), PRIMARY KEY (shop_id, id))");
         try (Connection c = DriverManager.getConnection(url, cred.username(), cred.password())) {
             c.setAutoCommit(false);
             try (PreparedStatement ps = c.prepareStatement(
@@ -364,6 +398,14 @@ class BulkChangeBatchIT {
             return;
         }
         exec(url, cred, "DROP TABLE IF EXISTS bulk_it");
+    }
+
+    private static void dropComposite(String url, ConsoleCredential cred) throws SQLException {
+        if (url.startsWith("jdbc:oracle:")) {
+            execIgnoring(url, cred, "ORA-00942", "DROP TABLE bulk_it_composite");
+            return;
+        }
+        exec(url, cred, "DROP TABLE IF EXISTS bulk_it_composite");
     }
 
     private static void execIgnoring(String url, ConsoleCredential cred, String code, String... statements)

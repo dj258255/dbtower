@@ -3,6 +3,7 @@ package io.dbtower.operator.internal;
 import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.BulkBatchOutcome;
 import io.dbtower.operator.model.BulkChangePlan;
+import io.dbtower.operator.model.KeyRangeSyntax;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -53,6 +54,16 @@ final class JdbcBulkChangeRunner {
         default String selectHead(int rows) {
             return "";
         }
+
+        /**
+         * 복합 키 구간을 적는 형태 — 기본은 표준 행 값 비교다.
+         *
+         * <p>MySQL과 SQL Server가 {@link KeyRangeSyntax#EXPANDED}로 덮어쓴다. SQL Server는 문법이 없어서,
+         * MySQL은 문법은 받지만 인덱스 범위로 내리지 않아서다(#140·#141, 200절).
+         */
+        default KeyRangeSyntax keyRangeSyntax() {
+            return KeyRangeSyntax.ROW_VALUE;
+        }
     }
 
     private final Dialect dialect;
@@ -69,17 +80,18 @@ final class JdbcBulkChangeRunner {
      */
     List<Object> nextBoundary(Connection c, BulkChangePlan plan, List<Object> lastKey) {
         boolean hasLower = lastKey != null && !lastKey.isEmpty();
+        KeyRangeSyntax syntax = dialect.keyRangeSyntax();
         String where = !hasLower
                 ? (plan.whereTail().isBlank() ? "" : " WHERE " + plan.whereTail())
                 : " WHERE " + (plan.whereTail().isBlank() ? "" : "(" + plan.whereTail() + ") AND ")
-                        + plan.compare(">");
+                        + plan.compare(">", syntax);
         String sql = "SELECT " + dialect.selectHead(plan.batchRows()) + plan.keyList()
                 + " FROM " + plan.table() + where
                 + " ORDER BY " + plan.keyList() + dialect.limitClause(plan.batchRows());
         try (PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setQueryTimeout(plan.timeoutSeconds());
             if (hasLower) {
-                bind(ps, 1, lastKey);
+                bind(ps, 1, syntax.binds(lastKey));
             }
             try (ResultSet rs = ps.executeQuery()) {
                 List<Object> last = null;
@@ -114,7 +126,8 @@ final class JdbcBulkChangeRunner {
      */
     BulkBatchOutcome executeBatch(Connection c, BulkChangePlan plan, List<Object> fromKey, List<Object> toKey) {
         boolean hasLower = fromKey != null && !fromKey.isEmpty();
-        String sql = plan.statementHead() + " WHERE " + plan.whereFor(hasLower);
+        KeyRangeSyntax syntax = dialect.keyRangeSyntax();
+        String sql = plan.statementHead() + " WHERE " + plan.whereFor(hasLower, syntax);
         boolean autoCommit = true;
         try {
             autoCommit = c.getAutoCommit();
@@ -128,9 +141,9 @@ final class JdbcBulkChangeRunner {
                 ps.setQueryTimeout(plan.timeoutSeconds());
                 int i = 1;
                 if (hasLower) {
-                    i = bind(ps, i, fromKey);
+                    i = bind(ps, i, syntax.binds(fromKey));
                 }
-                bind(ps, i, toKey);
+                bind(ps, i, syntax.binds(toKey));
                 affected = ps.executeLargeUpdate();
             }
             long elapsed = (System.nanoTime() - t0) / 1_000_000;

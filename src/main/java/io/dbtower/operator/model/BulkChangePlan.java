@@ -17,8 +17,12 @@ import java.util.List;
  * <p><b>복합 키</b>는 행 값 비교로 자른다(#126). {@code (shop_id, id)}의 다음 구간은
  * {@code (shop_id, id) > (?, ?) AND (shop_id, id) <= (?, ?)}다. 열마다 부등호를 따로 쓰면
  * ({@code shop_id > ? AND id > ?}) 구간이 겹치거나 비어 누락·중복이 생긴다 — 사전순 한 덩이로 비교해야
- * "이 키보다 뒤" 하나의 뜻이 된다. 두 기종 모두 행 값 비교로 인덱스를 탄다 — PostgreSQL은 {@code Index Cond: (ROW(shop_id, id) > ROW(1, 1))}으로
- * 조건이 인덱스에 내려가고, MySQL은 {@code type: index, key: PRIMARY, Using index}로 커버링 스캔이 된다(200절).
+ * "이 키보다 뒤" 하나의 뜻이 된다. 경계 {@code (2, 49999)}에서 실측하면 사전순 비교가 100,001행,
+ * 열별 비교가 2행이다 — 열별로 쓰면 99,999행이 조용히 빠진다(200절).
+ *
+ * <p><b>같은 뜻을 기종마다 다르게 적는다</b>(#140·#141). SQL Server는 행 값 비교 문법이 아예 없고
+ * ({@code Msg 4145}), MySQL은 문법은 받지만 인덱스 범위로 내리지 않아 배치가 뒤로 갈수록 앞 구간을 다시 훑는다.
+ * 그래서 형태 선택을 {@link KeyRangeSyntax}로 빼고 기종이 고른다 — 자세한 실측은 그쪽 주석에 있다(200절).
  *
  * @param statementHead  승인된 문장에서 {@code WHERE} 앞까지(예: {@code UPDATE t SET note = 'x'})
  * @param whereTail      승인된 문장의 {@code WHERE} 조건(키워드 제외). 조건이 없으면 빈 문자열
@@ -53,16 +57,25 @@ public record BulkChangePlan(String statementHead, String whereTail, String tabl
      * 열이 하나일 때 괄호를 씌우지 않는 이유는 기종마다 한 열 행 값 비교의 처리가 달라서다.
      */
     public String compare(String operator) {
-        if (keyColumns.size() == 1) {
-            return keyColumns.get(0) + " " + operator + " ?";
-        }
-        String placeholders = keyColumns.stream().map(c -> "?").reduce((a, b) -> a + ", " + b).orElseThrow();
-        return "(" + keyList() + ") " + operator + " (" + placeholders + ")";
+        return compare(operator, KeyRangeSyntax.ROW_VALUE);
+    }
+
+    /**
+     * 형태를 골라 적는 사전순 비교 — 기종이 {@link KeyRangeSyntax}로 고른다.
+     * 자리표시자 수가 형태마다 다르므로 바인딩은 {@link KeyRangeSyntax#binds}로 만들어야 한다.
+     */
+    public String compare(String operator, KeyRangeSyntax syntax) {
+        return syntax.compare(keyColumns, operator);
     }
 
     /** 원문 조건과 키 범위를 합친 {@code WHERE} 절 — 조건이 없으면 키 범위만 남는다. */
     public String whereFor(boolean hasLowerBound) {
-        String range = (hasLowerBound ? compare(">") + " AND " : "") + compare("<=");
+        return whereFor(hasLowerBound, KeyRangeSyntax.ROW_VALUE);
+    }
+
+    /** 형태를 골라 적는 {@code WHERE} 절. */
+    public String whereFor(boolean hasLowerBound, KeyRangeSyntax syntax) {
+        String range = (hasLowerBound ? compare(">", syntax) + " AND " : "") + compare("<=", syntax);
         return whereTail.isBlank() ? range : "(" + whereTail + ") AND " + range;
     }
 }
