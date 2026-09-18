@@ -20,7 +20,23 @@ jobs:
       # 기종 분기 기준선·읽기 전용 게이트). 테스트보다 먼저 돌려 빠르게 실패시킨다.
       - name: Convention checks
         run: ./scripts/check-conventions.sh
-      # 역할별 화면 E2E(PersonaUiE2ETest)용 브라우저 — 136절 화면 결함은 사람이 눌러서야 나왔다. CI가 같은 화면을 실제 브라우저로 누른다
+      # 브라우저 바이너리는 Playwright 버전에만 매여 있다 — 커밋마다 다시 받을 이유가 없다(#144, 매 실행 58초).
+      # 키에 버전을 넣어, 버전을 올리면 캐시가 자동으로 갈린다
+      - name: Playwright 버전 확인
+        id: pw
+        run: |
+          v=$(grep -oE "playwright:[0-9]+\.[0-9]+\.[0-9]+" build.gradle | head -1 | sed "s/playwright://")
+          test -n "$v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Playwright $v"
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      # 역할별 화면 E2E(PersonaUiE2ETest)용 브라우저 — 136절 화면 결함은 사람이 눌러서야 나왔다. CI가 같은 화면을 실제 브라우저로 누른다.
+      # 캐시가 맞아도 --with-deps 의 OS 패키지는 러너에 남지 않으므로 그 설치는 건너뛰지 않는다
       - name: Install Playwright Chromium
         run: ./gradlew playwrightInstall
       - name: Test

@@ -1,7 +1,7 @@
 # DBTower 5분 시연 순서
 
 화면을 짧게 시연할 때의 순서다. 한 흐름(느린 쿼리 발견 -> 인덱스 변경 요청 -> 승인 -> 실행 -> 전후 확인)을 역할을 바꿔 가며 끝까지 보여 주고,
-남는 시간에 테이블 보기를 붙인다. 각 장면의 근거 수치는 [VERIFICATION](VERIFICATION.md) 절 번호로 적었다. 네트워크나 AI가 느리면 [데모 GIF](images/demo-change-flow-glass.gif)로 대신한다.
+남는 시간에 테이블 보기를 붙인다. 각 장면의 근거 수치는 [VERIFICATION](VERIFICATION.md) 절 번호로 적었다. 네트워크나 AI가 느리면 [화면 모음](SCREENSHOTS.md)으로 대신한다.
 
 처음 환경을 준비하거나 역할별 버튼을 차례로 확인하려면
 [역할별 수동 테스트](MANUAL-TEST.md)를 먼저 따른다.

@@ -23,7 +23,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * (VERIFICATION 130절). 빠진 값을 어떻게 해석하는지가 곧 안전 계약이라 여기서 고정한다: 캡처 포기와 실제 되돌리기·정리 결과는
  * 명시해야만 전달되고, 명시가 빠지면 추측하지 않고 거부한다.
  */
-@SpringBootTest(properties = "dbtower.security.api-token=test-api-token")
+@SpringBootTest
 @AutoConfigureMockMvc
 class WorkbenchTicketApiTest {
 

@@ -49,8 +49,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 역할 분기는 그대로 그린다. 리뷰 제출 API를 쓰지 않는 이유는 AI 소견 호출이 로컬 환경(claude CLI 유무)에 따라 달라지기 때문이다.
  */
 @EnabledIfEnvironmentVariable(named = "DBTOWER_E2E", matches = "1")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "dbtower.security.api-token=test-api-token")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class PersonaUiE2ETest {
 
     private static final String PASSWORD = "persona-e2e-pass-1234";

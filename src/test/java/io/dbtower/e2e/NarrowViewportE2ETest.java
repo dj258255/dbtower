@@ -45,8 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * (표가 비면 쿼리 상세를 열 수 없어, 이 묶음이 재는 자리 중 하나를 못 본다).
  */
 @EnabledIfEnvironmentVariable(named = "DBTOWER_E2E", matches = "1")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "dbtower.security.api-token=test-api-token")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class NarrowViewportE2ETest {
 
     private static final String PASSWORD = "narrow-e2e-pass-1234";

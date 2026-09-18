@@ -25,7 +25,7 @@ Java 21 + Spring Boot 4로 만들었으며 웹 콘솔은 별도 빌드 체인이
 최근 백업이며, 그 백업이 없으면 실행을 거부합니다. 취소해도 이미 커밋한 배치는 되돌리지 않고,
 어디까지 적용됐는지는 마지막 키로 남깁니다.
 
-![인덱스 제안부터 실행과 전후 비교까지](docs/images/demo-change-flow-glass.gif)
+![관제 첫 화면 — 헬스 스코어, 백업 신선도, 조회 구간 한 줄, AI 어시스턴트](docs/images/webui/188-console-first-screen.jpg)
 
 ## 주요 기능
 

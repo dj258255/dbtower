@@ -34,7 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>허용 쪽은 존재하지 않는 id로 불러 인가만 통과했는지(401·403이 아닌지) 본다. 대상 DB나 실제 티켓에 닿지 않고도
  * "필터가 막았는가"만 가를 수 있다. 승인자와 운영자가 서로의 일을 못 하는 것이 이 설계의 핵심이라 양쪽 모두 거부를 확인한다.
  */
-@SpringBootTest(properties = "dbtower.security.api-token=test-api-token")
+@SpringBootTest
 @AutoConfigureMockMvc
 class PersonaAccessTest {
 

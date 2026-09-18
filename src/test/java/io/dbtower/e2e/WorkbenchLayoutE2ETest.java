@@ -49,8 +49,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>돌리는 법: {@code ./gradlew playwrightInstall && DBTOWER_E2E=1 ./gradlew test --tests '*WorkbenchLayoutE2ETest'}
  */
 @EnabledIfEnvironmentVariable(named = "DBTOWER_E2E", matches = "1")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "dbtower.security.api-token=test-api-token")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class WorkbenchLayoutE2ETest {
 
     private static final String PASSWORD = "e2e-wb-pass-1234";

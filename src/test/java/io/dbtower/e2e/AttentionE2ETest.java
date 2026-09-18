@@ -42,8 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 인스턴스는 닿지 않는 주소로 등록하고 헬스는 up으로 가로챈다(down 판정이면 대상 조회를 건너뛰어 지름길이 조회를 내지 않는다).</p>
  */
 @EnabledIfEnvironmentVariable(named = "DBTOWER_E2E", matches = "1")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "dbtower.security.api-token=test-api-token")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class AttentionE2ETest {
 
     private static final String PASSWORD = "e2e-attn-pass-1234";
