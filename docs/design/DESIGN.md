@@ -15,7 +15,7 @@
 ![DBTower 상세 아키텍처](../diagrams/architecture.svg)
 
 현재 구조의 기준은 Spring Modulith 17개 모듈, `DbmsOperator` 구현 5종, MCP 도구 19개,
-Flyway V46이다. 웹 콘솔과 MCP는 같은 서비스 코어와 호출자 권한을 사용하고, AI는 읽기와
+Flyway V49다. 웹 콘솔과 MCP는 같은 서비스 코어와 호출자 권한을 사용하고, AI는 읽기와
 변경 요청까지만 참여한다. 대상 DB 변경은 `review`가 승인한 티켓을 `workbench` 실행 계층이
 검증할 때만 허용한다.
 
