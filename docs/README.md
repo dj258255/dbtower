@@ -41,7 +41,7 @@ README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. �
 |---|---|---|
 | 1 | [PORTFOLIO-ONEPAGER.md](PORTFOLIO-ONEPAGER.md) | 문제, 해법, 대표 수치 한 장 |
 | 2 | [TECHNICAL-QA.md](TECHNICAL-QA.md) | 설계·안전·검증에 관한 질문과 답 |
-| 3 | [experiments/](experiments/) | 안전장치의 비용을 잰 실험(E1~E5). 표와 CSV는 실험 코드가 생성하며 손으로 고치지 않는다 |
+| 3 | [experiments/](experiments/) | 안전장치의 비용을 잰 실험(E1~E6). 표와 CSV는 실험 코드가 생성하며 손으로 고치지 않는다 |
 | 4 | [CHANGELOG.md](../CHANGELOG.md) -> [ROADMAP.md](ROADMAP.md) | 릴리스별 변경, 남은 백로그와 의도적으로 하지 않는 범위 |
 | 5 | [PRESENTATION.md](PRESENTATION.md) · [PORTFOLIO-AX.md](PORTFOLIO-AX.md) | 발표 원고, AI를 운영 플랫폼에 안전하게 붙인 사례 |
 
