@@ -5,11 +5,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import io.dbtower.PartitionLifecycle;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * ASH 샘플 보존 스윕 — {@code query_snapshot}·{@code wait_event_snapshot}과 대칭(기본 7일).
@@ -31,12 +33,20 @@ public class AshSampleRetentionJob {
     /** 한 번의 스윕에서 지울 최대 행 수 — 대량 DELETE의 락·WAL 폭증을 막는다. */
     private static final int DELETE_BATCH = 50_000;
 
+    /** 일 파티션을 며칠 앞질러 만들어 둘지 — 잡이 며칠 못 돌아도 INSERT 가 DEFAULT 로 새지 않게. */
+    private static final int PARTITIONS_AHEAD = 3;
+
+    private static final List<String> TABLES = List.of("ash_sample", "ash_sample_tick");
+
     private final JdbcTemplate jdbc;
+    private final PartitionLifecycle partitions;
     private final int retentionDays;
 
     public AshSampleRetentionJob(JdbcTemplate jdbc,
+                                 PartitionLifecycle partitions,
                                  @Value("${dbtower.ash.retention-days:7}") int retentionDays) {
         this.jdbc = jdbc;
+        this.partitions = partitions;
         this.retentionDays = retentionDays;
     }
 
@@ -44,10 +54,31 @@ public class AshSampleRetentionJob {
     @SchedulerLock(name = "ash-retention", lockAtLeastFor = "PT1M", lockAtMostFor = "PT10M")
     public void sweep() {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(retentionDays);
-        int samples = deleteBatched("ash_sample", cutoff);
-        int ticks = deleteBatched("ash_sample_tick", cutoff);
-        if (samples > 0 || ticks > 0) {
-            log.info("ASH 보존 스윕 cutoff={} 샘플={}행 틱={}행", cutoff, samples, ticks);
+        for (String table : TABLES) {
+            sweepTable(table, cutoff);
+        }
+    }
+
+    /**
+     * 파티션드면 앞질러 만들고 기한 지난 날을 DROP, 아니면 예전처럼 DELETE 로 폴백한다(#149).
+     *
+     * <p>폴백을 남기는 이유: H2 로 도는 테스트에는 PG 파티션이 없고, V49 적용 전 설치에서도
+     * 이 잡이 돌 수 있다. 어느 쪽인지는 PG 카탈로그로 판별한다.
+     */
+    private void sweepTable(String table, LocalDateTime cutoff) {
+        if (partitions.isPartitioned(table)) {
+            partitions.ensureUpcomingDailyPartitions(table, PARTITIONS_AHEAD);
+            int dropped = partitions.dropExpiredPartitions(table, cutoff);
+            // 파티션 경계에 걸친 날은 DROP 대상이 아니다 — 그 구간만 DELETE 가 맡는다
+            int rows = deleteBatched(table, cutoff);
+            if (dropped > 0 || rows > 0) {
+                log.info("ASH 보존 스윕 {} cutoff={} 파티션={}개 남은행={}행", table, cutoff, dropped, rows);
+            }
+            return;
+        }
+        int rows = deleteBatched(table, cutoff);
+        if (rows > 0) {
+            log.info("ASH 보존 스윕 {} cutoff={} {}행 (파티션 아님 — DELETE 폴백)", table, cutoff, rows);
         }
     }
 

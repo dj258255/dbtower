@@ -30,7 +30,8 @@ public class PartitionLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(PartitionLifecycle.class);
 
-    private static final Pattern PARTITION_NAME = Pattern.compile(".*_y(\\d{4})m(\\d{2})");
+    private static final Pattern MONTHLY_NAME = Pattern.compile(".*_y(\\d{4})m(\\d{2})");
+    private static final Pattern DAILY_NAME = Pattern.compile(".*_y(\\d{4})m(\\d{2})d(\\d{2})");
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -56,6 +57,19 @@ public class PartitionLifecycle {
         YearMonth now = YearMonth.now();
         for (YearMonth month : List.of(now, now.plusMonths(1))) {
             jdbcTemplate.execute(createPartitionSql(table, month));
+        }
+    }
+
+    /**
+     * 일 파티션을 앞질러 만든다 — 오늘부터 {@code ahead}일치.
+     *
+     * <p>월 단위보다 앞질러야 하는 폭이 넓다. 월은 한 장이 30일을 덮어 한 달에 한 번만 만들면 되지만,
+     * 일은 매일 새로 필요해서 잡이 한 번 못 돌면 그날 INSERT 가 DEFAULT 파티션으로 샌다.
+     */
+    public void ensureUpcomingDailyPartitions(String table, int ahead) {
+        LocalDate today = LocalDate.now();
+        for (int i = 0; i <= ahead; i++) {
+            jdbcTemplate.execute(createDailyPartitionSql(table, today.plusDays(i)));
         }
     }
 
@@ -86,13 +100,29 @@ public class PartitionLifecycle {
         if (!childName.startsWith(table + "_y")) {
             return false;
         }
-        Matcher m = PARTITION_NAME.matcher(childName);
+        // 일 파티션을 먼저 본다 — 월 패턴이 `_y2026m09` 까지만 보면 `d18` 이 남아 matches() 가 실패하고,
+        // 그 결과 "이름 규약을 안 따르는 자식"으로 분류돼 영원히 지워지지 않는다. 조용히 안 지우는 쪽이
+        // 제일 나쁜 실패라 단위를 명시적으로 갈라 본다(#149).
+        Matcher daily = DAILY_NAME.matcher(childName);
+        if (daily.matches()) {
+            LocalDate day = LocalDate.of(Integer.parseInt(daily.group(1)), Integer.parseInt(daily.group(2)),
+                    Integer.parseInt(daily.group(3)));
+            return !day.plusDays(1).atStartOfDay().isAfter(cutoff);   // 파티션 상한(exclusive)
+        }
+        Matcher m = MONTHLY_NAME.matcher(childName);
         if (!m.matches()) {
             return false;
         }
         YearMonth month = YearMonth.of(Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)));
         LocalDate monthEnd = month.plusMonths(1).atDay(1);   // 파티션 상한(exclusive)
         return !monthEnd.atStartOfDay().isAfter(cutoff);
+    }
+
+    /** 일 파티션 생성 DDL(멱등) — 이름 규약은 droppable 의 파싱과 한 쌍이다. */
+    public static String createDailyPartitionSql(String table, LocalDate day) {
+        return "CREATE TABLE IF NOT EXISTS %s_y%04dm%02dd%02d PARTITION OF %s FOR VALUES FROM ('%s') TO ('%s')"
+                .formatted(table, day.getYear(), day.getMonthValue(), day.getDayOfMonth(), table,
+                        day, day.plusDays(1));
     }
 
     /** 월 파티션 생성 DDL(멱등) — 이름 규약은 droppable의 파싱과 한 쌍이다. */
