@@ -18,7 +18,11 @@ Dockerfile
 .env
 .env.*
 !.env.example
-# AI 1차 분석의 판단 기준(런타임 입력) — 이미지에 포함해야 AiAnalyzer가 빈 프롬프트가 안 된다
+# AI 1차 분석의 판단 기준(런타임 입력) — 이미지에 포함해야 AiAnalyzer가 빈 프롬프트가 안 된다.
+# docs 를 폴더로 나눈 뒤(v1.6.2) 한 단계 깊어져, 중간 디렉터리까지 열어 줘야 파일에 닿는다 —
+# 부모가 제외된 채로는 자식 예외(!)가 먹지 않는다
 !docs
 docs/*
-!docs/ai-analysis-rules.md
+!docs/design
+docs/design/*
+!docs/design/ai-analysis-rules.md

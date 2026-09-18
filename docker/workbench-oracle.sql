@@ -1,4 +1,4 @@
--- 워크벤치 콘솔 계정 + 데모 데이터 — Oracle (근거: docs/least-privilege.md "워크벤치 콘솔 계정")
+-- 워크벤치 콘솔 계정 + 데모 데이터 — Oracle (근거: docs/operate/least-privilege.md "워크벤치 콘솔 계정")
 -- 최초 1회 수동 실행(재실행하면 이미 있는 객체에서 ORA-00955/01920이 난다):
 --   docker exec -i dbtower-oracle sqlplus -s / as sysdba < docker/workbench-oracle.sql
 -- 한글 리터럴은 docker exec 표준입력의 NLS 인코딩에 따라 깨질 수 있어 데모 값은 영문으로 둔다.

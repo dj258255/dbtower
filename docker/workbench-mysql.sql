@@ -1,4 +1,4 @@
--- 워크벤치 콘솔 계정 + 데모 데이터 — MySQL (근거: docs/least-privilege.md "워크벤치 콘솔 계정")
+-- 워크벤치 콘솔 계정 + 데모 데이터 — MySQL (근거: docs/operate/least-privilege.md "워크벤치 콘솔 계정")
 -- mysql-init.sql과 같은 정책(compose 무수정)이라 수동 실행한다:
 --   docker exec -i -e MYSQL_PWD=dbtower1234 dbtower-mysql mysql -uroot < docker/workbench-mysql.sql
 -- 여러 번 실행해도 결과가 같다.

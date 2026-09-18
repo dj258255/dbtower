@@ -25,7 +25,7 @@ FROM dual CONNECT BY level <= 20000;
 -- num_rows(테이블 통계)가 채워지도록 옵티마이저 통계 수집
 EXEC DBMS_STATS.GATHER_TABLE_STATS('SAMPLE', 'USERS');
 
--- 최소 권한 모니터링 계정 (실측 근거: docs/least-privilege.md)
+-- 최소 권한 모니터링 계정 (실측 근거: docs/operate/least-privilege.md)
 -- CREATE SESSION + SELECT_CATALOG_ROLE(V$SQL, V$DATABASE) + 대상 테이블 READ(EXPLAIN PLAN용).
 -- EXPLAIN PLAN 자체는 추가 권한 불요(공용 PLAN_TABLE + DBMS_XPLAN는 PUBLIC 실행 가능).
 -- 주의: user_tables 기반 table-stats는 이 계정 자신의 스키마만 보이므로 빈 결과가 정상이다.

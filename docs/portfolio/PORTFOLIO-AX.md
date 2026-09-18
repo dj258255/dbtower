@@ -156,7 +156,7 @@ SQL Server는 로컬 Colima(Rosetta 미사용)에서 amd64 이미지가 기동 �
 
 ## 사례 4. AI에게 실행 권한을 주지 않고도 쓸 만하게: 제안 · 체크포인트 · 실행 결과로 잰 정확도
 
-근거: [VERIFICATION 129절](../verify/VERIFICATION.md), [평가 러너](../scripts/eval-workbench-nl2sql.py)
+근거: [VERIFICATION 129절](../verify/VERIFICATION.md), [평가 러너](../../scripts/eval-workbench-nl2sql.py)
 
 **상황.** 사내 어드민 생성 플랫폼(TOI Studio) 화면을 보면 AI 대화가 "요청 → 계획 → 작업 → 체크포인트 카드"로 흐르고,
 입력창의 선택 커서로 화면 요소를 찍어 요청에 붙인다. 이 경험을 DB 조회에 옮기되, AI가 대상 DB에 무엇도 실행하지 않게 하고 싶었다.
@@ -435,7 +435,7 @@ pgbench 클라이언트와 DB가 같은 Mac을 쓴다. 사용자는 "이 Mac에�
 
 ## 사례 12. 동작이 맞아도 리뷰가 깨지면 품질 결함이다: 원시 NUL 바이트 사건
 
-근거: [VERIFICATION 154절](../verify/VERIFICATION.md), [규약 검사](../scripts/check-conventions.sh)
+근거: [VERIFICATION 154절](../verify/VERIFICATION.md), [규약 검사](../../scripts/check-conventions.sh)
 
 **상황.** 153절 커밋 통계에서 Java 소스 하나가 줄 단위 diff가 아니라 `Bin 8425 -> 9147 bytes`로 찍혔다.
 동작은 정상이었고, 150~153절 테스트 859개와 E2E 7/7도 통과했다. 하지만 git이 파일을 바이너리로 보면 PR에서 사람이 변경을 읽을 수 없고,
