@@ -1,5 +1,7 @@
 package io.dbtower.operator;
 
+import io.dbtower.operator.model.BulkBatchOutcome;
+import io.dbtower.operator.model.BulkChangePlan;
 import io.dbtower.operator.model.ChangeOutcome;
 import io.dbtower.operator.model.ChangePlan;
 import io.dbtower.operator.model.QueryResult;
@@ -357,6 +359,23 @@ public interface DbmsOperator {
      */
     default ChangeOutcome executeChange(ConsoleCredential credential, ChangePlan plan) {
         throw new UnsupportedOperationException("이 기종은 변경 티켓 실행을 지원하지 않습니다");
+    }
+
+    /**
+     * 대량 일괄 변경의 다음 배치가 닫을 구간의 상한 키 — 더 고칠 행이 없으면 null(docs/bulk-change-spec.md).
+     *
+     * <p>{@link #executeChange}와 나뉘는 이유: 그쪽은 되돌리기를 행 사본으로 보장하느라 한 트랜잭션이
+     * 행 수에 비례해 락을 쥔다. 수십만 행은 그 대가를 감당할 수 없어, 키 구간으로 쪼개 따로 커밋하고
+     * 되돌리기는 복원 검증된 백업을 실행 전 조건으로 걸어 보장한다.
+     */
+    default Object nextBulkBoundary(ConsoleCredential credential, BulkChangePlan plan, Object lastKey) {
+        throw new UnsupportedOperationException("이 기종은 대량 일괄 변경을 지원하지 않습니다");
+    }
+
+    /** 구간 하나를 고치고 커밋한다. 영향 행 수가 목표를 넘으면 커밋하지 않는다. */
+    default BulkBatchOutcome executeBulkBatch(ConsoleCredential credential, BulkChangePlan plan,
+                                              Object fromKey, Object toKey) {
+        throw new UnsupportedOperationException("이 기종은 대량 일괄 변경을 지원하지 않습니다");
     }
 
     /**
