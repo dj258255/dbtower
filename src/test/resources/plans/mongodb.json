@@ -1,0 +1,53 @@
+{
+  "namespace": "sample.customers",
+  "indexFilterSet": false,
+  "parsedQuery": {
+    "$and": [
+      {
+        "age": {
+          "$gt": 30
+        }
+      },
+      {
+        "created": {
+          "$gte": "2000-01-01T00:00:00.000Z"
+        }
+      },
+      {
+        "email": {
+          "$regex": "@gmail\\.com$"
+        }
+      }
+    ]
+  },
+  "queryHash": "471E618F",
+  "planCacheKey": "471E618F",
+  "optimizationTimeMillis": 2,
+  "maxIndexedOrSolutionsReached": false,
+  "maxIndexedAndSolutionsReached": false,
+  "maxScansToExplodeReached": false,
+  "winningPlan": {
+    "stage": "COLLSCAN",
+    "filter": {
+      "$and": [
+        {
+          "age": {
+            "$gt": 30
+          }
+        },
+        {
+          "created": {
+            "$gte": "2000-01-01T00:00:00.000Z"
+          }
+        },
+        {
+          "email": {
+            "$regex": "@gmail\\.com$"
+          }
+        }
+      ]
+    },
+    "direction": "forward"
+  },
+  "rejectedPlans": []
+}

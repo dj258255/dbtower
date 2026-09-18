@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.dbtower.analysis.AiAnalyzer;
 import io.dbtower.analysis.AiAnalyzer.CallSite;
+import io.dbtower.analysis.AiMaskLevel;
 import io.dbtower.analysis.PlanMasker;
+import io.dbtower.analysis.TableScale;
 import io.dbtower.analysis.QueryMasker;
 import io.dbtower.analysis.RuleBasedAnalyzer;
 import io.dbtower.operator.ConnectionPools;
@@ -32,6 +34,7 @@ import java.io.BufferedWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.nio.file.StandardOpenOption;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -481,7 +484,155 @@ class AiMaskingTradeoffExperimentIT {
         return out.toString();
     }
 
+    // ---------------------------------------------------------------- 가림 수준 3단계 (#100)
+
+    private static final Path LEVEL_CASES_PATH =
+            Path.of("src", "test", "resources", "experiments", "ai-masking-level-cases.json");
+    private static final Path LEVEL_PATH = Path.of("docs", "experiments", "ai-masking-levels.jsonl");
+
+    /**
+     * 가림 수준 셋(NONE·STRUCTURE·FULL)을 값이 진단을 가르는 사례 15개와 대조군 3개로 잰다.
+     *
+     * <p>조건 A~E가 "무엇을 어디까지 가릴 수 있나"를 찾는 과정이었다면, 여기서는 그 답을 제품 설정
+     * 세 개로 굳혀 놓고 <b>노출과 진단력의 교환</b>을 다시 잰다. STRUCTURE는 값을 지우되 {@code %} 자리·
+     * 자릿수·날짜 거리를 남기고, FULL은 전부 {@code ?}로 만든다.
+     *
+     * <p>프롬프트에는 제품과 같이 대상 테이블 행수가 붙는다({@link TableScale}) — 선택도는 비율이라
+     * 분모가 있어야 판단할 수 있고, 그 분모가 없어서 날짜 사례가 되살아나지 않았다.
+     *
+     * <p>판정은 이 테스트가 하지 않는다. 응답 원문을 남기고 사람과 별도 모델이 대조한다.
+     * 게이트: DBTOWER_EXPERIMENT=1 과 DBTOWER_EXPERIMENT_LEVELS=1
+     */
+    @Test
+    @Order(4)
+    void 가림_수준별_노출과_진단력을_18개_사례로_잰다() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue("1".equals(System.getenv("DBTOWER_EXPERIMENT_LEVELS")),
+                "DBTOWER_EXPERIMENT_LEVELS=1 일 때만 부른다");
+        List<MaskCase> cases = loadCases(LEVEL_CASES_PATH);
+        assertEquals(18, cases.size(), "사례는 15개 + 대조군 3개여야 한다");
+        AiAnalyzer analyzer = new AiAnalyzer(new SimpleMeterRegistry(), MODEL, RULES_PATH, MAX_TOKENS, EFFORT);
+        if (!analyzer.isEnabled()) {
+            fail("AI 백엔드가 OFF다 — 빈 응답을 진단력 0으로 세지 않으려 여기서 멈춘다");
+        }
+
+        Map<String, Map<String, String>> prompts = new LinkedHashMap<>();
+        Map<String, Map<String, Integer>> exposure = new LinkedHashMap<>();
+        for (MaskCase c : cases) {
+            DbmsType type = typeOf(c);
+            Db db = dbFor(c.dbms());
+            String plan = db.op().explain(c.sql());
+            List<String> findings = new RuleBasedAnalyzer().analyze(type, plan);
+            String scale = TableScale.describe(db.op(), c.sql());
+            Map<String, String> perLevel = new LinkedHashMap<>();
+            Map<String, Integer> perLevelExposure = new LinkedHashMap<>();
+            for (AiMaskLevel level : AiMaskLevel.values()) {
+                boolean mask = level != AiMaskLevel.NONE;
+                String sqlForPrompt = new QueryMasker(true, mask).applyForAiPrompt(c.sql());
+                String planForPrompt = PlanMasker.maskPlan(type, plan, level, Clock.systemDefaultZone());
+                String p = prompt(type, sqlForPrompt, planForPrompt, findings)
+                        + (scale.isEmpty() ? "" : "\n" + scale);
+                perLevel.put(level.name(), p);
+                perLevelExposure.put(level.name(), countExposed(p, c.sensitiveLiterals()));
+            }
+            prompts.put(c.id(), perLevel);
+            exposure.put(c.id(), perLevelExposure);
+        }
+
+        // 이미 기록된 (사례, 수준, 회차)는 다시 부르지 않는다 — 한도에 걸려 끊겨도 이어서 돈다
+        Set<String> done = new TreeSet<>();
+        if (Files.exists(LEVEL_PATH)) {
+            for (String line : Files.readAllLines(LEVEL_PATH, StandardCharsets.UTF_8)) {
+                if (!line.isBlank()) {
+                    JsonNode n = MAPPER.readTree(line);
+                    if (n.path("error").isNull() && !n.path("response").asText("").isEmpty()) {
+                        done.add(n.path("caseId").asText() + "|" + n.path("condition").asText()
+                                + "|" + n.path("rep").asInt());
+                    }
+                }
+            }
+        }
+        List<String[]> order = new ArrayList<>();
+        for (MaskCase c : cases) {
+            for (AiMaskLevel level : AiMaskLevel.values()) {
+                for (int rep = 1; rep <= 3; rep++) {
+                    if (!done.contains(c.id() + "|" + level.name() + "|" + rep)) {
+                        order.add(new String[]{c.id(), level.name(), String.valueOf(rep)});
+                    }
+                }
+            }
+        }
+        java.util.Collections.shuffle(order, new Random(SHUFFLE_SEED + 2));
+        System.out.println("[#100] 호출 " + order.size() + "회 남음 (18사례 × 3수준 × 3회 = 162)");
+
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(4);
+        java.util.concurrent.atomic.AtomicInteger finished = new java.util.concurrent.atomic.AtomicInteger();
+        List<java.util.concurrent.Future<?>> futures = new ArrayList<>();
+        for (String[] item : order) {
+            futures.add(pool.submit(() -> {
+                String p = prompts.get(item[0]).get(item[1]);
+                long t0 = System.nanoTime();
+                String response = "";
+                String error = null;
+                try {
+                    response = analyzer.analyze(CallSite.EXPLAIN, p).orElse("");
+                    if (response.isEmpty()) {
+                        error = "빈 응답";
+                    }
+                } catch (Exception e) {
+                    error = e.getClass().getSimpleName() + ": " + e.getMessage();
+                }
+                ObjectNode node = MAPPER.createObjectNode();
+                node.put("caseId", item[0]);
+                node.put("condition", item[1]);
+                node.put("rep", Integer.parseInt(item[2]));
+                node.put("backend", analyzer.backend());
+                node.put("sensitiveLeft", exposure.get(item[0]).get(item[1]));
+                node.put("seconds", Math.round((System.nanoTime() - t0) / 100_000_000.0) / 10.0);
+                node.put("prompt", p);
+                node.put("response", response);
+                if (error == null) {
+                    node.putNull("error");
+                } else {
+                    node.put("error", error);
+                }
+                synchronized (LEVEL_PATH) {
+                    try (BufferedWriter w = Files.newBufferedWriter(LEVEL_PATH, StandardCharsets.UTF_8,
+                            StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+                        w.write(MAPPER.writeValueAsString(node));
+                        w.newLine();
+                    }
+                }
+                System.out.println("[#100] " + finished.incrementAndGet() + "/" + order.size() + " "
+                        + item[0] + "/" + item[1] + "#" + item[2] + " 노출 "
+                        + exposure.get(item[0]).get(item[1]) + (error == null ? "" : " 오류 " + error));
+                return null;
+            }));
+        }
+        for (java.util.concurrent.Future<?> f : futures) {
+            f.get();
+        }
+        pool.shutdown();
+
+        // 노출은 이 테스트가 직접 센다 — 모델 판정과 무관한 사실이라 여기서 못박는다
+        int none = exposure.values().stream().mapToInt(m -> m.get("NONE")).sum();
+        int structure = exposure.values().stream().mapToInt(m -> m.get("STRUCTURE")).sum();
+        int full = exposure.values().stream().mapToInt(m -> m.get("FULL")).sum();
+        System.out.println("[#100] 노출 합계 — NONE " + none + " / STRUCTURE " + structure + " / FULL " + full);
+        assertTrue(none > 0, "가리지 않은 조건에서 노출이 0이면 사례가 값을 담고 있지 않다는 뜻이다");
+        assertEquals(0, structure, "STRUCTURE에서 민감 리터럴이 남았다");
+        assertEquals(0, full, "FULL에서 민감 리터럴이 남았다");
+    }
+
     // ---------------------------------------------------------------- 노출 세기
+
+    /** 프롬프트 하나에 남은 민감 리터럴 수 — 부분 문자열 기준이라 과소평가하지 않는 쪽으로 센다. */
+    private static int countExposed(String prompt, List<String> literals) {
+        int n = 0;
+        for (String literal : literals) {
+            n += countOccurrences(prompt, literal);
+        }
+        return n;
+    }
 
     private record Exposure(Map<String, Map<String, Map<String, Integer>>> perCase, Map<String, Integer> totals) {
     }
@@ -790,7 +941,11 @@ class AiMaskingTradeoffExperimentIT {
     }
 
     private static List<MaskCase> loadCases() throws Exception {
-        JsonNode root = MAPPER.readTree(Files.readString(CASES_PATH, StandardCharsets.UTF_8));
+        return loadCases(CASES_PATH);
+    }
+
+    private static List<MaskCase> loadCases(Path path) throws Exception {
+        JsonNode root = MAPPER.readTree(Files.readString(path, StandardCharsets.UTF_8));
         List<MaskCase> cases = new ArrayList<>();
         for (JsonNode node : root.path("cases")) {
             List<String> keywords = new ArrayList<>();

@@ -1,6 +1,15 @@
 package io.dbtower.analysis;
 
 import io.dbtower.registry.DbmsType;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -30,7 +39,9 @@ class PlanMaskerTest {
         String masked = PlanMasker.maskPlan(DbmsType.POSTGRESQL, plan);
 
         assertThat(masked).doesNotContain("2000-01-01");
-        assertThat(masked).contains("'?'::date");            // 타입은 남는다 — 형변환 진단의 재료다
+        // 값은 사라지고 "얼마나 오래됐나"만 남는다 — 전 기간 조건인지 판단하는 재료다(STRUCTURE)
+        assertThat(masked).contains("::date");                // 타입은 남는다 — 형변환 진단의 재료다
+        assertThat(masked).containsPattern("'\\?\\(약 \\d+년 전\\)'");
         assertThat(masked).contains("created_at >=");        // 컬럼·연산자도 남는다
         assertThat(masked).contains("\"Plan Rows\":100000"); // 추정 행수는 진단의 핵심이라 가리지 않는다
         assertThat(masked).contains("\"Total Cost\":2269.0");
@@ -64,8 +75,9 @@ class PlanMaskerTest {
         String masked = PlanMasker.maskPlan(DbmsType.MYSQL, plan);
 
         assertThat(masked).doesNotContain("2026-08-01").doesNotContain("99000").doesNotContain("99100");
-        assertThat(masked).contains("DATE'?'");
-        assertThat(masked).contains("? <= amount <= ?");
+        assertThat(masked).containsPattern("DATE'\\?\\(약 \\d+(일|개월|년) (전|후)\\)'");
+        // 숫자는 자릿수만 남는다 — 크기가 선택도를 가르는 사례(amount > 10 대 > 99000) 때문이다
+        assertThat(masked).contains("?(5자리) <= amount <= ?(5자리)");
         assertThat(masked).contains("`exp_mask_orders`.`created_at`");   // 백틱 식별자는 값이 아니다
         assertThat(masked).contains("\"rows_examined_per_scan\":200");   // 표 1의 교훈: 선택도는 계획이 들고 있다
         assertThat(masked).contains("\"filtered\":\"33.33\"");
@@ -118,7 +130,7 @@ class PlanMaskerTest {
         assertThat(masked).doesNotContain("VIP").doesNotContain("@gmail.com").doesNotContain("30");
         assertThat(masked).contains("\"$eq\":\"?\"");
         assertThat(masked).contains("\"$regex\":\"?$\"");    // 정규식 앵커는 남는다(뒤 일치)
-        assertThat(masked).contains("\"$gte\":\"?\"");
+        assertThat(masked).contains("\"$gte\":\"?(2자리)\"");
         assertThat(masked).contains("\"stage\":\"COLLSCAN\"");   // 값이지만 계획의 모양이다
         assertThat(masked).contains("\"direction\":\"forward\"");
         assertThat(masked).contains("\"grade\"").contains("\"email\"");   // 필드 이름은 키라 남는다
@@ -141,8 +153,9 @@ class PlanMaskerTest {
         String masked = PlanMasker.maskPlan(DbmsType.MSSQL, plan);
 
         assertThat(masked).doesNotContain("PAID");
-        assertThat(masked).contains("ScalarString=\"[orders].[status]='?'\"");   // 대괄호 식별자 보존
-        assertThat(masked).contains("ConstValue=\"'?'\"");
+        // 실제 showplan은 속성값 안의 따옴표를 &apos;로 쓴다 — 가린 뒤에도 XML로 되돌려 놓는다
+        assertThat(masked).contains("ScalarString=\"[orders].[status]=&apos;?&apos;\"");   // 대괄호 식별자 보존
+        assertThat(masked).contains("ConstValue=\"&apos;?&apos;\"");
         assertThat(masked).contains("EstimateRows=\"1\"").contains("PhysicalOp=\"Index Seek\"");
         assertThat(masked).contains("Index=\"[idx_status]\"");
     }
@@ -173,5 +186,89 @@ class PlanMaskerTest {
     void emptyPlan() {
         assertThat(PlanMasker.maskPlan(DbmsType.MYSQL, null)).isNull();
         assertThat(PlanMasker.maskPlan(DbmsType.MYSQL, "")).isEmpty();
+    }
+
+    // ---------------------------------------------------------------- 실제 캡처와 가림 수준
+
+    /** 날짜 거리를 단언하려면 "지금"이 고정돼야 한다 — 계획을 뜬 날 기준으로 박는다. */
+    private static final Clock FIXED =
+            Clock.fixed(Instant.parse("2026-09-18T00:00:00Z"), ZoneId.of("Asia/Seoul"));
+
+    private static String capture(String name) {
+        try {
+            return Files.readString(Path.of("src/test/resources/plans", name), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * 합성 픽스처가 아니라 SQL Server 2022에서 실제로 뜬 showplan.
+     *
+     * <p>지어낸 XML에는 {@code StatementText}가 없어서 술어만 가리면 통과했다. 실제 계획에는 사용자가 친
+     * SQL이 그 속성에 통째로 들어 있어, 값을 옆자리에 그대로 남기고 있었다. 이 테스트가 그 자리를 못박는다.
+     */
+    @Test
+    @DisplayName("MSSQL — 실제 showplan 캡처에서 StatementText의 값도 남지 않는다")
+    void mssqlRealCapture() {
+        String masked = PlanMasker.maskPlan(DbmsType.MSSQL, capture("sqlserver.xml"),
+                AiMaskLevel.STRUCTURE, FIXED);
+
+        assertThat(masked).doesNotContain("@gmail.com").doesNotContain("2000-01-01");
+        assertThat(masked).contains("StatementText=");
+        assertThat(masked).contains("&apos;%?&apos;");          // 앞 와일드카드 자리는 남는다
+        assertThat(masked).contains("StatementEstRows=\"1\"");  // 추정 행수는 진단 재료라 남는다
+        assertThat(masked).contains("PhysicalOp=");
+    }
+
+    @Test
+    @DisplayName("다섯 기종 실제 캡처 — 값은 사라지고 계획의 뼈대는 남는다")
+    void allRealCaptures() {
+        assertThat(PlanMasker.maskPlan(DbmsType.POSTGRESQL, capture("postgresql.json"),
+                AiMaskLevel.STRUCTURE, FIXED))
+                .doesNotContain("@gmail.com").contains("Seq Scan");
+        assertThat(PlanMasker.maskPlan(DbmsType.MYSQL, capture("mysql.json"),
+                AiMaskLevel.STRUCTURE, FIXED))
+                .doesNotContain("@gmail.com").contains("rows_examined_per_scan");
+        assertThat(PlanMasker.maskPlan(DbmsType.MONGODB, capture("mongodb.json"),
+                AiMaskLevel.STRUCTURE, FIXED))
+                .doesNotContain("@gmail.com").contains("stage");
+        assertThat(PlanMasker.maskPlan(DbmsType.ORACLE, capture("oracle.txt"),
+                AiMaskLevel.STRUCTURE, FIXED))
+                .doesNotContain("@GMAIL.COM").contains("TABLE ACCESS FULL");
+    }
+
+    /**
+     * 가림 수준 셋이 실제로 다른 것을 남긴다 — 실험이 재는 차이가 코드에 있다는 확인이다.
+     * 어느 수준이 나은지는 사례로 재서 정한다(docs/experiments/ai-masking-levels.md).
+     */
+    @Test
+    @DisplayName("가림 수준 — NONE은 원문, STRUCTURE는 모양, FULL은 물음표만")
+    void levels() {
+        String plan = """
+                [{"Plan": {"Node Type": "Seq Scan", \
+                "Filter": "(created_at >= '2000-01-01'::date AND amount > 99000)"}}]""";
+
+        assertThat(PlanMasker.maskPlan(DbmsType.POSTGRESQL, plan, AiMaskLevel.NONE, FIXED))
+                .isEqualTo(plan);
+        assertThat(PlanMasker.maskPlan(DbmsType.POSTGRESQL, plan, AiMaskLevel.STRUCTURE, FIXED))
+                .doesNotContain("2000-01-01").doesNotContain("99000")
+                .contains("?(약 27년 전)").contains("?(5자리)");
+        assertThat(PlanMasker.maskPlan(DbmsType.POSTGRESQL, plan, AiMaskLevel.FULL, FIXED))
+                .doesNotContain("2000-01-01").doesNotContain("99000")
+                .doesNotContain("자리").doesNotContain("년 전")
+                .contains("'?'::date").contains("amount > ?");
+    }
+
+    @Test
+    @DisplayName("설정 — 수준이 NONE이면 켜져 있어도 가리지 않는다")
+    void levelNoneDisablesMasking() {
+        String plan = """
+                [{"Plan": {"Filter": "(status = 'PAID')"}}]""";
+
+        assertThat(new PlanMasker(true, true, AiMaskLevel.NONE, FIXED)
+                .applyForAiPrompt(DbmsType.POSTGRESQL, plan)).isEqualTo(plan);
+        assertThat(new PlanMasker(true, true, AiMaskLevel.FULL, FIXED)
+                .applyForAiPrompt(DbmsType.POSTGRESQL, plan)).doesNotContain("PAID");
     }
 }
