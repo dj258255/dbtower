@@ -67,12 +67,30 @@ jobs:
         shell: bash
         run: java -cp "$JAR" scripts/MssqlLoad.java "$URL" sa env | tee env.log
 
-      - name: SQL Server IT (change execution, console read-only)
+      # BulkChangeBatchIT 가 목록에 없어서 v1.6.0 의 SQL Server 결함이 그대로 나갔다(#140) —
+      # 테스트를 써 두어도 CI 가 돌리지 않으면 없는 것과 같다. 이 기종에서만 도는 경로는 여기에 적어야 한다
+      - name: SQL Server IT (change execution, console read-only, bulk change)
         shell: bash
         run: |
-          DBTOWER_MSSQL_IT=1 ./gradlew test --tests '*ChangeExecutionIT' --tests '*ConsoleReadOnlyIT' --tests '*NetworkTimeoutAfterLoginIT' -i > it.log 2>&1
+          DBTOWER_MSSQL_IT=1 ./gradlew test --tests '*ChangeExecutionIT' --tests '*ConsoleReadOnlyIT' --tests '*NetworkTimeoutAfterLoginIT' --tests '*BulkChangeBatchIT' -i > it.log 2>&1
           # 로그 요약은 판정이 아니다 — 매치 없음·조기 종료로 step이 실패하지 않게 한다(판정은 위 gradle 종료 코드)
           grep -E "^\s+\[MSSQL|^\s+\|--|timings|PASSED|FAILED|SKIPPED|BUILD" it.log | grep -v "Hikari" | head -80 || true
+
+      # 위 step 이 SQL Server 테스트를 실제로 돌렸는지 본다. 게이트를 못 받으면 전부 건너뛰고도 통과한다 —
+      # 초록불이 "확인했다"가 아니라 "아무것도 안 했다"를 뜻할 수 있는 자리다(#140)
+      - name: SQL Server 테스트가 실제로 돌았는지
+        shell: bash
+        run: |
+          f=build/test-results/test/TEST-io.dbtower.operator.internal.BulkChangeBatchIT.xml
+          test -f "$f"
+          python3 - "$f" <<'EOF'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          ran = [tc.get("name") for tc in root.iter("testcase")
+                 if "SQL Server" in (tc.get("name") or "") and tc.find("skipped") is None]
+          print("SQL Server 에서 실제로 돈 테스트:", *ran, sep="\n  ")
+          assert any("복합" in n for n in ran), "복합 키 테스트가 건너뛰어졌다 — 게이트를 확인한다"
+          EOF
 
       - name: Load before/after index (native x64)
         shell: bash
