@@ -7,6 +7,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.hamcrest.Matchers.not;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -62,6 +63,29 @@ class SecurityConfigTest {
             mvc.perform(post(path).with(csrf()).contentType("application/json").content("{\"dryRun\":true}"))
                     .andExpect(status().isForbidden());
         }
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void VIEWER는_대량_일괄_변경을_시작하거나_멈출_수_없다() throws Exception {
+        for (String path : new String[]{"/api/workbench/tickets/1/bulk/start", "/api/workbench/tickets/1/bulk/pause",
+                "/api/workbench/tickets/1/bulk/resume", "/api/workbench/tickets/1/bulk/cancel"}) {
+            mvc.perform(post(path).with(csrf()).contentType("application/json").content("{}"))
+                    .andExpect(status().isForbidden());
+        }
+    }
+
+    @Test
+    @WithMockUser(roles = "APPROVER")
+    void APPROVER는_대량_일괄_변경을_취소만_할_수_있다() throws Exception {
+        // 승인한 사람은 멈춰 세울 수는 있어야 하지만, 시작·재개는 실행하는 사람의 몫이다(명세의 권한 표)
+        for (String path : new String[]{"/api/workbench/tickets/1/bulk/start", "/api/workbench/tickets/1/bulk/resume"}) {
+            mvc.perform(post(path).with(csrf()).contentType("application/json").content("{}"))
+                    .andExpect(status().isForbidden());
+        }
+        // 취소는 권한을 통과해 서비스까지 간다(진행 중인 실행이 없어 404) — 403이 아니라는 것이 요점이다
+        mvc.perform(post("/api/workbench/tickets/1/bulk/cancel").with(csrf()))
+                .andExpect(status().is(not(403)));
     }
 
     @Test
