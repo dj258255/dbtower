@@ -158,16 +158,27 @@ class BulkChangePreflightTest {
     }
 
     @Test
-    @DisplayName("MySQL·PostgreSQL이 아니면 거부한다")
-    void rejectsOtherDbms() {
+    @DisplayName("다섯 기종을 모두 받는다 — 각 기종의 경계 문법은 오퍼레이터가 흡수한다")
+    void acceptsAllSupportedDbms() {
         BackupFreshness ok = backup(BackupFreshness.Status.FRESH, "VERIFIED");
         DbmsOperator op = operatorWithPk("id");
 
-        for (DbmsType type : List.of(DbmsType.ORACLE, DbmsType.MSSQL, DbmsType.MONGODB)) {
-            assertThatThrownBy(() -> plan(type, SQL, op, ok, 1000))
-                    .as("%s", type)
-                    .isInstanceOf(WorkbenchRejection.class).hasMessageContaining("MySQL·PostgreSQL에서만");
+        for (DbmsType type : List.of(DbmsType.MYSQL, DbmsType.POSTGRESQL,
+                DbmsType.ORACLE, DbmsType.MSSQL, DbmsType.MONGODB)) {
+            assertThat(plan(type, SQL, op, ok, 1000)).as("%s", type).isNotNull();
         }
+    }
+
+    @Test
+    @DisplayName("배치 키의 타입이 섞이면 거부한다 — 범위 비교가 경계를 넘지 못해 문서가 조용히 빠진다")
+    void rejectsMixedKeyTypes() {
+        BackupFreshness ok = backup(BackupFreshness.Status.FRESH, "VERIFIED");
+        DbmsOperator op = operatorWithPk("id");
+        when(op.bulkKeyTypes(any(), anyString())).thenReturn(List.of("long", "string"));
+
+        assertThatThrownBy(() -> plan(DbmsType.MONGODB, SQL, op, ok, 1000))
+                .isInstanceOf(WorkbenchRejection.class)
+                .hasMessageContaining("타입이 2가지입니다(long, string)");
     }
 
     @Test

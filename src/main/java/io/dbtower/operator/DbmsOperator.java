@@ -380,6 +380,16 @@ public interface DbmsOperator {
         throw new UnsupportedOperationException("이 기종은 조건부 행 수 세기를 지원하지 않습니다");
     }
 
+    /**
+     * 배치 경계로 쓸 키의 타입 목록 — 하나가 아니면 호출자가 거부한다(#128).
+     *
+     * <p>SQL 계열은 열 타입이 하나로 고정돼 이 확인이 필요 없어 빈 목록을 돌려준다. MongoDB는
+     * {@code _id} 타입이 섞일 수 있고, 섞이면 비교가 타입 경계를 넘지 않아 배치가 문서를 조용히 빼먹는다.
+     */
+    default List<String> bulkKeyTypes(ConsoleCredential credential, String table) {
+        return List.of();
+    }
+
     /** 구간 하나를 고치고 커밋한다. 영향 행 수가 목표를 넘으면 커밋하지 않는다. */
     default BulkBatchOutcome executeBulkBatch(ConsoleCredential credential, BulkChangePlan plan,
                                               List<Object> fromKey, List<Object> toKey) {

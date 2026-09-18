@@ -25,11 +25,11 @@ import java.util.Locale;
 final class BulkChangePreflight {
 
     /**
-     * 이 경로를 지원하는 기종. MongoDB는 변경이 SQL 문장이 아니라 명령 JSON이라 같은 실행기로
-     * 흡수할 수 있는지부터 판정해야 한다(#128).
+     * 이 경로를 지원하는 기종. MongoDB는 {@code _id} 타입이 하나일 때만 받는다(#128 판정) —
+     * 섞이면 비교가 타입 경계를 넘지 않아 배치가 문서를 조용히 빼먹는다.
      */
     private static final List<DbmsType> SUPPORTED =
-            List.of(DbmsType.MYSQL, DbmsType.POSTGRESQL, DbmsType.ORACLE, DbmsType.MSSQL);
+            List.of(DbmsType.MYSQL, DbmsType.POSTGRESQL, DbmsType.ORACLE, DbmsType.MSSQL, DbmsType.MONGODB);
 
     /** 승인 시점 예상보다 이 배를 넘게 걸리면 멈추고 재승인을 요구한다. */
     static final int ESTIMATE_TOLERANCE = 2;
@@ -62,6 +62,7 @@ final class BulkChangePreflight {
 
         String where = stripWhereKeyword(tail);
         String head = headOf(sql, tail);
+        requireSingleKeyType(operator, credential, parsed.table());
         requireEstimateWithinTolerance(operator, credential, parsed.table(), where, approvedRows, timeoutSeconds);
         return new BulkChangePlan(head, where, parsed.table(), keyColumns, batchRows, timeoutSeconds);
     }
@@ -126,6 +127,26 @@ final class BulkChangePreflight {
                     + ") — 경계 조회가 인덱스를 타는지 확인된 범위까지만 받습니다", null);
         }
         return pk;
+    }
+
+    /**
+     * 배치 경계로 쓸 키의 타입이 하나여야 한다(#128). SQL 계열은 열 타입이 고정돼 빈 목록이 와서 그냥 통과한다.
+     *
+     * <p>MongoDB에서 {@code _id} 타입이 섞이면 {@code $gt}가 타입 경계를 넘지 않아, 경계 조회가 준 마지막 키
+     * 뒤의 다른 타입 문서를 하나도 잡지 못한다. 배치는 "더 없다"고 보고 정상 종료하고 그 문서들은 조용히 빠진다.
+     */
+    private static void requireSingleKeyType(DbmsOperator operator, ConsoleCredential credential, String table) {
+        List<String> types;
+        try {
+            types = operator.bulkKeyTypes(credential, table);
+        } catch (RuntimeException e) {
+            throw new WorkbenchRejection(422, "배치 키의 타입을 확인하지 못해 실행하지 않습니다: " + e.getMessage(), null);
+        }
+        if (types != null && types.size() > 1) {
+            throw new WorkbenchRejection(422, "배치 키(_id)의 타입이 " + types.size() + "가지입니다("
+                    + String.join(", ", types) + ") — 타입이 섞이면 범위 비교가 경계를 넘지 못해"
+                    + " 일부 문서가 조용히 빠집니다", null);
+        }
     }
 
     /**
