@@ -1131,6 +1131,20 @@ public class MsSqlOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * SQL Server는 행 수 제한이 {@code SELECT TOP (n)}으로 앞에 온다. {@code OFFSET ... FETCH}도 되지만
+     * {@code ORDER BY}가 필수인 데다 경계 조회는 이미 정렬하므로 {@code TOP}이 짧다.
+     */
+    @Override
+    protected String bulkSelectHead(int rows) {
+        return "TOP (" + rows + ") ";
+    }
+
+    @Override
+    protected String bulkLimitClause(int rows) {
+        return "";
+    }
+
     @Override
     public String explain(String sql) {
         requireSelect(sql);

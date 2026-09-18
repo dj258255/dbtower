@@ -65,7 +65,7 @@ public class BulkChangeRun {
     private final Sleeper sleeper;
 
     private final AtomicReference<State> state = new AtomicReference<>(State.RUNNING);
-    private final AtomicReference<Object> lastKey = new AtomicReference<>();
+    private final AtomicReference<java.util.List<Object>> lastKey = new AtomicReference<>();
     private volatile boolean pauseRequested;
     private volatile boolean cancelRequested;
     private volatile long affectedRows;
@@ -86,7 +86,7 @@ public class BulkChangeRun {
     }
 
     /** 마지막으로 적용을 마친 키 — 재개 지점이자 "어디까지 적용됐나"의 답이다. */
-    public Object lastAppliedKey() {
+    public java.util.List<Object> lastAppliedKey() {
         return lastKey.get();
     }
 
@@ -135,7 +135,7 @@ public class BulkChangeRun {
                     return state.get();
                 }
 
-                Object toKey = operator.nextBulkBoundary(credential, plan, lastKey.get());
+                java.util.List<Object> toKey = operator.nextBulkBoundary(credential, plan, lastKey.get());
                 if (toKey == null) {
                     return finish(State.DONE, null);
                 }

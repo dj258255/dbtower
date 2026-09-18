@@ -1,6 +1,8 @@
 package io.dbtower.operator.internal;
 
 import com.mongodb.MongoException;
+import io.dbtower.operator.model.BulkBatchOutcome;
+import io.dbtower.operator.model.BulkChangePlan;
 import io.dbtower.operator.model.ChangeOutcome;
 import io.dbtower.operator.model.ChangePlan;
 import io.dbtower.operator.model.QueryResult;
@@ -607,6 +609,49 @@ public class MongoOperator implements DbmsOperator {
     }
 
     /** 승인 변경 실행 — 트랜잭션·문서 사본·불변식은 {@link MongoChangeRunner}. 변경 계정(WRITE) 클라이언트로만 닿는다 */
+    /**
+     * {@code _id} 타입이 하나여야 대량 경로를 쓸 수 있다 — 섞이면 비교가 타입 경계를 넘지 않아
+     * 배치가 문서를 조용히 빼먹는다(#128 판정). 전체 문서를 훑으므로 실행 전에 한 번만 부른다.
+     */
+    @Override
+    public List<String> bulkKeyTypes(ConsoleCredential credential, String collection) {
+        try {
+            return withConsoleClient(credential,
+                    client -> new MongoBulkChangeRunner(client, instance.getDbName()).idTypes(collection));
+        } catch (MongoException e) {
+            throw new OperatorException("MongoDB _id 타입 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<Object> nextBulkBoundary(ConsoleCredential credential, BulkChangePlan plan, List<Object> lastKey) {
+        try {
+            Object last = lastKey == null || lastKey.isEmpty() ? null : lastKey.get(0);
+            Object next = withConsoleClient(credential,
+                    client -> new MongoBulkChangeRunner(client, instance.getDbName()).nextBoundary(plan, last));
+            return next == null ? null : List.of(next);
+        } catch (MongoException e) {
+            throw new OperatorException("MongoDB 배치 경계 조회 실패: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public BulkBatchOutcome executeBulkBatch(ConsoleCredential credential, BulkChangePlan plan,
+                                             List<Object> fromKey, List<Object> toKey) {
+        try {
+            Object from = fromKey == null || fromKey.isEmpty() ? null : fromKey.get(0);
+            Object to = toKey == null || toKey.isEmpty() ? null : toKey.get(0);
+            return withConsoleClient(credential,
+                    client -> new MongoBulkChangeRunner(client, instance.getDbName()).executeBatch(plan, from, to));
+        } catch (MongoException e) {
+            throw new OperatorException("MongoDB 배치 실행 실패: " + e.getMessage(), e);
+        }
+    }
+
+    private <T> T withConsoleClient(ConsoleCredential credential, java.util.function.Function<MongoClient, T> fn) {
+        return fn.apply(clients.console(instance, CredentialPurpose.WRITE, credential));
+    }
+
     @Override
     public ChangeOutcome executeChange(ConsoleCredential credential, ChangePlan plan) {
         try {

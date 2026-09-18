@@ -88,7 +88,7 @@ public class BulkChangeService {
     }
 
     /** 실행 중인 한 건의 겉보기 — 화면·조회가 쓴다(#104에서 배치 기록이 붙는다). */
-    public record RunView(Long reviewId, String state, Object lastAppliedKey, long affectedRows, int batches) {
+    public record RunView(Long reviewId, String state, String lastAppliedKey, long affectedRows, int batches) {
     }
 
     /**
@@ -115,7 +115,7 @@ public class BulkChangeService {
         if (!gate.claimExecution(reviewId)) {
             throw new WorkbenchRejection(409, "다른 요청이 이 티켓을 이미 실행 중이거나 상태가 바뀌었습니다", null);
         }
-        runs.save(new BulkChangeRunRecord(reviewId, ticket.instanceId(), plan.table(), plan.keyColumn(),
+        runs.save(new BulkChangeRunRecord(reviewId, ticket.instanceId(), plan.table(), plan.keyList(),
                 batchRows, LocalDateTime.now()));
         BulkChangeRun[] holder = new BulkChangeRun[1];
         BulkChangeRun run = new BulkChangeRun(operator, credential, plan,
@@ -159,8 +159,8 @@ public class BulkChangeService {
                              ReplicationState lag) {
         try {
             batchRecords.save(new BulkChangeBatch(reviewId, instanceId, run.batches(),
-                    outcome.fromKey() == null ? null : String.valueOf(outcome.fromKey()),
-                    String.valueOf(outcome.toKey()), outcome.affectedRows(), outcome.elapsedMillis(),
+                    BulkBatchOutcome.render(outcome.fromKey()),
+                    BulkBatchOutcome.render(outcome.toKey()), outcome.affectedRows(), outcome.elapsedMillis(),
                     lag == null ? null : lag.lagSeconds(), lag == null ? null : lag.lagSource().name(),
                     LocalDateTime.now()));
             updateRun(reviewId, run, run.state().name(), null);
@@ -180,7 +180,7 @@ public class BulkChangeService {
     private void updateRun(Long reviewId, BulkChangeRun run, String state, String reason) {
         runs.findById(reviewId).ifPresent(record -> {
             record.progress(state, reason,
-                    run.lastAppliedKey() == null ? null : String.valueOf(run.lastAppliedKey()),
+                    BulkBatchOutcome.render(run.lastAppliedKey()),
                     run.affectedRows(), run.batches(), LocalDateTime.now());
             runs.save(record);
         });
@@ -228,6 +228,7 @@ public class BulkChangeService {
     }
 
     private static RunView view(Long reviewId, BulkChangeRun run) {
-        return new RunView(reviewId, run.state().name(), run.lastAppliedKey(), run.affectedRows(), run.batches());
+        return new RunView(reviewId, run.state().name(), BulkBatchOutcome.render(run.lastAppliedKey()),
+                run.affectedRows(), run.batches());
     }
 }

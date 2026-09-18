@@ -368,7 +368,7 @@ public interface DbmsOperator {
      * 행 수에 비례해 락을 쥔다. 수십만 행은 그 대가를 감당할 수 없어, 키 구간으로 쪼개 따로 커밋하고
      * 되돌리기는 복원 검증된 백업을 실행 전 조건으로 걸어 보장한다.
      */
-    default Object nextBulkBoundary(ConsoleCredential credential, BulkChangePlan plan, Object lastKey) {
+    default List<Object> nextBulkBoundary(ConsoleCredential credential, BulkChangePlan plan, List<Object> lastKey) {
         throw new UnsupportedOperationException("이 기종은 대량 일괄 변경을 지원하지 않습니다");
     }
 
@@ -380,9 +380,19 @@ public interface DbmsOperator {
         throw new UnsupportedOperationException("이 기종은 조건부 행 수 세기를 지원하지 않습니다");
     }
 
+    /**
+     * 배치 경계로 쓸 키의 타입 목록 — 하나가 아니면 호출자가 거부한다(#128).
+     *
+     * <p>SQL 계열은 열 타입이 하나로 고정돼 이 확인이 필요 없어 빈 목록을 돌려준다. MongoDB는
+     * {@code _id} 타입이 섞일 수 있고, 섞이면 비교가 타입 경계를 넘지 않아 배치가 문서를 조용히 빼먹는다.
+     */
+    default List<String> bulkKeyTypes(ConsoleCredential credential, String table) {
+        return List.of();
+    }
+
     /** 구간 하나를 고치고 커밋한다. 영향 행 수가 목표를 넘으면 커밋하지 않는다. */
     default BulkBatchOutcome executeBulkBatch(ConsoleCredential credential, BulkChangePlan plan,
-                                              Object fromKey, Object toKey) {
+                                              List<Object> fromKey, List<Object> toKey) {
         throw new UnsupportedOperationException("이 기종은 대량 일괄 변경을 지원하지 않습니다");
     }
 
