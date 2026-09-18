@@ -170,6 +170,79 @@ class DocumentationScreenshotTest {
         }
     }
 
+    /**
+     * UX 2차로 바뀐 화면 셋 — 확인이 필요한 DB 카드(#55·#56), 실행계획 트리(#83), AI 대화 칸(#57).
+     *
+     * <p>Top Query 촬영과 같은 규율을 따른다: 찍기 전에 화면이 실제로 그 상태인지 값으로 확인한다.
+     * 캡처만 하고 검증하지 않으면 빈 화면·오류 화면을 문서에 올리게 된다.
+     */
+    @Test
+    void UX_2차로_바뀐_화면_셋을_검증하고_촬영한다() {
+        String baseUrl = env("DBTOWER_CAPTURE_BASE_URL", "http://127.0.0.1:8080");
+        String username = env("DBTOWER_CAPTURE_USERNAME", "admin");
+        String password = requiredEnv("DBTOWER_CAPTURE_PASSWORD");
+        String instanceId = requiredEnv("DBTOWER_CAPTURE_INSTANCE_ID");
+
+        try (Playwright playwright = Playwright.create();
+             Browser browser = playwright.chromium().launch();
+             BrowserContext context = browser.newContext(new Browser.NewContextOptions()
+                     .setTimezoneId("Asia/Seoul").setViewportSize(1512, 900))) {
+            Page page = context.newPage();
+            page.navigate(baseUrl + "/login.html");
+            page.fill("#username", username);
+            page.fill("#password", password);
+            page.click("button[type=submit]");
+            page.waitForURL(Pattern.compile("^(?!.*\\/login).*$"));
+
+            // 1. 첫 화면 — 확인이 필요한 DB 카드. 헬스 스코어 보고서가 와야 카드가 생긴다(40초 넘게 걸릴 수 있다)
+            page.navigate(baseUrl + "/");
+            Locator attention = page.locator("#attention");
+            attention.waitFor(new Locator.WaitForOptions().setTimeout(120_000));
+            assertThat(attention.textContent()).contains("확인이 필요한");
+            assertThat(page.locator("#attention .attention-row").count()).isGreaterThan(0);
+            assertThat((Boolean) page.evaluate("document.documentElement.scrollWidth <= innerWidth")).isTrue();
+            page.screenshot(new Page.ScreenshotOptions()
+                    .setPath(Path.of("docs/images/webui/200-console-attention.jpg")));
+
+            // 2. 쿼리 상세 — PostgreSQL 실행계획 트리. 노드가 하나라도 있어야 트리다
+            page.navigate(baseUrl + "/?instance=" + instanceId);
+            Locator rows = page.locator("#top-table tbody tr[data-idx]");
+            rows.first().waitFor(new Locator.WaitForOptions().setTimeout(120_000));
+            // 계획을 뜰 수 있는 것은 SELECT뿐이다 — 모니터 계정의 explain은 SELECT만 허용한다(안전 원칙).
+            // 그리고 트리를 보이려면 노드가 여럿이어야 한다. pg_database_size 같은 한 노드짜리는 트리가 아니라 한 줄이다.
+            Locator candidates = rows.filter(new Locator.FilterOptions()
+                    .setHasText(Pattern.compile("select.+from", Pattern.CASE_INSENSITIVE)));
+            candidates.first().waitFor(new Locator.WaitForOptions().setTimeout(60_000));
+            Locator planTree = page.locator("#detail-plan .plan-node");
+            int nodes = 0;
+            for (int i = 0; i < candidates.count() && nodes < 2; i++) {
+                candidates.nth(i).locator("td").first().click();
+                page.locator("#btn-explain").click();
+                try {
+                    planTree.first().waitFor(new Locator.WaitForOptions().setTimeout(20_000));
+                } catch (RuntimeException ignored) {
+                    continue;   // 이 쿼리는 계획을 못 떴다 — 다음 후보로
+                }
+                nodes = planTree.count();
+            }
+            assertThat(nodes).as("노드가 여럿인 계획을 찾지 못했다").isGreaterThan(1);
+            page.evaluate("() => document.querySelector('#detail-plan').scrollIntoView({block: 'center'})");
+            page.screenshot(new Page.ScreenshotOptions()
+                    .setPath(Path.of("docs/images/webui/201-querydetail-plan-tree.jpg")));
+
+            // 3. AI 대화 칸 — 입구가 하나로 모였고 방식 셋을 거기서 고른다
+            Locator ask = page.locator("#btn-ask-ai").first();
+            if (ask.count() > 0) {
+                ask.click();
+            }
+            Locator modes = page.locator("#chat-modes");
+            modes.waitFor(new Locator.WaitForOptions().setTimeout(30_000));
+            assertThat(modes.textContent()).contains("지금 답하기");
+            page.screenshot(new Page.ScreenshotOptions()
+                    .setPath(Path.of("docs/images/webui/202-console-ai-chat.jpg")));
+        }
+    }
+
     private static BrowserContext captureContext(Browser browser) {
         BrowserContext context = browser.newContext(new Browser.NewContextOptions()
                 .setTimezoneId("Asia/Seoul").setViewportSize(1512, 900));
