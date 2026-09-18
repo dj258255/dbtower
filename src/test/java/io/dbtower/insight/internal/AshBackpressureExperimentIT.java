@@ -1,5 +1,6 @@
 package io.dbtower.insight.internal;
 
+import io.dbtower.testsupport.TargetTableLock;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -74,12 +75,24 @@ class AshBackpressureExperimentIT {
         return c;
     }
 
+    /** 같은 대상 DB에 다른 실행이 붙어 exp_bp 를 지우지 않게 잡는다(#112) */
+    private static TargetTableLock targetLock;
+
     @BeforeAll
     static void setUp() throws Exception {
+        targetLock = TargetTableLock.acquire(List.of(
+                new TargetTableLock.Target("jdbc:postgresql://127.0.0.1:15432/sample", "postgres", "dbtower1234")));
         try (Connection c = open("e4-setup"); Statement st = c.createStatement()) {
             st.execute("DROP TABLE IF EXISTS exp_bp");
             st.execute("CREATE TABLE exp_bp (id INT PRIMARY KEY, v INT)");
             st.execute("INSERT INTO exp_bp VALUES (1, 0)");
+        }
+    }
+
+    @AfterAll
+    static void releaseLock() {
+        if (targetLock != null) {
+            targetLock.close();
         }
     }
 

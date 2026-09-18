@@ -8,7 +8,10 @@ import io.dbtower.operator.model.BulkChangePlan;
 import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
+import io.dbtower.testsupport.TargetTableLock;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -54,6 +57,23 @@ class BulkChangeBatchIT {
 
     private final ConnectionPools pools = new ConnectionPools(new VaultCredentials("", ""),
             15, 6, 5000, 600_000, 1_800_000, 30, 60_000);
+
+    /** 같은 대상 DB에 다른 실행이 붙어 bulk_it 을 지우지 않게 잡는다(#112) */
+    private static TargetTableLock targetLock;
+
+    @BeforeAll
+    static void lockTargets() {
+        targetLock = TargetTableLock.acquire(List.of(
+                new TargetTableLock.Target(MYSQL_URL, MYSQL_CRED.username(), MYSQL_CRED.password()),
+                new TargetTableLock.Target(PG_URL, PG_CRED.username(), PG_CRED.password())));
+    }
+
+    @AfterAll
+    static void unlockTargets() {
+        if (targetLock != null) {
+            targetLock.close();
+        }
+    }
 
     @AfterEach
     void close() {

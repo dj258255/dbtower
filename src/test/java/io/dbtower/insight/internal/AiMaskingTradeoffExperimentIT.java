@@ -17,6 +17,7 @@ import io.dbtower.operator.internal.PostgresOperator;
 import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
+import io.dbtower.testsupport.TargetTableLock;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -111,8 +112,14 @@ class AiMaskingTradeoffExperimentIT {
 
     // ---------------------------------------------------------------- 준비
 
+    /** 같은 대상 DB에 다른 실행이 붙어 exp_mask_* 를 지우지 않게 잡는다(#112) */
+    private static TargetTableLock targetLock;
+
     @BeforeAll
     static void setUp() throws Exception {
+        targetLock = TargetTableLock.acquire(List.of(
+                new TargetTableLock.Target("jdbc:mysql://127.0.0.1:13306/sample", "root", "dbtower1234"),
+                new TargetTableLock.Target("jdbc:postgresql://127.0.0.1:15432/sample", "postgres", "dbtower1234")));
         DBS.clear();
         DatabaseInstance mysql = instance(9501, DbmsType.MYSQL, 13306, "sample", "root", "dbtower1234");
         DBS.add(new Db("MySQL", mysql, new ConsoleCredential("root", "dbtower1234"),
@@ -126,6 +133,13 @@ class AiMaskingTradeoffExperimentIT {
             prepare(db);
         }
         Files.createDirectories(DOC_PATH.getParent());
+    }
+
+    @AfterAll
+    static void releaseLock() {
+        if (targetLock != null) {
+            targetLock.close();
+        }
     }
 
     @AfterAll
