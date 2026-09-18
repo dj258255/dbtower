@@ -59,6 +59,17 @@ public final class TargetTableLock implements AutoCloseable {
     public record Target(String jdbcUrl, String username, String password) {
     }
 
+    /**
+     * 게이트 환경변수가 켜졌을 때만 잡는다. 꺼져 있으면 {@code null}을 돌려준다.
+     *
+     * <p>왜 필요한가: JUnit은 <b>메서드 수준</b> {@code @EnabledIfEnvironmentVariable}을 평가하기 전에
+     * {@code @BeforeAll}을 돌린다. 대상 DB가 없는 CI에서 락을 잡으려다 연결 오류로 클래스가 통째로 깨졌다
+     * (#112를 고치다 만든 회귀 — CI에는 MySQL·PostgreSQL 컨테이너가 없다).
+     */
+    public static TargetTableLock acquireIfEnabled(String gateEnv, List<Target> targets) {
+        return "1".equals(System.getenv(gateEnv)) ? acquire(targets) : null;
+    }
+
     private static Connection lockOne(Target t) {
         Connection c = null;
         try {

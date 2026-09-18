@@ -81,7 +81,7 @@ class ChangeLockModeExperimentIT {
 
     @BeforeAll
     static void setUp() throws Exception {
-        targetLock = TargetTableLock.acquire(DBS.stream()
+        targetLock = TargetTableLock.acquireIfEnabled("DBTOWER_EXPERIMENT", DBS.stream()
                 .map(d -> new TargetTableLock.Target(d.url(), d.user(), d.password())).toList());
         for (Db db : DBS) {
             try (Connection c = db.open(); Statement st = c.createStatement()) {

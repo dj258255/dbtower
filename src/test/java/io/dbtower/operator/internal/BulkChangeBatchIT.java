@@ -63,7 +63,7 @@ class BulkChangeBatchIT {
 
     @BeforeAll
     static void lockTargets() {
-        targetLock = TargetTableLock.acquire(List.of(
+        targetLock = TargetTableLock.acquireIfEnabled(GATE, List.of(
                 new TargetTableLock.Target(MYSQL_URL, MYSQL_CRED.username(), MYSQL_CRED.password()),
                 new TargetTableLock.Target(PG_URL, PG_CRED.username(), PG_CRED.password())));
     }

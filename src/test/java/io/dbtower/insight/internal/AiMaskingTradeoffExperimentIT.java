@@ -117,7 +117,7 @@ class AiMaskingTradeoffExperimentIT {
 
     @BeforeAll
     static void setUp() throws Exception {
-        targetLock = TargetTableLock.acquire(List.of(
+        targetLock = TargetTableLock.acquireIfEnabled("DBTOWER_EXPERIMENT", List.of(
                 new TargetTableLock.Target("jdbc:mysql://127.0.0.1:13306/sample", "root", "dbtower1234"),
                 new TargetTableLock.Target("jdbc:postgresql://127.0.0.1:15432/sample", "postgres", "dbtower1234")));
         DBS.clear();

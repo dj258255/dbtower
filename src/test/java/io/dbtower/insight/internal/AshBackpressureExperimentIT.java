@@ -80,7 +80,7 @@ class AshBackpressureExperimentIT {
 
     @BeforeAll
     static void setUp() throws Exception {
-        targetLock = TargetTableLock.acquire(List.of(
+        targetLock = TargetTableLock.acquireIfEnabled("DBTOWER_EXPERIMENT", List.of(
                 new TargetTableLock.Target("jdbc:postgresql://127.0.0.1:15432/sample", "postgres", "dbtower1234")));
         try (Connection c = open("e4-setup"); Statement st = c.createStatement()) {
             st.execute("DROP TABLE IF EXISTS exp_bp");
