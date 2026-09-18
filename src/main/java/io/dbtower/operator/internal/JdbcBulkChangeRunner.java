@@ -37,6 +37,22 @@ final class JdbcBulkChangeRunner {
     interface Dialect {
         /** 문장·락 대기 상한을 건다. {@link JdbcChangeRunner.Dialect#beginChange}와 같은 훅이다. */
         void beginChange(Statement st, int timeoutSeconds) throws SQLException;
+
+        /**
+         * 경계 조회에 행 수 제한을 붙인다 — {@code SELECT ... ORDER BY ...} 뒤에 이어 붙일 절.
+         *
+         * <p>기본은 {@code LIMIT n}(MySQL·PostgreSQL). Oracle은 {@code FETCH FIRST n ROWS ONLY},
+         * SQL Server는 {@code TOP (n)}이라 자리가 달라 구현체가 덮어쓴다. SQL Server처럼 절이 앞에 오는
+         * 기종은 {@link #selectHead}도 함께 덮어쓴다.
+         */
+        default String limitClause(int rows) {
+            return " LIMIT " + rows;
+        }
+
+        /** {@code SELECT} 바로 뒤에 들어갈 것 — SQL Server의 {@code TOP (n)}이 여기 온다. */
+        default String selectHead(int rows) {
+            return "";
+        }
     }
 
     private final Dialect dialect;
@@ -57,8 +73,9 @@ final class JdbcBulkChangeRunner {
                 ? (plan.whereTail().isBlank() ? "" : " WHERE " + plan.whereTail())
                 : " WHERE " + (plan.whereTail().isBlank() ? "" : "(" + plan.whereTail() + ") AND ")
                         + plan.compare(">");
-        String sql = "SELECT " + plan.keyList() + " FROM " + plan.table() + where
-                + " ORDER BY " + plan.keyList() + " LIMIT " + plan.batchRows();
+        String sql = "SELECT " + dialect.selectHead(plan.batchRows()) + plan.keyList()
+                + " FROM " + plan.table() + where
+                + " ORDER BY " + plan.keyList() + dialect.limitClause(plan.batchRows());
         try (PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setQueryTimeout(plan.timeoutSeconds());
             if (hasLower) {

@@ -355,7 +355,32 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
     }
 
     private JdbcBulkChangeRunner bulkRunner() {
-        return new JdbcBulkChangeRunner(AbstractJdbcOperator.this::beginChange);
+        return new JdbcBulkChangeRunner(new JdbcBulkChangeRunner.Dialect() {
+            @Override
+            public void beginChange(Statement st, int timeoutSeconds) throws SQLException {
+                AbstractJdbcOperator.this.beginChange(st, timeoutSeconds);
+            }
+
+            @Override
+            public String limitClause(int rows) {
+                return AbstractJdbcOperator.this.bulkLimitClause(rows);
+            }
+
+            @Override
+            public String selectHead(int rows) {
+                return AbstractJdbcOperator.this.bulkSelectHead(rows);
+            }
+        });
+    }
+
+    /** 경계 조회의 행 수 제한 — 기본은 표준에 가까운 {@code LIMIT}이고 기종이 덮어쓴다. */
+    protected String bulkLimitClause(int rows) {
+        return " LIMIT " + rows;
+    }
+
+    /** {@code SELECT} 바로 뒤에 들어갈 것 — 기본은 없다. */
+    protected String bulkSelectHead(int rows) {
+        return "";
     }
 
     @Override

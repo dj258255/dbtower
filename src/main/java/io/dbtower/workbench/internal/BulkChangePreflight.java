@@ -24,8 +24,12 @@ import java.util.Locale;
  */
 final class BulkChangePreflight {
 
-    /** 이 경로를 지원하는 기종. 나머지는 Operator에 능력이 붙을 때까지 거부한다. */
-    private static final List<DbmsType> SUPPORTED = List.of(DbmsType.MYSQL, DbmsType.POSTGRESQL);
+    /**
+     * 이 경로를 지원하는 기종. MongoDB는 변경이 SQL 문장이 아니라 명령 JSON이라 같은 실행기로
+     * 흡수할 수 있는지부터 판정해야 한다(#128).
+     */
+    private static final List<DbmsType> SUPPORTED =
+            List.of(DbmsType.MYSQL, DbmsType.POSTGRESQL, DbmsType.ORACLE, DbmsType.MSSQL);
 
     /** 승인 시점 예상보다 이 배를 넘게 걸리면 멈추고 재승인을 요구한다. */
     static final int ESTIMATE_TOLERANCE = 2;
@@ -64,7 +68,8 @@ final class BulkChangePreflight {
 
     private static void requireSupportedDbms(DbmsType type) {
         if (!SUPPORTED.contains(type)) {
-            throw new WorkbenchRejection(422, "대량 일괄 변경은 아직 MySQL·PostgreSQL에서만 실행합니다(현재 " + type + ")", null);
+            throw new WorkbenchRejection(422, "대량 일괄 변경은 아직 " + SUPPORTED.stream().map(Enum::name).reduce((a, b) -> a + "·" + b).orElse("")
+                    + "에서만 실행합니다(현재 " + type + ")", null);
         }
     }
 

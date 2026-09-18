@@ -298,6 +298,15 @@ public class OracleOperator extends AbstractJdbcOperator {
         }
     }
 
+    /**
+     * Oracle은 {@code LIMIT}이 없다 — 12c부터의 표준 문법을 쓴다. {@code ROWNUM}은 정렬 전에 매겨져
+     * {@code ORDER BY}와 함께 쓰면 "정렬한 뒤 앞의 n개"가 아니라 "먼저 읽은 n개를 정렬"이 된다(경계가 틀어진다).
+     */
+    @Override
+    protected String bulkLimitClause(int rows) {
+        return " FETCH FIRST " + rows + " ROWS ONLY";
+    }
+
     @Override
     public String explain(String sql) {
         requireSelect(sql);

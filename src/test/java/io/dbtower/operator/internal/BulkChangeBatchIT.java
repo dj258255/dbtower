@@ -50,6 +50,15 @@ class BulkChangeBatchIT {
     private static final ConsoleCredential MYSQL_CRED = new ConsoleCredential("root", "dbtower1234");
     private static final ConsoleCredential PG_CRED = new ConsoleCredential("postgres", "dbtower1234");
 
+    /** Oracle·SQL Server는 게이트와 포트가 따로다 — SQL Server는 Rosetta VM에 띄운 2022를 쓴다(132절). */
+    private static final String MSSQL_GATE = "DBTOWER_MSSQL_IT";
+    private static final int MSSQL_PORT = Integer.parseInt(System.getenv().getOrDefault("DBTOWER_MSSQL_PORT", "11433"));
+    private static final String ORACLE_URL = "jdbc:oracle:thin:@//127.0.0.1:11521/FREEPDB1";
+    private static final String MSSQL_URL = "jdbc:sqlserver://127.0.0.1:" + MSSQL_PORT
+            + ";databaseName=master;encrypt=false;trustServerCertificate=true";
+    private static final ConsoleCredential ORACLE_CRED = new ConsoleCredential("sample", "dbtower1234");
+    private static final ConsoleCredential MSSQL_CRED = new ConsoleCredential("sa", "Dbtower1234!");
+
     /** 조건에 맞는 행이 총 몇 개인지 — 배치 크기(7)로 나누어떨어지지 않게 두어 마지막 배치가 짧게 끝나는 경우도 지난다 */
     private static final int MATCHING = 50;
     private static final int OTHERS = 30;
@@ -83,8 +92,19 @@ class BulkChangeBatchIT {
         pools.closeAll();
     }
 
+    /**
+     * 인스턴스 대역 — 기종마다 DB 이름이 다르다. Oracle은 PDB 이름(FREEPDB1)이고 SQL Server는 여기서 master를 쓴다.
+     * 하나로 박아 두면 오퍼레이터가 만드는 JDBC URL이 엉뚱한 DB를 가리켜 "Invalid object name"·연결 시간 초과로 나온다.
+     */
     private static DatabaseInstance instance(long id, DbmsType type, int port) {
-        DatabaseInstance instance = new DatabaseInstance("bulk-it-" + id, type, "127.0.0.1", port, "sample", "unused", "unused");
+        String dbName = switch (type) {
+            case ORACLE -> "FREEPDB1";
+            case MSSQL -> "master";
+            default -> "sample";
+        };
+        String user = type == DbmsType.ORACLE ? "sample" : type == DbmsType.MSSQL ? "sa" : "unused";
+        DatabaseInstance instance = new DatabaseInstance("bulk-it-" + id, type, "127.0.0.1", port, dbName,
+                user, "unused");
         ReflectionTestUtils.setField(instance, "id", id);
         return instance;
     }
@@ -133,6 +153,32 @@ class BulkChangeBatchIT {
             assertThat(count(MYSQL_URL, MYSQL_CRED, "SELECT COUNT(*) FROM bulk_it WHERE note = 'x'")).isZero();
         } finally {
             drop(MYSQL_URL, MYSQL_CRED);
+        }
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = GATE, matches = "1")
+    @DisplayName("Oracle — FETCH FIRST로 경계를 잡아 누락·중복 0")
+    void oracle() throws SQLException {
+        seed(ORACLE_URL, ORACLE_CRED, "NUMBER(19)");
+        OracleOperator op = new OracleOperator(instance(9306, DbmsType.ORACLE, 11521), pools, null);
+        try {
+            runAndVerify(op, ORACLE_CRED, ORACLE_URL);
+        } finally {
+            drop(ORACLE_URL, ORACLE_CRED);
+        }
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = MSSQL_GATE, matches = "1")
+    @DisplayName("SQL Server — TOP (n)으로 경계를 잡아 누락·중복 0")
+    void sqlServer() throws SQLException {
+        seed(MSSQL_URL, MSSQL_CRED, "BIGINT");
+        MsSqlOperator op = new MsSqlOperator(instance(9307, DbmsType.MSSQL, MSSQL_PORT), pools, null);
+        try {
+            runAndVerify(op, MSSQL_CRED, MSSQL_URL);
+        } finally {
+            drop(MSSQL_URL, MSSQL_CRED);
         }
     }
 
@@ -272,8 +318,10 @@ class BulkChangeBatchIT {
      */
     private static void seed(String url, ConsoleCredential cred, String keyType) throws SQLException {
         drop(url, cred);
+        String varchar = url.startsWith("jdbc:oracle:") ? "VARCHAR2" : "VARCHAR";
         exec(url, cred,
-                "CREATE TABLE bulk_it (id " + keyType + " PRIMARY KEY, grp " + keyType + ", kind VARCHAR(4), note VARCHAR(20))",
+                "CREATE TABLE bulk_it (id " + keyType + " PRIMARY KEY, grp " + keyType + ", kind " + varchar
+                        + "(4), note " + varchar + "(20))",
                 "CREATE INDEX bulk_it_kind_idx ON bulk_it (kind)");
         try (Connection c = DriverManager.getConnection(url, cred.username(), cred.password())) {
             c.setAutoCommit(false);
@@ -309,8 +357,29 @@ class BulkChangeBatchIT {
         }
     }
 
+    /** Oracle에는 {@code DROP TABLE IF EXISTS}가 없어 없는 테이블의 오류를 삼킨다(ORA-00942). */
     private static void drop(String url, ConsoleCredential cred) throws SQLException {
+        if (url.startsWith("jdbc:oracle:")) {
+            execIgnoring(url, cred, "ORA-00942", "DROP TABLE bulk_it", "DROP TABLE bulk_it_composite");
+            return;
+        }
         exec(url, cred, "DROP TABLE IF EXISTS bulk_it");
+    }
+
+    private static void execIgnoring(String url, ConsoleCredential cred, String code, String... statements)
+            throws SQLException {
+        try (Connection c = DriverManager.getConnection(url, cred.username(), cred.password());
+             Statement st = c.createStatement()) {
+            for (String sql : statements) {
+                try {
+                    st.execute(sql);
+                } catch (SQLException e) {
+                    if (!String.valueOf(e.getMessage()).contains(code)) {
+                        throw e;
+                    }
+                }
+            }
+        }
     }
 
     private static void exec(String url, ConsoleCredential cred, String... statements) throws SQLException {
