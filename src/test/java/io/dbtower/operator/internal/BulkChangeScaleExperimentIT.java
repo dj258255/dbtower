@@ -155,9 +155,9 @@ class BulkChangeScaleExperimentIT {
             BulkChangePlan plan = new BulkChangePlan("UPDATE bulk_scale SET note = 'done'", "kind = 'M'",
                     "bulk_scale", "id", BATCH_ROWS, TIMEOUT_SECONDS);
             long total = 0;
-            Object lastKey = null;
+            java.util.List<Object> lastKey = null;
             while (true) {
-                Object toKey = op.nextBulkBoundary(db.cred(), plan, lastKey);
+                java.util.List<Object> toKey = op.nextBulkBoundary(db.cred(), plan, lastKey);
                 if (toKey == null) {
                     break;
                 }

@@ -321,7 +321,8 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
      * 유휴 타임아웃에 끊기면 그 뒤 배치가 전부 실패한다. 배치 사이에는 어차피 쉬는 간격이 있어 재연결 비용이 묻힌다.
      */
     @Override
-    public Object nextBulkBoundary(ConsoleCredential credential, BulkChangePlan plan, Object lastKey) {
+    public java.util.List<Object> nextBulkBoundary(ConsoleCredential credential, BulkChangePlan plan,
+                                                   java.util.List<Object> lastKey) {
         try (Connection c = writeConnection(credential)) {
             return bulkRunner().nextBoundary(c, plan, lastKey);
         } catch (SQLException e) {
@@ -331,7 +332,7 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
 
     @Override
     public BulkBatchOutcome executeBulkBatch(ConsoleCredential credential, BulkChangePlan plan,
-                                             Object fromKey, Object toKey) {
+                                             java.util.List<Object> fromKey, java.util.List<Object> toKey) {
         try (Connection c = writeConnection(credential)) {
             return bulkRunner().executeBatch(c, plan, fromKey, toKey);
         } catch (SQLException e) {

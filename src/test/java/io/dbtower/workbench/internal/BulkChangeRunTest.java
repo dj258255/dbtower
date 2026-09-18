@@ -41,6 +41,11 @@ class BulkChangeRunTest {
 
     private static final BulkChangeRun.Policy POLICY = new BulkChangeRun.Policy(100, 5.0, 10, 1000);
 
+    /** 키 하나를 리스트로 — 복합 키 지원 뒤 경계는 열 목록이다(#126) */
+    private static List<Object> key(long value) {
+        return List.of(value);
+    }
+
     private static ReplicationState lag(double seconds) {
         return new ReplicationState("REPLICA", seconds, LagSource.MEASURED, null);
     }
@@ -54,7 +59,7 @@ class BulkChangeRunTest {
     void runsUntilBoundaryIsNull() {
         DbmsOperator op = mock(DbmsOperator.class);
         when(op.replicationState()).thenReturn(standalone());
-        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(1000L, 2000L, 2500L, null);
+        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(key(1000), key(2000), key(2500), (List<Object>) null);
         when(op.executeBulkBatch(eq(CRED), eq(PLAN), any(), any()))
                 .thenAnswer(i -> new BulkBatchOutcome(i.getArgument(2), i.getArgument(3), 1000, 12));
 
@@ -70,11 +75,11 @@ class BulkChangeRunTest {
         assertThat(run.run()).isEqualTo(BulkChangeRun.State.DONE);
         assertThat(run.batches()).isEqualTo(3);
         assertThat(run.affectedRows()).isEqualTo(3000);
-        assertThat(run.lastAppliedKey()).isEqualTo(2500L);
+        assertThat(run.lastAppliedKey()).isEqualTo(key(2500));
         // 첫 배치는 하한이 없다 — 키 공간의 처음부터 연다
         assertThat(seen.get(0).fromKey()).isNull();
-        assertThat(seen.get(1).fromKey()).isEqualTo(1000L);
-        assertThat(seen.get(2).fromKey()).isEqualTo(2000L);
+        assertThat(seen.get(1).fromKey()).isEqualTo(key(1000));
+        assertThat(seen.get(2).fromKey()).isEqualTo(key(2000));
     }
 
     @Test
@@ -84,9 +89,9 @@ class BulkChangeRunTest {
         AtomicInteger reads = new AtomicInteger();
         // 처음 세 번은 밀려 있고 그 뒤로 따라잡는다
         when(op.replicationState()).thenAnswer(i -> reads.incrementAndGet() <= 3 ? lag(12.0) : lag(0.4));
-        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(100L, (Object) null);
+        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(key(100), (List<Object>) null);
         when(op.executeBulkBatch(eq(CRED), eq(PLAN), any(), any()))
-                .thenReturn(new BulkBatchOutcome(null, 100L, 100, 5));
+                .thenReturn(new BulkBatchOutcome(null, key(100), 100, 5));
 
         List<String> states = new ArrayList<>();
         BulkChangeRun run = new BulkChangeRun(op, CRED, PLAN, POLICY, new BulkChangeRun.Listener() {
@@ -109,9 +114,9 @@ class BulkChangeRunTest {
         for (LagSource source : List.of(LagSource.NOT_APPLICABLE, LagSource.UNSUPPORTED, LagSource.UNAVAILABLE)) {
             DbmsOperator op = mock(DbmsOperator.class);
             when(op.replicationState()).thenReturn(new ReplicationState("R", null, source, "사유"));
-            when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(10L, (Object) null);
+            when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(key(10), (List<Object>) null);
             when(op.executeBulkBatch(eq(CRED), eq(PLAN), any(), any()))
-                    .thenReturn(new BulkBatchOutcome(null, 10L, 10, 1));
+                    .thenReturn(new BulkBatchOutcome(null, key(10), 10, 1));
 
             List<BulkChangeRun.State> states = new ArrayList<>();
             BulkChangeRun run = new BulkChangeRun(op, CRED, PLAN, POLICY, new BulkChangeRun.Listener() {
@@ -131,9 +136,9 @@ class BulkChangeRunTest {
     void replicationReadFailureDoesNotBlock() {
         DbmsOperator op = mock(DbmsOperator.class);
         when(op.replicationState()).thenThrow(new OperatorException("복제 조회 권한 없음"));
-        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(10L, (Object) null);
+        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(key(10), (List<Object>) null);
         when(op.executeBulkBatch(eq(CRED), eq(PLAN), any(), any()))
-                .thenReturn(new BulkBatchOutcome(null, 10L, 10, 1));
+                .thenReturn(new BulkBatchOutcome(null, key(10), 10, 1));
 
         AtomicReference<ReplicationState> recorded = new AtomicReference<>();
         BulkChangeRun run = new BulkChangeRun(op, CRED, PLAN, POLICY, new BulkChangeRun.Listener() {
@@ -153,7 +158,7 @@ class BulkChangeRunTest {
     void cancelStopsBeforeNextBatch() {
         DbmsOperator op = mock(DbmsOperator.class);
         when(op.replicationState()).thenReturn(standalone());
-        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(100L, 200L, 300L, null);
+        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(key(100), key(200), key(300), (List<Object>) null);
 
         AtomicReference<BulkChangeRun> self = new AtomicReference<>();
         when(op.executeBulkBatch(eq(CRED), eq(PLAN), any(), any())).thenAnswer(i -> {
@@ -167,7 +172,7 @@ class BulkChangeRunTest {
 
         assertThat(run.run()).isEqualTo(BulkChangeRun.State.CANCELLED);
         assertThat(run.batches()).isEqualTo(1);
-        assertThat(run.lastAppliedKey()).isEqualTo(100L);   // 어디까지 적용됐나가 남는다
+        assertThat(run.lastAppliedKey()).isEqualTo(key(100));   // 어디까지 적용됐나가 남는다
         verify(op, never()).revertChange(any(), any());
     }
 
@@ -176,7 +181,7 @@ class BulkChangeRunTest {
     void cancelWhilePaused() {
         DbmsOperator op = mock(DbmsOperator.class);
         when(op.replicationState()).thenReturn(lag(99.0));   // 계속 밀려 있다
-        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(100L);
+        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(key(100));
 
         AtomicReference<BulkChangeRun> self = new AtomicReference<>();
         AtomicInteger sleeps = new AtomicInteger();
@@ -198,7 +203,7 @@ class BulkChangeRunTest {
     void pauseByUserThenResume() {
         DbmsOperator op = mock(DbmsOperator.class);
         when(op.replicationState()).thenReturn(standalone());
-        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(100L, 200L, null);
+        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(key(100), key(200), (List<Object>) null);
 
         AtomicReference<BulkChangeRun> self = new AtomicReference<>();
         AtomicInteger sleeps = new AtomicInteger();
@@ -218,7 +223,7 @@ class BulkChangeRunTest {
 
         assertThat(run.run()).isEqualTo(BulkChangeRun.State.DONE);
         assertThat(run.batches()).isEqualTo(2);
-        assertThat(run.lastAppliedKey()).isEqualTo(200L);
+        assertThat(run.lastAppliedKey()).isEqualTo(key(200));
     }
 
     @Test
@@ -226,7 +231,7 @@ class BulkChangeRunTest {
     void batchFailureStops() {
         DbmsOperator op = mock(DbmsOperator.class);
         when(op.replicationState()).thenReturn(standalone());
-        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(100L, 200L, null);
+        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(key(100), key(200), (List<Object>) null);
         when(op.executeBulkBatch(eq(CRED), eq(PLAN), any(), any()))
                 .thenThrow(new OperatorException("배치가 목표 행 수를 넘겨 커밋하지 않았다(목표 1000, 영향 4000)"));
 
@@ -250,9 +255,9 @@ class BulkChangeRunTest {
     void maxBatchesGuard() {
         DbmsOperator op = mock(DbmsOperator.class);
         when(op.replicationState()).thenReturn(standalone());
-        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(1L);   // 늘 같은 키
+        when(op.nextBulkBoundary(eq(CRED), eq(PLAN), any())).thenReturn(key(1));   // 늘 같은 키
         when(op.executeBulkBatch(eq(CRED), eq(PLAN), any(), any()))
-                .thenReturn(new BulkBatchOutcome(1L, 1L, 0, 1));
+                .thenReturn(new BulkBatchOutcome(key(1), key(1), 0, 1));
 
         BulkChangeRun.Policy small = new BulkChangeRun.Policy(0, 5.0, 0, 5);
         BulkChangeRun run = new BulkChangeRun(op, CRED, PLAN, small, new BulkChangeRun.Listener() {

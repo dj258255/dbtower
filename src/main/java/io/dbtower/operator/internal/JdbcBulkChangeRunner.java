@@ -9,6 +9,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 대량 일괄 변경의 배치 하나 — 경계를 정하고, 그 구간만 고치고, 커밋한다(docs/bulk-change-spec.md).
@@ -49,22 +51,28 @@ final class JdbcBulkChangeRunner {
      * <p>{@code LIMIT}으로 목표 행 수만큼 키를 읽고 <b>마지막 키</b>를 상한으로 쓴다. 읽은 수가 목표에 못 미치면
      * 이번이 마지막 배치다.
      */
-    Object nextBoundary(Connection c, BulkChangePlan plan, Object lastKey) {
-        String where = lastKey == null
+    List<Object> nextBoundary(Connection c, BulkChangePlan plan, List<Object> lastKey) {
+        boolean hasLower = lastKey != null && !lastKey.isEmpty();
+        String where = !hasLower
                 ? (plan.whereTail().isBlank() ? "" : " WHERE " + plan.whereTail())
                 : " WHERE " + (plan.whereTail().isBlank() ? "" : "(" + plan.whereTail() + ") AND ")
-                        + plan.keyColumn() + " > ?";
-        String sql = "SELECT " + plan.keyColumn() + " FROM " + plan.table() + where
-                + " ORDER BY " + plan.keyColumn() + " LIMIT " + plan.batchRows();
+                        + plan.compare(">");
+        String sql = "SELECT " + plan.keyList() + " FROM " + plan.table() + where
+                + " ORDER BY " + plan.keyList() + " LIMIT " + plan.batchRows();
         try (PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setQueryTimeout(plan.timeoutSeconds());
-            if (lastKey != null) {
-                ps.setObject(1, lastKey);
+            if (hasLower) {
+                bind(ps, 1, lastKey);
             }
             try (ResultSet rs = ps.executeQuery()) {
-                Object last = null;
+                List<Object> last = null;
+                int columns = plan.keyColumns().size();
                 while (rs.next()) {
-                    last = rs.getObject(1);
+                    List<Object> row = new ArrayList<>(columns);
+                    for (int i = 1; i <= columns; i++) {
+                        row.add(rs.getObject(i));
+                    }
+                    last = row;
                 }
                 return last;
             }
@@ -73,13 +81,23 @@ final class JdbcBulkChangeRunner {
         }
     }
 
+    /** 키 값을 순서대로 바인딩하고 다음 자리 번호를 돌려준다. */
+    private static int bind(PreparedStatement ps, int from, List<Object> key) throws SQLException {
+        int i = from;
+        for (Object value : key) {
+            ps.setObject(i++, value);
+        }
+        return i;
+    }
+
     /**
      * 구간 {@code (fromKey, toKey]} 하나를 고치고 커밋한다. 영향 행 수가 목표를 넘으면 롤백하고 멈춘다.
      *
      * <p>커넥션의 자동 커밋을 끄고 배치가 끝날 때 되돌린다 — 이 커넥션은 다음 배치에도 쓰인다.
      */
-    BulkBatchOutcome executeBatch(Connection c, BulkChangePlan plan, Object fromKey, Object toKey) {
-        String sql = plan.statementHead() + " WHERE " + plan.whereFor(fromKey != null);
+    BulkBatchOutcome executeBatch(Connection c, BulkChangePlan plan, List<Object> fromKey, List<Object> toKey) {
+        boolean hasLower = fromKey != null && !fromKey.isEmpty();
+        String sql = plan.statementHead() + " WHERE " + plan.whereFor(hasLower);
         boolean autoCommit = true;
         try {
             autoCommit = c.getAutoCommit();
@@ -92,10 +110,10 @@ final class JdbcBulkChangeRunner {
             try (PreparedStatement ps = c.prepareStatement(sql)) {
                 ps.setQueryTimeout(plan.timeoutSeconds());
                 int i = 1;
-                if (fromKey != null) {
-                    ps.setObject(i++, fromKey);
+                if (hasLower) {
+                    i = bind(ps, i, fromKey);
                 }
-                ps.setObject(i, toKey);
+                bind(ps, i, toKey);
                 affected = ps.executeLargeUpdate();
             }
             long elapsed = (System.nanoTime() - t0) / 1_000_000;

@@ -55,6 +55,9 @@ class BulkChangeBatchIT {
     private static final int OTHERS = 30;
     private static final int BATCH = 7;
 
+    /** 복합 키 시드에서 조건에 맞는 행 수 — 배치 크기로 나누어떨어지지 않게 둔다 */
+    private static final int COMPOSITE_MATCHING = 40;
+
     private final ConnectionPools pools = new ConnectionPools(new VaultCredentials("", ""),
             15, 6, 5000, 600_000, 1_800_000, 30, 60_000);
 
@@ -122,7 +125,7 @@ class BulkChangeBatchIT {
         BulkChangePlan plan = new BulkChangePlan("UPDATE bulk_it SET note = 'x'", "kind = 'M'",
                 "bulk_it", "grp", 2, 30);
         try {
-            Object boundary = op.nextBulkBoundary(MYSQL_CRED, plan, null);
+            List<Object> boundary = op.nextBulkBoundary(MYSQL_CRED, plan, null);
             assertThatThrownBy(() -> op.executeBulkBatch(MYSQL_CRED, plan, null, boundary))
                     .isInstanceOf(OperatorException.class)
                     .hasMessageContaining("목표 행 수를 넘겨 커밋하지 않았다");
@@ -133,14 +136,109 @@ class BulkChangeBatchIT {
         }
     }
 
+    @Test
+    @EnabledIfEnvironmentVariable(named = GATE, matches = "1")
+    @DisplayName("MySQL — 복합 기본 키를 사전순으로 훑어 누락·중복 0")
+    void mysqlCompositeKey() throws SQLException {
+        seedComposite(MYSQL_URL, MYSQL_CRED);
+        MySqlOperator op = new MySqlOperator(instance(9304, DbmsType.MYSQL, 13306), pools, null, null);
+        try {
+            runCompositeAndVerify(op, MYSQL_CRED, MYSQL_URL);
+        } finally {
+            exec(MYSQL_URL, MYSQL_CRED, "DROP TABLE IF EXISTS bulk_it_composite");
+        }
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = GATE, matches = "1")
+    @DisplayName("PostgreSQL — 복합 기본 키를 사전순으로 훑어 누락·중복 0")
+    void postgresCompositeKey() throws SQLException {
+        seedComposite(PG_URL, PG_CRED);
+        PostgresOperator op = new PostgresOperator(instance(9305, DbmsType.POSTGRESQL, 15432), pools, null);
+        try {
+            runCompositeAndVerify(op, PG_CRED, PG_URL);
+        } finally {
+            exec(PG_URL, PG_CRED, "DROP TABLE IF EXISTS bulk_it_composite");
+        }
+    }
+
+    /**
+     * 복합 키 {@code (shop_id, id)}를 사전순으로 훑는다.
+     *
+     * <p>이 시드가 노리는 것: 같은 {@code id}가 여러 {@code shop_id}에 걸쳐 있다. 열마다 부등호를 따로 쓰면
+     * ({@code shop_id > ? AND id > ?}) 구간이 겹치거나 비어 누락·중복이 생기는데, 사전순 한 덩이 비교는
+     * 그렇지 않다. 그 차이를 이 데이터가 드러낸다.
+     */
+    private void runCompositeAndVerify(AbstractJdbcOperator op, ConsoleCredential cred, String url)
+            throws SQLException {
+        BulkChangePlan plan = new BulkChangePlan("UPDATE bulk_it_composite SET note = 'done'", "kind = 'M'",
+                "bulk_it_composite", List.of("shop_id", "id"), BATCH, 30);
+        assertThat(plan.compare(">")).isEqualTo("(shop_id, id) > (?, ?)");
+
+        List<BulkBatchOutcome> batches = new ArrayList<>();
+        List<Object> lastKey = null;
+        while (true) {
+            List<Object> toKey = op.nextBulkBoundary(cred, plan, lastKey);
+            if (toKey == null) {
+                break;
+            }
+            assertThat(toKey).as("경계는 키 열 수만큼 온다").hasSize(2);
+            batches.add(op.executeBulkBatch(cred, plan, lastKey, toKey));
+            lastKey = toKey;
+        }
+
+        long changed = count(url, cred, "SELECT COUNT(*) FROM bulk_it_composite WHERE note = 'done'");
+        long outside = count(url, cred,
+                "SELECT COUNT(*) FROM bulk_it_composite WHERE note = 'done' AND kind <> 'M'");
+        long sum = batches.stream().mapToLong(BulkBatchOutcome::affectedRows).sum();
+
+        assertThat(changed).as("조건에 맞는 행이 모두 바뀐다(누락 0)").isEqualTo(COMPOSITE_MATCHING);
+        assertThat(outside).as("조건 밖은 건드리지 않는다").isZero();
+        assertThat(sum).as("배치 영향 행 수의 합 = 실제 바뀐 행 수(중복 0)").isEqualTo(COMPOSITE_MATCHING);
+        assertThat(batches).hasSizeGreaterThan(1);
+        for (int i = 1; i < batches.size(); i++) {
+            assertThat(batches.get(i).fromKey()).isEqualTo(batches.get(i - 1).toKey());
+        }
+        // 기록에 남을 모양 — 사람이 읽을 수 있어야 한다
+        assertThat(BulkBatchOutcome.render(batches.getLast().toKey())).matches("\\(\\d+, \\d+\\)");
+    }
+
+    /** 같은 id가 여러 shop_id에 걸치도록 둔다 — 열별 부등호로는 못 자르는 모양이다. */
+    private static void seedComposite(String url, ConsoleCredential cred) throws SQLException {
+        exec(url, cred, "DROP TABLE IF EXISTS bulk_it_composite",
+                "CREATE TABLE bulk_it_composite (shop_id BIGINT, id BIGINT, kind VARCHAR(4), note VARCHAR(20),"
+                        + " PRIMARY KEY (shop_id, id))");
+        try (Connection c = DriverManager.getConnection(url, cred.username(), cred.password())) {
+            c.setAutoCommit(false);
+            try (PreparedStatement ps = c.prepareStatement(
+                    "INSERT INTO bulk_it_composite (shop_id, id, kind, note) VALUES (?, ?, ?, NULL)")) {
+                int rows = 0;
+                for (long shop = 1; shop <= 4; shop++) {
+                    long id = 1;
+                    for (int k = 0; k < 15; k++) {
+                        ps.setLong(1, shop);
+                        ps.setLong(2, id);
+                        // 앞의 COMPOSITE_MATCHING개만 대상으로 둔다
+                        ps.setString(3, rows < COMPOSITE_MATCHING ? "M" : "X");
+                        ps.addBatch();
+                        id += (k % 3) + 1;   // id도 비연속
+                        rows++;
+                    }
+                }
+                ps.executeBatch();
+            }
+            c.commit();
+        }
+    }
+
     private void runAndVerify(AbstractJdbcOperator op, ConsoleCredential cred, String url) throws SQLException {
         BulkChangePlan plan = new BulkChangePlan("UPDATE bulk_it SET note = 'done'", "kind = 'M'",
                 "bulk_it", "id", BATCH, 30);
 
         List<BulkBatchOutcome> batches = new ArrayList<>();
-        Object lastKey = null;
+        List<Object> lastKey = null;
         while (true) {
-            Object toKey = op.nextBulkBoundary(cred, plan, lastKey);
+            List<Object> toKey = op.nextBulkBoundary(cred, plan, lastKey);
             if (toKey == null) {
                 break;
             }

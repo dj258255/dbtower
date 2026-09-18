@@ -30,6 +30,12 @@ final class BulkChangePreflight {
     /** 승인 시점 예상보다 이 배를 넘게 걸리면 멈추고 재승인을 요구한다. */
     static final int ESTIMATE_TOLERANCE = 2;
 
+    /**
+     * 경계로 쓸 키 열 수의 상한. 사전순 비교는 열 수와 무관하게 성립하지만, 열이 늘수록 경계 조회가
+     * 인덱스를 타는지가 기종·통계에 따라 갈린다. 실측으로 확인한 범위까지만 받는다(#126: 2열까지 확인).
+     */
+    static final int MAX_KEY_COLUMNS = 3;
+
     private BulkChangePreflight() {
     }
 
@@ -46,14 +52,14 @@ final class BulkChangePreflight {
 
         Parsed parsed = ChangeStatementParser.parse(sql);
         requireSupportedStatement(parsed);
-        String keyColumn = requireSinglePrimaryKey(operator, parsed.table());
+        List<String> keyColumns = requirePrimaryKey(operator, parsed.table());
         String tail = parsed.captureTail() == null ? "" : parsed.captureTail().strip();
         requireNoOrderOrLimit(tail);
 
         String where = stripWhereKeyword(tail);
         String head = headOf(sql, tail);
         requireEstimateWithinTolerance(operator, credential, parsed.table(), where, approvedRows, timeoutSeconds);
-        return new BulkChangePlan(head, where, parsed.table(), keyColumn, batchRows, timeoutSeconds);
+        return new BulkChangePlan(head, where, parsed.table(), keyColumns, batchRows, timeoutSeconds);
     }
 
     private static void requireSupportedDbms(DbmsType type) {
@@ -93,10 +99,13 @@ final class BulkChangePreflight {
     }
 
     /**
-     * 기본 키가 한 열이어야 한다. 키가 없으면 배치 경계를 정할 수 없어 누락·중복을 막을 수단이 사라지고,
-     * 복합 키는 사전순 비교가 필요해 아직 지원하지 않는다(명세의 "하지 않는 것").
+     * 기본 키가 있어야 한다. 없으면 배치 경계를 정할 수 없어 누락·중복을 막을 수단이 사라진다.
+     *
+     * <p>복합 키는 사전순 비교로 받는다(#126) — {@code (shop_id, id) > (?, ?)}. 열마다 부등호를 따로 쓰면
+     * 구간이 겹치거나 비어 누락·중복이 생기므로, 한 덩이로 비교해 "이 키보다 뒤" 하나의 뜻이 되게 한다.
+     * 다만 열이 많아질수록 경계 조회가 인덱스를 타는지 기종별 확인이 필요해 상한을 둔다.
      */
-    private static String requireSinglePrimaryKey(DbmsOperator operator, String table) {
+    private static List<String> requirePrimaryKey(DbmsOperator operator, String table) {
         TableDetail detail;
         try {
             detail = operator.tableDetail(table);
@@ -107,10 +116,11 @@ final class BulkChangePreflight {
         if (pk == null || pk.isEmpty()) {
             throw new WorkbenchRejection(422, "기본 키가 없는 테이블은 배치 경계를 정할 수 없어 실행하지 않습니다", null);
         }
-        if (pk.size() > 1) {
-            throw new WorkbenchRejection(422, "복합 기본 키(" + String.join(", ", pk) + ")는 아직 지원하지 않습니다", null);
+        if (pk.size() > MAX_KEY_COLUMNS) {
+            throw new WorkbenchRejection(422, "기본 키 열이 " + pk.size() + "개입니다(상한 " + MAX_KEY_COLUMNS
+                    + ") — 경계 조회가 인덱스를 타는지 확인된 범위까지만 받습니다", null);
         }
-        return pk.get(0);
+        return pk;
     }
 
     /**

@@ -62,7 +62,7 @@ class BulkChangePreflightTest {
         assertThat(p.statementHead()).isEqualTo("UPDATE orders SET status = 'DONE'");
         assertThat(p.whereTail()).isEqualTo("status = 'PENDING'");   // WHERE 키워드만 떼고 조건은 원문 그대로
         assertThat(p.table()).isEqualTo("orders");
-        assertThat(p.keyColumn()).isEqualTo("id");
+        assertThat(p.keyColumns()).containsExactly("id");
         assertThat(p.whereFor(true)).isEqualTo("(status = 'PENDING') AND id > ? AND id <= ?");
     }
 
@@ -103,15 +103,24 @@ class BulkChangePreflightTest {
     }
 
     @Test
-    @DisplayName("기본 키가 없거나 복합이면 거부한다 — 배치 경계를 정할 수 없으면 누락·중복을 막을 수단이 없다")
-    void requiresSinglePrimaryKey() {
+    @DisplayName("기본 키가 없으면 거부하고, 복합 키는 사전순 비교로 받는다")
+    void requiresPrimaryKey() {
         BackupFreshness ok = backup(BackupFreshness.Status.FRESH, "VERIFIED");
 
         assertThatThrownBy(() -> plan(DbmsType.MYSQL, SQL, operatorWithPk(), ok, 1000))
                 .isInstanceOf(WorkbenchRejection.class).hasMessageContaining("기본 키가 없는 테이블");
 
-        assertThatThrownBy(() -> plan(DbmsType.MYSQL, SQL, operatorWithPk("shop_id", "id"), ok, 1000))
-                .isInstanceOf(WorkbenchRejection.class).hasMessageContaining("복합 기본 키(shop_id, id)");
+        // 복합 키는 이제 사전순 비교로 받는다(#126) — 거부가 아니라 계획이 나와야 한다
+        BulkChangePlan composite = plan(DbmsType.MYSQL, SQL, operatorWithPk("shop_id", "id"), ok, 1000);
+        assertThat(composite.keyColumns()).containsExactly("shop_id", "id");
+        assertThat(composite.compare(">")).isEqualTo("(shop_id, id) > (?, ?)");
+        assertThat(composite.whereFor(true))
+                .isEqualTo("(status = 'PENDING') AND (shop_id, id) > (?, ?) AND (shop_id, id) <= (?, ?)");
+
+        // 열이 상한을 넘으면 거부한다 — 경계 조회가 인덱스를 타는지 확인된 범위까지만 받는다
+        assertThatThrownBy(() -> plan(DbmsType.MYSQL, SQL,
+                operatorWithPk("a", "b", "c", "d"), ok, 1000))
+                .isInstanceOf(WorkbenchRejection.class).hasMessageContaining("기본 키 열이 4개입니다");
 
         DbmsOperator broken = mock(DbmsOperator.class);
         when(broken.tableDetail(anyString())).thenThrow(new OperatorException("권한 없음"));
