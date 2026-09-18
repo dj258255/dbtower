@@ -2,11 +2,8 @@
   "name": "dbtower-diagrams",
   "private": true,
   "type": "module",
-  "description": "문서용 손그림 SVG 생성기 — 앱 빌드와 무관하다. 그림을 고칠 때만 돌린다.",
+  "description": "문서용 SVG 생성기 — 앱 빌드와 무관하다. 그림을 고칠 때만 돌린다. 의존 0개.",
   "scripts": {
-    "build": "node architecture-core.mjs && node erd-core.mjs && python3 flatten.py"
-  },
-  "dependencies": {
-    "roughjs": "^4.6.6"
+    "build": "node architecture.mjs && node erd.mjs && node insight-flow.mjs && node deployment-flow.mjs && python3 flatten.py"
   }
 }

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 700" width="1180" height="700" role="img" aria-label="DBTower 아키텍처">
+<title>DBTower 아키텍처</title>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M 0 1 L 9 5 L 0 9 z" fill="#9ca3af"/>
+  </marker>
+</defs>
+<rect width="1180" height="700" fill="#ffffff"/>
+<text x="40" y="40" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="19" font-weight="700" fill="#111827" text-anchor="start" dominant-baseline="middle">DBTower</text>
+<text x="40" y="62" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="12.5" font-weight="400" fill="#6b7280" text-anchor="start" dominant-baseline="middle">Java 21 · Spring Boot 4 · Spring Modulith 17 모듈 — 경계는 빌드가 검사한다</text>
+<rect x="40" y="100" width="300" height="76" rx="10" fill="#f3f4f6" stroke="#d1d5db" stroke-width="1"/>
+<text x="190" y="130" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="14" font-weight="600" fill="#111827" text-anchor="middle" dominant-baseline="middle">운영자 · 개발자</text>
+<text x="190" y="146" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="11.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">역할 5종 · 로그인과 팀 범위</text>
+<rect x="840" y="100" width="300" height="76" rx="10" fill="#f3f4f6" stroke="#d1d5db" stroke-width="1"/>
+<text x="990" y="130" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="14" font-weight="600" fill="#111827" text-anchor="middle" dominant-baseline="middle">AI 에이전트 (MCP)</text>
+<text x="990" y="146" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="11.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">조회와 요청만 · 실행 도구 없음</text>
+<path d="M 190 176 V 232" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M 990 176 V 232" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<rect x="40" y="232" width="300" height="104" rx="10" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+<text x="190" y="268" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="14" font-weight="600" fill="#0a6aa8" text-anchor="middle" dominant-baseline="middle">조회</text>
+<text x="190" y="284" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="11.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">분리된 조회 계정</text>
+<text x="190" y="300" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="11.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">읽기 전용 트랜잭션 · 마스킹</text>
+<rect x="380" y="232" width="420" height="104" rx="10" fill="#fef2f2" stroke="#fecaca" stroke-width="1.5"/>
+<text x="590" y="268" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="14" font-weight="600" fill="#b42335" text-anchor="middle" dominant-baseline="middle">변경</text>
+<text x="590" y="284" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="11.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">승인된 티켓만 실행 · 요청자와 승인자와 운영자가 다른 사람</text>
+<text x="590" y="300" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="11.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">영향 행 수가 사본과 어긋나면 커밋하지 않는다</text>
+<rect x="840" y="232" width="300" height="104" rx="10" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+<text x="990" y="268" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="14" font-weight="600" fill="#0a6aa8" text-anchor="middle" dominant-baseline="middle">AI 1차 분석</text>
+<text x="990" y="284" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="11.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">판단 기준은 사람이 정한다</text>
+<text x="990" y="300" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="11.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">모델이 낸 수치는 사실과 대조</text>
+<path d="M 190 336 V 362 H 480 V 400" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M 590 336 V 400" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<path d="M 990 336 V 362 H 700 V 400" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<rect x="330" y="401" width="520" height="74" rx="10" fill="#0f172a" opacity="0.05"/><rect x="330" y="400" width="520" height="74" rx="10" fill="#ffffff" stroke="#0a6aa8" stroke-width="1.6"/>
+<text x="590" y="429" font-family="'SF Mono', ui-monospace, 'Cascadia Code', Menlo, monospace" font-size="16" font-weight="600" fill="#0a6aa8" text-anchor="middle" dominant-baseline="middle">DbmsOperator</text>
+<text x="590" y="445" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="11.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">플랫폼 코드는 기종을 모른다 · 구현 선택은 팩토리 한 곳</text>
+<path d="M 470 474 V 504 H 300 V 552" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<rect x="229.9" y="495" width="140.2" height="18" rx="4" fill="#ffffff"/><text x="300" y="504" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="10.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">조회 계정 · 변경 계정을 나눠 접속</text>
+<path d="M 760 474 V 504 H 935 V 552" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<rect x="910.47" y="495" width="49.06" height="18" rx="4" fill="#ffffff"/><text x="935" y="504" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="10.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">자기 상태만</text>
+<rect x="40" y="552" width="660" height="112" rx="12" fill="#fafafa" stroke="#d1d5db" stroke-width="1" stroke-dasharray="4 4"/>
+<text x="56" y="570" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#6b7280" text-anchor="start" dominant-baseline="middle">관리 대상 DB — 새 기종은 Operator 구현체 하나가 본체</text>
+<rect x="56" y="584" width="112" height="52" rx="10" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text x="112" y="603" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="12.5" font-weight="600" fill="#111827" text-anchor="middle" dominant-baseline="middle">MySQL</text>
+<text x="112" y="619" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="10.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">JDBC</text>
+<rect x="182" y="584" width="112" height="52" rx="10" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text x="238" y="603" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="12.5" font-weight="600" fill="#111827" text-anchor="middle" dominant-baseline="middle">PostgreSQL</text>
+<text x="238" y="619" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="10.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">JDBC</text>
+<rect x="308" y="584" width="112" height="52" rx="10" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text x="364" y="603" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="12.5" font-weight="600" fill="#111827" text-anchor="middle" dominant-baseline="middle">SQL Server</text>
+<text x="364" y="619" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="10.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">JDBC</text>
+<rect x="434" y="584" width="112" height="52" rx="10" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text x="490" y="603" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="12.5" font-weight="600" fill="#111827" text-anchor="middle" dominant-baseline="middle">Oracle</text>
+<text x="490" y="619" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="10.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">JDBC</text>
+<rect x="560" y="584" width="112" height="52" rx="10" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text x="616" y="603" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="12.5" font-weight="600" fill="#111827" text-anchor="middle" dominant-baseline="middle">MongoDB</text>
+<text x="616" y="619" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="10.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">비 JDBC</text>
+<rect x="790" y="552" width="350" height="112" rx="10" fill="#f3f4f6" stroke="#d1d5db" stroke-width="1"/>
+<text x="965" y="592" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="14" font-weight="600" fill="#111827" text-anchor="middle" dominant-baseline="middle">플랫폼 저장소</text>
+<text x="965" y="608" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="11.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">PostgreSQL · Flyway</text>
+<text x="965" y="624" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="11.5" font-weight="400" fill="#6b7280" text-anchor="middle" dominant-baseline="middle">대상 장애가 플랫폼을 죽이지 않게 분리한다</text>
+<text x="40" y="674" font-family="Pretendard, 'Apple SD Gothic Neo', -apple-system, 'Segoe UI', sans-serif" font-size="12.5" font-weight="400" fill="#6b7280" text-anchor="start" dominant-baseline="middle">조회는 읽기 전용 계정으로, 변경은 승인된 티켓만 — 이 둘이 이 플랫폼의 불변식이다.</text>
+</svg>
