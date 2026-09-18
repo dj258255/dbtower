@@ -30,7 +30,7 @@ public class MetricsTokenFilter extends OncePerRequestFilter {
         this.token = (token == null) ? "" : token.trim();
         if (this.token.isEmpty()) {
             log.warn("dbtower.metrics.token 미설정 — /actuator/prometheus가 인증 없이 열려 있습니다. "
-                    + "네트워크 레벨 제한을 전제로 하거나 토큰을 설정하세요(docs/operations.md)");
+                    + "네트워크 레벨 제한을 전제로 하거나 토큰을 설정하세요(docs/operate/operations.md)");
         }
     }
 

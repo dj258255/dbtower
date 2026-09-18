@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 대량 일괄 변경 한 건의 진행 — 배치를 순서대로 돌리고, 복제가 밀리면 멈췄다 재개하고, 사람이 멈추거나 취소하면 따른다
- * (docs/bulk-change-spec.md).
+ * (docs/design/bulk-change-spec.md).
  *
  * <p>왜 배치가 끝난 <b>뒤에</b> 멈추는가: 일시정지·취소가 실행 중인 문장을 죽이지 않는다. 문장을 끊으면 그 배치는
  * 롤백되지만 대상 DB는 이미 그만큼 일을 했고, 큰 구간일수록 롤백이 더 비싸다. 배치 경계에서 멈추면 "어디까지 적용됐나"가

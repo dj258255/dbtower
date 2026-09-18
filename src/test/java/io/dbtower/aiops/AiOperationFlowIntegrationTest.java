@@ -60,7 +60,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>사실 원천(점수·쿼리 비교·백업 등)은 H2에 스냅샷 테이블이 없어 목으로 넣고, 사실 수집기·수치 대조·전이 표·
  * Outbox 선점은 실빈으로 태운다(IncidentReportIntegrationTest와 같은 방침). 모델은 목이다 — 로컬에 claude CLI가 있어
- * 실빈이면 실제 모델을 부른다. 실제 모델까지 이은 관통은 docs/VERIFICATION.md 169절에 따로 남긴다.</p>
+ * 실빈이면 실제 모델을 부른다. 실제 모델까지 이은 관통은 docs/verify/VERIFICATION.md 169절에 따로 남긴다.</p>
  */
 @SpringBootTest(properties = {"dbtower.aiops.reaper-initial-delay-ms=3600000", "dbtower.aiops.max-active-per-requester=3",
         "dbtower.aiops.max-active-alert-jobs=3"})

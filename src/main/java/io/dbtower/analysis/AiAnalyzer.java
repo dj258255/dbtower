@@ -39,7 +39,7 @@ import java.util.function.Consumer;
 /**
  * 회귀 감지 결과에 대한 AI 1차 분석 (확장3).
  *
- * 판단을 통째로 LLM에 맡기지 않는다 — docs/ai-analysis-rules.md의 기종별 판단 기준을
+ * 판단을 통째로 LLM에 맡기지 않는다 — docs/design/ai-analysis-rules.md의 기종별 판단 기준을
  * 시스템 프롬프트로 넣어, 같은 입력에 일관된 판정이 나오게 한다.
  *
  * 백엔드는 환경에 맞게 자동 선택된다:
@@ -110,7 +110,7 @@ public class AiAnalyzer {
 
     public AiAnalyzer(MeterRegistry meterRegistry,
                       @Value("${dbtower.ai.model:claude-opus-4-8}") String model,
-                      @Value("${dbtower.ai.rules-path:docs/ai-analysis-rules.md}") String rulesPath,
+                      @Value("${dbtower.ai.rules-path:docs/design/ai-analysis-rules.md}") String rulesPath,
                       // adaptive thinking이 켜져 있어 이 예산은 "추론 + 응답"의 합산 상한이다.
                       // 너무 낮으면 추론이 예산을 먹고 응답이 중간에서 잘린다(D3 루프가 그걸 형식 오류로 오인).
                       @Value("${dbtower.ai.max-tokens:8192}") long maxTokens,

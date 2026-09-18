@@ -1,4 +1,4 @@
-// 워크벤치 콘솔 계정 + 데모 데이터 — MongoDB (근거: docs/least-privilege.md "워크벤치 콘솔 계정")
+// 워크벤치 콘솔 계정 + 데모 데이터 — MongoDB (근거: docs/operate/least-privilege.md "워크벤치 콘솔 계정")
 // 수동 실행: docker exec -i dbtower-mongo mongosh -u root -p dbtower1234 --authenticationDatabase admin --quiet < docker/workbench-mongo.js
 // 여러 번 실행해도 결과가 같다. 플랫폼은 authSource=admin을 가정하므로 계정은 admin db에 만든다.
 db = db.getSiblingDB('sample');

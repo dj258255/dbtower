@@ -24,7 +24,7 @@ DBTOWER_WEBHOOK_URL="" DBTOWER_ENCRYPTION_KEY=$(openssl rand -base64 32) ./gradl
 - 새 모듈 코드는 [AGENTS.md](AGENTS.md)의 "모듈 내부 패키지 규칙"을 따릅니다.
   공개 API만 모듈 루트에 두고 구현은 `internal/`에 둡니다.
 - 성능 개선은 before/after 실측 수치와 함께. 측정 없는 개선 주장은 받지 않습니다.
-- 기능 검증 결과(명령·출력·스크린샷)는 `docs/VERIFICATION.md`에 절을 추가해 기록합니다.
+- 기능 검증 결과(명령·출력·스크린샷)는 `docs/verify/VERIFICATION.md`에 절을 추가해 기록합니다.
 - 커밋 메시지는 한국어, 제목에 변경 의도가 드러나게. 이모지는 쓰지 않습니다.
 
 ## 이슈·PR

@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 대량 일괄 변경의 배치 하나 — 경계를 정하고, 그 구간만 고치고, 커밋한다(docs/bulk-change-spec.md).
+ * 대량 일괄 변경의 배치 하나 — 경계를 정하고, 그 구간만 고치고, 커밋한다(docs/design/bulk-change-spec.md).
  *
  * <p>{@link JdbcChangeRunner}와 나뉘는 지점: 그쪽은 한 트랜잭션 안에서 사본·대조·커밋을 묶어 되돌리기를 보장한다.
  * 여기는 되돌리기를 백업에 맡기는 대신 <b>구간마다 따로 커밋</b>해 락 보유를 짧게 끊는다. 그래서 이 클래스가

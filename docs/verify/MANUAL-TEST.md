@@ -265,5 +265,5 @@ docker exec dbtower-postgres dropdb -U postgres --if-exists dbtower_clicktest
 rm -f /tmp/dbtower-manual.env
 ```
 
-발표처럼 5분 안에 보여 주는 순서는 [DEMO-5MIN.md](DEMO-5MIN.md), 각 역할의 권한을
+발표처럼 5분 안에 보여 주는 순서는 [DEMO-5MIN.md](../portfolio/DEMO-5MIN.md), 각 역할의 권한을
 서버 수준에서 검증한 근거는 [VERIFICATION.md](VERIFICATION.md) 135~136절에 있습니다.

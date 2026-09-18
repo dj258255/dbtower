@@ -169,7 +169,7 @@ public class SecurityConfig {
                         // 로그인 화면도 브랜드 아이콘을 보여주므로 파비콘 자산 일체를 미인증 허용(민감정보 아님)
                         .requestMatchers("/login.html", "/style.css",
                                 "/favicon.ico", "/favicon.svg", "/favicon-96x96.png", "/apple-touch-icon.png").permitAll()
-                        // Prometheus 수집 경로 — 네트워크 레벨 제한 전제 (docs/operations.md)
+                        // Prometheus 수집 경로 — 네트워크 레벨 제한 전제 (docs/operate/operations.md)
                         .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         // 인가 거부(403)는 컨테이너가 /error로 다시 디스패치한다. /error가 인증 대상이면 그 디스패치가
                         // 로그인 리다이렉트(302)로 덮여, 로그인한 VIEWER가 ADMIN 경로를 부르면 "권한 없음" 대신

@@ -122,7 +122,7 @@ public class DiagnosisService {
                             PlanMasker planMasker,
                             RegistryService registry,
                             AuditTrail auditTrail,
-                            @Value("${dbtower.ai.rules-path:docs/ai-analysis-rules.md}") String rulesPath,
+                            @Value("${dbtower.ai.rules-path:docs/design/ai-analysis-rules.md}") String rulesPath,
                             @Value("${dbtower.ai.diagnose-max-steps:5}") int maxSteps) {
         // AiTurn은 오케스트레이션 시임이라 호출처 태그를 모른다 — 여기서 DIAGNOSE로 묶어 넘긴다.
         this(new McpProtocolHandler("http://localhost:" + port, tokens.token()),

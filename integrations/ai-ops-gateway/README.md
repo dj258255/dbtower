@@ -1,7 +1,7 @@
 # AI 운영 작업 실행면
 
-DBTower 바깥에서 도는 세 프로세스다. 설계와 경계는 [docs/AI-OPERATIONS-AUTOMATION.md](../../docs/AI-OPERATIONS-AUTOMATION.md),
-실측은 [docs/VERIFICATION.md 169절](../../docs/VERIFICATION.md)에 있다.
+DBTower 바깥에서 도는 세 프로세스다. 설계와 경계는 [docs/design/AI-OPERATIONS-AUTOMATION.md](../../docs/design/AI-OPERATIONS-AUTOMATION.md),
+실측은 [docs/verify/VERIFICATION.md 169절](../../docs/verify/VERIFICATION.md)에 있다.
 
 | 프로세스 | 하는 일 |
 |---|---|
@@ -35,9 +35,9 @@ pip install -r requirements.txt
 ```bash
 Q=QUERY_DIAGNOSIS,REGRESSION_EXPLANATION,INCIDENT_TRIAGE,DB_TEAM_INQUIRY
 python -m dbtower_aiops ingest --rebuild \
-  ../../docs/ai-analysis-rules.md:$Q \
-  ../../docs/operations.md:$Q,ADVISOR_SUMMARY \
-  ../../docs/least-privilege.md:INCIDENT_TRIAGE,DB_TEAM_INQUIRY,ADVISOR_SUMMARY
+  ../../docs/design/ai-analysis-rules.md:$Q \
+  ../../docs/operate/operations.md:$Q,ADVISOR_SUMMARY \
+  ../../docs/operate/least-privilege.md:INCIDENT_TRIAGE,DB_TEAM_INQUIRY,ADVISOR_SUMMARY
 ```
 
 절 제목이 기종 이름(MySQL·PostgreSQL·SQL Server·Oracle·MongoDB)이면 그 기종 전용으로 표시되어,

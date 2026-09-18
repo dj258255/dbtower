@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit;
  * <p>{@link JdbcBulkChangeRunner}와 같은 불변식을 지킨다: 승인된 filter를 다시 쓰지 않고 {@code $and}로
  * 범위만 덧붙이며, 영향 문서 수가 목표 배치 크기를 넘으면 <b>쓰지 않는다</b>.
  *
- * <p><b>왜 {@code _id} 타입이 하나여야 하는가</b>(실측, docs/bulk-change-spec.md #128 판정): MongoDB의
+ * <p><b>왜 {@code _id} 타입이 하나여야 하는가</b>(실측, docs/design/bulk-change-spec.md #128 판정): MongoDB의
  * 비교 연산자는 타입 경계를 넘지 않는다. {@code [{_id: 1}, {_id: 2}, {_id: "a"}]}에서 경계 조회가 마지막 키로
  * 숫자 {@code 2}를 주면 다음 구간 {@code {_id: {$gt: 2}}}가 문자 {@code _id}를 하나도 돌려주지 않는다.
  * 배치는 "더 없다"고 보고 정상 종료하고 문자 {@code _id} 문서는 조용히 빠진다 — 오류도 나지 않는 누락이다.

@@ -33,12 +33,12 @@
 | 단위 테스트 (작성 시점 31건 → 현재 72파일·360메서드) | 시점 비교 차분·경계, 회귀 감지 4규칙·쿨다운, 백업 명령 주입 방어, MCP 프로토콜, 5기종 판정 규칙 외 | src/test |
 | CI | GitHub Actions gradle test + 실패 리포트 아티팩트 (테스트 전용 H2 설정으로 실 DB 불필요) | .github/workflows/ci.yml |
 | Modulith internal 캡슐화 (2026-07-15) | 14개 모듈 전부 루트=공개 API(서비스·record)만, 구현은 internal/{web,domain,persistence,job}로 은닉 — 타 모듈의 repository·entity 직접 참조 0, ModularityTests가 경계 강제. operator는 record 21종을 model/ 서브패키지(@NamedInterface)로 분리(루트 28→7파일), 이를 위해 spring-modulith-api를 main 의존성에 추가. 규칙은 AGENTS.md "모듈 내부 패키지 규칙" | src/main/java, docs/modules(재생성) |
-| 운영 규칙 문서 | digests_size 포화(80% Truncate), digest 길이, PS 가시성 가이드, AAS와 load%, system.profile capped | docs/operations.md |
+| 운영 규칙 문서 | digests_size 포화(80% Truncate), digest 길이, PS 가시성 가이드, AAS와 load%, system.profile capped | docs/operate/operations.md |
 
 ## 완료 (거버넌스 SQL 워크벤치 — 플랫폼 엔지니어링 AX, 2026-09)
 
 사내 AI 화면 생성 도구(Toss TOI)의 "정책은 플랫폼, 화면은 AI"를 DB 조회·변경에 옮겼다. 결정·트레이드오프는
-[PORTFOLIO-AX.md](PORTFOLIO-AX.md), 명령·출력은 아래 절에 있다.
+[PORTFOLIO-AX.md](../portfolio/PORTFOLIO-AX.md), 명령·출력은 아래 절에 있다.
 
 | 단계 | 내용 | 검증 (VERIFICATION.md) |
 |---|---|---|
@@ -78,7 +78,7 @@
 ## 완료 (AI 운영 작업·콘솔 재설계, 2026-09)
 
 161~168절은 v1.3.0·v1.3.1로 게시한 회차이고, 169~182절은 v1.4.0에 들어간 AI 운영 작업과
-콘솔 재설계다. 169절부터의 결정·경계는 [AI 운영 작업 설계](AI-OPERATIONS-AUTOMATION.md)에 있다.
+콘솔 재설계다. 169절부터의 결정·경계는 [AI 운영 작업 설계](../design/AI-OPERATIONS-AUTOMATION.md)에 있다.
 
 | 단계 | 내용 | 검증 (VERIFICATION.md) |
 |---|---|---|
@@ -123,7 +123,7 @@
 | 5 | **완료(28절)** HA 안전 | ShedLock 분산 락 — 폴러 4종 한 노드만 실행(2노드 실측, 이후 잠금 작업 11종으로 확대), usingDbTime 클럭스큐 방어. 쿨다운 외부화는 이후 회차에서 완료(regression·anomaly·ops-alert 전부 @Value — 85절 grep 실측 0건) |
 | 6 | **완료(25절)** 감사 로그 | audit 모듈 — /api 상태변경·로그인·403 월권 기록(인터셉터+인가거부 리스너), Flyway V2. Vault 감사 이점과 짝 |
 | 7 | **완료(29절)** 백업 복원 검증 | 3값(VERIFIED/FAILED/UNSUPPORTED), MySQL/PG/Mongo 임시 DB 실복원, MSSQL VERIFYONLY, Oracle UNSUPPORTED 정직 표기. 원격 보관은 심화 아크에서 완료(55절 — S3 호환 오프사이트), 산출물 암호화는 잔여 ([3-2-1-1-0](https://www.datto.com/blog/3-2-1-1-0-backup-rule/)) |
-| 8 | **완료(27절)** 최소 권한 계정 | docs/least-privilege.md — 권한 0에서 에러 원문 수집으로 5기종 최소 집합 확정. Mongo clusterMonitor·PG 조용한 저하 등 실측 발견 ([Datadog DBM](https://docs.datadoghq.com/database_monitoring/setup_mysql/selfhosted/)) |
+| 8 | **완료(27절)** 최소 권한 계정 | docs/operate/least-privilege.md — 권한 0에서 에러 원문 수집으로 5기종 최소 집합 확정. Mongo clusterMonitor·PG 조용한 저하 등 실측 발견 ([Datadog DBM](https://docs.datadoghq.com/database_monitoring/setup_mysql/selfhosted/)) |
 | 9 | **완료(51절)** 분석 보호장치 | 모든 JDBC 조회에 기본 쿼리 타임아웃(`jdbc()` 헬퍼 단일 지점, `dbtower.query-timeout-seconds`), Mongo 소켓 read 상한도 같은 설정 공유, 심층진단(explain 실행)은 별도 더 짧은 타임아웃. 수집 폴러는 인스턴스별 지수 백오프(연속 실패 시 1→2→4→8→16틱 건너뜀, 1회 성공 즉시 복귀) — 죽은 대상 DB를 매 틱 두드리는 재접속 부하를 막는다. "진단이 부하 유발자가 되면 안 된다"는 원칙. Datadog DBM도 수집 쿼리에 statement timeout을 걸어 모니터링이 대상 부하가 되지 않게 한다 ([Datadog DBM](https://docs.datadoghq.com/database_monitoring/)) |
 
 ### Phase B — DBA 진단 심화 (완료: B1~B8, VERIFICATION 41절)
@@ -160,7 +160,7 @@
 ## Phase D — 자율 진단 (사람이 모는 대시보드에서, 스스로 보는 관제탑으로)
 
 Slack·경보·스케줄이 시작한 진단을 같은 권한·사실·검증·감사로 처리하는 비동기 실행 모델(aiops)은
-[AI 운영 작업 설계](AI-OPERATIONS-AUTOMATION.md)에 있고, 실측은 VERIFICATION 169절에 있다.
+[AI 운영 작업 설계](../design/AI-OPERATIONS-AUTOMATION.md)에 있고, 실측은 VERIFICATION 169절에 있다.
 D1~D9의 개별 진단은 그대로 두고, 그 위에 "사람이 화면 앞에 없어도 도는" 경로를 얹은 것이다.
 
 > **구현 담당: Opus. 이 절은 착수 명세다.** 아래 각 항목은 (1) 실존 상용 제품 근거, (2) 재활용할
@@ -199,7 +199,7 @@ gh-ost·pt-osc·goInception이 전부 MySQL 전용이라 이기종 정체성과 
 | D6 | **완료(48절)** 비용/효율 인사이트 (FinOps) | AWS FinOps agent, Mydbops(미사용 인덱스로 34~43% 절감) | tableStats(크기), describeSchema()(인덱스), parameters() | 미사용/중복 인덱스 후보, 테이블 bloat, 오버프로비저닝 신호(연결 수 대비 max_connections 등)를 "낭비 후보"로. 실제 클라우드 과금 연동은 범위 밖(자격증명), 신호 제시까지 | 실 DB에서 미사용 인덱스 후보 실제 검출 라이브. UNSUPPORTED 정직 |
 | D7 | **완료(47절)** 백업 신선도·커버리지 뷰 | 3-2-1 백업 원칙, DBA 일일 점검(모든 DB가 최근 백업됐나) | BackupRun 이력(확장1)·verifyRestore(A7) | 인스턴스별 마지막 백업 시각·복원 검증 상태·경과 시간을 한 화면에. 임계(예: 24h 초과 미백업) 넘으면 경보(B5 폴러에 규칙 추가). "백업했다"가 아니라 "지금 백업이 최신이고 복원 가능한가"를 상시 가시화 | 인스턴스별 마지막 백업·검증 상태 정확히 표시, 오래된 인스턴스 flag 라이브 |
 | D8 | **완료(50절)** 통합 헬스 스코어 | 관측성 카테고리(자동 우선순위·클러스터), 설문(40%만 통합) | D1(이상)·D2(advisor)·D4(SLO)·health·D7(백업)을 합산 | 인스턴스마다 흩어진 신호(이상 개수·advisor 심각도·SLO 버짓·백업 신선도·health)를 **하나의 점수/등급**으로. 대시보드 상단에 5기종 전체를 한눈에, 나쁜 순 정렬. "40% 통합" 고통에 직접 대응 — 어디부터 볼지 기계가 우선순위 매김 | 여러 신호가 점수로 합산·정렬되는지, 문제 인스턴스가 상단에 오는지 라이브. 단위: 점수 산식 |
-| D9 | **완료(50절)** 심층 원인 진단 (왜 인덱스를 못 타나)** | 공통 열쇠=추정 vs 실제 행수 괴리. [PG mis-estimate](https://pganalyze.com/docs/explain/insights/mis-estimate)·[Oracle E/A-Rows](https://jonathanlewis.wordpress.com/2016/05/05/e-rows-a-rows/)·[MSSQL](https://www.sqlservercentral.com/articles/why-your-index-isnt-being-used-reading-execution-plans-to-find-the-real-culprit)·[Mongo executionStats](https://www.mongodb.com/docs/manual/tutorial/analyze-query-plan/) | explain()·RuleBasedAnalyzer·describeSchema·D2 stale-statistics·D3 자연어 진단. **상세 명세·기종별 메커니즘·근본원인 5종 표는 docs/ai-analysis-rules.md "심층 원인 규칙 (D9)" 절 — 그게 구현 스펙이다(웹서칭 검증됨)** | `explainAnalyze(sql)` 새 능력(실제 실행 계획): MySQL 8.4 `EXPLAIN ANALYZE FORMAT=JSON`(actual_* 필드), PG `EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON)`, Oracle `/*+ gather_plan_statistics */`+`DISPLAY_CURSOR('ALLSTATS LAST')`(같은 커넥션 필수·SELECT_CATALOG_ROLE로 충분), MSSQL `SET STATISTICS XML ON`+별도 결과셋(plain Statement+getMoreResults — PreparedStatement 함정), Mongo `executionStats`. 카디널리티 괴리 감지: 추정 vs 실제 10배+ 최하위 노드 지목 — **PG·MySQL actual rows는 loops당 평균이라 총량은 loops 곱(오독 함정)**. 근본원인 규칙 매칭(형변환·컬럼함수·통계노후·선택도·선두누락). 안전: SELECT 전용 + 타임아웃(MySQL MAX_EXECUTION_TIME 힌트·PG SET LOCAL statement_timeout·Mongo maxTimeMS·나머지 setQueryTimeout). 권한·기종 불가는 UNSUPPORTED | 실 5기종: 형변환·풀스캔 쿼리로 괴리·근본원인 지적 라이브, loops 곱셈 정확성, 타임아웃 동작, UNSUPPORTED. 단위: 파싱·괴리판정·규칙매칭 |
+| D9 | **완료(50절)** 심층 원인 진단 (왜 인덱스를 못 타나)** | 공통 열쇠=추정 vs 실제 행수 괴리. [PG mis-estimate](https://pganalyze.com/docs/explain/insights/mis-estimate)·[Oracle E/A-Rows](https://jonathanlewis.wordpress.com/2016/05/05/e-rows-a-rows/)·[MSSQL](https://www.sqlservercentral.com/articles/why-your-index-isnt-being-used-reading-execution-plans-to-find-the-real-culprit)·[Mongo executionStats](https://www.mongodb.com/docs/manual/tutorial/analyze-query-plan/) | explain()·RuleBasedAnalyzer·describeSchema·D2 stale-statistics·D3 자연어 진단. **상세 명세·기종별 메커니즘·근본원인 5종 표는 docs/design/ai-analysis-rules.md "심층 원인 규칙 (D9)" 절 — 그게 구현 스펙이다(웹서칭 검증됨)** | `explainAnalyze(sql)` 새 능력(실제 실행 계획): MySQL 8.4 `EXPLAIN ANALYZE FORMAT=JSON`(actual_* 필드), PG `EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON)`, Oracle `/*+ gather_plan_statistics */`+`DISPLAY_CURSOR('ALLSTATS LAST')`(같은 커넥션 필수·SELECT_CATALOG_ROLE로 충분), MSSQL `SET STATISTICS XML ON`+별도 결과셋(plain Statement+getMoreResults — PreparedStatement 함정), Mongo `executionStats`. 카디널리티 괴리 감지: 추정 vs 실제 10배+ 최하위 노드 지목 — **PG·MySQL actual rows는 loops당 평균이라 총량은 loops 곱(오독 함정)**. 근본원인 규칙 매칭(형변환·컬럼함수·통계노후·선택도·선두누락). 안전: SELECT 전용 + 타임아웃(MySQL MAX_EXECUTION_TIME 힌트·PG SET LOCAL statement_timeout·Mongo maxTimeMS·나머지 setQueryTimeout). 권한·기종 불가는 UNSUPPORTED | 실 5기종: 형변환·풀스캔 쿼리로 괴리·근본원인 지적 라이브, loops 곱셈 정확성, 타임아웃 동작, UNSUPPORTED. 단위: 파싱·괴리판정·규칙매칭 |
 
 **구현 순서 권장 (Opus):** D1(이상 감지) → D2(Advisors) 를 먼저 — 둘이 "자율화"의 뼈대이고 기존
 폴러/규칙 문서를 그대로 승격한다. 이어 D3(자연어 진단)로 채널·AI 자산을 루프로 엮으면 "스스로 보고
@@ -283,7 +283,7 @@ SaaS 는 이 제품에 안 맞는다 — 대상 DB 자격증명 수탁, 사설�
 - 대상 DB 읽기 전용 카탈로그 조회만, IN-절 파라미터 바인딩(명령 주입 방어선), 시스템 스키마 제외·민감값 마스킹 승계
 - 조회 실패/권한 없음은 빈 값 뭉개기 금지 → notFound. 행수는 "≈" 추정치임을 명시(실측인 척 금지)
 - 플랜 기반 추출(5기종 플랜 포맷 파싱)은 이번 범위 밖 — 뷰 간접 참조 등 누락은 notFound로 노출
-- 검증: docker compose 5기종 실측 + docs/VERIFICATION.md 절 추가(명령·출력·Discord 스크린샷)
+- 검증: docker compose 5기종 실측 + docs/verify/VERIFICATION.md 절 추가(명령·출력·Discord 스크린샷)
 
 ## 심화 아크 3 — 테이블 상세 정보 레퍼런스 패리티 (착수 명세)
 
@@ -441,7 +441,7 @@ record TableDetail(String table, String engine, long rowCount, long dataBytes, l
 | P1-1 | TLS/HTTPS 전무 | 평문 HTTP 8080만. 리버스 프록시·`forward-headers-strategy` 가이드 없음 | 로그인 비번·세션쿠키·Bearer 토큰 평문 전송 |
 | P1-2 | 플랫폼 메타 DB 백업 없음 | 백업은 대상 DB만. 자기 자신(dbtower DB)은 볼륨 `dbtower-meta-data` 하나 의존 | 볼륨 소실 = 사용자·모든 자격증명·정책·이력 전소 |
 | P1-3 | README 로그인 절 ↔ 기본값 모순 | `.env.example:8` admin 비번 공란인데 `README.md:242`는 그 값으로 로그인하라 함 | 그대로 따르면 랜덤 비번이 로그에만 있고 안내 없어 첫 벽에서 막힘 |
-| P1-4 | AI 기능 2종 배포 이미지에서 죽음 | 규칙 파일 `docs/ai-analysis-rules.md`가 `.dockerignore:8`로 제외(빈 프롬프트) + `ANTHROPIC_API_KEY` compose 미배선·claude CLI 미번들 | README가 내세운 AI 분석이 셀프호스트에선 항상 OFF |
+| P1-4 | AI 기능 2종 배포 이미지에서 죽음 | 규칙 파일 `docs/design/ai-analysis-rules.md`가 `.dockerignore:8`로 제외(빈 프롬프트) + `ANTHROPIC_API_KEY` compose 미배선·claude CLI 미번들 | README가 내세운 AI 분석이 셀프호스트에선 항상 OFF |
 | P1-5 | `/actuator/prometheus` 무인증 노출 | `SecurityConfig.java:64` permitAll("네트워크 제한 전제")인데 8080이 호스트 노출·그 가이드 문서에 없음 | 도달 가능한 누구나 메트릭 스크랩 |
 
 ### P2 — 마찰·커뮤니티 위생
@@ -522,7 +522,7 @@ record TableDetail(String table, String engine, long rowCount, long dataBytes, l
 > 각 항목에 (1) 현재 상태와 코드 포인터, (2) 구현 방법(클래스·설정·마이그레이션 수준), (3) 함정,
 > (4) 검증 기준을 명시한다. 공통 불변식: 대상 DB 읽기 전용(대상 설정 변경 금지 — "켜져 있으면 쓴다"
 > 게이트), 비밀값 argv 금지(환경변수), 미지원 정직 표기(UNSUPPORTED 위장 금지), 성능 주장은 실측,
-> 모든 완료는 docs/VERIFICATION.md에 절 추가, 모듈 규칙은 AGENTS.md "모듈 내부 패키지 규칙" 준수.
+> 모든 완료는 docs/verify/VERIFICATION.md에 절 추가, 모듈 규칙은 AGENTS.md "모듈 내부 패키지 규칙" 준수.
 
 ### Phase 0 — 배포 블로커 (완료: VERIFICATION 63절)
 
@@ -720,9 +720,9 @@ PostgreSQL·SQL Server에서 실측했다(#76·#77·#78·#79, 두 대상 모두 
 라이브에서 SQL Server 권한 게이트가 스키마 단위 VIEW DEFINITION을 못 봐 최소 권한 계정을 미확보로 떨어뜨리던 것을 찾아 고쳤다.
 MySQL 트리거는 TRIGGER 권한이 없어 미확보, MongoDB SQL CHECK·트리거는 UNSUPPORTED로 구별한다.
 Oracle 외래키 실행은 157절에서 데모 테이블 한 개에 최소 권한(자식 ALTER·부모 REFERENCES)만 더해 승인 티켓 4건으로 확인하고 원복했다.
-상세는 [VERIFICATION 156·157절](VERIFICATION.md).
+상세는 [VERIFICATION 156·157절](../verify/VERIFICATION.md).
 
-> **착수 명세는 [docs/deepening-spec.md](deepening-spec.md)** — 아크 1~4차 구현 방법(쿼리·클래스
+> **착수 명세는 [docs/archive/deepening-spec.md](../archive/deepening-spec.md)** — 아크 1~4차 구현 방법(쿼리·클래스
 > 수준)·함정·검증 기준·산출물 체크리스트. 아크 1~4차는 그 명세대로 구현 완료(VERIFICATION 57~60절).
 
 기종별 담당 조사에서 검증된 후보만 수록(URL은 조사 시점 실확인). 정체성 필터 통과분만 —

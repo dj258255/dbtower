@@ -2,7 +2,7 @@
 
 플랫폼 엔지니어링 관점에서 "AI 기능을 붙인다"를 "AI가 지켜야 할 정책을 플랫폼이 보장한다"로 바꿔 푼 기록이다.
 기능 소개는 [README](../README.md)와 [PRESENTATION](PRESENTATION.md)에, 명령·출력 원문은
-[VERIFICATION](VERIFICATION.md)에 있다. 이 문서는 그 사이에서 **문제, 결정, 트레이드오프, 실측**만 사례 단위로 모은다.
+[VERIFICATION](../verify/VERIFICATION.md)에 있다. 이 문서는 그 사이에서 **문제, 결정, 트레이드오프, 실측**만 사례 단위로 모은다.
 
 ## 한 줄 요약
 
@@ -73,7 +73,7 @@ DB팀의 반복 문의("이 쿼리 왜 느려요", "이 테이블 좀 봐주세�
 
 ## 사례 1. AI 에이전트의 권한 경계는 프롬프트가 아니라 코드다
 
-근거: [VERIFICATION 126절](VERIFICATION.md)
+근거: [VERIFICATION 126절](../verify/VERIFICATION.md)
 
 **상황.** 자연어 진단은 AI가 읽기 도구(health, sessions, explain 등)를 스스로 골라 연쇄 호출하는 루프다.
 도구 실행은 서비스 토큰(ADMIN)으로 플랫폼 자신의 REST를 다시 부른다.
@@ -103,7 +103,7 @@ DB팀의 반복 문의("이 쿼리 왜 느려요", "이 테이블 좀 봐주세�
 
 ## 사례 2. 최소 권한 문서는 기능이 늘면 썩는다: "200 OK"는 통과가 아니었다
 
-근거: [VERIFICATION 127절](VERIFICATION.md), [least-privilege.md](least-privilege.md)
+근거: [VERIFICATION 127절](../verify/VERIFICATION.md), [least-privilege.md](../operate/least-privilege.md)
 
 **상황.** 5기종 모니터 계정의 최소 권한은 2026-07-04에 실측으로 확정해 문서와 init 스크립트에 박제했다.
 그 뒤 대기 이벤트, 세션 블로킹, advisor, finops 기능이 추가됐다. 워크벤치가 조회·변경 계정을 따로 두려면
@@ -129,7 +129,7 @@ SQL Server는 로컬 Colima(Rosetta 미사용)에서 amd64 이미지가 기동 �
 
 ## 사례 3. "읽기 전용"을 쓰기 권한 계정으로 검증했다: 같은 JDBC 호출, 드라이버 셋, 동작 셋
 
-근거: [VERIFICATION 128절](VERIFICATION.md)
+근거: [VERIFICATION 128절](../verify/VERIFICATION.md)
 
 **상황.** 사람이 자유 SQL로 대상 DB를 조회하는 거버넌스 워크벤치를 만들었다. Spider 2.0 기준 기업형 Text-to-SQL
 정확도가 20%대라, 다음 단계에서 AI가 SQL을 제안하더라도 실행 경계는 AI와 무관하게 서 있어야 한다.
@@ -156,7 +156,7 @@ SQL Server는 로컬 Colima(Rosetta 미사용)에서 amd64 이미지가 기동 �
 
 ## 사례 4. AI에게 실행 권한을 주지 않고도 쓸 만하게: 제안 · 체크포인트 · 실행 결과로 잰 정확도
 
-근거: [VERIFICATION 129절](VERIFICATION.md), [평가 러너](../scripts/eval-workbench-nl2sql.py)
+근거: [VERIFICATION 129절](../verify/VERIFICATION.md), [평가 러너](../scripts/eval-workbench-nl2sql.py)
 
 **상황.** 사내 어드민 생성 플랫폼(TOI Studio) 화면을 보면 AI 대화가 "요청 → 계획 → 작업 → 체크포인트 카드"로 흐르고,
 입력창의 선택 커서로 화면 요소를 찍어 요청에 붙인다. 이 경험을 DB 조회에 옮기되, AI가 대상 DB에 무엇도 실행하지 않게 하고 싶었다.
@@ -180,7 +180,7 @@ SQL Server는 로컬 Colima(Rosetta 미사용)에서 amd64 이미지가 기동 �
 
 ## 사례 5. "승인된 변경만 실행한다"를 SQL 검사가 아니라 트랜잭션 불변식으로 보장하기
 
-근거: [VERIFICATION 130절](VERIFICATION.md), [실행 흐름](../src/main/java/io/dbtower/operator/internal/JdbcChangeRunner.java),
+근거: [VERIFICATION 130절](../verify/VERIFICATION.md), [실행 흐름](../src/main/java/io/dbtower/operator/internal/JdbcChangeRunner.java),
 [3기종 실DB 테스트](../src/test/java/io/dbtower/operator/internal/ChangeExecutionIT.java)
 
 **상황.** 리뷰 게이트는 판정·승인까지만 했고, 실행은 사람이 DB 클라이언트로 따로 했다. 그러면 승인된 SQL과 실행된 SQL이 같다는
@@ -219,7 +219,7 @@ SQL Server는 로컬 Colima(Rosetta 미사용)에서 amd64 이미지가 기동 �
 
 ## 사례 6. "완벽하게"를 목록이 아니라 실측으로: 남은 공백을 스스로 찾아 끝까지 닫기
 
-근거: [VERIFICATION 131절](VERIFICATION.md)
+근거: [VERIFICATION 131절](../verify/VERIFICATION.md)
 
 **상황.** 3단계를 커밋한 뒤 "다 됐다"고 보고할 수 있었지만, 원래 요구와 코드를 다시 대조하자 공백이 나왔다. 사용자가 처음 말한
 "클릭하면 테이블 창"이 없었고, 승인된 채 실행하지 않을 티켓을 닫을 방법도, 커밋 여부를 모르는 티켓을 풀 방법도 없었다.
@@ -257,7 +257,7 @@ SQL Edge는 지원이 끝난 제품이라 실제 SQL Server 2022 검증을 대�
 
 ## 사례 7. 한계로 적은 것을 다시 파 보니 결함이었다: 요청자 신원, 행 지표의 뜻, 표시 정밀도
 
-근거: [VERIFICATION 132절](VERIFICATION.md)
+근거: [VERIFICATION 132절](../verify/VERIFICATION.md)
 
 **상황.** 사례 6을 마치며 한계를 정직하게 적어 두었다. SQL Server는 SQL Edge로만 검증했고, MCP로 올린 티켓의 요청자는 서비스 토큰으로
 남으며, 성능 비교는 0.0 ms로 반올림되고 "스캔 행 +706%"는 해석이 필요하다고. 사용자가 "남은 한계도 다 해줘"라고 했다. 한계 목록을
@@ -299,7 +299,7 @@ SQL Edge는 지원이 끝난 제품이라 실제 SQL Server 2022 검증을 대�
 
 ## 사례 8. "이 Mac에서도 방법이 있을 것"을 조사로 확정하고, 없는 것 대신 잴 수 있는 것을 쟀다
 
-근거: [VERIFICATION 133절](VERIFICATION.md)
+근거: [VERIFICATION 133절](../verify/VERIFICATION.md)
 
 **상황.** 사례 7에서 제약 셋을 남겼다. SQL Server 2022는 Rosetta 위의 x64 번역이라 µs를 성능 근거로 못 쓰고, Oracle 앱 스키마는 앱 전역 하나이며,
 pgbench 클라이언트와 DB가 같은 Mac을 쓴다. 사용자는 "이 Mac에서도 네이티브 x64로 돌릴 방법이 있을 테니 자세히 찾아보라"고 했다.
@@ -328,7 +328,7 @@ pgbench 클라이언트와 DB가 같은 Mac을 쓴다. 사용자는 "이 Mac에�
 
 ## 사례 9. 네이티브 x64로 재고, 정리하다 찾은 결함을 고치고 합친다: 말 없는 대상 하나가 폴러 전체를 멈췄다
 
-근거: [VERIFICATION 134절](VERIFICATION.md), [PR #2](https://github.com/dj258255/dbtower/pull/2)
+근거: [VERIFICATION 134절](../verify/VERIFICATION.md), [PR #2](https://github.com/dj258255/dbtower/pull/2)
 
 **상황.** 사례 8에서 "이 Mac에서는 SQL Server를 번역 없이 돌릴 수 없다"를 확정하고 다른 하드웨어 경로를 사용자 결정으로 남겼다. 사용자가 "다 해줘"라고 해
 브랜치를 push하고 PR을 열어 GitHub의 x64 러너에서 같은 IT와 같은 부하 측정기를 돌렸다. 측정이 끝나고 검증용 등록을 지우던 중 삭제 API가 돌아오지 않았다.
@@ -360,7 +360,7 @@ pgbench 클라이언트와 DB가 같은 Mac을 쓴다. 사용자는 "이 Mac에�
 
 ## 사례 10. 한 플랫폼, 사람별 입구: 제품을 나누지 않고 쓰는 사람을 나눴다
 
-근거: [VERIFICATION 135절](VERIFICATION.md), [DESIGN 3.6](DESIGN.md)
+근거: [VERIFICATION 135절](../verify/VERIFICATION.md), [DESIGN 3.6](../design/DESIGN.md)
 
 **상황.** 워크벤치가 커지자 사용자가 물었다. "거버넌스 SQL 워크벤치와 이기종 DBMS 관제를 섞으면 안 되나, 쓰는 사람을 명확히 해야 할 것 같다." 코드를 보니 문제는 화면이
 두 개라는 데 있지 않았다. 역할이 VIEWER·ADMIN 둘뿐이라 인가 경계 24개가 전부 ADMIN이었고, 백업을 돌리는 DBA는 인스턴스 등록·보안 설정까지 함께 받아야 했다. 관제만 보면
@@ -397,7 +397,7 @@ pgbench 클라이언트와 DB가 같은 Mac을 쓴다. 사용자는 "이 Mac에�
 
 ## 사례 11. 기다림을 보이게: 관측이 부하가 되지 않는 실시간, 판단을 바꾸지 않는 스트리밍
 
-근거: [VERIFICATION 140절](VERIFICATION.md)(실시간 관제), [141절](VERIFICATION.md)(AI 스트리밍)
+근거: [VERIFICATION 140절](../verify/VERIFICATION.md)(실시간 관제), [141절](../verify/VERIFICATION.md)(AI 스트리밍)
 
 **상황.** 남은 일로 실시간 관제를 꼽자 사용자가 "이미 만들지 않았나"고 물었다. 확인해 보니 없었다. 비슷한 ASH 샘플러는 기본 꺼짐·PostgreSQL 전용으로 1초 샘플을 메타 DB에
 쌓는 사후 분석용이었고, 화면은 인스턴스를 고를 때 세션을 한 번 읽고 끝이었다. AI 쪽도 같았다. 워크벤치 AI 제안과 자연어 진단은 답이 다 만들어질 때까지 10~20초(진단은 수십 초~분)
@@ -435,7 +435,7 @@ pgbench 클라이언트와 DB가 같은 Mac을 쓴다. 사용자는 "이 Mac에�
 
 ## 사례 12. 동작이 맞아도 리뷰가 깨지면 품질 결함이다: 원시 NUL 바이트 사건
 
-근거: [VERIFICATION 154절](VERIFICATION.md), [규약 검사](../scripts/check-conventions.sh)
+근거: [VERIFICATION 154절](../verify/VERIFICATION.md), [규약 검사](../scripts/check-conventions.sh)
 
 **상황.** 153절 커밋 통계에서 Java 소스 하나가 줄 단위 diff가 아니라 `Bin 8425 -> 9147 bytes`로 찍혔다.
 동작은 정상이었고, 150~153절 테스트 859개와 E2E 7/7도 통과했다. 하지만 git이 파일을 바이너리로 보면 PR에서 사람이 변경을 읽을 수 없고,
@@ -460,7 +460,7 @@ Java 파일에는 150·151절 구간의 제약 키 조립 위치에, JS 파일�
 
 ## 사례 13. AI 운영 작업 — 화면 앞의 사람에게서 AI를 떼어낸다: Slack 한 문장에서 검증된 소견까지
 
-근거: [VERIFICATION 169절](VERIFICATION.md), [AI-OPERATIONS-AUTOMATION.md](AI-OPERATIONS-AUTOMATION.md)
+근거: [VERIFICATION 169절](../verify/VERIFICATION.md), [AI-OPERATIONS-AUTOMATION.md](../design/AI-OPERATIONS-AUTOMATION.md)
 
 **상황.** 기존 AI는 전부 사람이 화면 앞에 있어야 돌았다(회귀 1차 분석, 워크벤치 보조, 자연어 진단, 실행계획 분석).
 요청과 결과 사이가 수십 초라 Slack 3초 규칙을 못 지키고, "이 소견이 어떤 사실을 보고 한 말인가"를 나중에 되짚을

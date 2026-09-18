@@ -37,7 +37,7 @@ import java.sql.SQLException;
  * JDBC 기반 Operator 공통 골격.
  *
  * 처음엔 호출마다 DriverManager로 새 커넥션을 열었다(TCP+인증 핸드셰이크 반복).
- * 개선 아크 1에서 인스턴스별 HikariCP 풀로 교체 — before/after 실측은 docs/DESIGN.md 참고.
+ * 개선 아크 1에서 인스턴스별 HikariCP 풀로 교체 — before/after 실측은 docs/design/DESIGN.md 참고.
  */
 public abstract class AbstractJdbcOperator implements DbmsOperator {
 

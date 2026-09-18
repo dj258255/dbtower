@@ -12,7 +12,7 @@
 
 ## 2. 아키텍처
 
-![DBTower 상세 아키텍처](architecture-detail.svg)
+![DBTower 상세 아키텍처](../diagrams/architecture-detail.svg)
 
 현재 구조의 기준은 Spring Modulith 17개 모듈, `DbmsOperator` 구현 5종, MCP 도구 19개,
 Flyway V46이다. 웹 콘솔과 MCP는 같은 서비스 코어와 호출자 권한을 사용하고, AI는 읽기와
@@ -24,10 +24,10 @@ Flyway V46이다. 웹 콘솔과 MCP는 같은 서비스 코어와 호출자 권�
 모델이 낸 수치는 플랫폼이 모은 사실과 대조해 어긋나면 "검증되지 않음"으로 남긴다
 ([AI 운영 작업](AI-OPERATIONS-AUTOMATION.md)).
 
-- [데이터 도메인 지도](erd.svg): V1~V41에서 역할이 큰 테이블과 증거의 연결
-- [진단에서 실행까지](insight-flow.svg): AI와 사람의 책임, 승인·실행 불변식
-- [CI/CD와 런타임](deployment-flow.svg): 테스트 게이트, 이미지 게시, 셀프호스트와 대상 프로비저닝
-- [모듈 문서](modules/): Spring Modulith가 코드에서 생성한 실제 의존 관계
+- [데이터 도메인 지도](../diagrams/erd.svg): V1~V41에서 역할이 큰 테이블과 증거의 연결
+- [진단에서 실행까지](../diagrams/insight-flow.svg): AI와 사람의 책임, 승인·실행 불변식
+- [CI/CD와 런타임](../diagrams/deployment-flow.svg): 테스트 게이트, 이미지 게시, 셀프호스트와 대상 프로비저닝
+- [모듈 문서](../modules/): Spring Modulith가 코드에서 생성한 실제 의존 관계
 
 ## 3. 핵심 결정과 이유
 
@@ -170,7 +170,7 @@ Apple Liquid Glass(WWDC25)의 재질감을 웹 콘솔에 들이되, 운영 콘�
 ## 5. 로드맵 (이 문서의 완성 기준: 확장3까지 — 이후는 ROADMAP.md)
 
 확장3 이후(확장4~6 채널·5기종, Phase A 운영 안전 ~ Phase E 셀프호스트 제품화)는
-[ROADMAP.md](ROADMAP.md)로 이관해 관리했고 전부 완료됐다. 아래는 초기 설계 시점의 기록이다.
+[ROADMAP.md](../work/ROADMAP.md)로 이관해 관리했고 전부 완료됐다. 아래는 초기 설계 시점의 기록이다.
 
 - [x] MVP1: 이기종 등록 + Operator 추상화 (MySQL/PG/MSSQL)
 - [x] MVP2: 시점 비교 검증 — 신규 쿼리/급증/rows-call 폭증 검출 (VERIFICATION.md 3절)

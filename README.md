@@ -1,4 +1,4 @@
-# <img src="docs/icon.svg" width="34" align="top"> DBTower
+# <img src="docs/images/icon.svg" width="34" align="top"> DBTower
 
 [![CI](https://github.com/dj258255/dbtower/actions/workflows/ci.yml/badge.svg)](https://github.com/dj258255/dbtower/actions/workflows/ci.yml)
 [![Release](https://github.com/dj258255/dbtower/actions/workflows/release.yml/badge.svg)](https://github.com/dj258255/dbtower/actions/workflows/release.yml)
@@ -25,7 +25,7 @@ Java 21 + Spring Boot 4로 만들었으며 웹 콘솔은 별도 빌드 체인이
 최근 백업이며, 그 백업이 없으면 실행을 거부합니다. 취소해도 이미 커밋한 배치는 되돌리지 않고,
 어디까지 적용됐는지는 마지막 키로 남깁니다.
 
-![관제 첫 화면 — 헬스 스코어, 백업 신선도, 조회 구간 한 줄, AI 어시스턴트](docs/images/webui/188-console-first-screen.jpg)
+![대량 일괄 변경 — 진행 패널, 일시정지·취소, 배치별 키 구간과 복제 지연](docs/images/webui/199-workbench-bulk-change.png)
 
 ## 주요 기능
 
@@ -36,7 +36,7 @@ Java 21 + Spring Boot 4로 만들었으며 웹 콘솔은 별도 빌드 체인이
 | AI 운영 작업 | Slack 한 문장·웹 콘솔·경보·DB팀 문의에서 시작된 비동기 진단. 사실은 DBTower가 모으고 모델은 1차 소견만 내며, 소견의 수치는 사실과 대조해 어긋나면 "검증되지 않음"으로 남깁니다 |
 | 운영 | 통합 헬스 스코어, SLO·에러 버짓, Advisors, FinOps 신호, 백업·복원 검증 |
 | 변경 관리 | 읽기 전용 워크벤치, 마스킹, 변경 리뷰, 승인 티켓 실행·되돌리기 |
-| 대량 일괄 변경 | 승인된 티켓을 기본 키 범위 배치로 쪼개 실행합니다. 복제가 밀리면 멈췄다 재개하고, 되돌리기는 행 사본이 아니라 복원 검증된 최근 백업을 실행 전 조건으로 걸어 보장합니다(MySQL·PostgreSQL) |
+| 대량 일괄 변경 | 승인된 티켓을 기본 키 범위 배치로 쪼개 실행합니다. 복제가 밀리면 멈췄다 재개하고, 되돌리기는 행 사본이 아니라 복원 검증된 최근 백업을 실행 전 조건으로 걸어 보장합니다. 복합 기본 키와 5기종을 지원하며, 여러 테이블에 걸친 변경과 `_id` 타입이 섞인 MongoDB 컬렉션은 담지 않습니다 |
 | 연동 | 웹 콘솔, MCP stdio·HTTP, Discord·Slack 웹훅, K8s·Terraform·Ansible |
 | 화면 | 관제·워크벤치를 한 페이지의 두 모드로. 관제 AI 채팅은 대화를 서버에 저장하고 대화 목록에서 이어 보며, AI로 보내는 쿼리와 실행계획의 값은 가림 수준(`NONE`·`STRUCTURE`·`FULL`)으로 가립니다 |
 
@@ -60,14 +60,14 @@ Java 21 + Spring Boot 4로 만들었으며 웹 콘솔은 별도 빌드 체인이
   격리합니다.
 - 비밀번호는 AES-256-GCM으로 저장하며 API 응답과 외부 명령 인자에 노출하지 않습니다.
 
-자세한 결정과 위협 경계는 [설계 문서](docs/DESIGN.md), [최소 권한 가이드](docs/least-privilege.md),
-[검증 기록](docs/VERIFICATION.md)에서 확인할 수 있습니다.
+자세한 결정과 위협 경계는 [설계 문서](docs/design/DESIGN.md), [최소 권한 가이드](docs/operate/least-privilege.md),
+[검증 기록](docs/verify/VERIFICATION.md)에서 확인할 수 있습니다.
 
 ## 빠른 시작
 
 Docker와 Docker Compose만 있으면 앱과 전용 메타 DB를 실행할 수 있습니다.
-현재 정식 버전은 `v1.4.0`입니다. 운영에서는 재현 가능한 업그레이드를 위해 `latest` 대신
-`DBTOWER_TAG=1.4.0`처럼 버전을 고정하는 것을 권장합니다.
+현재 정식 버전은 `v1.6.1`입니다. 운영에서는 재현 가능한 업그레이드를 위해 `latest` 대신
+`DBTOWER_TAG=1.6.1`처럼 버전을 고정하는 것을 권장합니다.
 
 ```bash
 cp .env.example .env
@@ -78,7 +78,7 @@ cp .env.example .env
 ```dotenv
 DBTOWER_DB_PASSWORD=change-me-strong-password
 DBTOWER_ENCRYPTION_KEY=<openssl rand -base64 32 결과>
-DBTOWER_TAG=1.4.0
+DBTOWER_TAG=1.6.1
 ```
 
 그다음 컨테이너를 시작합니다.
@@ -96,7 +96,7 @@ docker compose -f docker-compose.app.yml logs dbtower
 
 이 구성은 DBTower와 메타 DB만 실행합니다. 관리 대상 DB는 로그인 후 웹 콘솔에서
 등록합니다.
-배포와 프록시, 백업 설정은 [운영 가이드](docs/operations.md)를 참고하세요.
+배포와 프록시, 백업 설정은 [운영 가이드](docs/operate/operations.md)를 참고하세요.
 
 ## 로컬 개발
 
@@ -110,7 +110,7 @@ DBTOWER_ENCRYPTION_KEY=$(openssl rand -base64 32) ./gradlew bootRun
 
 Apple Silicon의 Rosetta 없는 Colima에서는 amd64 전용 SQL Server 2022가 기동되지 않습니다.
 이 머신에서 `docker-compose.arm64.yml`의 Azure SQL Edge도 `S_SbtUnimplementedInstruction`로
-종료됐다. SQL Server까지 확인할 때는 Rosetta를 켠 별도 Colima 프로필에 실제 2022 이미지를 띄운다.
+종료됐습니다. SQL Server까지 확인할 때는 Rosetta를 켠 별도 Colima 프로필에 실제 2022 이미지를 띄웁니다.
 
 ```bash
 colima start mssql2022 --vm-type vz --vz-rosetta --cpu 4 --memory 6 --disk 20
@@ -121,8 +121,8 @@ MSSQL_SA_PASSWORD='...' docker --context colima-mssql2022 run -d \
 ```
 
 계정·데모 데이터 준비와 실제 SQL Server 2022 검증 결과는
-[VERIFICATION.md](docs/VERIFICATION.md) 132·164절에 기록했습니다. 이 실행은 Microsoft가
-지원하는 네이티브 ARM64 구성이 아니라 로컬 개발용 번역 환경이다.
+[VERIFICATION.md](docs/verify/VERIFICATION.md) 132·164절에 기록했습니다. 이 실행은 Microsoft가
+지원하는 네이티브 ARM64 구성이 아니라 로컬 개발용 번역 환경입니다.
 
 등록한 대상의 비밀번호를 다음 실행에서도 사용하려면 암호화 키를 고정해서
 보관해야 합니다.
@@ -149,7 +149,7 @@ MSSQL_SA_PASSWORD='...' docker --context colima-mssql2022 run -d \
 승인자와 운영자는 서로를 포함하지 않습니다. 화면은 `/api/me`가 반환한 능력으로 동작을
 표시하고, 최종 권한은 서버가 검사합니다.
 
-직접 역할을 바꿔 가며 확인하는 순서는 [역할별 수동 테스트](docs/MANUAL-TEST.md)에 있습니다.
+직접 역할을 바꿔 가며 확인하는 순서는 [역할별 수동 테스트](docs/verify/MANUAL-TEST.md)에 있습니다.
 
 ![DBTower 워크벤치 모드 — 스키마 트리, 워크시트 탭, 조회 결과, 버전 기록](docs/images/webui/196-workbench-query-result.jpg)
 
@@ -159,22 +159,22 @@ MSSQL_SA_PASSWORD='...' docker --context colima-mssql2022 run -d \
 사용하며 구현, 엔티티, 저장소는 각 모듈의 `internal` 패키지에 숨깁니다. 순환 의존과
 레이어 위반은 테스트와 규약 검사에서 실패합니다.
 
-![DBTower 아키텍처 핵심](docs/architecture-core.svg)
+![DBTower 아키텍처 핵심](docs/diagrams/architecture-core.svg)
 
 보장하는 것은 넷입니다. 입구가 사람과 에이전트 둘이고, 조회와 변경이 다른 계정으로 갈리며,
 AI는 판단자가 아니라 1차 분석기이고, 플랫폼 저장소는 대상 DB와 분리됩니다. 모듈 17개가 모두
-그려진 상세본은 [architecture-detail.svg](docs/architecture-detail.svg)에 있습니다.
+그려진 상세본은 [architecture-detail.svg](docs/diagrams/architecture-detail.svg)에 있습니다.
 
 데이터 모델도 같은 방식으로 핵심만 추렸습니다. 인스턴스 하나에 관측·백업·변경 증거가 매달리고,
 변경은 요청부터 실행까지 한 사슬로 남습니다.
 
-![DBTower 데이터 모델 핵심](docs/erd-core.svg)
+![DBTower 데이터 모델 핵심](docs/diagrams/erd-core.svg)
 
-전체 표 관계는 [erd.svg](docs/erd.svg)에 있습니다.
+전체 표 관계는 [erd.svg](docs/diagrams/erd.svg)에 있습니다.
 
 핵심은 `operator` 모듈입니다. 새 DBMS 지원은 Operator 구현체가 본체이고 enum, 팩토리,
 백업 도구, JDBC 드라이버, 화면 자산은 등록 절차로 다룹니다. 전체 구조는
-[DESIGN.md](docs/DESIGN.md), 생성된 모듈 문서는 [docs/modules/](docs/modules/)에 있습니다.
+[DESIGN.md](docs/design/DESIGN.md), 생성된 모듈 문서는 [docs/modules/](docs/modules/)에 있습니다.
 
 ## 실측 결과
 
@@ -189,7 +189,7 @@ AI는 판단자가 아니라 1차 분석기이고, 플랫폼 저장소는 대상
 | 세션 화면 10명의 30초간 대상 조회 | 150회 | 14회 |
 | Slack 한 문장에서 검증된 소견까지(라이브) | 확인 응답 65.6 ms | 결과 도착 31.7초 |
 
-측정 환경, 명령, 원문 출력은 [VERIFICATION.md](docs/VERIFICATION.md)의 9, 132, 134,
+측정 환경, 명령, 원문 출력은 [VERIFICATION.md](docs/verify/VERIFICATION.md)의 9, 132, 134,
 140, 169절에 있습니다.
 
 ## 일정과 작업 방식
@@ -215,29 +215,29 @@ AI는 판단자가 아니라 1차 분석기이고, 플랫폼 저장소는 대상
 끝나면 실제 마감과 어긋난 이유를 채웁니다([CONTRIBUTING.md](CONTRIBUTING.md) 참고).
 지금까지 이슈 56건(열림 0건, 닫힘 56건), PR 86건이 쌓였습니다.
 
-예상 시간은 2026-09-17부터 기록을 시작했습니다. 그 전까지는 로드맵과 명세 문서에
-우선순위와 완료 조건만 있고 예상 시간은 없었습니다. 아래는 그날 이후 실제로 적어 둔
-이슈 몇 건의 예상과 실제입니다.
+착수 전에 적은 예상과, 끝난 뒤 채운 실제입니다. 어긋난 이유는 짐작이 아니라 그 작업에서 실제로 있었던 일을 적습니다.
 
 | 이슈 → PR | 작업 | 예상 | 예상 마감 | 실제 마감 | 어긋난 이유 |
 |---|---|---|---|---|---|
-| #66 → PR #67 | UX 1차 검증 기록과 CHANGELOG 정리 | 2시간 | 09-17 23:20 | 09-17 21:54 | 앞선 작업에서 이미 확인한 수치와 화면이라 새로 잴 것이 없었습니다 |
-| #61 → PR #68 | 글자 크기 네 단계 기준 적용, 시간대 선택 접기 | 4시간 | 09-18 07:20 | 09-17 23:04 | 값 대응표 하나로 한 번에 바꿨습니다 |
-| #69 → PR #74 | 문서 대표 화면 10장 재촬영 | 2시간 | 09-18 00:40 | 09-17 23:15 | 촬영 중 발견한 스냅샷 저장 실패(#70)를 먼저 고치는 작업이 끼었습니다 |
-| #70 → PR #71 | 스냅샷 저장 실패 수정 | 1시간 | 09-17 23:43 | 09-17 23:08 | 수정 전 재현에서 수집 재시도 간격만큼 약 10분을 기다렸습니다 |
+| #126 → PR #134 | 대량 변경에 복합 기본 키 지원 | 1일 | 09-19 | 09-18 | 행 값 비교가 두 기종 모두 인덱스를 타서 기종별 분기가 필요 없었습니다 |
+| #127 → PR #134 | 대량 변경을 Oracle·SQL Server로 확장 | 2일 | 09-21 | 09-18 | 방언에 붙은 것이 메서드 둘뿐이라 배치 실행기 본체를 손대지 않았습니다 |
+| #131 → PR #136 | AI 가림 기본값 전환 여부 판정 | 2일 | 09-23 | 09-18 | 판정 일치율이 착수 전에 정한 기준에 못 미쳐 바꾸지 않기로 했고, 전환 작업 자체가 없어졌습니다 |
+| #140 → PR #142 | SQL Server 복합 키 문법 오류 수정 | 반나절 | 09-19 | 09-18 | 고치는 것보다 찾는 데 시간이 들었습니다. 고친 뒤 CI가 그 테스트를 아예 돌리지 않던 것도 드러나 워크플로까지 손봤습니다 |
+
+마감을 넘기면 원래 값을 지우지 않고 새 예상을 한 줄 더 적습니다. 없는 예상을 뒤늦게 만들어 넣지 않습니다.
 
 ## 문서
 
 문서가 길어져도 README가 다시 목차가 되지 않도록 별도의 [문서 안내](docs/README.md)에
 목적별 읽기 순서와 기록 위치를 정리했습니다.
 
-- 처음 둘러보기: [한 장 요약](docs/PORTFOLIO-ONEPAGER.md), [5분 시연](docs/DEMO-5MIN.md)
-- 설계 이해하기: [설계](docs/DESIGN.md), [AI 판단 규칙](docs/ai-analysis-rules.md), [AI 운영 자동화](docs/AI-OPERATIONS-AUTOMATION.md)
-- 운영·배포하기: [운영](docs/operations.md), [최소 권한](docs/least-privilege.md)
-- API 연동하기: [API 빠른 참조](docs/API.md)
-- 직접 눌러보기: [역할별 수동 테스트](docs/MANUAL-TEST.md)
-- 현재 화면 보기: [화면 갤러리](docs/SCREENSHOTS.md)
-- 근거 확인하기: [검증 기록](docs/VERIFICATION.md), [변경 이력](CHANGELOG.md)
+- 처음 둘러보기: [한 장 요약](docs/portfolio/PORTFOLIO-ONEPAGER.md), [5분 시연](docs/portfolio/DEMO-5MIN.md)
+- 설계 이해하기: [설계](docs/design/DESIGN.md), [AI 판단 규칙](docs/design/ai-analysis-rules.md), [AI 운영 자동화](docs/design/AI-OPERATIONS-AUTOMATION.md)
+- 운영·배포하기: [운영](docs/operate/operations.md), [최소 권한](docs/operate/least-privilege.md)
+- API 연동하기: [API 빠른 참조](docs/operate/API.md)
+- 직접 눌러보기: [역할별 수동 테스트](docs/verify/MANUAL-TEST.md)
+- 현재 화면 보기: [화면 갤러리](docs/portfolio/SCREENSHOTS.md)
+- 근거 확인하기: [검증 기록](docs/verify/VERIFICATION.md), [변경 이력](CHANGELOG.md)
 - 개발에 참여하기: [기여 가이드](CONTRIBUTING.md), [저장소 규칙](AGENTS.md)
 
 ## 요구사항

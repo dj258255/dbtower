@@ -34,4 +34,4 @@ aws provider v5.100 스키마로 `validate` 통과). **`apply`는 실행하지 �
 ## 모니터링 계정 주의
 
 RDS 마스터 계정으로 붙지 않는다. 생성 후 `dbtower_monitor` 최소 권한 계정을 부여하고
-(docs/least-privilege.md) 그 계정으로 등록한다 — 등록 payload의 username/password가 그것이다.
+(docs/operate/least-privilege.md) 그 계정으로 등록한다 — 등록 payload의 username/password가 그것이다.

@@ -12,7 +12,7 @@ import java.util.List;
  * 2) rootCauses — 인덱스 무력화 근본원인 5종(암시적 형변환·컬럼함수·통계노후·낮은선택도·복합선두누락) 매칭.
  *
  * notes에는 정직성 안내를 싣는다(loops당 평균의 총량 환산 주의, 파싱 한계, 스키마 미가용 등).
- * docs/ai-analysis-rules.md "심층 원인 규칙 (D9)" 절이 이 판정의 스펙이다.
+ * docs/design/ai-analysis-rules.md "심층 원인 규칙 (D9)" 절이 이 판정의 스펙이다.
  *
  * @param plan        실제 실행 계획 원문(기종별 JSON/텍스트/XML) — 추정이 아니라 진짜 실행 결과
  * @param worstGap    추정 vs 실제 괴리가 가장 큰 최하위 노드(임계 미만이면 null)

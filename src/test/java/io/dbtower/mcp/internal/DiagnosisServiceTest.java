@@ -101,7 +101,7 @@ class DiagnosisServiceTest {
                         + "\"rootCause\":\"인덱스 없는 후위 와일드카드 LIKE 풀스캔\",\"confidence\":\"high\"}");
 
         DiagnosisService svc = new DiagnosisService(handler, ai, true, "mock", new QueryMasker(true, false),
-                "docs/ai-analysis-rules.md", 5);
+                "docs/design/ai-analysis-rules.md", 5);
         DiagnosisService.DiagnosisResult r = svc.diagnose(1, "POSTGRESQL", "orders-prod",
                 "어제 오후에 왜 느려졌어?");
 
@@ -145,7 +145,7 @@ class DiagnosisServiceTest {
                 "{\"action\":\"call_tool\",\"tool\":\"drop_everything\",\"arguments\":{},\"reason\":\"화이트리스트 밖\"}",
                 "{\"action\":\"final\",\"answer\":\"IO 대기\",\"rootCause\":\"IO\",\"confidence\":\"medium\"}");
         DiagnosisService svc = new DiagnosisService(new McpProtocolHandler(baseUrl), ai, true, "mock",
-                new QueryMasker(true, false), "docs/ai-analysis-rules.md", 5);
+                new QueryMasker(true, false), "docs/design/ai-analysis-rules.md", 5);
         List<String> events = new java.util.ArrayList<>();
 
         DiagnosisService.DiagnosisResult r = svc.diagnose(1, "POSTGRESQL", "orders-prod", "왜 느려?", recorder(events));
@@ -163,7 +163,7 @@ class DiagnosisServiceTest {
                 "{\"action\":\"call_tool\",\"tool\":\"wait_events\",\"arguments\":{\"instanceId\":1},\"reason\":\"IO인지 본다\"}",
                 "{\"action\":\"final\",\"answer\":\"IO 대기\",\"rootCause\":\"IO\",\"confidence\":\"low\"}");
         DiagnosisService svc = new DiagnosisService(new McpProtocolHandler(baseUrl), ai, true, "mock",
-                new QueryMasker(true, false), "docs/ai-analysis-rules.md", 1);
+                new QueryMasker(true, false), "docs/design/ai-analysis-rules.md", 1);
         List<String> events = new java.util.ArrayList<>();
 
         svc.diagnose(1, "POSTGRESQL", "orders-prod", "왜 느려?", recorder(events));
@@ -183,7 +183,7 @@ class DiagnosisServiceTest {
                         + "\"rootCause\":\"미상\",\"confidence\":\"low\"}");
 
         DiagnosisService svc = new DiagnosisService(handler, ai, true, "mock", new QueryMasker(true, false),
-                "docs/ai-analysis-rules.md", 5);
+                "docs/design/ai-analysis-rules.md", 5);
         DiagnosisService.DiagnosisResult r = svc.diagnose(1, "MYSQL", "db1", "느린 세션 죽여줘");
 
         assertEquals(0, r.toolCallCount(), "실행된 도구 없음");
@@ -246,7 +246,7 @@ class DiagnosisServiceTest {
                         systems.add(system);
                         return Optional.of(finalJson);
                     },
-                    true, "mock", new QueryMasker(true, false), "docs/ai-analysis-rules.md", 5);
+                    true, "mock", new QueryMasker(true, false), "docs/design/ai-analysis-rules.md", 5);
             svc.diagnose(Long.parseLong(target[0]), target[1], target[2], target[3]);
         }
 
@@ -276,7 +276,7 @@ class DiagnosisServiceTest {
                         + "\"rootCause\":\"미상\",\"confidence\":\"low\"}\n```\n이상입니다.");
 
         DiagnosisService svc = new DiagnosisService(handler, ai, true, "mock", new QueryMasker(true, false),
-                "docs/ai-analysis-rules.md", 5);
+                "docs/design/ai-analysis-rules.md", 5);
         DiagnosisService.DiagnosisResult r = svc.diagnose(1, "MYSQL", "db1", "왜?");
 
         assertEquals("근거 부족으로 모른다.", r.answer());
@@ -287,7 +287,7 @@ class DiagnosisServiceTest {
     void AI_백엔드가_없으면_비활성_결과를_정직하게_돌려준다() {
         McpProtocolHandler handler = new McpProtocolHandler(baseUrl);
         DiagnosisService svc = new DiagnosisService(handler, (s, u) -> Optional.empty(),
-                false, "off", new QueryMasker(true, false), "docs/ai-analysis-rules.md", 5);
+                false, "off", new QueryMasker(true, false), "docs/design/ai-analysis-rules.md", 5);
         DiagnosisService.DiagnosisResult r = svc.diagnose(1, "MYSQL", "db1", "왜 느려?");
 
         assertFalse(r.aiEnabled());
@@ -312,7 +312,7 @@ class DiagnosisServiceTest {
                 "{\"action\":\"final\",\"answer\":\"근거가 부분적이라 확실치 않다.\",\"rootCause\":\"미상\",\"confidence\":\"low\"}");
 
         DiagnosisService svc = new DiagnosisService(handler, ai, true, "mock", new QueryMasker(true, false),
-                "docs/ai-analysis-rules.md", 2);
+                "docs/design/ai-analysis-rules.md", 2);
         DiagnosisService.DiagnosisResult r = svc.diagnose(1, "MYSQL", "db1", "왜?");
 
         assertEquals(2, r.toolCallCount());
@@ -343,7 +343,7 @@ class DiagnosisServiceTest {
         DiagnosisGuard.CallerScope teamScope = new DiagnosisGuard.CallerScope(false, Set.of(1L));
 
         DiagnosisService svc = new DiagnosisService(new McpProtocolHandler(baseUrl), ai, true, "mock",
-                new QueryMasker(true, false), "docs/ai-analysis-rules.md", 5,
+                new QueryMasker(true, false), "docs/design/ai-analysis-rules.md", 5,
                 () -> teamScope, (action, instanceId, outcome) -> audited.add(outcome + " " + action));
         DiagnosisService.DiagnosisResult r = svc.diagnose(1, "MYSQL", "orders-prod", "지금 뭐가 막혀?");
 
@@ -372,7 +372,7 @@ class DiagnosisServiceTest {
                 "{\"action\":\"final\",\"answer\":\"-\",\"rootCause\":\"-\",\"confidence\":\"low\"}");
 
         DiagnosisService svc = new DiagnosisService(new McpProtocolHandler(baseUrl), ai, true, "mock",
-                new QueryMasker(true, false), "docs/ai-analysis-rules.md", 5);
+                new QueryMasker(true, false), "docs/design/ai-analysis-rules.md", 5);
         DiagnosisService.DiagnosisResult r = svc.diagnose(1, "MYSQL", "db1", "복제 괜찮아?");
 
         assertTrue(r.toolCalls().get(0).rejected());
@@ -389,7 +389,7 @@ class DiagnosisServiceTest {
                 "{\"action\":\"final\",\"answer\":\"앞서 본 orders 자기조인의 실행계획을 다시 확인해야 한다.\","
                         + "\"rootCause\":\"확인 필요\",\"confidence\":\"low\"}");
         DiagnosisService svc = new DiagnosisService(handler, ai, true, "mock", new QueryMasker(true, false),
-                "docs/ai-analysis-rules.md", 5);
+                "docs/design/ai-analysis-rules.md", 5);
 
         String longAnswer = "가".repeat(2000);
         List<DiagnosisService.PriorTurn> history = List.of(
@@ -423,7 +423,7 @@ class DiagnosisServiceTest {
         DiagnosisService.AiTurn ai = scripted(received,
                 "{\"action\":\"final\",\"answer\":\"-\",\"rootCause\":\"-\",\"confidence\":\"low\"}");
         DiagnosisService svc = new DiagnosisService(handler, ai, true, "mock", new QueryMasker(true, false),
-                "docs/ai-analysis-rules.md", 5);
+                "docs/design/ai-analysis-rules.md", 5);
 
         List<DiagnosisService.PriorTurn> history = new java.util.ArrayList<>();
         history.add(new DiagnosisService.PriorTurn("가장 옛 질문", "가장 옛 답"));

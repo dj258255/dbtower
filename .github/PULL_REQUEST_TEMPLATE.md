@@ -2,7 +2,7 @@
 <!-- 변경의 의도. 닫는 이슈: Closes #번호 -->
 
 ## 어떻게 검증했나
-<!-- ./gradlew test 결과, 라이브 실측 명령·출력, 화면이면 브라우저에서 확인한 동작. 관련 docs/VERIFICATION.md 절 번호 -->
+<!-- ./gradlew test 결과, 라이브 실측 명령·출력, 화면이면 브라우저에서 확인한 동작. 관련 docs/verify/VERIFICATION.md 절 번호 -->
 
 ## 머지 순서
 <!-- 다른 PR 위에 쌓았으면 적는다. 쌓인 PR은 head 브랜치를 바로 지우지 않는다(AGENTS.md "작업 기록") -->

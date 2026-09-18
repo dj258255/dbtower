@@ -103,7 +103,7 @@ p.push(text(480, 606, '승인된 SQL 과 실행된 SQL 이 같다는 것을 표�
 }));
 
 writeFileSync(
-  new URL('../erd-core.svg', import.meta.url),
+  new URL('./erd-core.svg', import.meta.url),
   svg(W, H, p.join('\n'), 'DBTower 데이터 모델 핵심'),
 );
-console.log('docs/erd-core.svg');
+console.log('docs/diagrams/erd-core.svg');

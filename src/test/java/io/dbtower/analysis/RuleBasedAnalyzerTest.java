@@ -8,7 +8,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * 기종별 실행계획 판정 규칙 검증. 규칙 문자열은 docs/ai-analysis-rules.md와 짝이다 —
+ * 기종별 실행계획 판정 규칙 검증. 규칙 문자열은 docs/design/ai-analysis-rules.md와 짝이다 —
  * 규칙을 바꾸면 문서도 같이 바꿔야 한다는 것을 테스트가 상기시킨다.
  */
 class RuleBasedAnalyzerTest {
