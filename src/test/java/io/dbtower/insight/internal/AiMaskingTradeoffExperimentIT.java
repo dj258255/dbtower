@@ -18,6 +18,9 @@ import io.dbtower.operator.internal.MySqlOperator;
 import io.dbtower.operator.internal.PostgresOperator;
 import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.registry.DatabaseInstance;
+import io.dbtower.operator.model.SchemaSnapshot;
+import io.dbtower.operator.model.TableDetail;
+import io.dbtower.operator.model.TableSchema;
 import io.dbtower.registry.DbmsType;
 import io.dbtower.testsupport.TargetTableLock;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -99,6 +102,14 @@ class AiMaskingTradeoffExperimentIT {
     private static final Path CASES_PATH = Path.of("src", "test", "resources", "experiments", "ai-masking-cases.json");
     private static final Path RESPONSES_PATH = Path.of("docs", "experiments", "ai-masking-responses.jsonl");
     private static final Path DOC_PATH = Path.of("docs", "experiments", "ai-masking-tradeoff.md");
+
+    /**
+     * 프롬프트에 대상 테이블 행수가 붙기 전(#124 이전) 회차의 원자료. 지우지 않고 남긴다 —
+     * 그 회차의 결론(노출 41 -> 0, 앞 와일드카드가 진단을 가른다)은 그 조건에서 참이고,
+     * 조건이 달라졌다는 사실과 함께 읽으면 비교의 재료가 된다(#130).
+     */
+    static final Path RESPONSES_BEFORE_SCALE =
+            Path.of("docs", "experiments", "ai-masking-responses-noscale.jsonl");
 
     private static final List<String> CONDITIONS = List.of("A", "B", "C");
 
@@ -189,17 +200,24 @@ class AiMaskingTradeoffExperimentIT {
             for (String condition : List.of("A", "B")) {
                 boolean maskAiPrompt = "B".equals(condition);
                 String product = productPrompt(c, plan, maskAiPrompt);
-                String runner = prompt(type, sqlFor(c, condition), plan, findings);
+                String runner = prompt(type, sqlFor(c, condition), plan, findings, expectedScale(c));
                 assertEquals(product, runner, c.id() + " 조건 " + condition + " 의 프롬프트가 제품과 다르다");
             }
         }
         return cases.size();
     }
 
-    /** 제품 경로로 프롬프트를 받아낸다: 팩토리를 대체하고 AiAnalyzer가 받은 인자를 붙잡는다. */
+    /**
+     * 제품 경로로 프롬프트를 받아낸다: 팩토리를 대체하고 AiAnalyzer가 받은 인자를 붙잡는다.
+     *
+     * <p>스키마와 테이블 상세도 대역으로 돌려준다 — {@link TableScale}이 행수 줄을 붙이는 경우까지
+     * 맞대야 한다. 대역이 빈 스키마를 주면 그 줄이 없는 프롬프트만 비교하게 되고, 제품이 실제로
+     * 붙이는 줄은 검사에서 빠진다(#130에서 실제로 그렇게 새고 있었다).
+     */
     private static String productPrompt(MaskCase c, String plan, boolean maskAiPrompt) {
         DbmsOperator operator = mock(DbmsOperator.class);
         when(operator.explain(anyString())).thenReturn(plan);
+        stubScale(operator);
         DbmsOperatorFactory factory = mock(DbmsOperatorFactory.class);
         when(factory.create(any())).thenReturn(operator);
         AiAnalyzer analyzer = mock(AiAnalyzer.class);
@@ -213,6 +231,33 @@ class AiMaskingTradeoffExperimentIT {
         return captor.getValue();
     }
 
+    /**
+     * 사례의 SQL에 나오는 테이블에 행수를 붙여 준다 — 실험과 제품이 같은 줄을 받게 한다.
+     * 행수는 실제 시드와 같은 값으로 둔다({@link #CUSTOMERS}·{@link #ORDERS}).
+     */
+    private static void stubScale(DbmsOperator operator) {
+        when(operator.describeSchema()).thenReturn(new SchemaSnapshot("TABLE", "sample",
+                List.of(tableSchema("exp_mask_customers"), tableSchema("exp_mask_orders")), false, 0));
+        when(operator.tableDetail("exp_mask_customers")).thenReturn(detailWithRows("exp_mask_customers", CUSTOMERS));
+        when(operator.tableDetail("exp_mask_orders")).thenReturn(detailWithRows("exp_mask_orders", ORDERS));
+    }
+
+    /** 동일성 비교에 쓸 행수 줄 — 대역 스키마·상세로 TableScale이 만들 줄을 그대로 얻는다. */
+    private static String expectedScale(MaskCase c) {
+        DbmsOperator operator = mock(DbmsOperator.class);
+        stubScale(operator);
+        return TableScale.describe(operator, c.sql());
+    }
+
+    private static TableSchema tableSchema(String name) {
+        return new TableSchema(name, List.of(), List.of(), "TABLE", List.of(), List.of(), null, null);
+    }
+
+    private static TableDetail detailWithRows(String name, long rows) {
+        return new TableDetail(name, null, rows, -1, -1, -1, null, null,
+                TableDetail.DdlSource.UNSUPPORTED, List.of(), "대역");
+    }
+
     private static DatabaseInstance instanceFor(MaskCase c) {
         for (Db db : DBS) {
             if (db.dbms().equals(c.dbms())) {
@@ -223,15 +268,24 @@ class AiMaskingTradeoffExperimentIT {
     }
 
     /** 제품과 같은 형식 — 조건 A·B의 SQL은 제품과 같은 QueryMasker를 통과한다. */
-    private static String prompt(DbmsType type, String sqlForPrompt, String plan, List<String> findings) {
+    /**
+     * 실험 프롬프트 — 제품 {@code AiAnalysisRunner.run}과 글자 단위로 같아야 한다.
+     *
+     * <p>{@code scale}은 대상 테이블의 전체 행수 한 줄이다(#124, {@link TableScale}). 선택도는 비율이라
+     * 분모가 없으면 판단할 수 없어 제품이 이 줄을 붙이는데, 실험이 빼면 두 쪽의 조건이 달라진다 —
+     * 199절까지의 측정(조건 A~E)은 이 줄 없이 쟀고 가림 수준 측정은 붙여서 쟀다. 그래서 여기서 맞춘다(#130).
+     */
+    private static String prompt(DbmsType type, String sqlForPrompt, String plan, List<String> findings,
+                                 String scale) {
         return """
                 [%s] 아래 쿼리와 실행계획을 판단 기준에 따라 분석해줘.
                 SQL:
                 %s
                 실행계획:
                 %s
-                규칙 기반 지적: %s""".formatted(type, sqlForPrompt, plan,
-                findings.isEmpty() ? "(없음)" : String.join(" / ", findings));
+                규칙 기반 지적: %s%s""".formatted(type, sqlForPrompt, plan,
+                findings.isEmpty() ? "(없음)" : String.join(" / ", findings),
+                scale.isEmpty() ? "" : "\n" + scale);
     }
 
     private static String sqlFor(MaskCase c, String condition) {
@@ -266,11 +320,12 @@ class AiMaskingTradeoffExperimentIT {
             Db db = dbFor(c.dbms());
             String plan = db.op().explain(c.sql());
             List<String> findings = new RuleBasedAnalyzer().analyze(typeOf(c), plan);
+            String scale = TableScale.describe(db.op(), c.sql());
             plans.put(c.id(), plan);
             Map<String, String> perCondition = new LinkedHashMap<>();
             for (String condition : CONDITIONS) {
                 String planForPrompt = "C".equals(condition) ? maskPlanStringLiterals(plan) : plan;
-                perCondition.put(condition, prompt(typeOf(c), sqlFor(c, condition), planForPrompt, findings));
+                perCondition.put(condition, prompt(typeOf(c), sqlFor(c, condition), planForPrompt, findings, scale));
             }
             prompts.put(c.id(), perCondition);
             System.out.println("[E2] " + c.id() + " 계획 확보 — " + plan.replaceAll("\\s+", " ").length() + "자, 규칙 지적 "
@@ -365,14 +420,15 @@ class AiMaskingTradeoffExperimentIT {
         for (MaskCase c : cases) {
             String plan = dbFor(c.dbms()).op().explain(c.sql());
             List<String> findings = new RuleBasedAnalyzer().analyze(typeOf(c), plan);
+            String scale = TableScale.describe(dbFor(c.dbms()).op(), c.sql());
             Map<String, String> perCondition = new LinkedHashMap<>();
-            perCondition.put("B", prompt(typeOf(c), sqlFor(c, "B"), plan, findings));
-            perCondition.put("C", prompt(typeOf(c), sqlFor(c, "C"), maskPlanStringLiterals(plan), findings));
-            perCondition.put("D", prompt(typeOf(c), sqlFor(c, "C"), maskPlanKeepWildcards(plan), findings));
+            perCondition.put("B", prompt(typeOf(c), sqlFor(c, "B"), plan, findings, scale));
+            perCondition.put("C", prompt(typeOf(c), sqlFor(c, "C"), maskPlanStringLiterals(plan), findings, scale));
+            perCondition.put("D", prompt(typeOf(c), sqlFor(c, "C"), maskPlanKeepWildcards(plan), findings, scale));
             // 조건 E는 실험 장치가 아니라 제품 함수다 — PlanMasker가 조건 키 안에서만 가리고 숫자까지 가린다.
             // C·D가 작은따옴표만 보는 탓에 계획의 맨숫자가 남았고(L9·L10), 그 구멍을 메운 것이 이 조건이다.
             perCondition.put("E", prompt(typeOf(c), sqlFor(c, "C"),
-                    PlanMasker.maskPlan(typeOf(c), plan), findings));
+                    PlanMasker.maskPlan(typeOf(c), plan), findings, scale));
             prompts.put(c.id(), perCondition);
         }
         Set<String> done = new TreeSet<>();
@@ -529,8 +585,7 @@ class AiMaskingTradeoffExperimentIT {
                 boolean mask = level != AiMaskLevel.NONE;
                 String sqlForPrompt = new QueryMasker(true, mask).applyForAiPrompt(c.sql());
                 String planForPrompt = PlanMasker.maskPlan(type, plan, level, Clock.systemDefaultZone());
-                String p = prompt(type, sqlForPrompt, planForPrompt, findings)
-                        + (scale.isEmpty() ? "" : "\n" + scale);
+                String p = prompt(type, sqlForPrompt, planForPrompt, findings, scale);
                 perLevel.put(level.name(), p);
                 perLevelExposure.put(level.name(), countExposed(p, c.sensitiveLiterals()));
             }
