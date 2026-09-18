@@ -92,11 +92,21 @@ TLS가 필요한 대상은 `"useTls": true`를 추가합니다. 인증서 검증
 | `POST /api/workbench/tickets/{id}/dry-run` | 실행 후 롤백하는 사전 검증 |
 | `POST /api/workbench/tickets/{id}/execute` | 승인된 티켓 실행 |
 | `POST /api/workbench/tickets/{id}/revert` | 행 사본 기반 되돌리기 |
+| `POST /api/workbench/tickets/{id}/bulk/start` | 대량 일괄 변경 시작(배치로 쪼개 실행) |
+| `GET /api/workbench/tickets/{id}/bulk` | 진행 상태(상태·배치 수·바뀐 행·마지막 적용 키) |
+| `GET /api/workbench/tickets/{id}/bulk/batches` | 배치별 기록(키 구간·영향 행 수·그때의 복제 지연), 마지막 50개 |
+| `POST /api/workbench/tickets/{id}/bulk/pause` · `resume` · `cancel` | 일시정지·재개·취소(취소는 승인자도 가능) |
 | `GET /api/workbench/executions/{id}/workload` | 실행 전후 워크로드 비교 |
 | `POST /api/reviews/{id}/cancel` | 변경 요청 취소 |
 
 워크벤치 조회에는 `READ`, 승인 티켓 실행에는 `WRITE` 자격증명을 별도로 등록합니다.
 승인 없이 변경 SQL을 실행하는 API는 없습니다.
+
+대량 일괄 변경은 시작 요청이 즉시 돌아오고 진행은 조회로 봅니다 — 수 분~수 시간 걸리는 일을
+요청 스레드가 붙잡으면 웹 요청이 타임아웃되고 그 타임아웃이 실행을 끊지도 못합니다.
+실행 전 조건(복원 검증된 최근 백업, 단일 기본 키, UPDATE·DELETE, MySQL·PostgreSQL,
+승인 시점 예상 대비 2배 이내)을 하나라도 어기면 시작하지 않습니다. 자세한 기준은
+[bulk-change-spec.md](bulk-change-spec.md)에 있습니다.
 
 ## 운영과 관리
 
