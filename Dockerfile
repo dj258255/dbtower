@@ -23,7 +23,26 @@ RUN ./gradlew --no-daemon clean bootJar -x test && cp build/libs/*.jar /app.jar
 FROM eclipse-temurin:21-jre-jammy
 
 # 백업/복원이 shell-out하는 DB 클라이언트 번들
+#
+# ldconfig를 잠시 치워 두는 이유(v1.5.0 릴리스에서 실측): arm64 이미지는 QEMU 에뮬레이션으로 빌드하는데,
+# libc-bin의 설치 후 트리거가 부르는 ldconfig가 그 위에서 세그폴트로 죽는다. dpkg는 이를 설치 실패로 보고
+# 빌드 전체가 멈춘다. amd64는 같은 Dockerfile로 통과하고, v1.4.0까지도 통과했다 — 베이스 이미지의
+# libc-bin이 2.35-0ubuntu3.14로 올라가며 드러난 회귀다.
+#
+# qemu: uncaught target signal 11 (Segmentation fault) - core dumped
+# dpkg: error processing package libc-bin (--configure): ... returned error exit status 139
+#
+# ldconfig는 공유 라이브러리 캐시를 다시 만드는 일이라 설치 중 건너뛰어도 되고, 마지막에 한 번 돌리면 된다.
+# 되돌리기를 같은 RUN 안에서 하므로 이미지 레이어에는 원래 ldconfig가 남는다.
+#
+# mv가 아니라 dpkg-divert를 쓰는 이유: /sbin/ldconfig는 실제 파일이 아니라 /usr/sbin/ldconfig를 가리키는
+# 자리다(usrmerge). mv로 옮기면 dpkg가 나중에 제 파일을 다시 깔면서 우리가 만든 가짜가 남고,
+# 그 가짜가 없는 ldconfig.real을 찾아 런타임에 깨진다(로컬 arm64 빌드에서 실제로 그렇게 됐다).
+# dpkg-divert는 dpkg 자신에게 "이 경로는 비켜 뒀다"고 알려 두는 표준 방법이라 재설치와도 어긋나지 않는다.
 RUN set -eux; \
+    dpkg-divert --local --rename --add /usr/sbin/ldconfig; \
+    printf '#!/bin/sh\nexit 0\n' > /usr/sbin/ldconfig; \
+    chmod +x /usr/sbin/ldconfig; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         ca-certificates curl gnupg lsb-release \
@@ -44,7 +63,11 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends postgresql-client-16 mongodb-database-tools; \
     # 빌드 전용 도구 정리(런타임 healthcheck용 curl·ca-certificates는 남긴다)
     apt-get purge -y gnupg lsb-release; apt-get autoremove -y; \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/*; \
+    # 원래 ldconfig를 돌려놓고 캐시를 한 번 만든다 — arm64에서는 이 한 번도 QEMU 위라 실패할 수 있어 무시한다
+    rm -f /usr/sbin/ldconfig; \
+    dpkg-divert --local --rename --remove /usr/sbin/ldconfig; \
+    ldconfig || true
 
 # 비루트 실행
 RUN useradd -r -u 1001 -m dbtower
