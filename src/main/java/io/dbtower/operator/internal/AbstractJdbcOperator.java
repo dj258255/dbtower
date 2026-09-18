@@ -4,6 +4,7 @@ import io.dbtower.operator.OperatorException;
 import io.dbtower.operator.model.BulkBatchOutcome;
 import io.dbtower.operator.model.BulkChangePlan;
 import io.dbtower.operator.model.ChangeOutcome;
+import io.dbtower.operator.model.KeyRangeSyntax;
 import io.dbtower.operator.model.ChangePlan;
 import io.dbtower.operator.model.QueryResult;
 import io.dbtower.operator.model.RevertPlan;
@@ -370,6 +371,11 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
             public String selectHead(int rows) {
                 return AbstractJdbcOperator.this.bulkSelectHead(rows);
             }
+
+            @Override
+            public KeyRangeSyntax keyRangeSyntax() {
+                return AbstractJdbcOperator.this.bulkKeyRangeSyntax();
+            }
         });
     }
 
@@ -381,6 +387,14 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
     /** {@code SELECT} 바로 뒤에 들어갈 것 — 기본은 없다. */
     protected String bulkSelectHead(int rows) {
         return "";
+    }
+
+    /**
+     * 복합 키 구간을 적는 형태 — 기본은 표준 행 값 비교이고 MySQL·SQL Server가 덮어쓴다(#140·#141).
+     * 키가 하나면 두 형태가 같은 문자열을 내므로 단일 키 경로는 이 선택과 무관하다.
+     */
+    protected KeyRangeSyntax bulkKeyRangeSyntax() {
+        return KeyRangeSyntax.ROW_VALUE;
     }
 
     @Override

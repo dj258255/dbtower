@@ -30,6 +30,7 @@ import io.dbtower.operator.model.TableDetail;
 import io.dbtower.operator.model.TableDetail.DdlSource;
 import io.dbtower.operator.model.TableStat;
 import io.dbtower.operator.model.WaitEvent;
+import io.dbtower.operator.model.KeyRangeSyntax;
 
 import io.dbtower.registry.DatabaseInstance;
 import org.slf4j.Logger;
@@ -1143,6 +1144,21 @@ public class MsSqlOperator extends AbstractJdbcOperator {
     @Override
     protected String bulkLimitClause(int rows) {
         return "";
+    }
+
+    /**
+     * SQL Server에는 행 값 비교 문법이 없다 — {@code (a, b) > (?, ?)}는 파싱 단계에서 죽는다(#140).
+     *
+     * <pre>
+     * Msg 4145, Level 15, State 1
+     * An expression of non-boolean type specified in a context where a condition is expected, near ','.
+     * </pre>
+     *
+     * <p>그래서 같은 뜻을 펼쳐 적는다. 이것은 성능 선택이 아니라 <b>문법이 성립하는 유일한 형태</b>다.
+     */
+    @Override
+    protected KeyRangeSyntax bulkKeyRangeSyntax() {
+        return KeyRangeSyntax.EXPANDED;
     }
 
     @Override

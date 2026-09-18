@@ -10695,3 +10695,123 @@ FULL에서는 세 번 다 "실제 패턴을 확인할 수 없다"로 내려갔�
 - 판정자가 사람이 아니다. 이 AI 코딩 세션과 로컬 오픈소스 모델 둘이 매기고 갈린 것만 사람이 본다
 - 프롬프트에 행수가 붙어 앞 회차(조건 A~E)와 조건이 다르다. 두 표를 직접 비교하면 안 된다
 - 행수는 카탈로그 추정치다. 기종에 따라 실제와 벌어질 수 있고, 권한이 없으면 줄이 붙지 않는다
+
+## 200. 복합 키 구간을 기종마다 다르게 적는다 (2026-09-18, #140·#141)
+
+v1.6.0을 낸 뒤 코드에 `(200절)` 참조가 있는데 그 절이 없는 것을 발견했다. 기억으로 적지 않고 다시 쟀더니
+**주석이 틀렸고 결함 둘이 나왔다.** 게시 후 확인이 아니었으면 안 보였을 자리다.
+
+### 표
+
+```sql
+CREATE TABLE bulk_rowvalue_200 (shop_id BIGINT, id BIGINT, kind VARCHAR(4), note VARCHAR(20),
+                                PRIMARY KEY (shop_id, id));
+-- shop_id 1~4 x id 1~50000 = 20만 행, kind 는 짝수 id 가 'M'
+```
+
+같은 조회를 경계 앞 `(1, 1)`과 뒤 `(4, 40000)`에서 잰다. 배치 경로가 실제로 쓰는 모양
+(`ORDER BY 키` + 행 수 제한)을 그대로 쓴다.
+
+### 왜 사전순 한 덩이여야 하는가
+
+열마다 부등호를 따로 쓰면 행이 빠진다. 경계 `(2, 49999)`에서 남은 행을 세면 이렇다.
+
+```
+행값비교: SELECT count(*) ... WHERE (shop_id, id) > (2, 49999)   -> 100001
+열별비교: SELECT count(*) ... WHERE shop_id > 2 AND id > 49999   ->      2
+```
+
+**99,999행이 조용히 빠진다.** 오류가 나지 않아 배치는 정상 종료한다.
+
+### 기종별 조건 처리
+
+| 기종 | `(a, b) > (?, ?)` 처리 | 앞 경계 | 뒤 경계 |
+|---|---|---|---|
+| PostgreSQL 16 | `Index Cond: (ROW(shop_id, id) > ROW(4, 40000))` | 24 버퍼 | 24 버퍼 |
+| MySQL 8.4.11 | `Covering index scan` + `Filter` | 1,001행 0.27ms | 191,000행 30.5ms |
+| Oracle 23 FREE | `INDEX FULL SCAN` + filter | 152 gets | 897 gets |
+| SQL Server 2022 | 문법 없음 | 실행 불가 | 실행 불가 |
+
+PostgreSQL만 경계 깊이와 무관하다. 조건이 인덱스 접근으로 내려가 시작 위치가 된다.
+
+### SQL Server는 문법부터 없다 (#140)
+
+```
+1> SELECT COUNT(*) FROM (VALUES (1,1),(1,2),(2,1)) v(a,b) WHERE (a, b) > (1, 1);
+Msg 4145, Level 15, State 1
+An expression of non-boolean type specified in a context where a condition is expected, near ','.
+```
+
+v1.6.0이 이 기종에서 깨진 채 나갔다. 복합 키 통합 테스트가 MySQL·PostgreSQL만 덮어 릴리스 게이트를
+통과했다 — 기종 확장(#127)과 복합 키(#126)가 **곱해지는 자리**를 테스트가 비워 뒀다.
+
+### MySQL은 인덱스 문제가 아니다 (#141)
+
+보조 인덱스 `(shop_id, id)`를 따로 걸어도 훑는 행이 그대로다. 읽는 인덱스만 바뀐다.
+
+| 조건 | 인덱스 | 훑은 행 | 시간 |
+|---|---|---|---|
+| `(shop_id, id) > (4, 40000)` | PRIMARY | 200,000 | 32.4ms |
+| `(shop_id, id) > (4, 40000)` | 새로 건 보조 인덱스 | 200,000 | 49.2ms |
+| `shop_id > 4 OR (shop_id = 4 AND id > 40000)` | PRIMARY | 10,000 | 2.6ms |
+
+같은 인덱스에서 술어를 어떻게 쓰느냐로만 갈린다. 펼친 형태의 계획은 이렇다.
+
+```
+-> Covering index range scan on bulk_rowvalue_200 using PRIMARY
+   over (shop_id = 4 AND 40000 < id) OR (4 < shop_id)  (actual time=0.156..1.23 rows=10000 loops=1)
+```
+
+`EXPLAIN`에 `key: PRIMARY`가 보이면 인덱스를 쓰는 것처럼 보이지만 `type: index`는 인덱스 전체 훑기다.
+범위로 타는 것은 `type: range`다. 이 둘을 같은 것으로 읽으면 "인덱스를 더 걸자"는 엉뚱한 결론이 나온다.
+
+### PostgreSQL에 펼친 형태를 쓰면 안 된다
+
+비트맵 스캔이 인덱스 순서를 잃어 `Sort`가 붙는다. 경계 조회는 `ORDER BY 키 LIMIT n`이라 순서가 곧 성능이다.
+
+| 형태 | 계획 | 시간 | 버퍼 |
+|---|---|---|---|
+| 행 값 비교 | `Index Scan` + `Index Cond` | 0.60ms | 24 |
+| 펼친 `OR` | `Sort` <- `Bitmap Heap Scan` | 3.19ms | 115 |
+
+그래서 한 형태로 통일하지 않고 기종이 고르게 했다(`operator/model/KeyRangeSyntax`). 선택 자리는
+`JdbcBulkChangeRunner.Dialect`로, 이미 `limitClause`·`selectHead`가 기종차를 흡수하던 곳이다.
+
+### Oracle은 이번에 고치지 않는다
+
+두 형태를 같은 계획으로 정규화한다(plan hash 3748993936 동일). 술어 정보에 Oracle이 스스로 펼친 것이 보인다.
+
+```
+4 - filter("SHOP_ID">4 OR "ID">40000 AND "SHOP_ID"=4)
+```
+
+선두 열에 중복 술어(`shop_id >= 4`)를 더해도 옵티마이저가 지운다. 5.9배는 MySQL의 113배와 성격이 다르고
+(블록 단위로 훑어 건당 비용이 작다) 힌트나 다른 접근이 필요해, **고치지 않기로 하고 수치를 남긴다.**
+
+### 테스트
+
+`KeyRangeSyntaxTest`가 두 형태의 뜻이 같은지 본다 — 자리표시자 수와 바인딩 수가 맞는지, 그리고 12개 키의
+모든 구간 조합에서 두 형태가 같은 집합을 고르는지.
+
+`BulkChangeBatchIT`의 복합 키 테스트를 Oracle·SQL Server까지 넓혔다. 고친 코드를 일부러 되돌려
+(SQL Server를 `ROW_VALUE`로) 돌리면 이렇게 잡는다.
+
+```
+io.dbtower.operator.OperatorException: 배치 실행 실패:
+  An expression of non-boolean type specified in a context where a condition is expected, near ','.
+```
+
+5기종 결과(`DBTOWER_CONSOLE_IT=1`, SQL Server는 `DBTOWER_MSSQL_IT=1` + Rosetta VM 포트 14330):
+
+```
+PASS MySQL — 복합 기본 키를 사전순으로 훑어 누락·중복 0
+PASS PostgreSQL — 복합 기본 키를 사전순으로 훑어 누락·중복 0
+PASS Oracle — 복합 기본 키를 사전순으로 훑어 누락·중복 0
+PASS SQL Server — 복합 기본 키를 펼친 형태로 훑어 누락·중복 0
+```
+
+### 남는 것
+
+- Oracle의 5.9배. 위에 적은 대로 이번 범위 밖이다
+- 이 표는 20만 행이다. 100만 행에서 MySQL의 차이는 더 벌어진다(배치마다 앞 구간을 다시 훑으므로)
+- 키가 하나면 두 형태가 같은 문자열을 낸다 — v1.5.0까지의 단일 키 경로는 이 변경과 무관하다
