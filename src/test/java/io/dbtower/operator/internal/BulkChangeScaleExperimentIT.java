@@ -10,7 +10,9 @@ import io.dbtower.operator.model.ChangePlan.Kind;
 import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.registry.DatabaseInstance;
 import io.dbtower.registry.DbmsType;
+import io.dbtower.testsupport.TargetTableLock;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -76,9 +78,22 @@ class BulkChangeScaleExperimentIT {
 
     private static final List<Run> RUNS = new ArrayList<>();
 
+    /** 같은 대상 DB에 다른 실행이 붙어 bulk_scale 을 지우지 않게 잡는다(#112) */
+    private static TargetTableLock targetLock;
+
+    @BeforeAll
+    static void lockTargets() {
+        targetLock = TargetTableLock.acquireIfEnabled("DBTOWER_EXPERIMENT", List.of(
+                new TargetTableLock.Target(MYSQL_URL, MYSQL_CRED.username(), MYSQL_CRED.password()),
+                new TargetTableLock.Target(PG_URL, PG_CRED.username(), PG_CRED.password())));
+    }
+
     @AfterAll
     static void closePools() {
         POOLS.closeAll();
+        if (targetLock != null) {
+            targetLock.close();
+        }
     }
 
     /** 한 번의 측정 — 방식 하나를 한 기종에서 돌린 결과 */

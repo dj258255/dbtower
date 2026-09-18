@@ -1,5 +1,6 @@
 package io.dbtower.operator.internal;
 
+import io.dbtower.testsupport.TargetTableLock;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -75,8 +76,13 @@ class ChangeLockModeExperimentIT {
             new Db("MySQL", "jdbc:mysql://127.0.0.1:13306/sample", "root", "dbtower1234"),
             new Db("PostgreSQL", "jdbc:postgresql://127.0.0.1:15432/sample", "postgres", "dbtower1234"));
 
+    /** 같은 대상 DB에 다른 실행이 붙어 실험 테이블을 지우지 않게 잡는다(#112) */
+    private static TargetTableLock targetLock;
+
     @BeforeAll
     static void setUp() throws Exception {
+        targetLock = TargetTableLock.acquireIfEnabled("DBTOWER_EXPERIMENT", DBS.stream()
+                .map(d -> new TargetTableLock.Target(d.url(), d.user(), d.password())).toList());
         for (Db db : DBS) {
             try (Connection c = db.open(); Statement st = c.createStatement()) {
                 st.execute("DROP TABLE IF EXISTS " + TABLE);
@@ -96,6 +102,13 @@ class ChangeLockModeExperimentIT {
                 }
                 c.commit();
             }
+        }
+    }
+
+    @AfterAll
+    static void releaseLock() {
+        if (targetLock != null) {
+            targetLock.close();
         }
     }
 
