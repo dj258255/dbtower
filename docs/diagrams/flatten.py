@@ -16,7 +16,7 @@ import cairosvg
 
 HERE = Path(__file__).parent
 
-for name in ("architecture-core", "erd-core"):
+for name in ("architecture", "erd", "insight-flow", "deployment-flow"):
     src = HERE / f"{name}.svg"
     dst = HERE / f"{name}-flat.svg"
     cairosvg.svg2svg(url=str(src), write_to=str(dst))

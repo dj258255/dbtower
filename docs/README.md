@@ -64,14 +64,22 @@ PDF로 인쇄하면 `<text>`가 Type 3 글꼴로 박혀 문서 전체에 따라�
 
 ## 그림
 
-| 그림 | 내용 | 주의 |
-|---|---|---|
-| [architecture-core.svg](diagrams/architecture-core.svg) | **먼저 볼 것** — 이 플랫폼이 보장하는 넷만. 상자 아홉 개 | 손그림(rough.js), 원본은 `diagrams/architecture-core.mjs` |
-| [erd-core.svg](diagrams/erd-core.svg) | **먼저 볼 것** — 인스턴스에 매달린 세 갈래(관측·변경 증거·백업) | 손그림(rough.js), 원본은 `diagrams/erd-core.mjs` |
-| [architecture-detail.svg](diagrams/architecture-detail.svg) | 17개 모듈, 5개 DBMS, 신뢰 경계, AI 운영 작업 실행면 | Flyway V47 기준 — V48의 대량 변경 테이블 둘은 그림에 없다 |
-| [erd.svg](diagrams/erd.svg) | 핵심 데이터 도메인과 증거 관계 | V47 기준 — AI 운영 작업·대화·경보 쿨다운·수집 상태 포함. V48의 `bulk_change_run`·`bulk_change_batch`는 아직 없다 |
-| [insight-flow.svg](diagrams/insight-flow.svg) | 발견, AI 분석, 승인, 실행, 검증의 책임 흐름 | |
-| [deployment-flow.svg](diagrams/deployment-flow.svg) | CI 게이트, 멀티아키텍처 이미지, 런타임과 IaC 범위 | |
+| 그림 | 내용 |
+|---|---|
+| [architecture.svg](diagrams/architecture.svg) | 이 플랫폼이 보장하는 넷 — 입구 둘, 조회와 변경의 분리, AI 의 자리, 저장소 분리 |
+| [erd.svg](diagrams/erd.svg) | 인스턴스에 매달린 세 갈래 — 관측, 변경의 증거, 백업 |
+| [insight-flow.svg](diagrams/insight-flow.svg) | 발견에서 실행까지 책임이 넘어가는 순서 |
+| [deployment-flow.svg](diagrams/deployment-flow.svg) | CI 게이트, 게시물, 셀프호스트 런타임 |
+
+편집 원본은 `diagrams/`의 `.mjs`다. 고치고 `cd docs/diagrams && npm run build`.
+외부 의존이 없어 `node`와 `python3`만 있으면 된다.
+
+**mermaid 를 쓰지 않는 이유**(실측): mermaid 는 `htmlLabels: true` 가 기본이라 글자를 `<foreignObject>` 에 넣는다.
+브라우저에서 mermaid 가 직접 그릴 때는 보이지만 SVG 파일로 뽑으면 **GitHub 가 sanitize 하며 그 글자를 지운다** —
+앞 판의 네 그림이 전부 `<text>` 0개였다. 자동 배치도 문제였다. ERD 가 1500x3321 로 늘어나 화면에 담기지 않았다.
+
+`*-flat.svg`는 글자를 path 로 바꾼 것이다. 웹에서는 원본이 가볍고 글자 선택·검색이 되지만,
+PDF 로 인쇄하면 `<text>` 가 Type 3 글꼴로 박혀 문서 전체에 따라붙는다. 인쇄물에는 flat 쪽을 쓴다.
 
 편집 원본은 같은 이름의 `.mmd`입니다. 그림을 고치면 원본과 SVG를 함께 갱신합니다.
 

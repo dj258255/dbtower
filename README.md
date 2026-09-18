@@ -159,18 +159,16 @@ MSSQL_SA_PASSWORD='...' docker --context colima-mssql2022 run -d \
 사용하며 구현, 엔티티, 저장소는 각 모듈의 `internal` 패키지에 숨깁니다. 순환 의존과
 레이어 위반은 테스트와 규약 검사에서 실패합니다.
 
-![DBTower 아키텍처 핵심](docs/diagrams/architecture-core.svg)
+![DBTower 아키텍처](docs/diagrams/architecture.svg)
 
 보장하는 것은 넷입니다. 입구가 사람과 에이전트 둘이고, 조회와 변경이 다른 계정으로 갈리며,
-AI는 판단자가 아니라 1차 분석기이고, 플랫폼 저장소는 대상 DB와 분리됩니다. 모듈 17개가 모두
-그려진 상세본은 [architecture-detail.svg](docs/diagrams/architecture-detail.svg)에 있습니다.
+AI는 판단자가 아니라 1차 분석기이고, 플랫폼 저장소는 대상 DB와 분리됩니다. 모듈 17개의 실제
+의존 관계는 Modulith가 생성하는 [docs/modules/](docs/modules/)에 있습니다.
 
-데이터 모델도 같은 방식으로 핵심만 추렸습니다. 인스턴스 하나에 관측·백업·변경 증거가 매달리고,
+데이터 모델은 한 문장으로 읽힙니다. 인스턴스 하나에 관측·백업·변경 증거가 매달리고,
 변경은 요청부터 실행까지 한 사슬로 남습니다.
 
-![DBTower 데이터 모델 핵심](docs/diagrams/erd-core.svg)
-
-전체 표 관계는 [erd.svg](docs/diagrams/erd.svg)에 있습니다.
+![DBTower 데이터 모델](docs/diagrams/erd.svg)
 
 핵심은 `operator` 모듈입니다. 새 DBMS 지원은 Operator 구현체가 본체이고 enum, 팩토리,
 백업 도구, JDBC 드라이버, 화면 자산은 등록 절차로 다룹니다. 전체 구조는

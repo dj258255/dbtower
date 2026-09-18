@@ -8556,7 +8556,7 @@ SQL Edge 서비스만 제외했고, 다섯 번째 대상은 별도 Rosetta 프�
 배포 흐름 Mermaid 원본에는 실제 릴리즈 경로를 반영하고 SVG를 같은 CLI로 다시 만들었다.
 
 ```
-npx --yes @mermaid-js/mermaid-cli@11.17.0 -i docs/deployment-flow.mmd -o docs/deployment-flow.svg
+npx --yes @mermaid-js/mermaid-cli@11.17.0 -i docs/deployment-flow.mjs -o docs/deployment-flow.svg
 qlmanage -t -s 1800 docs/deployment-flow.svg   렌더 성공 · 잘림 없음
 xmllint --noout docs/deployment-flow.svg       오류 0
 Markdown 로컬 링크 검사                        누락 0
@@ -10004,7 +10004,7 @@ linux/arm64    sha256:f2fe2fee19b068e013ba110280bd15b17da4b7544f317689c233f9e68d
 ### 정직하게 남기는 범위
 
 - PRESENTATION.md 이미지는 대부분 v1.3(보라) 화면이다. 본문 설명은 지금과 어긋나지 않는다
-- erd.svg·architecture-detail.svg는 V41·16개 모듈 기준이라 AI 운영 작업·대화 테이블이 그림에 없다(문서 안내에 명시)
+- erd.svg·architecture.svg는 V41·16개 모듈 기준이라 AI 운영 작업·대화 테이블이 그림에 없다(문서 안내에 명시)
 - 게시된 이미지를 새 환경에서 pull해 기동해 보지는 않았다
 
 ## 184. 실제 화면 점검에서 나온 UI/UX 문제 — 원문 오류, 드롭다운, 쿼리 상세, 모니터링 배치 (2026-09-17, #40)
