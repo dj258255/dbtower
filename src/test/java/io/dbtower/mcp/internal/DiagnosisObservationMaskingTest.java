@@ -135,7 +135,7 @@ class DiagnosisObservationMaskingTest {
             return Optional.ofNullable(queue.poll());
         };
         DiagnosisService svc = new DiagnosisService(new McpProtocolHandler(baseUrl), ai, true, "mock",
-                new QueryMasker(true, false), "docs/ai-analysis-rules.md", 5);
+                new QueryMasker(true, false), "docs/design/ai-analysis-rules.md", 5);
 
         DiagnosisService.DiagnosisResult result = svc.diagnose(1, "MYSQL", "live-mysql", "지금 뭐가 막혀?");
 
@@ -168,7 +168,7 @@ class DiagnosisObservationMaskingTest {
             return Optional.ofNullable(queue.poll());
         };
         DiagnosisService svc = new DiagnosisService(new McpProtocolHandler(baseUrl), ai, true, "mock",
-                new QueryMasker(true, false), "docs/ai-analysis-rules.md", 5);
+                new QueryMasker(true, false), "docs/design/ai-analysis-rules.md", 5);
 
         DiagnosisService.DiagnosisResult result = svc.diagnose(1, "MYSQL", "live-mysql", "왜 느려?");
 
@@ -198,7 +198,7 @@ class DiagnosisObservationMaskingTest {
             return Optional.ofNullable(queue.poll());
         };
         DiagnosisService svc = new DiagnosisService(new McpProtocolHandler(baseUrl), ai, true, "mock",
-                new QueryMasker(true, false), "docs/ai-analysis-rules.md", 5,
+                new QueryMasker(true, false), "docs/design/ai-analysis-rules.md", 5,
                 () -> DiagnosisGuard.CallerScope.GLOBAL, (action, instanceId, outcome) -> { },
                 new PlanMasker(true, true), id -> DbmsType.POSTGRESQL);
 
@@ -231,7 +231,7 @@ class DiagnosisObservationMaskingTest {
             return Optional.ofNullable(queue.poll());
         };
         DiagnosisService svc = new DiagnosisService(new McpProtocolHandler(baseUrl), ai, true, "mock",
-                new QueryMasker(true, false), "docs/ai-analysis-rules.md", 5);
+                new QueryMasker(true, false), "docs/design/ai-analysis-rules.md", 5);
 
         svc.diagnose(1, "POSTGRESQL", "live-pg", "왜 느려?");
 

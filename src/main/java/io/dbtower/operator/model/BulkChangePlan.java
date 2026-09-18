@@ -3,7 +3,7 @@ package io.dbtower.operator.model;
 import java.util.List;
 
 /**
- * 승인된 변경 한 문장을 <b>기본 키 범위로 쪼개</b> 실행하는 계획(docs/bulk-change-spec.md).
+ * 승인된 변경 한 문장을 <b>기본 키 범위로 쪼개</b> 실행하는 계획(docs/design/bulk-change-spec.md).
  *
  * <p>{@link ChangePlan}과 무엇이 다른가: 그쪽은 한 트랜잭션 안에서 행 사본을 잡고 대조한 뒤 커밋해
  * 되돌리기를 사본으로 보장한다. 그 안전의 대가가 행 수에 비례해(10,000행 락 보유 PostgreSQL 67.1ms·

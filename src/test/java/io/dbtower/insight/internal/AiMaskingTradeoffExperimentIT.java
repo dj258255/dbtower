@@ -95,7 +95,7 @@ class AiMaskingTradeoffExperimentIT {
 
     /** 제품 기본 모델 이름 — CLI 모드에서는 제품이 --model을 넘기지 않으므로 실제 모델은 CLI 기본값이다 */
     private static final String MODEL = "claude-opus-4-8";
-    private static final String RULES_PATH = "docs/ai-analysis-rules.md";
+    private static final String RULES_PATH = "docs/design/ai-analysis-rules.md";
     private static final long MAX_TOKENS = 8192;
     private static final String EFFORT = "high";
 

@@ -32,7 +32,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 대량 일괄 변경 — 승인된 티켓 하나를 배치로 쪼개 실행한다(docs/bulk-change-spec.md).
+ * 대량 일괄 변경 — 승인된 티켓 하나를 배치로 쪼개 실행한다(docs/design/bulk-change-spec.md).
  *
  * <p>티켓의 권위는 그대로 {@link ChangeTicketGate}에 있다. 이 서비스는 실행권을 조건부 UPDATE로 얻고
  * ({@code APPROVED -> EXECUTING}) 배치 진행 상태만 따로 들고 있다가, 끝나면 게이트에 결과를 돌려준다.

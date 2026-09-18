@@ -58,7 +58,7 @@ services:
       DBTOWER_BACKUP_ENCRYPTION_KEY: ${DBTOWER_BACKUP_ENCRYPTION_KEY:-}
       DBTOWER_VERIFY_ISOLATED: ${DBTOWER_VERIFY_ISOLATED:-false}
       # 그 밖의 통합(선택)은 이 compose에 기본 나열하지 않았다 — 필요 시 여기 environment에 추가한다:
-      #   ChatOps(Discord/Slack): DBTOWER_DISCORD_*, DBTOWER_SLACK_*  (docs/DESIGN.md)
+      #   ChatOps(Discord/Slack): DBTOWER_DISCORD_*, DBTOWER_SLACK_*  (docs/design/DESIGN.md)
       #   외부 시크릿(Vault): DBTOWER_VAULT_URL/DBTOWER_VAULT_TOKEN
       #   디스크 예측 소스(외부 Prometheus/CloudWatch): DBTOWER_PROMETHEUS_URL 등
       JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75}

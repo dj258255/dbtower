@@ -1,7 +1,7 @@
 # DBTower 프로비저닝 연동 — Ansible (온프레미스/VM)
 
 DB가 태어나는 순간 관제탑(DBTower)에 자동 등록한다. 이 플레이북은 대상 DB에
-**모니터링 전용 최소 권한 계정**을 만들고(`docs/least-privilege.md` 기준), DBTower의
+**모니터링 전용 최소 권한 계정**을 만들고(`docs/operate/least-privilege.md` 기준), DBTower의
 **멱등 등록 API(PUT /api/instances)** 로 등록한다. 두 번 돌려도 중복·에러 없이 수렴한다.
 
 ## 무엇을 하나

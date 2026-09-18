@@ -139,7 +139,7 @@ public interface DbmsOperator {
      * 쿼리를 진짜 실행해 추정 행수 vs 실제 행수의 괴리(카디널리티 오추정)를 드러낸다.
      * "무엇이 느린가"를 넘어 "왜 인덱스를 못 타나"를 짚는 근본원인 진단의 원천 데이터다.
      *
-     * 기종별 획득 방식(docs/ai-analysis-rules.md "심층 원인 규칙 (D9)" 절이 스펙):
+     * 기종별 획득 방식(docs/design/ai-analysis-rules.md "심층 원인 규칙 (D9)" 절이 스펙):
      * MySQL=EXPLAIN ANALYZE FORMAT=JSON(actual_* 필드), PostgreSQL=EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON),
      * Oracle=/*+ gather_plan_statistics *&#47; 후 DBMS_XPLAN.DISPLAY_CURSOR('ALLSTATS LAST')(같은 커넥션),
      * SQL Server=SET STATISTICS XML ON(플랜이 별도 결과셋), MongoDB=explain verbosity executionStats.
@@ -362,7 +362,7 @@ public interface DbmsOperator {
     }
 
     /**
-     * 대량 일괄 변경의 다음 배치가 닫을 구간의 상한 키 — 더 고칠 행이 없으면 null(docs/bulk-change-spec.md).
+     * 대량 일괄 변경의 다음 배치가 닫을 구간의 상한 키 — 더 고칠 행이 없으면 null(docs/design/bulk-change-spec.md).
      *
      * <p>{@link #executeChange}와 나뉘는 이유: 그쪽은 되돌리기를 행 사본으로 보장하느라 한 트랜잭션이
      * 행 수에 비례해 락을 쥔다. 수십만 행은 그 대가를 감당할 수 없어, 키 구간으로 쪼개 따로 커밋하고

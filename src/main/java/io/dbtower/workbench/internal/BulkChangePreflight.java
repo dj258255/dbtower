@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 대량 일괄 변경의 실행 전 조건(docs/bulk-change-spec.md) — 하나라도 어기면 실행하지 않는다.
+ * 대량 일괄 변경의 실행 전 조건(docs/design/bulk-change-spec.md) — 하나라도 어기면 실행하지 않는다.
  *
  * <p>이 검사가 존재하는 이유는 되돌리기 방식이 다르기 때문이다. 소량 변경은 행 사본으로 되돌리지만 대량은
  * <b>복원 검증에 성공한 최근 백업</b>에 기댄다. 그래서 "되돌릴 자리가 있는가"가 기능의 전제이고, 그 확인을

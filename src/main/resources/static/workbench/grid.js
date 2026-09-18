@@ -18,7 +18,7 @@ function compare(a, b) {
 // 결과 칸 표시(#62) — 원래 값은 바꾸지 않고 보이는 모양만 다듬는다. 행 상세·복사·CSV는 원래 값 그대로다.
 // - 숫자 열은 오른쪽 정렬·고정폭 숫자, 부동소수 오차(0.19754200000000002)는 소수 넷째 자리까지 보이고 원래 값은 title
 // - PostgreSQL은 조회 계정에 통계 열람 권한이 없으면 남의 세션·쿼리 문장을 "<insufficient privilege>"로 바꿔 보낸다 —
-//   원문 대신 무엇이 없어서인지와 필요한 권한 이름을 말한다(docs/least-privilege.md)
+//   원문 대신 무엇이 없어서인지와 필요한 권한 이름을 말한다(docs/operate/least-privilege.md)
 const NUMERIC_TYPE = /^(int|integer|bigint|smallint|tinyint|mediumint|serial|bigserial|numeric|decimal|number|float|double|real|money|int[248]|float[48])/i;
 const DECIMAL_TEXT = /^-?\d+\.\d{5,}$/;
 const PG_NO_PRIVILEGE = "<insufficient privilege>";

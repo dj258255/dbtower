@@ -195,7 +195,7 @@ Performance Insights도 부하가 높으면 샘플을 떨어뜨리는 쪽을 골
 - `wait_category`는 이벤트 이름으로 **근사**한다. 정확한 분류는 `SessionInfo`에 카테고리를
   추가해야 하고, 그건 5기종 공통 모델 변경이라 이 아크의 범위를 넘는다
 
-실측 근거는 `docs/VERIFICATION.md` §124, 계측 절차는 `dbtower-lakehouse/docs/RUNBOOK.md` §8.
+실측 근거는 `docs/verify/VERIFICATION.md` §124, 계측 절차는 `dbtower-lakehouse/docs/RUNBOOK.md` §8.
 
 ## 7. 정식 이미지 배포와 업그레이드
 

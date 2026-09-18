@@ -17,7 +17,7 @@ DBTOWER_ENCRYPTION_KEY=$(openssl rand -base64 32) DBTOWER_WEBHOOK_URL="" ./gradl
 ```
 
 - 성능 개선은 반드시 before/after 실측 수치와 함께. 측정 없는 개선 주장 금지
-- 기능 검증 결과(명령·출력·스크린샷)는 docs/VERIFICATION.md에 절을 추가해 기록한다
+- 기능 검증 결과(명령·출력·스크린샷)는 docs/verify/VERIFICATION.md에 절을 추가해 기록한다
 - 수치를 지어내지 않는다. 재현 불가능한 주장은 쓰지 않는다
 
 ## 저장소 구조
@@ -77,7 +77,7 @@ scripts/         dbtower-mcp.sh (MCP stdio 실행기)
   어긋나면 커밋하지 않고, 되돌리기는 실행 직후 사본과 현재 행이 같을 때만 쓴다(JdbcChangeRunner 주석 참고)
 - MCP·웹훅 등 채널 계층에 비즈니스 로직을 두지 않는다 — 전부 REST/서비스 코어에 위임. 위임의 주체는 호출자 그대로 둔다
   (서비스 토큰으로 바꿔 부르면 요청자·감사 기록이 사람을 잃는다 — McpHttpController 주석)
-- AI는 판단자가 아니라 1차 분석기다. 판단 기준은 docs/ai-analysis-rules.md에 사람이 정하고, AI는 그 위에서만 판정
+- AI는 판단자가 아니라 1차 분석기다. 판단 기준은 docs/design/ai-analysis-rules.md에 사람이 정하고, AI는 그 위에서만 판정
 - 비동기 AI 작업(aiops)에서 틀렸을 때 손해가 큰 일은 플랫폼이 한다 — 권한·팀 범위, 사실 수집, 모델 호출, 결과 검증, 감사.
   큐·재시도·검색·알림은 실행면(integrations)이 맡되, 실행면이 보낸 사실·상태를 그대로 믿지 않는다(리스 토큰·전이 표·수치 대조)
 - 모델이 낸 수치와 인용은 플랫폼이 모은 사실과 대조해 어긋나면 결과에 "검증되지 않음"으로 남긴다. 지우거나 조용히 고치지 않는다
@@ -95,7 +95,7 @@ scripts/         dbtower-mcp.sh (MCP stdio 실행기)
 
 ## 화면(웹 콘솔)
 
-실제로 한 번씩 틀렸던 것들이다(docs/VERIFICATION.md 138·139·140절).
+실제로 한 번씩 틀렸던 것들이다(docs/verify/VERIFICATION.md 138·139·140절).
 
 - 유리 재질(`--glass-*` 토큰)은 떠 있는 계층에만 쓴다 — 상단바·사이드바·세그먼트 탭·드롭다운·툴팁·모달.
   표·카드·코드·편집기는 불투명. 운영 콘솔은 읽는 화면이다.

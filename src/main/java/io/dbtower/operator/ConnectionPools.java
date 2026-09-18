@@ -30,7 +30,7 @@ import java.util.concurrent.Executor;
  * 관리 대상 인스턴스별 커넥션 풀.
  *
  * 개선 아크 1: 매 수집마다 DriverManager로 새 커넥션을 열던 방식(TCP+인증 핸드셰이크 반복)을
- * 인스턴스별 HikariCP 풀로 교체. before/after는 docs/DESIGN.md의 실측 기록 참고.
+ * 인스턴스별 HikariCP 풀로 교체. before/after는 docs/design/DESIGN.md의 실측 기록 참고.
  *
  * 관리 플랫폼은 대상 DB를 "가끔" 조회하므로 풀을 작게 유지한다 — 대상 DB의 커넥션 슬롯은 서비스가
  * 써야 할 자원이라 관제 도구가 많이 점유하면 안 된다. 다만 한 인스턴스에 독립 접근자가 여럿이다

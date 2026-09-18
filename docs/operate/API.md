@@ -111,7 +111,7 @@ AI로 나가는 값의 가림은 `dbtower.masking.mask-ai-prompt`(SQL 문장)와
 요청 스레드가 붙잡으면 웹 요청이 타임아웃되고 그 타임아웃이 실행을 끊지도 못합니다.
 실행 전 조건(복원 검증된 최근 백업, 단일 기본 키, UPDATE·DELETE, MySQL·PostgreSQL,
 승인 시점 예상 대비 2배 이내)을 하나라도 어기면 시작하지 않습니다. 자세한 기준은
-[bulk-change-spec.md](bulk-change-spec.md)에 있습니다.
+[bulk-change-spec.md](../design/bulk-change-spec.md)에 있습니다.
 
 ## 운영과 관리
 

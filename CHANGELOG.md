@@ -53,7 +53,7 @@
 PostgreSQL과 Oracle도 그대로 행 값 비교를 쓴다 — PostgreSQL은 펼친 형태를 쓰면 오히려 느려진다
 (비트맵 스캔이 인덱스 순서를 잃어 `Sort`가 붙는다).
 
-측정과 근거는 `docs/VERIFICATION.md` 200절에 있다.
+측정과 근거는 `docs/verify/VERIFICATION.md` 200절에 있다.
 
 ## [1.6.0] - 2026-09-18
 
@@ -87,7 +87,7 @@ AI 가림의 기본값은 그대로 꺼진 채 둔다. 켜는 쪽으로 바꾸�
 ### 정해진 것 (코드 변경 없음)
 
 - **여러 테이블에 걸친 변경은 이 경로에 담지 않는다**(#129). 변경 대상이 1:N 조인의 N 쪽이면 배치 하나가
-  한 스냅샷이라는 성질이 깨진다. 근거는 `docs/bulk-change-spec.md`
+  한 스냅샷이라는 성질이 깨진다. 근거는 `docs/design/bulk-change-spec.md`
 - **AI 가림의 기본값은 그대로 꺼진 채 둔다**(#131). 켜는 쪽으로 바꾸려면 "`STRUCTURE`가 `NONE` 대비 정확도를
   잃지 않는다"가 필요한데, 판정자 셋의 일치가 126칸 중 64칸(51%)이라 손실 폭을 수치로 말할 수 없다.
   착수 전에 정해 둔 기준(일치 80%)에 못 미쳐 전환하지 않았다. 켜야 하는 설치는 `mask-ai-prompt`·`mask-ai-plan`을
@@ -120,7 +120,7 @@ AI로 나가는 값의 가림은 켜고 끄는 두 갈래가 아니라 **수준 
 76,970번 커밋하게 했다. 최대 대기는 22.9초에서 0.64초로 내려왔다.
 
 모듈 17개, 테스트 1126건(실패 0, 건너뜀 50), 브라우저 E2E 13개 클래스. 라이브 실측은
-[VERIFICATION](docs/VERIFICATION.md) 199개 절.
+[VERIFICATION](docs/verify/VERIFICATION.md) 199개 절.
 
 들어온 것은 네 묶음이다. 실제 화면 점검에서 나온 UI/UX 문제(184절, #40 -> #42~#49), UX 2차(184~197절, #65 -> #55~#64),
 기술 과제 넷(#97~#100, 192~195·199절), 대량 일괄 변경(#101~#105, 196~198절).
@@ -183,7 +183,7 @@ AI는 지금까지 사람이 화면 앞에 있어야만 돌았고, "이 소견�
 2자리로 묶었다.
 
 모듈 17개, 테스트 1041건(실패 0, 건너뜀 84), 브라우저 E2E 9개 클래스 42건. 라이브 실측은
-[VERIFICATION](docs/VERIFICATION.md) 182개 절.
+[VERIFICATION](docs/verify/VERIFICATION.md) 182개 절.
 
 ### Added
 
@@ -322,7 +322,7 @@ v1.3.0 공개 뒤 실제 MySQL·PostgreSQL 값과 승인 변경 흐름을 다시
 안전하게 실행하는 경로"를 붙였다. 관통 원칙은 그대로다: 관리 플랫폼은 대상 DB에 임의 변경을 하지
 않고, **승인된 티켓만** 변경 계정으로 실행한다(행 사본·영향 행 수 대조·되돌리기 경로와 함께).
 
-전부 라이브 재현·검증(docs/VERIFICATION.md 166개 절). 테스트 897건, 모듈 16개.
+전부 라이브 재현·검증(docs/verify/VERIFICATION.md 166개 절). 테스트 897건, 모듈 16개.
 
 ### Added
 
@@ -550,7 +550,7 @@ DBTower를 실제 운영 도구로 밀어붙인 릴리즈. 현업 DBA의 병목�
 
 v1.0.0으로 만들 만큼 만들었다 싶었는데, 실제로 쓰다 보니 필요한 게 계속 보였다. 심화 네 아크로
 기존 기능을 다섯 기종에서 온전하게 다듬고, 그다음 만든 것을 스스로 감사해 하드닝했다. 상세 재현
-기록은 [VERIFICATION.md](docs/VERIFICATION.md) 57~62절, 판단 근거는 [HARDENING-ROADMAP.md](docs/HARDENING-ROADMAP.md).
+기록은 [VERIFICATION.md](docs/verify/VERIFICATION.md) 57~62절, 판단 근거는 [HARDENING-ROADMAP.md](docs/archive/HARDENING-ROADMAP.md).
 
 ### Added
 - **플랜 플립 감지 5기종화** — 실행계획 변경 감지가 PostgreSQL만 완전하던 것을 다섯 기종으로 확장.

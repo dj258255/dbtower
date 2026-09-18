@@ -1,7 +1,7 @@
 """테스트 공용 가짜 — DBTower 작업 API의 전이 규칙을 작게 흉내 낸다.
 
 흉내 내는 규칙은 Java 쪽 계약과 같다: 선점은 RECEIVED에서만, 이후 단계는 리스 토큰이 맞아야, 같은 단계 재진입 허용,
-끝난 작업은 409. 실제 DBTower와의 관통은 docs/VERIFICATION.md 169절에 따로 기록한다.
+끝난 작업은 409. 실제 DBTower와의 관통은 docs/verify/VERIFICATION.md 169절에 따로 기록한다.
 """
 from __future__ import annotations
 

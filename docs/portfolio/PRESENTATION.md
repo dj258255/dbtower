@@ -4,7 +4,7 @@
 등록하고, "문제 쿼리 식별 -> 원인 분석 -> DB팀 문의"의 전 과정을 한 플랫폼에서 처리하는 컨트롤 플레인.
 Java 21 + Spring Boot.
 
-모든 수치는 실측이다. 재현 로그는 docs/VERIFICATION.md에 있고, 본문 괄호의 절 번호가 그 근거다.
+모든 수치는 실측이다. 재현 로그는 docs/verify/VERIFICATION.md에 있고, 본문 괄호의 절 번호가 그 근거다.
 
 ---
 
@@ -40,7 +40,7 @@ DBTower는 그 문제 정의를 출발점으로 삼아, 1인이 검증 가능한
 그래도 막히면  분석 결과를 통째로 첨부해 버튼 한 번으로 DB팀 문의
 ```
 
-![웹 콘솔 관제 모드 — 조회 구간 한 줄과 실제 PostgreSQL Top Query, SQL 강조(185절 촬영)](images/webui/189-console-time-top-query.jpg)
+![웹 콘솔 관제 모드 — 조회 구간 한 줄과 실제 PostgreSQL Top Query, SQL 강조(185절 촬영)](../images/webui/189-console-time-top-query.jpg)
 
 ## 3. 목표
 
@@ -70,7 +70,7 @@ Call/sec · Latency(ms) · Row Examined(Avg)를 기본 뷰로 보여준다 (VERI
 Call/sec은 누적 카운터라 단일 스냅샷으로는 낼 수 없어 최근 두 스냅샷의 차분으로 산출하고,
 이력이 부족하면 값을 지어내는 대신 "—"로 표기한다.
 
-![Top Query — 부하·호출/초·지연·돌려주거나 바꾼 행(평균), 실제 PostgreSQL 값과 SQL 강조(185절 촬영)](images/webui/189-console-time-top-query.jpg)
+![Top Query — 부하·호출/초·지연·돌려주거나 바꾼 행(평균), 실제 PostgreSQL 값과 SQL 강조(185절 촬영)](../images/webui/189-console-time-top-query.jpg)
 
 ### 5.2 시점 비교
 
@@ -84,7 +84,7 @@ Call/sec은 누적 카운터라 단일 스냅샷으로는 낼 수 없어 최근 
 폭증)의 대리 신호로 쓴다. 부하 주입 전후 비교에서 점조회 QPS 증가와 신규 풀스캔 쿼리 감지를
 실측했다 (VERIFICATION 3절).
 
-![시점 비교 — 조회 구간 vs 비교 구간, 호출량·지연·행 증감과 신규 쿼리 표시(185절 촬영, 신규 쿼리가 부하 1위)](images/webui/197-console-compare.jpg)
+![시점 비교 — 조회 구간 vs 비교 구간, 호출량·지연·행 증감과 신규 쿼리 표시(185절 촬영, 신규 쿼리가 부하 1위)](../images/webui/197-console-compare.jpg)
 
 활용 사례 세 가지가 레퍼런스의 실전 사례와 정확히 겹친다.
 
@@ -100,7 +100,7 @@ CPU 스파이크가 보이면 그 구간을 긁어서 바로 시점 비교로 �
 CPU%를 토글할 수 있다. 실측에서 드래그로 고른 두 구간이 "호출량 +75% / 읽은 행수 +113% / 신규 쿼리
 10개"로 비교됐다 (VERIFICATION 68절).
 
-![시점 비교 — QPS 그래프 드래그로 조회 구간 선택(조회 초록·비교 주황)](images/webui/127-glass-compare-drag.jpg)
+![시점 비교 — QPS 그래프 드래그로 조회 구간 선택(조회 초록·비교 주황)](../images/webui/127-glass-compare-drag.jpg)
 
 ### 5.4 Slow Query
 
@@ -108,9 +108,9 @@ CPU%를 토글할 수 있다. 실측에서 드래그로 고른 두 구간이 "�
 MongoDB는 프로파일러의 planSummary를 그대로 노출해 COLLSCAN은 빨강, IXSCAN은 초록 배지로
 인덱스 사용 여부를 표에서 바로 판별한다 (VERIFICATION 67절).
 
-![MySQL Slow Query — User@host·Lock·Rows_sent](images/webui/122-glass-slow-mysql.jpg)
+![MySQL Slow Query — User@host·Lock·Rows_sent](../images/webui/122-glass-slow-mysql.jpg)
 
-![MongoDB Slow Query — profile 컬렉션의 명령별 소요·검사 행·명령 JSON(146절 재촬영, 이 구간은 aggregate 명령이라 Plan 배지 없음)](images/webui/123-glass-slow-mongo.jpg)
+![MongoDB Slow Query — profile 컬렉션의 명령별 소요·검사 행·명령 JSON(146절 재촬영, 이 구간은 aggregate 명령이라 Plan 배지 없음)](../images/webui/123-glass-slow-mongo.jpg)
 
 ### 5.5 모니터링 지표 통합
 
@@ -119,14 +119,14 @@ CPU%와 Connections 그래프를 콘솔에 내장하고(Prometheus HTTP API 직�
 쿼리 수준 분석에 집중한다는 분담이다. 미수집·미지원 기종은 사유를 note로 밝히고 값을 지어내지
 않는다 (VERIFICATION 68절).
 
-![Monitoring 탭 Metric 카드 — exporter가 없으면 사유를 그대로 표기하고, 쿼리 활동(QPS)은 스냅샷에서 그린다(146절 재촬영)](images/webui/124-glass-metric-card.jpg)
+![Monitoring 탭 Metric 카드 — exporter가 없으면 사유를 그대로 표기하고, 쿼리 활동(QPS)은 스냅샷에서 그린다(146절 재촬영)](../images/webui/124-glass-metric-card.jpg)
 
 ### 5.6 테이블 상세
 
 쿼리가 참조하는 테이블의 DDL, 크기 통계, 인덱스 카디널리티를 5기종 공통 화면으로 보여준다
 (VERIFICATION 66절). 실행계획을 읽을 때 "이 테이블에 어떤 인덱스가 있나"를 다른 창 없이 확인한다.
 
-![테이블 상세 — 기본키·외래키·참조 방향, 접힌 DDL과 크기 통계](images/webui/148-table-detail-after.jpg)
+![테이블 상세 — 기본키·외래키·참조 방향, 접힌 DDL과 크기 통계](../images/webui/148-table-detail-after.jpg)
 
 ## 6. 2단계 — 원인 분석
 
@@ -136,13 +136,13 @@ CPU%와 Connections 그래프를 콘솔에 내장하고(Prometheus HTTP API 직�
 MySQL은 EXPLAIN FORMAT=JSON, PG는 EXPLAIN (FORMAT JSON), MSSQL은 SHOWPLAN_XML,
 MongoDB는 명령 JSON을 받는다. 안전장치로 explain은 SELECT만 허용한다 (VERIFICATION 2절).
 
-![실행계획 보기 — 쿼리 상세의 토글에서 EXPLAIN까지(185절 촬영)](images/webui/190-querydetail-plan.jpg)
+![실행계획 보기 — 쿼리 상세의 토글에서 EXPLAIN까지(185절 촬영)](../images/webui/190-querydetail-plan.jpg)
 
 ### 6.2 규칙 기반 지적 + AI 1차 분석
 
 실행계획에서 비효율 신호를 규칙으로 지적한다. access_type=ALL, filesort, Seq Scan, Nested Loop
 안쪽 Seq Scan, Clustered Index Scan 등이다. 규칙마다 "왜 신호인지"와 "언제 오탐인지"를
-docs/ai-analysis-rules.md에 문서화했다. 예를 들어 앞 와일드카드 LIKE가 인덱스를 못 타는 이유는
+docs/design/ai-analysis-rules.md에 문서화했다. 예를 들어 앞 와일드카드 LIKE가 인덱스를 못 타는 이유는
 B+Tree가 정렬 순서로 시작점을 잡는 구조라서이고, 작은 테이블의 풀스캔은 오히려 빠르다는 예외를
 함께 둔다. 최종 판단자는 선택도다.
 
@@ -152,7 +152,7 @@ AI는 실행할 때마다 결과가 달라질 수 있다. 그래서 AI에게 판
 수 없다"고 답했다 (VERIFICATION 16-1절). API 키가 없으면 조용히 비활성화되고 규칙 기반 분석만
 남는다. 분석 실패가 알림을 막지 않는다.
 
-![안티패턴 신호와 AI 1차 분석 — 규칙 지적이 계획에 맞지 않으면 AI가 근거와 함께 반박한다(185절 촬영)](images/webui/193-querydetail-antipattern-ai.jpg)
+![안티패턴 신호와 AI 1차 분석 — 규칙 지적이 계획에 맞지 않으면 AI가 근거와 함께 반박한다(185절 촬영)](../images/webui/193-querydetail-antipattern-ai.jpg)
 
 ## 7. 3단계 — DB팀 문의
 
@@ -189,7 +189,7 @@ schema_diff, metrics 등 진단 도구는 전부 읽기 전용이다. kill은 �
 claude mcp add --transport http dbtower http://localhost:8080/mcp
 ```
 
-![MCP 연동 카드 — 콘솔 세션이 MCP 코어의 tools/list를 받아 그린다(위쪽 일부, 142절 재촬영)](images/webui/110-glass-mcp.jpg)
+![MCP 연동 카드 — 콘솔 세션이 MCP 코어의 tools/list를 받아 그린다(위쪽 일부, 142절 재촬영)](../images/webui/110-glass-mcp.jpg)
 
 ### 8.3 알림에서 진단까지, 채팅 안에서 도는 루프
 
@@ -212,11 +212,11 @@ Discord 제약 때문에 음소거 이모지 반응으로 대응했다. 알림�
 중지되고 만료 시 자동 재개되며, 강제 지점은 웹훅 어댑터 한 곳이다 (98절). Slack Events
 인바운드(서명 검증, challenge, 이모지 이벤트)도 같은 루프의 변형으로 준비돼 있다.
 
-![알림 embed에 돋보기 반응 — 봇 호출](images/webui/51-alert-embed-reaction.png)
+![알림 embed에 돋보기 반응 — 봇 호출](../images/webui/51-alert-embed-reaction.png)
 
-![봇의 진단 답글 — 도구 연쇄 근거를 나열](images/webui/52-bot-diagnosis-reply.png)
+![봇의 진단 답글 — 도구 연쇄 근거를 나열](../images/webui/52-bot-diagnosis-reply.png)
 
-![통합 AI 칸 — 알림 딥링크의 질문을 이어받아 도구 호출 근거와 함께 진단](images/webui/142-unified-ai-diagnosing.jpg)
+![통합 AI 칸 — 알림 딥링크의 질문을 이어받아 도구 호출 근거와 함께 진단](../images/webui/142-unified-ai-diagnosing.jpg)
 
 ### 8.4 단계별 보안 3단계
 
@@ -228,7 +228,7 @@ Discord 제약 때문에 음소거 이모지 반응으로 대응했다. 알림�
 | 2. 인가·수신 제한 | Discord 요청은 Ed25519 서명 검증, 채널·유저 화이트리스트 기본 거부. 팀 스코핑(LBAC)은 스코프 밖을 404로 은닉 | 88절 · 77절 |
 | 3. 데이터 마스킹 | 외부로 나가는 SQL의 리터럴만 ?로 치환, 식별자·구조는 보존. 문자 스캐너 구현(정규식으로는 이스케이프·따옴표 식별자를 못 가른다) | 70절 |
 
-![MCP 클라이언트가 authorize를 열면 뜨는 DBTower 로그인 창. authorize는 같은 로그인 화면으로 보낸다(172절 새 디자인)](images/webui/166-sky-login.jpg)
+![MCP 클라이언트가 authorize를 열면 뜨는 DBTower 로그인 창. authorize는 같은 로그인 화면으로 보낸다(172절 새 디자인)](../images/webui/166-sky-login.jpg)
 
 ## 9. AI 운영 작업 — 화면 앞에 사람이 없어도 도는 진단
 
@@ -386,5 +386,5 @@ VERIFICATION의 해당 절에 실측과 함께 있다.
 | JPA + JDBC batch 병용 | 엔티티 관리는 JPA, 대량 스냅샷 쓰기는 batch |
 | PostgreSQL (플랫폼 저장소) | Operator 지원 기종이라 도그푸딩이 가능하다 |
 | Prometheus + Grafana | 시계열 저장·시각화는 표준 도구에 위임, 플랫폼은 쿼리 수준 분석에 집중 |
-| Anthropic Java SDK / claude CLI | AI 1차 분석. 판단 기준은 docs/ai-analysis-rules.md에 사람이 명시 |
+| Anthropic Java SDK / claude CLI | AI 1차 분석. 판단 기준은 docs/design/ai-analysis-rules.md에 사람이 명시 |
 | k6 | 부하 재현과 성능 회귀 확인 |

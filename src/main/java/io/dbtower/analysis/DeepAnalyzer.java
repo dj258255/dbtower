@@ -36,7 +36,7 @@ import java.util.regex.Pattern;
  *    SQL 술어와 스키마(컬럼 타입·인덱스 선두)를 대조하고, 플랜의 경고(CONVERT_IMPLICIT)도 신호로 쓴다.
  *
  * RuleBasedAnalyzer가 증상(풀스캔·정렬)을 잡는다면, 여기서부터는 "왜 그 플랜이 골라졌나"의 원인이다.
- * 판정 스펙은 docs/ai-analysis-rules.md "심층 원인 규칙 (D9)" 절. 근거가 없으면 원인을 지어내지 않는다.
+ * 판정 스펙은 docs/design/ai-analysis-rules.md "심층 원인 규칙 (D9)" 절. 근거가 없으면 원인을 지어내지 않는다.
  */
 @Component
 public class DeepAnalyzer {

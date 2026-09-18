@@ -78,7 +78,7 @@ p.push(text(450, 583, '조회는 읽기 전용 계정으로, 변경은 승인된
 }));
 
 writeFileSync(
-  new URL('../architecture-core.svg', import.meta.url),
+  new URL('./architecture-core.svg', import.meta.url),
   svg(W, H, p.join('\n'), 'DBTower 아키텍처 핵심'),
 );
-console.log('docs/architecture-core.svg');
+console.log('docs/diagrams/architecture-core.svg');

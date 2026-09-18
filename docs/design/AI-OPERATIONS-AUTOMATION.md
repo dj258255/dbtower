@@ -4,7 +4,7 @@ DB팀 문의만 자동화하지 않는다. 쿼리 진단·회귀 원인·백업 
 진단·DB팀 문의·정기 리포트를 **하나의 작업 모델**로 묶고, 어디서 시작하든 같은 권한·사실·검증·감사를 거치게 한다.
 
 관련 구현은 `io.dbtower.aiops`(플랫폼)와 `integrations/ai-ops-gateway`(실행면)에 있다.
-실측 기록은 [VERIFICATION.md 169절](VERIFICATION.md), API 목록은 [API.md](API.md)에 있다.
+실측 기록은 [VERIFICATION.md 169절](../verify/VERIFICATION.md), API 목록은 [API.md](../operate/API.md)에 있다.
 
 ## 1. 무엇이 문제였나
 
@@ -175,9 +175,9 @@ cp .env.example .env            # 비밀값은 환경변수로만
 python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
 
 python -m dbtower_aiops ingest --rebuild \
-  ../../docs/ai-analysis-rules.md:QUERY_DIAGNOSIS,REGRESSION_EXPLANATION,INCIDENT_TRIAGE,DB_TEAM_INQUIRY \
-  ../../docs/operations.md:QUERY_DIAGNOSIS,REGRESSION_EXPLANATION,INCIDENT_TRIAGE,DB_TEAM_INQUIRY,ADVISOR_SUMMARY \
-  ../../docs/least-privilege.md:INCIDENT_TRIAGE,DB_TEAM_INQUIRY,ADVISOR_SUMMARY
+  ../../docs/design/ai-analysis-rules.md:QUERY_DIAGNOSIS,REGRESSION_EXPLANATION,INCIDENT_TRIAGE,DB_TEAM_INQUIRY \
+  ../../docs/operate/operations.md:QUERY_DIAGNOSIS,REGRESSION_EXPLANATION,INCIDENT_TRIAGE,DB_TEAM_INQUIRY,ADVISOR_SUMMARY \
+  ../../docs/operate/least-privilege.md:INCIDENT_TRIAGE,DB_TEAM_INQUIRY,ADVISOR_SUMMARY
 
 uvicorn --factory dbtower_aiops.gateway:create_app --port 18090   # Slack 입구
 python -m dbtower_aiops relay                                     # Outbox -> Redis

@@ -408,7 +408,7 @@ Discord webhook: HTTP 204
 아니면 Slack 포맷 {"text":...}로 자동 전환. URL은 비밀값이라 환경변수(DBTOWER_WEBHOOK_URL)로만 주입.
 
 AI 1차 분석(확장3): 감지 결과를 Anthropic Messages API(Java SDK)로 1차 분석해 알림에 첨부.
-판단을 통째로 맡기지 않고 docs/ai-analysis-rules.md의 기종별 판단 기준을 system 프롬프트로 넣어
+판단을 통째로 맡기지 않고 docs/design/ai-analysis-rules.md의 기종별 판단 기준을 system 프롬프트로 넣어
 같은 입력에 일관된 판정이 나오게 한다(레퍼런스와 같은 접근). ANTHROPIC_API_KEY 미설정이면
 조용히 비활성화되고 규칙 기반 알림만 발송 — 분석 실패가 알림 자체를 막지 않는다.
 
@@ -814,7 +814,7 @@ MCP:    도구 9종(wait_events 포함), 웹 콘솔 Monitoring 탭에 카드 렌
 비활성 instrument를 켜지 않고 "안 보이는 범위"를 응답에 명시, (2) MSSQL idle 필터는
 1차 응답에서 SOS_WORK_DISPATCHER가 8억 ms로 도배되는 것을 보고 실측 기반으로 보강.
 
-![Wait Events — MySQL 대기 이벤트와 비활성 instrument 안내](images/webui/08-wait.png)
+![Wait Events — MySQL 대기 이벤트와 비활성 instrument 안내](../images/webui/08-wait.png)
 
 ## 27. Phase A8 — 대상 DB 최소 권한 계정: 실측으로 확정한 권한 목록
 
@@ -822,7 +822,7 @@ MCP:    도구 9종(wait_events 포함), 웹 콘솔 Monitoring 탭에 카드 렌
 최소 권한만 가진 전용 계정으로 붙어야 한다(Datadog DBM 등의 관행). 문제는 "최소가 얼마냐"를
 추측하면 틀린다는 것 — 그래서 권한 0에서 시작해 에러 원문을 수집하며 하나씩 더했다.
 
-확정된 최소 집합 (docs/least-privilege.md, 전부 실측):
+확정된 최소 집합 (docs/operate/least-privilege.md, 전부 실측):
 - MySQL: sample.* + performance_schema digest + mysql.slow_log SELECT + REPLICATION CLIENT/SLAVE
 - PostgreSQL: LOGIN + pg_read_all_stats (pg_monitor 전체는 과함)
 - SQL Server: VIEW SERVER PERFORMANCE STATE 한 줄 (2022 세분화 권한)
@@ -938,7 +938,7 @@ instanceId=8 & action=backup (AND): 인스턴스 8의 백업 계열만
 이로써 Spring Data는 세 층위에서 제자리를 지킨다: 파생 메서드(정적 단순), @Query(정적 집계·벌크),
 Specification(동적 필터). "어디에 뭘 쓰나"를 기능이 결정하게 두는 것 — 프레임워크를 과시하지 않는다.
 
-![감사 로그 검색 — 동적 필터(Specification)](images/webui/09-audit.png)
+![감사 로그 검색 — 동적 필터(Specification)](../images/webui/09-audit.png)
 
 ## 32. 정리 아크 — Lombok(R1) + JdbcTemplate(R2): "JPA/Native Query 통일"이 아닌 적재적소
 
@@ -1251,7 +1251,7 @@ OpsAlertDetector에 신선도 경보(STALE 항상·NO_BACKUP은 등록 후 임�
 ## 49. 심층 원인 진단(D9) 명세 확정 — 프롬프트 문서 강화
 
 사용자 지적("기종별로 왜 인덱스를 못 타는지 디테일하게 분석해야")을 반영해 D9를 웹서칭으로 검증·명세화.
-docs/ai-analysis-rules.md에 "심층 원인 규칙(D9)" 절 추가: (1) 추정 vs 실제 행수 괴리를 기종별로 보는
+docs/design/ai-analysis-rules.md에 "심층 원인 규칙(D9)" 절 추가: (1) 추정 vs 실제 행수 괴리를 기종별로 보는
 법(MySQL EXPLAIN ANALYZE FORMAT=JSON, PG (ANALYZE,BUFFERS), Oracle gather_plan_statistics+
 DISPLAY_CURSOR ALLSTATS LAST, MSSQL SET STATISTICS XML 별도 결과셋, Mongo executionStats),
 (2) 인덱스 무력화 근본원인 5종(암시적 형변환·컬럼 함수·통계 노후·낮은 선택도·복합 선두 누락),
@@ -1582,7 +1582,7 @@ UI: Monitoring 탭에 데드락 카드(배지=획득 방식, victim·리소스·
 ## 62. 하드닝 아크 — 4축 감사 → 검증된 수정 (WS-A/B/C)
 
 배경: 심화 4개 아크 후, 동시성·자원누수 / 기종정확성·버전 / 보안 / HA·수명주기 4개 축을 병렬 감사(웹서칭
-포함)해 결함을 수집하고, 코드 재검증 + OWASP·CWE·벤더 문서 대조로 FIX/SKIP을 정했다(docs/HARDENING-ROADMAP.md).
+포함)해 결함을 수집하고, 코드 재검증 + OWASP·CWE·벤더 문서 대조로 FIX/SKIP을 정했다(docs/archive/HARDENING-ROADMAP.md).
 서브에이전트 3개가 파일 소유권으로 분할 구현(충돌 0). 신규 단위 28건 + 통합, 전체 그린.
 
 - **WS-A 보안**: (A-1) XXE — 데드락 파서 2곳·PlanShapes showplan의 DocumentBuilderFactory에
@@ -1626,14 +1626,14 @@ UI: Monitoring 탭에 데드락 카드(배지=획득 방식, victim·리소스·
 - **커밋된 바이너리 DB 제거**: `data/dbhub.mv.db`(2.3MB, USERS/PASSWORD 테이블 든 옛 H2) git rm +
   `.gitignore`에 `data/`.
 - **AI 배선**: `.dockerignore`가 docs 전체를 제외해 이미지에서 `ai-analysis-rules.md`가 빈 프롬프트였다 →
-  `!docs`+`docs/*`+`!docs/ai-analysis-rules.md` 예외 + `Dockerfile`에 `COPY docs/ai-analysis-rules.md`.
+  `!docs`+`docs/*`+`!docs/design/ai-analysis-rules.md` 예외 + `Dockerfile`에 `COPY docs/design/ai-analysis-rules.md`.
   compose에 `ANTHROPIC_API_KEY` env + `.env.example` [선택] 항목.
 
 **라이브 실측**:
 - fail-closed: `SPRING_PROFILES_ACTIVE=docker` + 키 미설정으로 jar 기동 → exit 1로 거부, 로그:
   `IllegalStateException: 배포 프로필(docker)에서 DBTOWER_ENCRYPTION_KEY가 없습니다 — 인스턴스 비밀번호
   평문 저장을 막기 위해 기동을 거부합니다`. 단위 `SecretCipherProfileTest.docker_프로필에_키가_없으면_기동을_거부한다` 추가.
-- AI 규칙 번들: `.dockerignore` 예외 검증 — `busybox`에 `COPY docs/ai-analysis-rules.md`가 성공(파일이
+- AI 규칙 번들: `.dockerignore` 예외 검증 — `busybox`에 `COPY docs/design/ai-analysis-rules.md`가 성공(파일이
   빌드 컨텍스트에 포함됨을 확인, 이전엔 제외돼 COPY 불가였다).
 - 전체 테스트 그린(신규 단위 1건 포함).
 
@@ -1723,9 +1723,9 @@ UI: Monitoring 탭에 데드락 카드(배지=획득 방식, victim·리소스·
 
 **웹 콘솔 실물 스크린샷(로그인 → 상위 쿼리 → 관련 테이블 구조 → "상세 보기" 아코디언, 8890)**:
 
-![MySQL users 테이블 상세 — NATIVE DDL·InnoDB·카디널리티 8118](images/webui/29-table-detail-mysql.png)
+![MySQL users 테이블 상세 — NATIVE DDL·InnoDB·카디널리티 8118](../images/webui/29-table-detail-mysql.png)
 
-![PostgreSQL demo_order 테이블 상세 — FK·CHECK 포함 재구성 DDL·엔진/생성시각 정직 미제공](images/webui/30-table-detail-pg.png)
+![PostgreSQL demo_order 테이블 상세 — FK·CHECK 포함 재구성 DDL·엔진/생성시각 정직 미제공](../images/webui/30-table-detail-pg.png)
 
 MySQL은 SHOW CREATE TABLE 원문·엔진/생성시각까지, PG는 "카탈로그 재구성" 배지와 함께 재구성 DDL을
 보이고 엔진·생성시각 행은 아예 렌더하지 않는다("값과 출처의 정직"이 화면까지 관철).
@@ -1757,7 +1757,7 @@ FK·CHECK가 원문 그대로 재조립됐고, idx 카디널리티는 customer_i
 빼고 파비콘(favicon.svg) 아이콘 + "DBTower"로 통일. 로그인 화면은 미인증이라 favicon.svg가 로그인으로
 리다이렉트돼 안 뜨던 것을 SecurityConfig permitAll에 파비콘 자산(svg·96png·apple-touch)을 추가해 해결.
 
-![로그인 브랜드 — 파비콘 + DBTower, "DB" 박스 제거](images/webui/31-brand-login.png)
+![로그인 브랜드 — 파비콘 + DBTower, "DB" 박스 제거](../images/webui/31-brand-login.png)
 
 ## 67. 레퍼런스 "문제 쿼리 식별" 표 컬럼 패리티 (Top Query·Slow Query·Mongo Plan)
 
@@ -1782,11 +1782,11 @@ FK·CHECK가 원문 그대로 재조립됐고, idx 카디널리티는 customer_i
   프로파일링 레벨2로 인덱스/풀스캔 쿼리를 실행해 planSummary 확보 후 확인.
 - 단위 383건 그린(SlowQuery 확장·QueryStatView 변경 반영, 회귀 없음).
 
-![Top Query — Call/sec·Latency·Row Examined(Avg)](images/webui/32-top-query-cols.png)
+![Top Query — Call/sec·Latency·Row Examined(Avg)](../images/webui/32-top-query-cols.png)
 
-![MySQL Slow Query — User@host·Lock·Rows_sent](images/webui/33-slow-mysql-cols.png)
+![MySQL Slow Query — User@host·Lock·Rows_sent](../images/webui/33-slow-mysql-cols.png)
 
-![MongoDB Slow Query — Plan(IXSCAN 초록·COLLSCAN 빨강)](images/webui/34-slow-mongo-plan.png)
+![MongoDB Slow Query — Plan(IXSCAN 초록·COLLSCAN 빨강)](../images/webui/34-slow-mongo-plan.png)
 
 ## 68. 모니터링 지표 통합 — CPU·Connections 그래프 내장 + CPU 그래프 드래그
 
@@ -1823,9 +1823,9 @@ instant화 — 차트 축·드래그 선택·입력 표시가 전부 브라우�
 - Prometheus 실측치: mysql threads_connected=7, pg numbackends(sample)=3, CPU 2.2~85%(rate 안정화 전 포함).
 - 단위 386건 그린.
 
-![Monitoring Metric 카드 — CPU%·Connections 내장 그래프](images/webui/35-metric-card.png)
+![Monitoring Metric 카드 — CPU%·Connections 내장 그래프](../images/webui/35-metric-card.png)
 
-![시점 비교 — CPU 그래프 드래그 선택(조회 초록·비교 주황)](images/webui/36-compare-cpu-drag.png)
+![시점 비교 — CPU 그래프 드래그 선택(조회 초록·비교 주황)](../images/webui/36-compare-cpu-drag.png)
 
 ## 69. 화면 패리티 최종 전수 재검증 — 마지막 3건 마감
 
@@ -1859,9 +1859,9 @@ instant화 — 차트 축·드래그 선택·입력 표시가 전부 브라우�
 - 남은 것(로드맵 심화 아크 4 명세): 인스턴스 Slack/담당팀 라벨 + console_url 딥링크(이미지 9~11
   좌상단 메타), Slow KST 표시 옵션, Mongo 장기 조회 샘플링. 총 단위 386건 그린.
 
-![비교뷰 — Load 증감 첫 컬럼 + NEW 하이라이트](images/webui/37-compare-load-col.png)
+![비교뷰 — Load 증감 첫 컬럼 + NEW 하이라이트](../images/webui/37-compare-load-col.png)
 
-![MongoDB Top Query — 집계 + Plan 배지](images/webui/38-mongo-top-plan.png)
+![MongoDB Top Query — 집계 + Plan 배지](../images/webui/38-mongo-top-plan.png)
 
 ## 70. 데이터 마스킹 배선 — 외부로 나가는 SQL의 리터럴만 가린다 (Phase 2 완결)
 
@@ -1917,9 +1917,9 @@ instant화 — 차트 축·드래그 선택·입력 표시가 전부 브라우�
 - MCP tools/list → **14종**(metrics 포함) 실측.
 - 총 단위 398건 그린(신규: QueryMaskerTest 7·StatsCollectionAdvisorTest 5, 갱신: MCP 14종·upsert 시그니처).
 
-![인스턴스 카드 — 팀 배지 + 콘솔 딥링크](images/webui/39-instance-team-badge.png)
+![인스턴스 카드 — 팀 배지 + 콘솔 딥링크](../images/webui/39-instance-team-badge.png)
 
-![진단 딥링크 — 질문 프리필](images/webui/40-diagnose-deeplink.png)
+![진단 딥링크 — 질문 프리필](../images/webui/40-diagnose-deeplink.png)
 
 ## 72. Phase 2 완결 — 로그 백업 5기종 게이트 + PITR (복원 가능 창·복원 명령 안내·실제 시점 복원 e2e)
 
@@ -2073,7 +2073,7 @@ UNSUPPORTED(XtraBackup/스냅샷 영역)로 안내한다. MSSQL의 .bak은 이�
   큰따옴표를 거부(조용히 제거해 인증을 어긋나게 하지 않고 명확히 실패). 단위 2건(개행 password·
   따옴표 username 거부). 총 404건 그린.
 
-![백업/PITR 카드 — 복원 가능 창·문안·이력(PHYSICAL/LOG/UNSUPPORTED 색 구분)](images/webui/41-backup-pitr-card.png)
+![백업/PITR 카드 — 복원 가능 창·문안·이력(PHYSICAL/LOG/UNSUPPORTED 색 구분)](../images/webui/41-backup-pitr-card.png)
 
 ## 77. Phase 3 — 팀 스코핑(LBAC) + 공유 세션(재시작 생존)
 
@@ -2094,7 +2094,7 @@ UNSUPPORTED(XtraBackup/스냅샷 영역)로 안내한다. MSSQL의 .bak은 이�
   team-b 단건 id=2 → **404**, 자기 팀 id=1 → 200. 단위 TeamScopeTest 6건(네 규칙 + 스코프밖 404
   메시지 동일성). 총 단위 410건 그린.
 
-![VIEWER(team-a) 인스턴스 목록 — team-a 뱃지 + 전역만, team-b 제외](images/webui/42-lbac-viewer-scope.png)
+![VIEWER(team-a) 인스턴스 목록 — team-a 뱃지 + 전역만, team-b 제외](../images/webui/42-lbac-viewer-scope.png)
 
 ## 78. Phase 5 — 디스크 포화 예측 (선형 추세 ETA, 실측 CRITICAL)
 
@@ -2118,7 +2118,7 @@ UNSUPPORTED(XtraBackup/스냅샷 영역)로 안내한다. MSSQL의 .bak은 이�
 - 단위 9건(DiskForecastAdvisorTest — ETA 3/14일 경계, 절대 여유 10%, CRITICAL 시 중복 억제,
   미수집 침묵, mountpoint 양보 셀렉터). 총 419건 그린.
 
-![Advisors — 디스크 포화 임박 CRITICAL(선형 추세 0.7일, 여유 76.8%)](images/webui/43-disk-forecast.png)
+![Advisors — 디스크 포화 임박 CRITICAL(선형 추세 0.7일, 여유 76.8%)](../images/webui/43-disk-forecast.png)
 
 ## 79. Phase 4 — 서버 공유 인지(호스트 그룹핑) — 서버 전역 신호 dedup
 
@@ -2144,7 +2144,7 @@ UNSUPPORTED(XtraBackup/스냅샷 영역)로 안내한다. MSSQL의 .bak은 이�
 - 단위 6건(같은 서버 1회+공유 명시·다른 서버 각각·인스턴스 스코프 유지 / 스윕 대표만 실행·
   nodeFilter 다르면 미dedup·SHARED 표기). 총 425건 그린.
 
-![인스턴스 카드 — 같은 host:port 페어에만 "서버 공유 ×2" 배지](images/webui/44-server-shared-badge.png)
+![인스턴스 카드 — 같은 host:port 페어에만 "서버 공유 ×2" 배지](../images/webui/44-server-shared-badge.png)
 
 ## 80. Phase 3·4 — 관제탑이 두 대가 될 때: 수집 샤딩·무중단 페일오버·분산 잠금
 
@@ -2169,8 +2169,8 @@ UNSUPPORTED(XtraBackup/스냅샷 영역)로 안내한다. MSSQL의 .bak은 이�
 - 단위: 샤딩 4건(획득 샤드만 수집·전 샤드 인수·기존 락 이름 하위 호환·무획득 무수집) +
   잠금 가드 5건(스토어 교체 후 동일 계약). 총 429건 그린.
 
-![페일오버 후 node B(8891)가 같은 세션으로 콘솔 서빙](images/webui/45-node-b-survivor.png)
-![노드를 오간 실패 3회 뒤 잠금 — 카운터가 메타 DB라 노드 분산 우회 불가](images/webui/46-cross-node-lock.png)
+![페일오버 후 node B(8891)가 같은 세션으로 콘솔 서빙](../images/webui/45-node-b-survivor.png)
+![노드를 오간 실패 3회 뒤 잠금 — 카운터가 메타 DB라 노드 분산 우회 불가](../images/webui/46-cross-node-lock.png)
 
 ## 81. Phase 4 — query_snapshot 월별 파티셔닝: 보존 정리 DELETE 1,880ms → DROP 12.8ms
 
@@ -2197,7 +2197,7 @@ UNSUPPORTED(XtraBackup/스냅샷 영역)로 안내한다. MSSQL의 .bak은 이�
   잡도 없어, 파티션 관리 비용 대비 실익이 없다. 볼륨 실측이 정당화할 때 같은 패턴 적용.
 - 단위 4건(월 전체 경과만 DROP·경계 동치·규약 밖 자식 보호·생성 DDL-판정 규약 쌍). 총 433건 그린.
 
-![파티션 전환 후 Top Query 정상 렌더 — 화면·수집 무변경](images/webui/47-partitioned-topquery.png)
+![파티션 전환 후 Top Query 정상 렌더 — 화면·수집 무변경](../images/webui/47-partitioned-topquery.png)
 
 ## 82. Phase 4 — 커넥션 온디맨드: 격리한 대상에서 커넥션 0으로
 
@@ -2272,7 +2272,7 @@ UNSUPPORTED(XtraBackup/스냅샷 영역)로 안내한다. MSSQL의 .bak은 이�
   이미 전부 @Value 외부화 완료 상태였다 — 하드코딩 쿨다운 0건(grep 실측). 잔여 표기만 제거.
 - 총 441건 그린(파티션 판정 테스트는 공용 PartitionLifecycleTest로 이동·확장).
 
-![Slow Query — 브라우저 로컬 시간 표시, 툴팁에 UTC 원문](images/webui/48-slow-local-time.png)
+![Slow Query — 브라우저 로컬 시간 표시, 툴팁에 UTC 원문](../images/webui/48-slow-local-time.png)
 
 ## 86. 백업 산출물 암호화 — 3-2-1-1-0의 마지막 1 (변조는 실패로, 위장 불가)
 
@@ -2317,7 +2317,7 @@ UNSUPPORTED(XtraBackup/스냅샷 영역)로 안내한다. MSSQL의 .bak은 이�
   PITR 창 앵커가 물리 산출물로 갱신되고 물리 절차 문안 생성 확인.
 - 단위 +1(물리 앵커 문안 — prepare·copy-back·binlog_info 좌표·중복 재생 경고). 총 447건 그린.
 
-![백업/PITR 카드 — 물리(xbstream) 앵커와 복원 가능 창](images/webui/49-xtrabackup-physical.png)
+![백업/PITR 카드 — 물리(xbstream) 앵커와 복원 가능 창](../images/webui/49-xtrabackup-physical.png)
 
 ## 88. Discord 봇 인바운드 — 알림 → 진단 루프의 왕복 완성 (보안 3단계)
 
@@ -2407,7 +2407,7 @@ UNSUPPORTED(XtraBackup/스냅샷 영역)로 안내한다. MSSQL의 .bak은 이�
   invalid_grant, 미등록 redirect_uri → invalid_request, 원격 평문 http redirect → 등록 거부.
 - 단위 2건(PKCE S256 검증, redirect_uri 화이트리스트) + 라이브 전 플로우. 총 458건 그린.
 
-![MCP 클라이언트가 authorize를 열면 뜨는 DBTower 로그인 창 — 로그인하면 토큰이 자동 발급된다](images/webui/50-oauth-login-prompt.png)
+![MCP 클라이언트가 authorize를 열면 뜨는 DBTower 로그인 창 — 로그인하면 토큰이 자동 발급된다](../images/webui/50-oauth-login-prompt.png)
 
 ## 92. 감지 알림 리치 embed화 + OAuth 보안 리뷰 반영
 
@@ -2476,8 +2476,8 @@ UNSUPPORTED(XtraBackup/스냅샷 영역)로 안내한다. MSSQL의 .bak은 이�
   게시 확인**(REST 재조회: title `DBTower 진단 — local-mysql`, color 0x6366f1, description 1539자,
   결론은 "단정할 근거 부족" 정직 판정). 총 464건 그린.
 
-![알림 embed에 돋보기 반응 — 진단 시작 안내까지](images/webui/51-alert-embed-reaction.png)
-![봇의 진단 답글 — 근거 나열과 정직한 결론](images/webui/52-bot-diagnosis-reply.png)
+![알림 embed에 돋보기 반응 — 진단 시작 안내까지](../images/webui/51-alert-embed-reaction.png)
+![봇의 진단 답글 — 근거 나열과 정직한 결론](../images/webui/52-bot-diagnosis-reply.png)
 
 ## 95. 알림 매핑 영속화(V21·V22) + 슬래시 커맨드 실등록 — 재시작해도 이어지는 반응 진단
 
@@ -4373,7 +4373,7 @@ Flyway V32        실 PG 적용 성공
 ```
 
 lakehouse 쪽에서도 같은 계열의 규약 위반 둘을 찾아 고쳤다(모델 이름과 기종 축 조인).
-그쪽 기록은 `dbtower-lakehouse/docs/VERIFICATION.md` 25절.
+그쪽 기록은 `dbtower-lakehouse/docs/verify/VERIFICATION.md` 25절.
 
 ## 126. 자연어 진단의 팀 범위 우회 — 프롬프트가 아니라 코드로 막는다 (2026-09-10)
 
@@ -4470,7 +4470,7 @@ SELECT command denied to user 'dbtower_monitor'@'172.18.0.1' for table 'events_w
 SELECT command denied to user 'dbtower_monitor'@'172.18.0.1' for table 'innodb_lock_waits'
 ```
 
-`docs/least-privilege.md`와 `docker/mysql-init.sql` 어디에도 두 테이블 권한이 없다. 문서 실측(2026-07-04)
+`docs/operate/least-privilege.md`와 `docker/mysql-init.sql` 어디에도 두 테이블 권한이 없다. 문서 실측(2026-07-04)
 뒤에 들어온 기능의 권한이 반영되지 않은 것으로 보인다. (새 볼륨에서 모니터 계정이 자동으로 생기지 않은 것은
 결함이 아니다. `mysql-init.sql` 머리 주석대로 compose 무수정 정책이라 수동 실행이 기본이다.)
 127절에서 5기종으로 넓혀 재실측하고 고쳤다.
@@ -4537,7 +4537,7 @@ granted 상태의 WARN 로그: 0건
 ```
 
 상태 코드로 세면 누락 7개 중 2개만 보인다. 2개는 200 본문 안의 `ERROR`, 나머지는 이 토폴로지에서 경로를 타지 않아
-코드 기준으로만 필요성을 확인했다. 표에도 "코드 경로 기준"이라고 구분해 적었다([least-privilege.md](least-privilege.md)).
+코드 기준으로만 필요성을 확인했다. 표에도 "코드 경로 기준"이라고 구분해 적었다([least-privilege.md](../operate/least-privilege.md)).
 
 ### 재발 방지
 
@@ -4667,9 +4667,9 @@ SELECT id, name, grade FROM customers      HTTP 200
 
 ### 화면
 
-![워크벤치 조회 — 분류 배지·마스킹된 열](images/webui/67-workbench-query-masked.png)
-![변경 문장은 실행 전에 승인 티켓으로 안내](images/webui/68-workbench-change-rejected.png)
-![별칭 o를 orders로 풀어 쓰는 자동완성](images/webui/69-workbench-autocomplete.png)
+![워크벤치 조회 — 분류 배지·마스킹된 열](../images/webui/67-workbench-query-masked.png)
+![변경 문장은 실행 전에 승인 티켓으로 안내](../images/webui/68-workbench-change-rejected.png)
+![별칭 o를 orders로 풀어 쓰는 자동완성](../images/webui/69-workbench-autocomplete.png)
 
 ### 한계
 
@@ -4740,9 +4740,9 @@ SqlReferencesTest 3        FROM/JOIN/UPDATE/INTO 추출, CTE 이름·주석·문
 결과의 `status` 열 머리를 눌러 칩 → "이 중 FAIL만 고객 등급별로" 전송 → AI가 편집기 SQL과 칩을 이어받아
 `JOIN customers ... WHERE o.status = 'FAIL' GROUP BY c.grade`를 `v2`로 제안 → 새로고침해도 대화·카드·편집기 복원.
 
-![AI 답변과 체크포인트 카드](images/webui/70-workbench-ai-checkpoint.png)
-![선택 모드로 결과 열을 칩으로](images/webui/71-workbench-pick-chip.png)
-![칩과 편집기 SQL을 이어받은 v2 제안](images/webui/72-workbench-followup-v2.png)
+![AI 답변과 체크포인트 카드](../images/webui/70-workbench-ai-checkpoint.png)
+![선택 모드로 결과 열을 칩으로](../images/webui/71-workbench-pick-chip.png)
+![칩과 편집기 SQL을 이어받은 v2 제안](../images/webui/72-workbench-followup-v2.png)
 
 화면 검증에서 잡은 것: AI 답변으로 버전이 늘어도 상단 "버전 없음"이 그대로였다(목록만 갱신). 버전 표시를 워크시트
 목록 갱신 한 곳으로 모았다.
@@ -4958,9 +4958,9 @@ GET /api/workbench/tickets/13/executions
 인스턴스 비교 탭: 같은 조회 `SELECT id, name, email, grade FROM customers ORDER BY id`를 PostgreSQL과 MySQL에서(키 id). MySQL id=1 등급만 GOLD로 바꿔 둔 상태에서
 "바뀜 1 · 같음 2", 바뀐 칸만 `VIP → GOLD`, email은 두 인스턴스 규칙을 합쳐 가림. 비교 뒤 MySQL 값은 원복했다.
 
-![승인 전 드라이런 — 마스킹된 행 diff와 검증 조회 전후](images/webui/73-workbench-ticket-dryrun-diff.png)
-![DDL 실행 기록 — 구조 변화와 같은 트랜잭션 안 전후 실행계획](images/webui/74-workbench-ticket-ddl-probe.png)
-![인스턴스 간 결과 비교 — 한 칸 차이만 짚는다](images/webui/75-workbench-instance-compare.png)
+![승인 전 드라이런 — 마스킹된 행 diff와 검증 조회 전후](../images/webui/73-workbench-ticket-dryrun-diff.png)
+![DDL 실행 기록 — 구조 변화와 같은 트랜잭션 안 전후 실행계획](../images/webui/74-workbench-ticket-ddl-probe.png)
+![인스턴스 간 결과 비교 — 한 칸 차이만 짚는다](../images/webui/75-workbench-instance-compare.png)
 
 
 ## 131. 남은 과제를 끝까지 — 티켓의 빠진 출구, SQL Server·MongoDB 변경 실행, MCP 채널, 암호화·성능 실측 (2026-09-11)
@@ -5015,7 +5015,7 @@ Oracle `customers` 상세는 비어 나왔다. Oracle 테이블 상세는 `user_
 (OracleOperator 주석: 다른 스키마를 보려면 그 스키마를 기본으로 하는 계정으로 등록), 데모 모니터 계정의 스키마에는 테이블이 없다.
 이번 범위에서 바꾸지 않았다.
 
-![테이블 상세 탭](images/webui/76-workbench-table-detail.png)
+![테이블 상세 탭](../images/webui/76-workbench-table-detail.png)
 
 ### 2. SQL Server 계열 변경 실행 (커밋 2a7e43c, Azure SQL Edge)
 
@@ -5454,7 +5454,7 @@ pgbench 지연은 클라이언트가 보낸 뒤 받을 때까지(프로토콜 �
 
 화면 버튼은 60분 창이라 API로 본 4분 창(48.9453 → 0.0036)과 수치가 조금 다르다.
 
-![워크벤치 티켓 워크로드 비교 — 행 지표 이름, 1ms 미만 정밀도, 브라우저 시간대 시각](images/webui/77-workbench-workload-rows-metric.png)
+![워크벤치 티켓 워크로드 비교 — 행 지표 이름, 1ms 미만 정밀도, 브라우저 시간대 시각](../images/webui/77-workbench-workload-rows-metric.png)
 
 ### 6. MCP 카드
 
@@ -5469,7 +5469,7 @@ pgbench 지연은 클라이언트가 보낸 뒤 받을 때까지(프로토콜 �
 README·PRESENTATION의 카드 사진을 다시 찍었다. 첫 재촬영본에는 ADMIN 세션이 완성해 주는 등록 명령에 서비스 토큰 원문이 그대로
 찍혀 있었다 — 커밋하지 않고, 예전 사진과 같이 화면에서 토큰을 `****`로 가린 뒤 다시 찍었다(고정 헤더가 카드 위에 겹친 것도 숨겼다).
 
-![MCP 연동 카드 — 세션 경로로 받은 도구 19종](images/webui/06-mcp.png)
+![MCP 연동 카드 — 세션 경로로 받은 도구 19종](../images/webui/06-mcp.png)
 
 ### 7. 성능 전후 재측정 — 컨테이너 밖 부하, 행을 돌려주는 조회
 
@@ -5618,7 +5618,7 @@ x86-64 명령어를 직접 실행하지 못한다. 이 Mac에서 SQL Server를 �
      다시 SAMPLE                         HTTP 200 appSchema=SAMPLE
 ```
 
-![인스턴스 카드 — 등록한 앱 스키마 표기](images/webui/78-instances-oracle-app-schema.png)
+![인스턴스 카드 — 등록한 앱 스키마 표기](../images/webui/78-instances-oracle-app-schema.png)
 
 ### 테스트
 
@@ -6131,8 +6131,8 @@ ok   리뷰_카드의_승인_시각은_브라우저_시간대로_보이고_UTC_�
 
 - README 첫 화면에 "3분 요약"(무엇·누가·데모 GIF·실측 3개·링크)을 두고, 56줄 기능 표는 접었다.
 - `docs/images/demo-change-flow.gif` — 4절 흐름의 실제 화면 7장에 역할·단계 설명 띠를 붙여 합쳤다(1100x609, 7프레임, 690KB). 브라우저 확장의 GIF 내보내기는 파일 다운로드라 쓰지 않고, 저장한 스크린샷을 로컬(Pillow)에서 합쳤다.
-- `docs/PORTFOLIO-ONEPAGER.md` — DBMS 운영 관리 직무에 맞춘 사례 넷(승인된 변경만 실행, 권한 경계는 코드, 대상 하나가 폴러를 멈추지 않게, 사람별 입구)과 실측 표.
-- `docs/TECHNICAL-QA.md` — 설계·변경 안전·AI·검증·장애 대응 질문 13개, 답마다 근거 절.
+- `docs/portfolio/PORTFOLIO-ONEPAGER.md` — DBMS 운영 관리 직무에 맞춘 사례 넷(승인된 변경만 실행, 권한 경계는 코드, 대상 하나가 폴러를 멈추지 않게, 사람별 입구)과 실측 표.
+- `docs/portfolio/TECHNICAL-QA.md` — 설계·변경 안전·AI·검증·장애 대응 질문 13개, 답마다 근거 절.
 
 ### 테스트
 
@@ -6194,10 +6194,10 @@ CI 로그는 통과한 테스트 이름을 찍지 않아, 이 실행만으로는
 
 ### 화면 전후 (같은 로컬 앱, 역할별 프록시 — 136절 방식, 브라우저는 로그인하지 않음)
 
-![로그인 전후](images/webui/92-glass-login-before-after.jpg)
-![대시보드 전후](images/webui/93-glass-dashboard-before-after.jpg)
-![모니터링 탭 전후](images/webui/94-glass-monitor-before-after.jpg)
-![워크벤치 전후](images/webui/95-glass-workbench-before-after.jpg)
+![로그인 전후](../images/webui/92-glass-login-before-after.jpg)
+![대시보드 전후](../images/webui/93-glass-dashboard-before-after.jpg)
+![모니터링 탭 전후](../images/webui/94-glass-monitor-before-after.jpg)
+![워크벤치 전후](../images/webui/95-glass-workbench-before-after.jpg)
 
 실제 적용값을 브라우저에서 읽었다: 사이드바 `backdrop-filter: blur(22px) saturate(1.8)`, 사이드바 안 `--muted: #5b6475`, 기본 버튼 `linear-gradient(rgb(84, 98, 245) 0%, rgb(66, 80, 230) 100%)`,
 워크벤치 대화상자 `blur(22px) saturate(1.8)`·모서리 20px·모달 배경 `blur(6px)`(대화상자는 요청을 올리지 않고 미리보기로만 열었다). 미리보기에서 대화상자가 어둡게 흐린 화면 위에서 탁한 회색으로 보여
@@ -6272,9 +6272,9 @@ wb    @430·768·1024, login @430·768·1024: 수정 전후 모두 넘침 0
 - 사이드바 인스턴스 카드가 가로로 감쌀 때 버전 문자열(nowrap) 길이까지 늘어 잘렸다 — `max-width: 100%`로 말줄임이 먹게
 - 버튼·탭 글자 `white-space: nowrap`, 차트 도구 줄은 줄바꿈 허용, 640px 이하에서 상단바 설명 숨김·메뉴 한 줄 가로 스크롤, 워크벤치 시트 제목 `min-width: 0`·시트 줄 줄바꿈
 
-![대시보드 430px 전후](images/webui/97-layout-dash-430-before-after.jpg)
-![워크벤치 430px 전후](images/webui/98-layout-workbench-430-before-after.jpg)
-![빈 차트 전후](images/webui/99-layout-metric-empty-before-after.jpg)
+![대시보드 430px 전후](../images/webui/97-layout-dash-430-before-after.jpg)
+![워크벤치 430px 전후](../images/webui/98-layout-workbench-430-before-after.jpg)
+![빈 차트 전후](../images/webui/99-layout-metric-empty-before-after.jpg)
 
 ### 회귀
 
@@ -6354,7 +6354,7 @@ sparkPoints=13   visibility=visible
 같은 락 때문에 앱 로그에는 이 대상의 다른 조회(Advisors 통계 등)가 소켓 읽기 제한에 걸려 커넥션이 broken 처리된 경고가 남았다(`SocketTimeoutException: Read timed out` 13건,
 락을 쥔 동안만). 대상 하나의 락이 플랫폼을 세우지 않고 조회 단위 실패로 끝났다는 134절 경계가 그대로 동작한 것이다.
 
-![실시간 세션 카드 — 락을 쥔 1517과 그 뒤에 막힌 네 세션, 상태 줄과 추이](images/webui/100-live-sessions.png)
+![실시간 세션 카드 — 락을 쥔 1517과 그 뒤에 막힌 네 세션, 상태 줄과 추이](../images/webui/100-live-sessions.png)
 
 ### 테스트
 
@@ -6436,8 +6436,8 @@ MockMvc는 SSE의 비동기 디스패치를 실제로 태우지 않는다. 그�
 (서버 elapsedMs와, 화면이 요청을 보낸 뒤 첫 조각을 받은 시각 — 클릭 측정보다 저장 대기 `flushSave` 만큼 짧다). 계측 뒤 새 워크시트(28)는 보관 처리했다.
 쓰는 중 화면에서는 JSON 순서(title, sql, explanation)대로 SQL이 먼저 완성되고 설명이 문장 중간까지 와 있다.
 
-![워크벤치 AI 답을 흘려 받는 중 — 단계 문구, 쓰이는 중인 설명, 먼저 완성된 SQL](images/webui/101-workbench-ai-streaming.png)
-![완성 뒤 — 가정까지 붙은 설명, 읽기 분류, v1 체크포인트 카드, 첫 글자 9.8초 표시](images/webui/102-workbench-ai-streamed-done.png)
+![워크벤치 AI 답을 흘려 받는 중 — 단계 문구, 쓰이는 중인 설명, 먼저 완성된 SQL](../images/webui/101-workbench-ai-streaming.png)
+![완성 뒤 — 가정까지 붙은 설명, 읽기 분류, v1 체크포인트 카드, 첫 글자 9.8초 표시](../images/webui/102-workbench-ai-streamed-done.png)
 
 ### 실측 2 — 자연어 진단: 단계가 보이는 시각
 
@@ -6455,8 +6455,8 @@ events=8  unparseable_events=0  content_type=text/event-stream  backend=cli
 브라우저 경로(Playwright, 관제 프록시 — 청크 결함을 고친 뒤)도 같은 질문으로 확인했다. 진단 클릭부터 첫 도구 줄이 보이기까지 4.883초, 결과까지 123.747초(도구 4개).
 진행 중 화면은 "AI가 2번째 판단을 내리는 중 · 5초 경과"와 첫 도구(query_stats)와 그 이유를, 끝난 뒤에는 기존 결과 화면에 소요 시간(123.6초)을 더해 보인다.
 
-![자연어 진단을 흘려 받는 중 — 지금 몇 번째 판단인지, 경과 시간, 이미 부른 도구와 이유](images/webui/103-diagnose-streaming-steps.png)
-![진단 결과 — 근본원인·확신도·사용 도구 4개·123.6초, 도구 호출 근거](images/webui/104-diagnose-result.jpg)
+![자연어 진단을 흘려 받는 중 — 지금 몇 번째 판단인지, 경과 시간, 이미 부른 도구와 이유](../images/webui/103-diagnose-streaming-steps.png)
+![진단 결과 — 근본원인·확신도·사용 도구 4개·123.6초, 도구 호출 근거](../images/webui/104-diagnose-result.jpg)
 
 **계측 결함 하나.** 첫 진단 계측은 역할 프록시를 거쳤는데 `JSONDecodeError: Invalid control character at: line 1 column 6352`로 깨졌다. 받은 원본 바이트를 떠 보니
 본문 앞이 `32\r\nevent:thinking...`이었다 — 프록시의 SSE 전달이 `res.fp.readline()`(원시 소켓)을 읽어, 앱이 보낸 chunked 청크 크기 줄을 본문에 섞고 있었다.
@@ -6555,7 +6555,7 @@ IndexAdviceTest(hasPlaceholders 포함)    tests 5 failures 0
 
 수정한 jar로 화면에서 다시 눌렀다(요청자 프록시, Playwright): AI 분석 클릭부터 분석 문단이 보이기까지 46.525초, 실행계획 결과는 `"Node Type": "Limit"`부터 채워졌다.
 
-![쿼리 상세 AI 분석 — 정규화 SQL의 제네릭 계획(Seq Scan·Sort), 규칙 지적, AI 1차 분석과 판단할 근거가 없는 것](images/webui/108-glass-query-ai.jpg)
+![쿼리 상세 AI 분석 — 정규화 SQL의 제네릭 계획(Seq Scan·Sort), 규칙 지적, AI 1차 분석과 판단할 근거가 없는 것](../images/webui/108-glass-query-ai.jpg)
 
 ### 4. 정리
 
@@ -6807,8 +6807,8 @@ Top Query 표가 1512px 노트북 폭에서 옆으로 넘쳐 쿼리 상세 오�
 브라우저 경로(Playwright, 관리자 프록시)로 흘리는 도중을 찍었다. 변경 요청 창에는 규칙 판정이 먼저 있고 AI 1차 소견이 문장 중간까지 와 있다(버튼 "AI 소견 작성 중...").
 찍은 뒤 이 티켓(#60)은 취소했다. 인시던트 리포트는 재료로 만든 리포트 위에 AI 요약 칸이 쓰이는 중이다.
 
-![변경 요청 올리기 — 규칙 판정이 먼저, AI 1차 소견이 쓰이는 중](images/webui/129-ticket-submit-streaming.jpg)
-![인시던트 리포트 — 재료로 만든 리포트가 먼저, AI 요약 칸이 쓰이는 중](images/webui/130-incident-report-streaming.jpg)
+![변경 요청 올리기 — 규칙 판정이 먼저, AI 1차 소견이 쓰이는 중](../images/webui/129-ticket-submit-streaming.jpg)
+![인시던트 리포트 — 재료로 만든 리포트가 먼저, AI 요약 칸이 쓰이는 중](../images/webui/130-incident-report-streaming.jpg)
 
 **찍다가 찾은 것 — 리포트 구간의 시간대.** 화면에서 20:22~20:36(KST)을 골랐는데 리포트 본문은 "구간: 2026-09-11 11:22 ~ 11:36"이었다. 서버 시각은 UTC이고(DbtowerApplication)
 마크다운에 시간대 표기가 없어, 읽는 사람은 9시간 어긋난 구간으로 읽는다. 132절에서 워크벤치 시각을 브라우저 시간대로 고친 것과 같은 계열이다. 리포트는 웹훅 카드와
@@ -6856,8 +6856,8 @@ PRESENTATION.md에 남아 있던 옛 디자인 화면 11장을 새 디자인으�
 400px에서 표가 47px 넘치는 것은 숫자 열(nowrap)의 최소 폭이다. 표는 자기 상자 안에서 스크롤되고 결과 패널·페이지는 넘치지 않는다(패널 366px = 366px).
 "1512px 고치기 전"은 첫 사진(126 1차)을 찍은 jar의 측정이고, 나머지 줄은 CSS 두 번 고친 jar를 차례로 띄워 같은 스크립트로 잰 것이다.
 
-![테이블 상세 — orders DDL·기본 통계·인덱스](images/webui/125-glass-table-detail-mysql.jpg)
-![실행계획 — 자리표시자를 값으로 채워 EXPLAIN, 풀스캔 판정. 표 폭 수정 후](images/webui/126-glass-explain.jpg)
+![테이블 상세 — orders DDL·기본 통계·인덱스](../images/webui/125-glass-table-detail-mysql.jpg)
+![실행계획 — 자리표시자를 값으로 채워 EXPLAIN, 풀스캔 판정. 표 폭 수정 후](../images/webui/126-glass-explain.jpg)
 
 ### 회귀
 
@@ -6933,10 +6933,10 @@ PRESENTATION.md에 남아 있던 옛 디자인 화면 11장을 새 디자인으�
 - 스키마 사용법 안내가 사이드바 바닥으로 떨어졌다 — 트리를 끝까지 늘려서(`flex: 1`). 내용만큼만 자라게(`flex: 0 1 auto`)
 - 티켓 목록의 상태 알약이 긴 SQL 줄 폭만큼 늘어났다 — 두 줄 격자(`auto auto`)의 둘째 열이 SQL 폭을 따라감. 줄바꿈 flex로
 
-![전 — 오른쪽 탭에 채팅·스키마·변경 티켓](images/webui/131-workbench-layout-before.jpg)
-![후 — 스키마에서 orders를 펼치고 선택 모드로 테이블·열을 채팅에 붙인 순간](images/webui/132-workbench-layout-after.jpg)
-![후 — 변경 티켓은 가운데 결과 탭, 목록과 상세를 나란히, 채팅·스키마는 그대로](images/webui/133-workbench-tickets-center.jpg)
-![후 — 400px, 한 열로 접힌 순서(인스턴스·스키마 -> 편집기 -> AI)](images/webui/134-workbench-400.jpg)
+![전 — 오른쪽 탭에 채팅·스키마·변경 티켓](../images/webui/131-workbench-layout-before.jpg)
+![후 — 스키마에서 orders를 펼치고 선택 모드로 테이블·열을 채팅에 붙인 순간](../images/webui/132-workbench-layout-after.jpg)
+![후 — 변경 티켓은 가운데 결과 탭, 목록과 상세를 나란히, 채팅·스키마는 그대로](../images/webui/133-workbench-tickets-center.jpg)
+![후 — 400px, 한 열로 접힌 순서(인스턴스·스키마 -> 편집기 -> AI)](../images/webui/134-workbench-400.jpg)
 
 ### README 워크벤치 사진 교체
 
@@ -7134,10 +7134,10 @@ macOS에서는 두 방식 모두 2초대에 끝나 재현되지 않았다. 고�
 
 관리자 프록시로 Playwright(`shots149/DocShots149.java`)가 찍었다. 자연어 진단은 claude CLI로 실제로 돌렸고, 두 번째 도구 호출이 흘러온 순간이다.
 
-![관제 모드 — 인스턴스 | 작업면(Top Query) | 늘 보이는 AI 칸](images/webui/141-unified-monitor-3col.jpg)
-![AI 칸에서 자연어 진단이 흘러오는 중 — query_stats, compare 호출과 그 이유](images/webui/142-unified-ai-diagnosing.jpg)
-![상단 전환으로 들어간 워크벤치 모드 — 147절 3칸 그대로](images/webui/143-unified-workbench-mode.jpg)
-![400px 관제 모드 — 인스턴스 -> 함대 개요 -> 시간대 -> 작업면 -> AI 칸 순서, 상단바 로그아웃이 화면 안](images/webui/144-unified-monitor-400.jpg)
+![관제 모드 — 인스턴스 | 작업면(Top Query) | 늘 보이는 AI 칸](../images/webui/141-unified-monitor-3col.jpg)
+![AI 칸에서 자연어 진단이 흘러오는 중 — query_stats, compare 호출과 그 이유](../images/webui/142-unified-ai-diagnosing.jpg)
+![상단 전환으로 들어간 워크벤치 모드 — 147절 3칸 그대로](../images/webui/143-unified-workbench-mode.jpg)
+![400px 관제 모드 — 인스턴스 -> 함대 개요 -> 시간대 -> 작업면 -> AI 칸 순서, 상단바 로그아웃이 화면 안](../images/webui/144-unified-monitor-400.jpg)
 
 ### 회귀
 
@@ -7229,8 +7229,8 @@ DBTOWER_E2E=1 PersonaUiE2ETest   7/7
 
 ### 화면 사진
 
-![전 — 테이블 -> 열 두 단계, 뷰 2개가 테이블처럼 섞이고 ordered_at이 "o…"로 잘림](images/webui/145-schema-tree-before.jpg)
-![후 — 루트 줄, 테이블/뷰 묶음, orders.id PK, 인덱스 2, 열 이름이 타입보다 먼저](images/webui/146-schema-tree-after.jpg)
+![전 — 테이블 -> 열 두 단계, 뷰 2개가 테이블처럼 섞이고 ordered_at이 "o…"로 잘림](../images/webui/145-schema-tree-before.jpg)
+![후 — 루트 줄, 테이블/뷰 묶음, orders.id PK, 인덱스 2, 열 이름이 타입보다 먼저](../images/webui/146-schema-tree-after.jpg)
 
 ### 회귀
 
@@ -7385,11 +7385,11 @@ SQL Server orders        키 표시 0                            PK 2 · FK 1 ·
 
 ### 화면 사진
 
-![전 — 키 표시 없음, NOT NULL이 두 줄, DDL이 펼쳐져 아래를 민다](images/webui/147-table-detail-before.jpg)
-![후 — 기본키·외래키 표시와 참조 링크, 가리키는 외래키와 ON DELETE, 접힌 DDL](images/webui/148-table-detail-after.jpg)
-![후 — SQL Server orders: customer_id에 인덱스가 없어 "인덱스 없음"](images/webui/151-table-detail-unindexed-fk.jpg)
-![후 — 결과 그리드: 열 1을 끌어 넓히고 행 3의 세로 키-값 상세](images/webui/149-grid-row-detail.jpg)
-![후 — 관제 관련 테이블 구조: 열 줄의 PK·FK와 fk 줄, 워크벤치와 같은 상세](images/webui/150-monitor-refschema-after.jpg)
+![전 — 키 표시 없음, NOT NULL이 두 줄, DDL이 펼쳐져 아래를 민다](../images/webui/147-table-detail-before.jpg)
+![후 — 기본키·외래키 표시와 참조 링크, 가리키는 외래키와 ON DELETE, 접힌 DDL](../images/webui/148-table-detail-after.jpg)
+![후 — SQL Server orders: customer_id에 인덱스가 없어 "인덱스 없음"](../images/webui/151-table-detail-unindexed-fk.jpg)
+![후 — 결과 그리드: 열 1을 끌어 넓히고 행 3의 세로 키-값 상세](../images/webui/149-grid-row-detail.jpg)
+![후 — 관제 관련 테이블 구조: 열 줄의 PK·FK와 fk 줄, 워크벤치와 같은 상세](../images/webui/150-monitor-refschema-after.jpg)
 
 ## 152. 변경 티켓 목록 — 열린 것만/전체 (2026-09-12)
 
@@ -7420,7 +7420,7 @@ SQL Server orders        키 표시 0                            PK 2 · FK 1 ·
 
 글자 대비(계산): 눌린 범위 버튼 흰 글자 / --primary #4f5ef7 4.91:1.
 
-![후 — 인스턴스 1: 열린 것 2(선택) · 전체 22, 승인된 티켓 둘이 맨 위](images/webui/152-tickets-scope-after.jpg)
+![후 — 인스턴스 1: 열린 것 2(선택) · 전체 22, 승인된 티켓 둘이 맨 위](../images/webui/152-tickets-scope-after.jpg)
 
 ### 회귀 (151·152절 공통)
 
@@ -7494,8 +7494,8 @@ MySQL은 외래키를 지워도 그 열의 인덱스(`idx_orders_customer`)를 �
 후(이 변경, 티켓 #74 외래키 삭제)    "orders 외래키 fk_orders_customer 사라짐 (customer_id -> customers(id))"
 ```
 
-![전 — 외래키를 추가한 실행인데 "제약조건은 아직 비교하지 않습니다"로 남았다](images/webui/153-exec-fk-before.jpg)
-![후 — 같은 종류의 실행 기록에 외래키가 생겼다는 줄이 남는다](images/webui/154-exec-fk-after.jpg)
+![전 — 외래키를 추가한 실행인데 "제약조건은 아직 비교하지 않습니다"로 남았다](../images/webui/153-exec-fk-before.jpg)
+![후 — 같은 종류의 실행 기록에 외래키가 생겼다는 줄이 남는다](../images/webui/154-exec-fk-after.jpg)
 
 ### 회귀
 
@@ -7559,7 +7559,7 @@ git ls-files 전수 NUL 검사        0 (이미지·jar 제외)
 
 ### 범위
 
-코드는 건드리지 않고 문서만 최신화했다. `docs/TECHNICAL-QA.md`가 71줄에서 멈춰 146~154절의 사건이 없던 것을 보강했다.
+코드는 건드리지 않고 문서만 최신화했다. `docs/portfolio/TECHNICAL-QA.md`가 71줄에서 멈춰 146~154절의 사건이 없던 것을 보강했다.
 특히 설계 판단을 짧게 확인할 수 있는 세 사건을 질문 답으로 올렸다.
 
 - 데모 외래키 티켓이 MySQL·SQL Server 변경 계정의 `REFERENCES` 권한에 막힌 것(151절)
@@ -7569,16 +7569,16 @@ git ls-files 전수 NUL 검사        0 (이미지·jar 제외)
 함께 고친 문서 색인:
 
 - `README.md`: AX 사례 수 12개로 갱신, 154절 NUL 사건 한 줄 추가
-- `docs/ROADMAP.md`: 완료 표에 154절 행 추가
-- `docs/PORTFOLIO-AX.md`: 로드맵 행과 사례 12 추가
+- `docs/work/ROADMAP.md`: 완료 표에 154절 행 추가
+- `docs/portfolio/PORTFOLIO-AX.md`: 로드맵 행과 사례 12 추가
 
 줄 수 확인:
 
 ```
-wc -l docs/TECHNICAL-QA.md docs/PORTFOLIO-AX.md docs/ROADMAP.md README.md
-      95 docs/TECHNICAL-QA.md
-     453 docs/PORTFOLIO-AX.md
-     721 docs/ROADMAP.md
+wc -l docs/portfolio/TECHNICAL-QA.md docs/portfolio/PORTFOLIO-AX.md docs/work/ROADMAP.md README.md
+      95 docs/portfolio/TECHNICAL-QA.md
+     453 docs/portfolio/PORTFOLIO-AX.md
+     721 docs/work/ROADMAP.md
      574 README.md
     1843 total
 ```
@@ -7702,8 +7702,8 @@ SQL Server(인스턴스 5, 권한 게이트 수정 뒤)
 
 ### 화면 사진
 
-![실행 기록 — CHECK 제약이 생겼다(PostgreSQL 티켓 #76)](images/webui/155-exec-check-added.jpg)
-![실행 기록 — 같은 제약이 사라졌다(티켓 #77), DB는 원래 상태로](images/webui/156-exec-check-removed.jpg)
+![실행 기록 — CHECK 제약이 생겼다(PostgreSQL 티켓 #76)](../images/webui/155-exec-check-added.jpg)
+![실행 기록 — 같은 제약이 사라졌다(티켓 #77), DB는 원래 상태로](../images/webui/156-exec-check-removed.jpg)
 
 ### 남긴 한계
 
@@ -7774,8 +7774,8 @@ Oracle에는 외래키의 ON UPDATE 개념이 없어 `onUpdate`가 null이다(15
 
 ### 화면 사진
 
-![실행 기록 — Oracle 외래키가 생겼다(티켓 #81)](images/webui/157-exec-oracle-fk-added.jpg)
-![실행 기록 — 같은 외래키가 사라졌다(티켓 #82), 스키마는 원래 구조로](images/webui/158-exec-oracle-fk-removed.jpg)
+![실행 기록 — Oracle 외래키가 생겼다(티켓 #81)](../images/webui/157-exec-oracle-fk-added.jpg)
+![실행 기록 — 같은 외래키가 사라졌다(티켓 #82), 스키마는 원래 구조로](../images/webui/158-exec-oracle-fk-removed.jpg)
 
 ### 이로써 닫힌 것
 
@@ -7851,7 +7851,7 @@ SQL Server(인스턴스 5) 행 10 · 축 30 · 첫 행 "인덱스 없이 훑음 
 첫 사진에서 고친 것 둘: 값과 단위가 세로로 떨어져 "1"과 "표본 비율"이 다른 항목처럼 읽혔고, 행마다 같은 note가 다섯 번 반복됐다.
 값·단위를 한 줄로 묶고 note를 목록 아래 한 번만 적었다. 미확보 표기도 흐린 글자에서 값 자리의 굵은 글자로 바꿨다(#5b6475/#f7f8fb 5.61:1).
 
-![안티패턴 신호 — 축마다 값·단위와 그 값을 준 지표 이름, 없는 축은 미확보](images/webui/159-antipattern-signals.jpg)
+![안티패턴 신호 — 축마다 값·단위와 그 값을 준 지표 이름, 없는 축은 미확보](../images/webui/159-antipattern-signals.jpg)
 
 ## 159. 플랜 플립 5기종 실태, 티켓 상세 읽기, 인덱스 제안의 기종별 한계 (2026-09-12)
 
@@ -7914,7 +7914,7 @@ PostgreSQL(인스턴스 1) 안내 숨김(hidden) — 되는 기종에 잔소리�
 
 안내를 넣다가 `.advisor-input`을 쪼개 버튼이 아랫줄로 떨어졌던 것을 되돌렸다 — 안내는 입력 줄 바깥에 둔다.
 
-![인덱스 제안 — 되지 않는 기종은 버튼을 누르기 전에 이유를 말한다](images/webui/161-advisor-unsupported.jpg)
+![인덱스 제안 — 되지 않는 기종은 버튼을 누르기 전에 이유를 말한다](../images/webui/161-advisor-unsupported.jpg)
 
 ### 티켓 상세 읽기 — 사용자가 지적한 화면
 
@@ -7932,7 +7932,7 @@ PostgreSQL(인스턴스 1) 안내 숨김(hidden) — 되는 기종에 잔소리�
 카드 3개(사유·규칙 판정·AI 1차 소견) · AI 소견 문단 1 · 옛 한 줄 형식 잔여 2줄(제출·승인 이력, 원래 한 줄이 맞다)
 ```
 
-![티켓 상세 — 사유·규칙 판정·AI 소견이 각자 카드로](images/webui/160-ticket-detail-blocks.jpg)
+![티켓 상세 — 사유·규칙 판정·AI 소견이 각자 카드로](../images/webui/160-ticket-detail-blocks.jpg)
 
 ## 160. 백로그 세 번째 재조사(테마 B·D), MongoDB 플랜 조회 헛발 제거 (2026-09-12)
 
@@ -8005,7 +8005,7 @@ system.profile 표본 1,023건 · queryHash 있음 302 · 없음 721
 ### 왜
 
 백로그가 세 번 연속 낡아 있던 뒤라(157~160절), 다음 일을 백로그가 아니라 **실제 운영 시나리오**에서 고르기로 했다.
-가장 가까운 시나리오는 [DEMO-5MIN](DEMO-5MIN.md)이다. 문서가 시키는 순서대로 역할을 바꿔 가며 눌러 보고,
+가장 가까운 시나리오는 [DEMO-5MIN](../portfolio/DEMO-5MIN.md)이다. 문서가 시키는 순서대로 역할을 바꿔 가며 눌러 보고,
 막히는 지점·화면 오류·문서와 실물의 어긋남을 그대로 기록했다. 판정은 눈이 아니라 API 응답과 대상 DB 상태로 했다.
 
 ### 완주 기록 (요청자 8802 -> 승인자 8803 -> 운영자 8804)
@@ -8223,11 +8223,11 @@ btn btn-primary btn-small 진단             7.26   적용
 기종 분기가 늘지 않은 것이 중요하다 — 자원 압박은 `DbmsOperator`의 능력으로 흡수했고,
 기종별 차이는 구현체 안의 SQL과 `unit`·`source` 문자열에만 남는다(아키텍처 원칙).
 
-![헬스 스코어 — 자원 압박 행에 무엇을 읽었는지가 함께 남는다](images/webui/162-score-resource.jpg)
+![헬스 스코어 — 자원 압박 행에 무엇을 읽었는지가 함께 남는다](../images/webui/162-score-resource.jpg)
 
-![SLO 카드 — 수치를 키우고 주석을 구분선 아래로 내려 결론이 먼저 읽힌다](images/webui/163-slo-card.jpg)
+![SLO 카드 — 수치를 키우고 주석을 구분선 아래로 내려 결론이 먼저 읽힌다](../images/webui/163-slo-card.jpg)
 
-![세션 표 — Query 열이 남는 폭을 가져가고 나머지 열은 밀리지 않는다](images/webui/164-session-table.jpg)
+![세션 표 — Query 열이 남는 폭을 가져가고 나머지 열은 밀리지 않는다](../images/webui/164-session-table.jpg)
 
 ### 캡처를 보다 찾은 것 — 세션 경과가 음수였다
 
@@ -8807,7 +8807,7 @@ GET /actuator/health                                       {"groups":["liveness"
 ## 169. AI 운영 작업 — Slack 한 문장에서 검증된 소견까지 (2026-09-15/16)
 
 진단 종류(쿼리·회귀·백업·SLO·Advisor·비용·장애·문의·리포트)를 한 작업 모델로 묶고, Slack·경보·웹 어디서 시작해도
-같은 권한·사실·검증·감사를 거치게 했다. 설계와 경계는 [AI-OPERATIONS-AUTOMATION.md](AI-OPERATIONS-AUTOMATION.md)에 있다.
+같은 권한·사실·검증·감사를 거치게 했다. 설계와 경계는 [AI-OPERATIONS-AUTOMATION.md](../design/AI-OPERATIONS-AUTOMATION.md)에 있다.
 여기에는 실제로 돌린 것과, 돌려보고 나서야 드러난 결함만 적는다.
 
 ### 이번에 정한 경계
@@ -8926,7 +8926,7 @@ Slack 결과 링크가 JSON API를 가리키면 눌러도 사람이 읽을 화�
 > 브라우저로 밟아 보니 **Slack이 실제로 보내는 주소(`?aiop=`만 있는)로는 아무 일도 일어나지 않았다.**
 > 코드를 읽고 확인한 것을 화면에서 확인했다고 적은 것이 잘못이다. 원인과 실측은 170절 결함 9번에 있다.
 
-![AI 운영 작업 카드](images/aiops-console-card.png)
+![AI 운영 작업 카드](../images/aiops-console-card.png)
 
 블록 순서는 검증되지 않은 내용 -> 규칙 판정 -> AI 1차 소견 -> 근거 -> 불확실한 점 -> 다음 조치 -> 승인 -> 사실 -> 참고 자료다.
 스레드에서 소견만 읽고 지나가는 사람이 확인 안 된 수치를 사실로 믿지 않게 경고를 소견 위에 세웠다.
@@ -9202,7 +9202,7 @@ SQL Server는 꺼진 상태 그대로다 — **쿨다운이 이어지지 않으�
 로그인 화면을 보고 "버튼이랑 배경이 너무 AI 티가 난다"는 피드백을 받았다. 요청은 셋이었다 — 하늘색 원톤, Apple Liquid Glass 느낌,
 부제("이기종 DBMS 운영 관리 플랫폼") 제거. 원칙 하나가 같이 왔다: **화면에 보이는 모든 내용을 먼저 머릿속에서 설계하고, 그에 맞게 구현한다.**
 
-![로그인 — 단색 하늘, 입력 한 묶음, 칸 안의 화살표 버튼, 바로 아래 안내 상자](images/webui/166-sky-login.jpg)
+![로그인 — 단색 하늘, 입력 한 묶음, 칸 안의 화살표 버튼, 바로 아래 안내 상자](../images/webui/166-sky-login.jpg)
 
 ### 두 번 틀리고 나서 바꾼 방향
 
@@ -9268,7 +9268,7 @@ Playwright로 뷰포트를 정확히 맞춰 쟀다(Chrome 확장 창 조절은 `
           입력 묶음 left 16 / right 374 = 안내 상자 left 16 / right 374 (끝선 일치)
 ```
 
-![휴대폰 폭 — 오류 한 줄과 안내 상자](images/webui/167-sky-login-mobile-error.jpg)
+![휴대폰 폭 — 오류 한 줄과 안내 상자](../images/webui/167-sky-login-mobile-error.jpg)
 
 ### 새 로그인 화면으로 실제 로그인이 되나
 
@@ -9442,10 +9442,10 @@ JPA `AttributeConverter`가 비밀번호 칸을 복호화하고, 한 인스턴�
 body::before content = none
 ```
 
-![관제 — 전](images/webui/168-sky-monitor-before.jpg)
-![관제 — 후](images/webui/169-sky-monitor-after.jpg)
-![워크벤치 — 전](images/webui/170-sky-workbench-before.jpg)
-![워크벤치 — 후](images/webui/171-sky-workbench-after.jpg)
+![관제 — 전](../images/webui/168-sky-monitor-before.jpg)
+![관제 — 후](../images/webui/169-sky-monitor-after.jpg)
+![워크벤치 — 전](../images/webui/170-sky-workbench-before.jpg)
+![워크벤치 — 후](../images/webui/171-sky-workbench-after.jpg)
 
 ### 테스트
 
@@ -9540,9 +9540,9 @@ static `maskLiterals`를 쓰는 query_stats·compare는 계속 가린다. `mask-
 | 보호 | 없음 | "쿼리 속 값은 ?로 가려서 보냅니다" + 툴팁(176절에서 확인한 범위만 말한다) |
 | 워크벤치 | 입력창 아래 정책 문단 | 대화 칸 맨 위 한 줄 |
 
-![대화가 열린 채팅](images/webui/172-chat-conversation.png)
-![대화 목록](images/webui/173-chat-conversation-list.png)
-![긴 인스턴스 이름 — 이름만 줄고 고정 문구는 보인다](images/webui/174-chat-header-long-name.png)
+![대화가 열린 채팅](../images/webui/172-chat-conversation.png)
+![대화 목록](../images/webui/173-chat-conversation-list.png)
+![긴 인스턴스 이름 — 이름만 줄고 고정 문구는 보인다](../images/webui/174-chat-header-long-name.png)
 
 ### 서버 대화가 실제로 이어지는가 (라이브, 실제 AI)
 
@@ -9607,9 +9607,9 @@ DBTOWER_E2E=1 ... --rerun-tasks  (혼자, 시작 12:58:04 UTC)
 SQL ID 값 자체는 정상이다 — MySQL은 digest(64자 16진), PostgreSQL은 부호 있는 64비트 queryid다. 통째로 보여 이상해 보였다.
 세그먼트 모양은 `.mon-tab`을 빌리지 않고 새로 뒀다 — `setupMonitorNav()`가 문서 전체의 `.mon-tab`을 잡아 상세 토글을 누르면 모니터 그룹이 숨었다.
 
-![상세 머리줄과 실행계획 토글](images/webui/175-querydetail-toggled.png)
-![표 SQL 툴팁](images/webui/176-querydetail-sql-tip.png)
-![더보기로 연 심층 진단 — 실행 버튼](images/webui/177-querydetail-more-menu.png)
+![상세 머리줄과 실행계획 토글](../images/webui/175-querydetail-toggled.png)
+![표 SQL 툴팁](../images/webui/176-querydetail-sql-tip.png)
+![더보기로 연 심층 진단 — 실행 버튼](../images/webui/177-querydetail-more-menu.png)
 
 ### 스크린샷에서 드러난 것 — 채팅이 "불러오는 중"에 10초 멈춤
 
@@ -9704,8 +9704,8 @@ DBTOWER_E2E=1 ... --rerun-tasks  (혼자, 시작 14:31:30 UTC)
 
 서버는 **마지막** ADMIN의 강등만 막는다(`SecurityController.setRole`). ADMIN이 둘 이상이면 자기 강등이 실제로 되므로 화면 경고는 중복이 아니다.
 
-![사용자·역할 — 적용 전 확인과 자기 강등 경고](images/webui/178-monitor-users-role.png)
-![MCP — 명령만 든 code, 접힌 제공 도구](images/webui/179-monitor-mcp-collapsed.png)
+![사용자·역할 — 적용 전 확인과 자기 강등 경고](../images/webui/178-monitor-users-role.png)
+![MCP — 명령만 든 code, 접힌 제공 도구](../images/webui/179-monitor-mcp-collapsed.png)
 
 ### 필터·빈 카드·툴팁
 
@@ -9714,7 +9714,7 @@ DBTOWER_E2E=1 ... --rerun-tasks  (혼자, 시작 14:31:30 UTC)
 - 지연 백분위·세션 표의 SQL 열도 178절의 강조 툴팁으로. 네이티브 `title` SQL 툴팁은 이제 없다
 - 서브탭(`.mon-tab`)은 178절 세그먼트와 같은 높이·모서리·선택색
 
-![환경 값이 둘일 때만 환경 필터가 보인다](images/webui/180-monitor-filter-visible.png)
+![환경 값이 둘일 때만 환경 필터가 보인다](../images/webui/180-monitor-filter-visible.png)
 
 ### 테스트
 
@@ -9760,9 +9760,9 @@ DBTOWER_E2E=1 ... --rerun-tasks  (혼자, 시작 15:09:10 UTC)
 - 워크시트: 왼쪽 아래 목록을 없애고 편집기 위 탭 줄로. ×는 탭 안 "보관할까요? [보관] [취소]", 활성 탭 더블클릭으로 이름 바꾸기, `+` 새 워크시트
 - 툴바는 알약 한 높이, 결과 탭은 178절 세그먼트와 같은 값, `.wb-mini-btn`·`.wb-icon-btn`은 공용 `.btn btn-small`로. 스키마 사용법 줄은 검색칸 옆 정보 툴팁으로
 
-![워크벤치 전체](images/webui/181-workbench-full.png)
-![워크시트 요청 실패가 탭 줄에 보인다](images/webui/182-workbench-worksheet-error.png)
-![탭 안 보관 확인](images/webui/183-workbench-archive-confirm.png)
+![워크벤치 전체](../images/webui/181-workbench-full.png)
+![워크시트 요청 실패가 탭 줄에 보인다](../images/webui/182-workbench-worksheet-error.png)
+![탭 안 보관 확인](../images/webui/183-workbench-archive-confirm.png)
 
 코더가 E2E로 잡은 결함 둘: 탭을 innerHTML로 다시 그릴 때 id를 유지해야 하는 `#wb-title`·`#wb-version`이 함께 사라져 인스턴스를 바꾸면 워크시트 요청이 아예 나가지 않았다, `dataset` 문자열과 숫자 id를 `===`로 비교해 보관 확인이 영영 뜨지 않았다.
 
@@ -9817,8 +9817,8 @@ PersonaUiE2ETest 혼자 6회        10/10 x6 (01:54~02:03 UTC)
 인스턴스 0대일 때 대화 칸도 같은 말을 세 번(부제·대화 영역·입력창 안내) 했고 그중 입력창 "왼쪽에서 인스턴스를 고르면"은 할 수 없는 일이었다 — 부제 한 줄만 남기고 새 대화 버튼을 감췄다.
 콘솔에는 인스턴스 등록 화면이 없다(`RegistryController`의 `POST /api/instances`·멱등 `PUT`만 있다). 버튼을 만들지 않고 실제 입구를 문장으로 적었다.
 
-![관제 첫 화면 — 인스턴스를 아직 고르지 않음](images/webui/184-first-console-none.png)
-![등록된 인스턴스 0대, ADMIN](images/webui/185-first-console-empty-admin.png)
+![관제 첫 화면 — 인스턴스를 아직 고르지 않음](../images/webui/184-first-console-none.png)
+![등록된 인스턴스 0대, ADMIN](../images/webui/185-first-console-empty-admin.png)
 
 ### 남은 입력 모양
 
@@ -9862,8 +9862,8 @@ PersonaUiE2ETest 혼자 6회        10/10 x6 (01:54~02:03 UTC)
 폭 맞춤을 끄면 "상세 오른쪽 끝이 스크롤 상자 밖", sticky를 빼면 "표를 밀자 상세 왼쪽이 상자 밖"으로 실패하는 것을 확인했다.
 CSS를 읽어 찾은 넘침 위험 다섯(스크롤 상자 없던 AI 리포트 표, `.command-grid`·`.score-contrib`의 `1fr`, `.fleet-row`의 `minmax(600px,1fr)`, 폭 제한 없는 차트 툴팁)도 미리 막았다 — 실측으로 재현한 넘침은 아니다.
 
-![390px — 쿼리 상세가 보이는 폭 안에](images/webui/186-narrow-console-390.png)
-![390px — 워크벤치](images/webui/187-narrow-workbench-390.png)
+![390px — 쿼리 상세가 보이는 폭 안에](../images/webui/186-narrow-console-390.png)
+![390px — 워크벤치](../images/webui/187-narrow-workbench-390.png)
 
 ### 테스트
 
@@ -10472,7 +10472,7 @@ MySQL      10,000행 PESSIMISTIC 락 보유 중앙값 75.2ms · 동시 작성자
 
 행 10배에 락 보유가 6~7배다. 100만 행이면 같은 방식으로 수 초~수십 초를 한 트랜잭션이 쥐고, 복제도 한꺼번에 민다.
 
-### 정한 것 (docs/bulk-change-spec.md)
+### 정한 것 (docs/design/bulk-change-spec.md)
 
 - 기본 키 범위로 쪼개 구간마다 따로 커밋한다. 기본값 배치 1,000행·쉼 100ms
 - 되돌리기는 사본이 아니라 **복원 검증에 성공한 최근 백업**을 실행 전 조건으로 걸어 보장한다

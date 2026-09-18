@@ -8,9 +8,9 @@ lakehouse에 잇는 작업의 종합 기록이다. 2026-07-18 구현.
 관통 원칙: **읽고 판정하고 기록하는 것은 깊게, 대상 DB를 바꾸는 실행은 기존 경계
 (ADMIN·gh-ost·사람) 뒤에 둔다.** 관제탑이 대상 DB에 임의 DDL을 실행하면 다른 제품이 된다.
 
-- 상세 재현 기록: [VERIFICATION.md](VERIFICATION.md) 105~109절
+- 상세 재현 기록: [VERIFICATION.md](../verify/VERIFICATION.md) 105~109절
 - 블로그 서사: [dbtower 20편](https://github.com/dj258255/IT-Oasis)(운영 병목 다섯 곳)
-- 로드맵 명세: [ROADMAP.md](ROADMAP.md) "운영 병목 아크 B1~B5"
+- 로드맵 명세: [ROADMAP.md](../work/ROADMAP.md) "운영 병목 아크 B1~B5"
 
 ---
 
@@ -47,9 +47,9 @@ gossip 필드를 흘려 매 수집 오탐. 파라미터 diff도 오염하던 기
 
 라이브: work_mem 4096→8192 변경 → 같은 서버 인스턴스 2개 감지 → 웹훅 카드 발사.
 
-![설정 변경 이력 콘솔](images/webui/56-config-drift.png)
+![설정 변경 이력 콘솔](../images/webui/56-config-drift.png)
 
-![설정 변경 감지 Discord 카드](card-config-drift.png)
+![설정 변경 감지 Discord 카드](../images/card-config-drift.png)
 
 ---
 
@@ -77,11 +77,11 @@ gossip 필드를 흘려 매 수집 오탐. 파라미터 diff도 오염하던 기
 라이브: MySQL users `ADD COLUMN nickname VARCHAR(32) NOT NULL` → R-LOCK·R-NOTNULL·
 R-LOCK-OK(8,118행) + AI 소견 → 승인 → 감사 2건.
 
-![리뷰 게이트 콘솔](images/webui/57-review-gate.png)
+![리뷰 게이트 콘솔](../images/webui/57-review-gate.png)
 
-![변경 리뷰 요청 카드](card-review-request.png)
+![변경 리뷰 요청 카드](../images/card-review-request.png)
 
-![변경 리뷰 승인 카드](card-review-decision.png)
+![변경 리뷰 승인 카드](../images/card-review-decision.png)
 
 ---
 
@@ -101,7 +101,7 @@ R-LOCK-OK(8,118행) + AI 소견 → 승인 → 감사 2건.
 
 라이브: 4기종 적재·Oracle 0행(UNSUPPORTED)·심은 미사용 인덱스에 "관측 0일" 라벨.
 
-![FinOps 관측 기간 라벨](images/webui/58-index-observation.png)
+![FinOps 관측 기간 라벨](../images/webui/58-index-observation.png)
 
 ---
 
@@ -120,9 +120,9 @@ R-LOCK-OK(8,118행) + AI 소견 → 승인 → 감사 2건.
 라이브(dbtower-self 2시간): AI가 "지연이 읽은 행수와 나란히→워크로드 증가 가능성, work_mem은
 4분 net-zero라 악화 설명 어려움, 근거 부족" 정직 판정.
 
-![인시던트 리포트 콘솔](images/webui/59-incident-report.png)
+![인시던트 리포트 콘솔](../images/webui/59-incident-report.png)
 
-![인시던트 리포트 카드](card-incident.png)
+![인시던트 리포트 카드](../images/card-incident.png)
 
 ---
 
@@ -140,7 +140,7 @@ DBA가 매달 손으로 만드는 정기 점검 보고서 자동화. 기간 전�
 
 라이브(dbtower-self 30일): 헬스 72점(C)·백업 FRESH·중복 인덱스 경고·낭비 9건·설정 변경 2건.
 
-![월간 점검 리포트 콘솔](images/webui/60-monthly-report.png)
+![월간 점검 리포트 콘솔](../images/webui/60-monthly-report.png)
 
 ---
 

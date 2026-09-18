@@ -73,7 +73,7 @@ public class AiOperationWorkflow {
                                RegistryService registry, FactCollector collector, AiAnalyzer analyzer,
                                AuditTrail auditTrail, JobViews views, AiOperationSettings settings,
                                PlatformTransactionManager transactionManager, AiOperationMetrics metrics,
-                               @Value("${dbtower.ai.rules-path:docs/ai-analysis-rules.md}") String rulesPath) {
+                               @Value("${dbtower.ai.rules-path:docs/design/ai-analysis-rules.md}") String rulesPath) {
         this.jobs = jobs;
         this.results = results;
         this.registry = registry;
