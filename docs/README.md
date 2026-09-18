@@ -33,7 +33,7 @@ README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. �
 | 3 | [DESIGN.md](DESIGN.md) · [modules/](modules/) | 현재 아키텍처와 핵심 결정, Modulith가 생성한 모듈 의존 |
 | 4 | [MANUAL-TEST.md](MANUAL-TEST.md) | 역할별 계정으로 변경 티켓 흐름을 손으로 확인하는 절차 |
 | 5 | [VERIFICATION.md](VERIFICATION.md) | 고치려는 기능의 과거 결함과 측정 — 아래 "최근 검증 기록"에서 절 번호를 찾는다 |
-| 6 | [bulk-change-spec.md](bulk-change-spec.md) | 대량 일괄 변경의 실행 방식·안전 기준 착수 명세(#101~#105, 진행 중) |
+| 6 | [bulk-change-spec.md](bulk-change-spec.md) | 대량 일괄 변경의 실행 방식·안전 기준. 5기종 전부와, 담지 않기로 판정한 범위(여러 테이블·`_id` 타입이 섞인 컬렉션)까지 |
 
 ### 리뷰어·평가자 — 설계와 근거를 확인하는 사람
 
@@ -41,7 +41,7 @@ README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. �
 |---|---|---|
 | 1 | [PORTFOLIO-ONEPAGER.md](PORTFOLIO-ONEPAGER.md) | 문제, 해법, 대표 수치 한 장 |
 | 2 | [TECHNICAL-QA.md](TECHNICAL-QA.md) | 설계·안전·검증에 관한 질문과 답 |
-| 3 | [experiments/](experiments/) | 안전장치의 비용을 잰 실험(E1~E6). 표와 CSV는 실험 코드가 생성하며 손으로 고치지 않는다 |
+| 3 | [experiments/](experiments/) | 두 갈래다. 안전장치의 비용을 잰 실험(E1~E6, 표와 CSV를 실험 코드가 생성한다)과, AI로 나가는 값의 가림을 잰 실험(조건 A~E·수준 셋). 뒤쪽은 응답 원자료가 `.jsonl`이고 판정 표는 판정자 셋의 결과라 일치율과 함께 읽어야 한다 |
 | 4 | [CHANGELOG.md](../CHANGELOG.md) -> [ROADMAP.md](ROADMAP.md) | 릴리스별 변경, 남은 백로그와 의도적으로 하지 않는 범위 |
 | 5 | [PRESENTATION.md](PRESENTATION.md) · [PORTFOLIO-AX.md](PORTFOLIO-AX.md) | 발표 원고, AI를 운영 플랫폼에 안전하게 붙인 사례 |
 
@@ -49,8 +49,8 @@ README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. �
 
 | 그림 | 내용 | 주의 |
 |---|---|---|
-| [architecture-detail.svg](architecture-detail.svg) | 17개 모듈, 5개 DBMS, 신뢰 경계, AI 운영 작업 실행면 | Flyway V47 기준(2026-09-18) |
-| [erd.svg](erd.svg) | 핵심 데이터 도메인과 증거 관계 | V47 기준 — AI 운영 작업·대화·경보 쿨다운·수집 상태 포함 |
+| [architecture-detail.svg](architecture-detail.svg) | 17개 모듈, 5개 DBMS, 신뢰 경계, AI 운영 작업 실행면 | Flyway V47 기준 — V48의 대량 변경 테이블 둘은 그림에 없다 |
+| [erd.svg](erd.svg) | 핵심 데이터 도메인과 증거 관계 | V47 기준 — AI 운영 작업·대화·경보 쿨다운·수집 상태 포함. V48의 `bulk_change_run`·`bulk_change_batch`는 아직 없다 |
 | [insight-flow.svg](insight-flow.svg) | 발견, AI 분석, 승인, 실행, 검증의 책임 흐름 | |
 | [deployment-flow.svg](deployment-flow.svg) | CI 게이트, 멀티아키텍처 이미지, 런타임과 IaC 범위 | |
 
