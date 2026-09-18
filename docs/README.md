@@ -49,12 +49,18 @@ README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. �
 
 | 그림 | 내용 | 주의 |
 |---|---|---|
+| [architecture-core.svg](architecture-core.svg) | **먼저 볼 것** — 이 플랫폼이 보장하는 넷만. 상자 아홉 개 | 손그림(rough.js), 원본은 `diagrams/architecture-core.mjs` |
+| [erd-core.svg](erd-core.svg) | **먼저 볼 것** — 인스턴스에 매달린 세 갈래(관측·변경 증거·백업) | 손그림(rough.js), 원본은 `diagrams/erd-core.mjs` |
 | [architecture-detail.svg](architecture-detail.svg) | 17개 모듈, 5개 DBMS, 신뢰 경계, AI 운영 작업 실행면 | Flyway V47 기준 — V48의 대량 변경 테이블 둘은 그림에 없다 |
 | [erd.svg](erd.svg) | 핵심 데이터 도메인과 증거 관계 | V47 기준 — AI 운영 작업·대화·경보 쿨다운·수집 상태 포함. V48의 `bulk_change_run`·`bulk_change_batch`는 아직 없다 |
 | [insight-flow.svg](insight-flow.svg) | 발견, AI 분석, 승인, 실행, 검증의 책임 흐름 | |
 | [deployment-flow.svg](deployment-flow.svg) | CI 게이트, 멀티아키텍처 이미지, 런타임과 IaC 범위 | |
 
 편집 원본은 같은 이름의 `.mmd`입니다. 그림을 고치면 원본과 SVG를 함께 갱신합니다.
+
+`*-core.svg` 둘만 예외로 `diagrams/`의 자바스크립트가 만듭니다. mermaid 도 같은 rough.js 로 손그림을
+그리지만 노드를 자동 배치해, 개수가 적을수록 오히려 자리가 어색해집니다. 이 둘은 자리를 직접 잡았습니다.
+다시 만들려면 `cd docs/diagrams && npm i && npm run build` — 앱 빌드와는 무관합니다.
 
 ## 최근 검증 기록
 
