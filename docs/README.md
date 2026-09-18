@@ -17,6 +17,9 @@ README에는 제품 개요와 실행에 필요한 최소 정보만 둡니다. �
 | [diagrams/](diagrams/) | 그림과 그 생성기 |
 | [images/](images/) · [modules/](modules/) · [eval/](eval/) | 화면 캡처, Modulith가 생성한 모듈 문서, 평가 세트 |
 
+그림의 `*-flat.svg`는 글자를 path로 바꾼 것이다. 웹에서는 원본(`*-core.svg`)이 가볍고 글자 선택·검색이 되지만,
+PDF로 인쇄하면 `<text>`가 Type 3 글꼴로 박혀 문서 전체에 따라붙는다. 인쇄물에는 flat 쪽을 쓴다.
+
 ## 누가 읽나
 
 ### 운영자 — 설치하고 대상 DB를 붙이는 사람
