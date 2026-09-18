@@ -20,7 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 원칙: 관제 조회는 VIEWER부터, 토큰 조회·인스턴스 등록은 ADMIN만, 기계는 Bearer 토큰.
  * 사람별 역할(요청자·승인자·운영자)의 행렬은 PersonaAccessTest가 본다.
  */
-@SpringBootTest(properties = {"dbtower.security.api-token=test-api-token", "dbtower.security.mcp-token=test-mcp-token"})
+@SpringBootTest
 @AutoConfigureMockMvc
 class SecurityConfigTest {
 

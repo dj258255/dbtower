@@ -45,7 +45,6 @@ import static com.microsoft.playwright.assertions.PlaywrightAssertions.setDefaul
 @EnabledIfEnvironmentVariable(named = "DBTOWER_E2E", matches = "1")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-                "dbtower.security.api-token=test-api-token",
                 // 이 클래스는 한 사람이 메서드마다 작업을 맡긴다. 운영 한도(3건)는 모델 호출 비용 가드라
                 // 화면이 보는 값이 아니고, 여기서 확인하려는 네 동작과도 무관하다 — 테스트가 한도에 걸려
                 // "진행 중인 작업이 3건"으로 거절당하는 것은 화면 결함이 아니라 픽스처의 문제다.

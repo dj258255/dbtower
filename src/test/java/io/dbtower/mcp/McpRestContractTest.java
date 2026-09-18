@@ -30,7 +30,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 문자열 결합으로 만들어져 실행 없이는 얻을 수 없고, 이 계약을 지키는 다른 자동 수단이 없다.
  */
 @SpringBootTest
-@ActiveProfiles("test")
 class McpRestContractTest {
 
     /** URL 조각은 /, ?, & 로 시작한다 — args.get("instanceId") 같은 인자 이름 리터럴과 구분하는 규칙. */

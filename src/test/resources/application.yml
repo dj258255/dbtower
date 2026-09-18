@@ -30,6 +30,14 @@ spring:
       continue-on-error: true
 
 dbtower:
+  # 토큰을 여기서 고정한다 — 값이 필요해서가 아니라 컨텍스트를 나누지 않기 위해서다(#144).
+  # @SpringBootTest(properties = ...) 는 스프링 컨텍스트 캐시 키의 일부라, 이 한 줄 때문에
+  # 열 개가 넘는 클래스가 저마다 컨텍스트를 새로 띄웠다(한 번에 약 18초).
+  # 미설정이면 ApiTokenProvider 가 임의 토큰을 만들어 저장하므로, 고정값을 준다고 해서
+  # 검증이 약해지지 않는다 — 토큰 인증을 실제로 보는 테스트는 그대로 이 값을 쓴다.
+  security:
+    api-token: test-api-token
+    mcp-token: test-mcp-token
   snapshot:
     interval-ms: 3600000   # 테스트 중 폴러가 돌지 않게 사실상 정지
     retention-sweep-ms: 3600000

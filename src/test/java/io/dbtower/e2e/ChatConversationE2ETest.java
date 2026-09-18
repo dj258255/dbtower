@@ -48,8 +48,7 @@ import static com.microsoft.playwright.assertions.PlaywrightAssertions.setDefaul
  * <p>돌리는 법: {@code ./gradlew playwrightInstall && DBTOWER_E2E=1 ./gradlew test --tests '*ChatConversationE2ETest'}
  */
 @EnabledIfEnvironmentVariable(named = "DBTOWER_E2E", matches = "1")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "dbtower.security.api-token=test-api-token")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ChatConversationE2ETest {
 
     private static final String PASSWORD = "e2e-chat-pass-1234";

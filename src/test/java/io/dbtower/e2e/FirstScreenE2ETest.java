@@ -41,8 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 대상 DB는 필요 없다 — 인스턴스는 닿지 않는 주소(127.0.0.1:1)로 등록한다.
  */
 @EnabledIfEnvironmentVariable(named = "DBTOWER_E2E", matches = "1")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "dbtower.security.api-token=test-api-token")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class FirstScreenE2ETest {
 
     private static final String PASSWORD = "firstscreen-e2e-pass-1234";

@@ -25,7 +25,7 @@ Java 21 + Spring Boot 4로 만들었으며 웹 콘솔은 별도 빌드 체인이
 최근 백업이며, 그 백업이 없으면 실행을 거부합니다. 취소해도 이미 커밋한 배치는 되돌리지 않고,
 어디까지 적용됐는지는 마지막 키로 남깁니다.
 
-![인덱스 제안부터 실행과 전후 비교까지](docs/images/demo-change-flow-glass.gif)
+![관제 첫 화면 — 헬스 스코어, 백업 신선도, 조회 구간 한 줄, AI 어시스턴트](docs/images/webui/188-console-first-screen.jpg)
 
 ## 주요 기능
 
@@ -159,7 +159,18 @@ MSSQL_SA_PASSWORD='...' docker --context colima-mssql2022 run -d \
 사용하며 구현, 엔티티, 저장소는 각 모듈의 `internal` 패키지에 숨깁니다. 순환 의존과
 레이어 위반은 테스트와 규약 검사에서 실패합니다.
 
-![DBTower 아키텍처](docs/architecture-detail.svg)
+![DBTower 아키텍처 핵심](docs/architecture-core.svg)
+
+보장하는 것은 넷입니다. 입구가 사람과 에이전트 둘이고, 조회와 변경이 다른 계정으로 갈리며,
+AI는 판단자가 아니라 1차 분석기이고, 플랫폼 저장소는 대상 DB와 분리됩니다. 모듈 17개가 모두
+그려진 상세본은 [architecture-detail.svg](docs/architecture-detail.svg)에 있습니다.
+
+데이터 모델도 같은 방식으로 핵심만 추렸습니다. 인스턴스 하나에 관측·백업·변경 증거가 매달리고,
+변경은 요청부터 실행까지 한 사슬로 남습니다.
+
+![DBTower 데이터 모델 핵심](docs/erd-core.svg)
+
+전체 표 관계는 [erd.svg](docs/erd.svg)에 있습니다.
 
 핵심은 `operator` 모듈입니다. 새 DBMS 지원은 Operator 구현체가 본체이고 enum, 팩토리,
 백업 도구, JDBC 드라이버, 화면 자산은 등록 절차로 다룹니다. 전체 구조는

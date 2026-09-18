@@ -64,3 +64,5 @@ __pycache__/
 integrations/**/.venv/
 .fastembed_cache/
 .commandcode/
+docs/diagrams/node_modules/
+docs/diagrams/package-lock.json
