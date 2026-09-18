@@ -11,7 +11,7 @@
 | MySQL | 8.4.11 | 100000행(VIP 2000, GOLD 18000, NORMAL 80000) | 200000행(CANCELLED 2000, PAID 190000, REFUND 8000) |
 | PostgreSQL | PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit | 100000행(NORMAL 80000, VIP 2000, GOLD 18000) | 200000행(CANCELLED 2000, PAID 190000, REFUND 8000) |
 
-- 실행 일시: 2026-09-18T03:04:47.084586+09:00
+- 실행 일시: 2026-09-18T09:22:37.884913+09:00
 - 모델: 설정값 `claude-opus-4-8` (CLI 모드는 제품이 --model을 넘기지 않으므로 실제 모델은 CLI 기본값), effort=high, max_tokens=8192, 백엔드=cli
 - 호출: 45회 = 사례 15 × 조건 3, 조건 비율 A 15회 B 15회 C 15회 
 - 오류(정확도 계산에서 제외): A 0건 B 0건 C 0건 
@@ -95,7 +95,7 @@
 ## 계획에 리터럴이 찍혔는가 (사례별 원문 발췌)
 
 - **L1** (MySQL) 계획에 있는 민감 리터럴: `1012345678`
-  - `{ "query_block": { "select_id": 1, "cost_info": { "query_cost": "10094.45" }, "table": { "table_name": "exp_mask_customers", "access_type": "ALL", "possible_key…`
+  - `{ "query_block": { "select_id": 1, "cost_info": { "query_cost": "10096.75" }, "table": { "table_name": "exp_mask_customers", "access_type": "ALL", "possible_key…`
 - **L2** (MySQL) 계획에 있는 민감 리터럴: `%@gmail.com`, `@gmail.com`
   - `…": [ "id", "email" ], "attached_condition": "(`sample`.`exp_mask_customers`.`email` like '%@gmail.com')" } } }`
 - **L3** (MySQL) 계획에 있는 민감 리터럴: 없음
@@ -107,9 +107,9 @@
 - **C2** (MySQL) 계획에 있는 민감 리터럴: `2026-01-01`
   - `…, "created_at" ], "attached_condition": "(`sample`.`exp_mask_orders`.`created_at` >= DATE'2026-01-01')" } } }`
 - **L5** (PostgreSQL) 계획에 있는 민감 리터럴: `%@gmail.com`, `@gmail.com`
-  - `… "Total Cost": 2269.00, "Plan Rows": 9091, "Plan Width": 8, "Filter": "((email)::text ~~ '%@gmail.com'::text)" } } ]`
+  - `…"Total Cost": 2269.00, "Plan Rows": 20202, "Plan Width": 8, "Filter": "((email)::text ~~ '%@gmail.com'::text)" } } ]`
 - **L6** (PostgreSQL) 계획에 있는 민감 리터럴: `PAID`
-  - `…otal Cost": 3975.00, "Plan Rows": 190313, "Plan Width": 12, "Filter": "((status)::text = 'PAID'::text)" } } ]`
+  - `…otal Cost": 3975.00, "Plan Rows": 190087, "Plan Width": 12, "Filter": "((status)::text = 'PAID'::text)" } } ]`
 - **L7** (PostgreSQL) 계획에 있는 민감 리터럴: `137`, `281`, `499`
   - `…4,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,1…`
 - **L8** (PostgreSQL) 계획에 있는 민감 리터럴: `2000-01-01`
@@ -117,7 +117,7 @@
 - **C3** (PostgreSQL) 계획에 있는 민감 리터럴: `kim@exp.test`
   - `…al Cost": 2519.00, "Plan Rows": 500, "Plan Width": 8, "Filter": "(lower((email)::text) = 'kim@exp.test'::text)" } } ]`
 - **C4** (PostgreSQL) 계획에 있는 민감 리터럴: `VIP`
-  - `… "Total Cost": 2269.00, "Plan Rows": 2047, "Plan Width": 27, "Filter": "((grade)::text = 'VIP'::text)" } ] } ] } } ]`
+  - `… "Total Cost": 2269.00, "Plan Rows": 1960, "Plan Width": 27, "Filter": "((grade)::text = 'VIP'::text)" } ] } ] } } ]`
 - **L9** (MySQL) 계획에 있는 민감 리터럴: `99000`, `99100`, `2026-08-01`
   - `…nt", "created_at" ], "attached_condition": "((`sample`.`exp_mask_orders`.`amount` between 99000 and 99100) and (`sample`.`exp_mask_orders`.`created_at` >= DATE'2026-08-01'))" } } }`
 - **L10** (MySQL) 계획에 있는 민감 리터럴: `2020-01-01`
