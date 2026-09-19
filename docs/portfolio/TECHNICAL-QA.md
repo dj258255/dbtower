@@ -63,8 +63,8 @@ VACUUM 후에도 공간 미반환).
 **Q. 셀프호스트인데 저장소를 하나로 두면 나중에 부담 아닌가요?**
 규모가 커지면 분리가 이깁니다. 다만 **셀프호스트일수록 부품 수가 비용**입니다 — 저장소를 하나 더 두면
 설치하는 사람이 백업·업그레이드·장애 지점을 둘 관리하게 됩니다. 상용 제품도 갈립니다. pganalyze는
-PostgreSQL 하나, Percona PMM은 VictoriaMetrics + PostgreSQL 둘입니다. 장기 보관은 아예 범위 밖으로
-빼고 lakehouse 몫이라 적었습니다 — 메타 DB에는 7일치만 둡니다.
+PostgreSQL 하나, Percona PMM은 VictoriaMetrics + PostgreSQL 둘입니다. DBTower는 저장소를 추가하지
+않고, 원본은 짧게 보관합니다. 시간·일 집계의 메타 DB 장기 보관은 외부 lakehouse를 대체할 다음 설계입니다.
 
 ## 변경 실행의 안전
 

@@ -75,7 +75,7 @@ public class UnusedIndexAnalyzer implements FinOpsAnalyzer {
                     "사용 통계상 스캔 0회(통계 리셋 이후 누적)" + size + observed
                             + ". 미사용 인덱스는 쓰기마다 갱신 비용을 물고 저장공간을 잡아먹는다.",
                     "관측 기간이 짧으면(또는 그 사이 서버가 재기동했으면) 0회는 미사용이 아닐 수 있으니 "
-                            + "분기 단위 장기 판정(lakehouse)과 함께 보고, 유니크·FK 지원 인덱스가 아니면 삭제 후보로 검토한다. 실행은 사람이 한다."));
+                            + "장기 관측 기간과 함께 보고, 유니크·FK 지원 인덱스가 아니면 삭제 후보로 검토한다. 실행은 사람이 한다."));
         }
         return candidates;
     }

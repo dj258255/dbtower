@@ -25,7 +25,7 @@ import java.util.List;
  * 각 operator의 쿼리 타임아웃이 이미 지킨다). 수집 불가/미지원 기종은 빈 목록이 정상 —
  * 조용히 건너뛴다(B1의 정직 표기를 데이터에도 적용: 없는 걸 지어내지 않는다).
  *
- * <p>보존은 query_snapshot과 대칭(기본 7일) — 장기 이력은 lakehouse 몫이고, 여기는
+ * <p>보존은 query_snapshot과 대칭(기본 7일) — 장기 이력은 메타 DB 집계가 맡고, 여기는
  * 관제 DB가 무한 성장하지 않는 것이 우선이다(SnapshotRetentionJob과 같은 근거).
  * HA: 수집·보존 모두 ShedLock으로 노드 배타.
  */

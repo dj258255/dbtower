@@ -10966,3 +10966,27 @@ UPDATE orders SET status = 'DONE' ...         -> 통과
 
 복합 키는 어느 열이든 걸린다. DELETE는 값을 바꾸지 않아 해당 없다. MongoDB는 `_id` 자체를 바꾸는 갱신을
 서버가 거부하므로 이 검사가 덮지 않는다.
+
+## 203. 외부 lakehouse 연동 제거 (2026-09-20)
+
+메타 PostgreSQL을 운영 이력의 단일 저장소로 정하고, 외부 DuckLake·Metabase 서빙과 장기 베이스라인
+writeback을 제거했다. `V50__drop_lakehouse_baseline.sql`은 이미 적용된 V24를 고치지 않고 수신 전용
+`baseline_longterm` 테이블을 제거한다. MCP의 `lakehouse_query`·`lakehouse_card_create`도 함께 없애
+외부 분석계 API·토큰 범위가 남지 않게 했다.
+
+```bash
+./gradlew compileJava
+./scripts/check-conventions.sh
+./gradlew test --tests 'io.dbtower.mcp.McpProtocolHandlerTest' --tests 'io.dbtower.insight.BaselineServiceTest' --no-build-cache
+docker compose up -d
+```
+
+```
+compileJava                         BUILD SUCCESSFUL
+check-conventions.sh                규약 검사 전부 통과(9종)
+McpProtocolHandlerTest·BaselineServiceTest  BUILD SUCCESSFUL
+docker compose up -d                Docker daemon에 연결할 수 없어 미실행
+```
+
+Docker Desktop이 실행 중이지 않아 실제 PostgreSQL 전체 마이그레이션 적용은 이 환경에서 확인하지 못했다.
+데몬을 시작한 뒤 빈 PostgreSQL에 전체 Flyway 마이그레이션을 적용해 V50을 확인해야 한다.

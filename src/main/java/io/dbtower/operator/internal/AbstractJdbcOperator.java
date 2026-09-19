@@ -187,7 +187,7 @@ public abstract class AbstractJdbcOperator implements DbmsOperator {
      * 그 뒤 세미콜론 검사가 통째로 무력화됐다 — {@code SELECT 1 /* ' *&#47;; DROP TABLE x}가 통과했다.
      * 반대로 {@code SELECT 1 /* ; *&#47;}처럼 주석 안의 세미콜론은 거부되는 오탐도 있었다. 양방향 파손이었다.
      *
-     * <p>같은 저장소의 {@code LakehouseController}가 이미 "주석을 걷어낸 뒤 판정"을 쓰고 있었다.
+     * <p>읽기 전용 경계는 주석을 걷어낸 뒤 판정해야 한다.
      * 두 read-only 게이트가 서로 다른 강도로 병존하던 것을 여기서 맞춘다.
      *
      * <p>CTE({@code WITH ... SELECT})도 허용한다 — 실무 SQL의 상당 비중인데 거부되고 있었다.

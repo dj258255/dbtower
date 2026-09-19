@@ -69,7 +69,7 @@ else
 fi
 
 # 5) 읽기 전용 게이트가 주석을 걷어낸 뒤 판정하는지 — 리뷰에서 실제로 뚫렸던 지점이다.
-#    두 게이트(requireSelect / LakehouseController)가 서로 다른 강도로 병존하지 않게 못 박는다.
+#    모든 읽기 전용 게이트가 같은 기준을 따르도록 못 박는다.
 hits=""
 grep -q "canonical(sql)" src/main/java/io/dbtower/operator/internal/AbstractJdbcOperator.java \
     || hits="AbstractJdbcOperator.requireSelect가 canonical(주석·인용 제거) 사본으로 판정하지 않는다"
@@ -147,10 +147,6 @@ for p in root.rglob("*"):
     except Exception:
         continue
     for m in path.finditer(text):
-        # "lakehouse docs/CONTRACT.md" 처럼 다른 저장소의 문서를 가리키는 것은 이 검사의 대상이 아니다
-        before = text[max(0, m.start() - 40):m.start()]
-        if "lakehouse" in before:
-            continue
         if not (root / m.group(0)).exists():
             bad.append(str(p) + " -> " + m.group(0))
 

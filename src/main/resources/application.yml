@@ -102,7 +102,7 @@ dbtower:
     interval-ms: 1000         # 샘플 주기. 락은 초 단위로 생겼다 사라지므로 1초여야 의미가 있다
     max-sessions-per-tick: 500 # 상한 초과 시 elapsed 내림차순으로 자르고 dropped로 기록한다
     workers: 4                # 인스턴스 병렬 샘플링 워커
-    retention-days: 7         # query_snapshot·wait_event_snapshot과 대칭. 장기는 lakehouse 몫
+    retention-days: 7         # query_snapshot·wait_event_snapshot과 대칭. 장기 보관은 메타 DB 집계가 맡는다
     retention-sweep-ms: 3600000
 
   # 실시간 세션 스트림(SSE, VERIFICATION 140절) — 화면이 열려 있는 동안만 대상별로 한 번씩 조회해 구독자 전원에게 나눈다.

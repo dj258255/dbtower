@@ -22,9 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
  * 벌크 DELETE라 트랜잭션 경계를 열고, HA에서 여러 노드가 같은 삭제를 중복 실행하지 않게 ShedLock으로
  * 한 노드만 돌린다(삭제는 멱등하지만 불필요한 DB 부하·로그 중복을 막는다). keep이 0 이하면 보존 무제한(정리 안 함).
  *
- * <p><b>시간 하한 병행(D2, lakehouse 연동)</b>: 카운트 단독 보존은 플랜이 자주 뒤집히는 쿼리에서
- * "어제" 행을 하루가 닫히기 전에 밀어낼 수 있다 — lakehouse가 어제 하루창을 D+1에 추출하는 계약과
- * 어긋난다(lakehouse docs/CONTRACT.md §1-1). min-age-hours(기본 48h)보다 어린 행은 세대를 초과해도
+ * <p><b>시간 하한 병행</b>: 카운트 단독 보존은 플랜이 자주 뒤집히는 쿼리에서 최근 조사 행을
+ * 너무 일찍 밀어낼 수 있다. min-age-hours(기본 48h)보다 어린 행은 세대를 초과해도
  * 지우지 않는다. 0 이하로 주면 시간 하한 없이 기존(카운트 단독) 동작이다.
  */
 @Component

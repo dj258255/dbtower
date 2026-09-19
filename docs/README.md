@@ -111,7 +111,7 @@ PDF 로 인쇄하면 `<text>` 가 Type 3 글꼴로 박혀 문서 전체에 따�
 |---|---|---|
 | [HARDENING-ROADMAP.md](archive/HARDENING-ROADMAP.md) | 동시성·기종 정확성·보안·수명주기 4축 감사와 FIX/SKIP 결정 | v1.1.0, 57~62절 |
 | [deepening-spec.md](archive/deepening-spec.md) | 심화 2차 착수 명세 | v1.1.0, 57~60절 |
-| [OPERATIONAL-BOTTLENECK-ARCS.md](archive/OPERATIONAL-BOTTLENECK-ARCS.md) | 운영 병목 B1~B5와 lakehouse 판정 | v1.2.0, 105~109절 |
+| [OPERATIONAL-BOTTLENECK-ARCS.md](archive/OPERATIONAL-BOTTLENECK-ARCS.md) | 운영 병목 B1~B5와 당시 장기 분석 판정 | v1.2.0, 105~109절 |
 | [PI-POLICY.md](archive/PI-POLICY.md) | 로컬 에이전트의 도구·경로·명령 실행 정책 | 168절 |
 | [eval/](eval/) | 워크벤치 자연어 SQL 평가 세트와 실행 로그 | 2026-09-10 |
 

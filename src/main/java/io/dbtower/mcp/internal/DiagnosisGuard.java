@@ -23,7 +23,7 @@ import java.util.Set;
 final class DiagnosisGuard {
 
     /** 인스턴스 인자가 없는 도구. 이 밖의 도구는 전부 instanceId를 대상 id로 고정한다(새 도구도 기본이 안전 쪽). */
-    private static final Set<String> INSTANCE_FREE_TOOLS = Set.of("list_instances", "lakehouse_query");
+    private static final Set<String> INSTANCE_FREE_TOOLS = Set.of("list_instances");
 
     static final String HIDDEN_OBSERVATION = "(호출자 범위 필터를 적용할 수 없어 결과를 숨겼다)";
 
@@ -50,10 +50,6 @@ final class DiagnosisGuard {
         ObjectNode args = arguments != null && arguments.isObject()
                 ? ((ObjectNode) arguments).deepCopy() : JsonNodeFactory.instance.objectNode();
 
-        if ("lakehouse_query".equals(tool) && !scope.global()) {
-            // 장기 마트는 instance_id 축으로 전 인스턴스가 한 테이블에 섞여 있어 행 단위로 범위를 걸 수 없다
-            return reject("장기 마트는 인스턴스 횡단 데이터라 팀 범위 사용자에게 열지 않는다");
-        }
         if (INSTANCE_FREE_TOOLS.contains(tool)) {
             return new Verdict(args, null);
         }

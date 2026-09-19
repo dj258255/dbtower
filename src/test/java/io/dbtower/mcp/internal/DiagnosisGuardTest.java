@@ -78,15 +78,6 @@ class DiagnosisGuardTest {
     }
 
     @Test
-    void 장기_마트는_팀_범위_주체에게_막고_전역_주체에게는_연다() throws Exception {
-        JsonNode q = json("{\"sql\":\"SELECT * FROM dim_instance\"}");
-        assertTrue(DiagnosisGuard.check(1, teamOne, "lakehouse_query", q).rejected());
-        Verdict global = DiagnosisGuard.check(1, CallerScope.GLOBAL, "lakehouse_query", q);
-        assertFalse(global.rejected());
-        assertFalse(global.arguments().has("instanceId"));
-    }
-
-    @Test
     void list_instances는_팀_범위_주체에게_보이는_것만_남긴다() {
         String all = "[{\"id\":1,\"name\":\"orders\"},{\"id\":2,\"name\":\"billing-other-team\"},{\"id\":3,\"name\":\"shared\"}]";
         String filtered = DiagnosisGuard.filterObservation("list_instances", all, teamOne, mapper);

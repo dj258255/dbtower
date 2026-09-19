@@ -17,10 +17,10 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 오브젝트 크기 주기 영속 (Phase 5 forward) — lakehouse 용량 예측(13단계)의 원료 공급.
+ * 오브젝트 크기 주기 영속 — 메타 DB 장기 집계 기반 용량 예측의 원료 공급.
  *
  * <p>tableStats()는 화면에 "지금 크기"를 보여줄 뿐이었다. 장기 D-day("몇 달 뒤 꽉 차나")는
- * 크기의 시계열이 있어야 하고, 그 시계열의 장기 보관·회귀 계산은 lakehouse 몫이다 — 여기는
+ * 크기의 시계열이 있어야 하고, 그 시계열의 장기 보관·회귀 계산은 메타 DB 집계가 맡는다 — 여기는
  * 6시간 주기로 영속하고 7일만 보존한다(wait_event·query_snapshot과 같은 운명 분리).
  * 단기 디스크 ETA(78절, Prometheus predict 계열)와는 지평이 다른 별도 층이다.
  *

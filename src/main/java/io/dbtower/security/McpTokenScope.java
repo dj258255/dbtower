@@ -24,8 +24,7 @@ public final class McpTokenScope {
             get("/api/schema-diff"),
             get("/api/reviews/" + ID),
             get("/api/workbench/tickets/" + ID + "/executions"),
-            post("/api/workbench/instances/" + ID + "/agent-query"),
-            post("/api/lakehouse/(query|cards)"));
+            post("/api/workbench/instances/" + ID + "/agent-query"));
 
     private McpTokenScope() {
     }

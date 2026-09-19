@@ -17,7 +17,7 @@ import java.util.List;
  * ASH 샘플 보존 스윕 — {@code query_snapshot}·{@code wait_event_snapshot}과 대칭(기본 7일).
  *
  * <p>여기 7일만 사는 이유는 다른 스냅샷과 같다. 관제 DB가 관리 대상보다 먼저 포화되면 안 된다.
- * 장기 이력은 lakehouse 몫이고, 그 구조는 Oracle의 V$ACTIVE_SESSION_HISTORY(메모리, 약 1시간)와
+ * 장기 이력은 메타 DB 집계가 맡고 원본은 짧게 보관한다. 이 구조는 Oracle의 V$ACTIVE_SESSION_HISTORY(메모리, 약 1시간)와
  * DBA_HIST_ACTIVE_SESS_HISTORY(AWR, 장기) 분리와 같은 계보다.
  *
  * <p>ASH는 초당 수천 행이라 다른 스냅샷보다 훨씬 빨리 는다. 그래서 스윕 주기를 1시간으로 두되

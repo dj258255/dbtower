@@ -21,7 +21,7 @@ import java.util.List;
  *
  * <p>WaitEventSnapshotJob·SizeSnapshotJob과 같은 뼈대: 긴 주기(기본 6시간 — 인덱스 사용은 느린
  * 추세라 촘촘할 필요가 없다), 인스턴스별 시스템 뷰 조회, 수집 격리 토글 존중, 인스턴스 실패 격리,
- * ShedLock 배타, 7일 보존(장기는 lakehouse). UNSUPPORTED 기종(Oracle)은 NATIVE가 아니라 조용히
+ * ShedLock 배타, 7일 원본 보존(장기는 메타 DB 집계). UNSUPPORTED 기종(Oracle)은 NATIVE가 아니라 조용히
  * 건너뛴다 — 없는 통계를 지어내 저장하지 않는다.
  */
 @Component

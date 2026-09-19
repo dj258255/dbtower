@@ -71,7 +71,7 @@ class PlanSnapshotRetentionIntegrationTest {
     void 시간_하한보다_어린_행은_세대_초과여도_보존된다_D2() {
         // 플랜이 자주 뒤집히는 쿼리 시나리오: keep=2 초과분이 5건인데, 그중 3건은 최근 24h 안(어린 행).
         // cutoff=now-48h 기준 — 어린 행은 살아남고, 48h를 넘긴 초과분만 지워져야 한다.
-        // lakehouse가 "어제 하루창"을 D+1에 뽑는 계약(CONTRACT §1-1) 보장이 이 하한의 존재 이유다.
+        // 최근 조사용 플랜 이력이 카운트 초과만으로 일찍 지워지지 않아야 한다.
         LocalDateTime now = LocalDateTime.now();
         // 오래된 4건(3~6일 전) + 어린 3건(1~23시간 전) = 7건, keep=2
         for (int d = 3; d <= 6; d++) {
