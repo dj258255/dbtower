@@ -158,6 +158,39 @@ class BulkChangePreflightTest {
     }
 
     @Test
+    @DisplayName("배치 경계로 쓰는 기본 키 열을 SET하는 변경은 거부한다 — 키가 바뀌면 진행 위치가 뜻을 잃는다")
+    void rejectsBatchKeyModification() {
+        BackupFreshness ok = backup(BackupFreshness.Status.FRESH, "VERIFIED");
+        DbmsOperator op = operatorWithPk("id");
+
+        // SET 목록 어디에 있든 걸린다
+        assertThatThrownBy(() -> plan(DbmsType.MYSQL,
+                "UPDATE orders SET status = 'X', id = 9 WHERE status = 'PENDING'", op, ok, 1000))
+                .isInstanceOf(WorkbenchRejection.class)
+                .hasMessageContaining("기본 키 열(id)을 바꾸는 변경은 실행하지 않습니다");
+
+        for (String sql : List.of(
+                "UPDATE orders SET id = id + 1 WHERE status = 'PENDING'",
+                "UPDATE orders SET `id` = 9 WHERE status = 'PENDING'",
+                "UPDATE orders SET ID = 9 WHERE status = 'PENDING'",
+                "UPDATE orders SET (id, status) = (1, 'X') WHERE status = 'PENDING'")) {
+            assertThatThrownBy(() -> plan(DbmsType.MYSQL, sql, op, ok, 1000))
+                    .as("%s", sql)
+                    .isInstanceOf(WorkbenchRejection.class)
+                    .hasMessageContaining("바꾸는 변경은 실행하지 않습니다");
+        }
+
+        // 복합 키는 어느 열이든 걸린다
+        assertThatThrownBy(() -> plan(DbmsType.MYSQL,
+                "UPDATE orders SET id = 3 WHERE shop_id = 1", operatorWithPk("shop_id", "id"), ok, 1000))
+                .isInstanceOf(WorkbenchRejection.class)
+                .hasMessageContaining("기본 키 열(id)");
+
+        // 키가 아닌 열만 바꾸면 그대로 계획이 나온다
+        assertThat(plan(DbmsType.MYSQL, SQL, op, ok, 1000)).isNotNull();
+    }
+
+    @Test
     @DisplayName("다섯 기종을 모두 받는다 — 각 기종의 경계 문법은 오퍼레이터가 흡수한다")
     void acceptsAllSupportedDbms() {
         BackupFreshness ok = backup(BackupFreshness.Status.FRESH, "VERIFIED");

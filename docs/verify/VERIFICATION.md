@@ -10928,3 +10928,41 @@ V48 이 `AUTO_INCREMENT` 로 같은 자리에서 깨졌던 것과 같은 모양�
   지금 방식으로 감당된다 — **필요할 때 옮기고, 지금은 옮기지 않는 이유를 남긴다**
 - `ash` 샘플러는 기본 꺼짐이라 대부분의 설치에서 이 표는 비어 있다. 켜고 나서 바꾸면 데이터가
   쌓인 상태의 전환이 되므로 지금 바꿨다
+
+## 202. 배치 경계 키를 바꾸는 대량 변경을 실행 전에 거부한다 (2026-09-19)
+
+대량 일괄 변경은 기본 키를 경계로 잡고 그 키가 커지는 방향으로만 나아간다(`lastAppliedKey`). 승인된 문장이
+그 키 자체를 `SET`하면 진행 위치가 뜻을 잃는다 — 앞으로 옮겨 간 행은 다시 처리되고, 뒤로 옮겨 간 행은
+이미 지나간 구간으로 가 조용히 빠진다. 오류가 나지 않으므로 배치는 정상 종료하고 누락을 알리지 않는다.
+
+`BulkChangePreflight`가 실행 전 조건으로 거부한다(`requireKeysNotModified`). SET 대상 열은
+`ChangeStatementParser.updateSetColumns`가 뽑는다 — 최상위 쉼표로 대입문을 가르고 첫 최상위 `=` 왼쪽의
+이름을 모으며, `t.col`의 한정자와 인용 부호는 뺀다. `(a, b) = (...)` 형태는 두 열을 모두 본다.
+
+```bash
+./gradlew compileJava compileTestJava
+./scripts/check-conventions.sh
+./gradlew test --tests '*BulkChangePreflightTest'
+./gradlew test
+```
+
+```
+compileJava·compileTestJava   BUILD SUCCESSFUL
+check-conventions.sh          규약 검사 전부 통과(9종)
+BulkChangePreflightTest       12 tests, 0 failures — 새 테스트 rejectsBatchKeyModification 포함
+./gradlew test                BUILD SUCCESSFUL in 5m 9s
+```
+
+거부되는 문장은 아래와 같다(모두 422). 키가 아닌 열만 바꾸면 그대로 계획이 나온다.
+
+```
+UPDATE orders SET id = id + 1 ...             -> 거부
+UPDATE orders SET status = 'X', id = 9 ...    -> 거부(SET 목록 뒤쪽이어도 걸린다)
+UPDATE orders SET `id` = 9 ...                -> 거부(인용 부호 무시)
+UPDATE orders SET ID = 9 ...                  -> 거부(대소문자 무시)
+UPDATE orders SET (id, status) = (1, 'X') ... -> 거부(열 목록 형태)
+UPDATE orders SET status = 'DONE' ...         -> 통과
+```
+
+복합 키는 어느 열이든 걸린다. DELETE는 값을 바꾸지 않아 해당 없다. MongoDB는 `_id` 자체를 바꾸는 갱신을
+서버가 거부하므로 이 검사가 덮지 않는다.
