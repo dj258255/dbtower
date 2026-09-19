@@ -3,14 +3,17 @@ package io.dbtower.workbench.internal;
 import io.dbtower.backup.BackupFreshness;
 import io.dbtower.operator.DbmsOperator;
 import io.dbtower.operator.model.BulkChangePlan;
+import io.dbtower.operator.model.ChangePlan;
 import io.dbtower.operator.model.TableDetail;
 import io.dbtower.registry.ConsoleCredential;
 import io.dbtower.registry.DbmsType;
 import io.dbtower.workbench.internal.ChangeStatementParser.Parsed;
 import io.dbtower.workbench.internal.WorkbenchService.WorkbenchRejection;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * 대량 일괄 변경의 실행 전 조건(docs/design/bulk-change-spec.md) — 하나라도 어기면 실행하지 않는다.
@@ -57,6 +60,7 @@ final class BulkChangePreflight {
         Parsed parsed = ChangeStatementParser.parse(sql);
         requireSupportedStatement(parsed);
         List<String> keyColumns = requirePrimaryKey(operator, parsed.table());
+        requireKeysNotModified(sql, parsed.kind(), keyColumns);
         String tail = parsed.captureTail() == null ? "" : parsed.captureTail().strip();
         requireNoOrderOrLimit(tail);
 
@@ -127,6 +131,41 @@ final class BulkChangePreflight {
                     + ") — 경계 조회가 인덱스를 타는지 확인된 범위까지만 받습니다", null);
         }
         return pk;
+    }
+
+    /**
+     * 배치 경계로 쓰는 키 열을 SET하는 변경은 거부한다. 경계는 키로 잡고 앞으로만 나아가므로, 키가 바뀌면
+     * 뒤로 옮겨 간 행은 이미 지나간 구간으로 가 조용히 빠지고 앞으로 옮겨 간 행은 다시 처리된다. 승인된 문장이
+     * 자기 경계를 흔들면 진행 위치({@code lastAppliedKey})가 뜻을 잃는다. DELETE는 값을 바꾸지 않아 해당 없다.
+     */
+    private static void requireKeysNotModified(String sql, ChangePlan.Kind kind, List<String> keyColumns) {
+        if (kind != ChangePlan.Kind.UPDATE) {
+            return;
+        }
+        Set<String> keys = new HashSet<>();
+        for (String key : keyColumns) {
+            keys.add(normalizeColumn(key));
+        }
+        for (String column : ChangeStatementParser.updateSetColumns(sql)) {
+            if (keys.contains(normalizeColumn(column))) {
+                throw new WorkbenchRejection(422, "배치 경계로 쓰는 기본 키 열(" + column
+                        + ")을 바꾸는 변경은 실행하지 않습니다 — 키가 바뀌면 지나친 구간으로 이동한 행이 조용히 빠지거나 다시 처리됩니다", null);
+            }
+        }
+    }
+
+    /** 인용 부호와 대소문자를 무시하고 열 이름을 비교한다. */
+    private static String normalizeColumn(String column) {
+        String name = column == null ? "" : column.strip();
+        if (name.length() >= 2) {
+            char first = name.charAt(0);
+            char last = name.charAt(name.length() - 1);
+            if ((first == '"' && last == '"') || (first == '`' && last == '`')
+                    || (first == '[' && last == ']')) {
+                name = name.substring(1, name.length() - 1);
+            }
+        }
+        return name.toLowerCase(Locale.ROOT);
     }
 
     /**

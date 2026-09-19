@@ -139,6 +139,78 @@ final class ChangeStatementParser {
     }
 
     /**
+     * UPDATE의 SET 절이 바꾸는 열 이름들(최상위, 인용 부호 제거). 대량 배치의 경계 키를 SET하는 변경을 실행 전에
+     * 걸러내기 위한 것이다 — 이 파서는 여전히 안전 경계가 아니고, 최종 방어는 실행 계층의 행 수 대조다.
+     *
+     * <p>대입문 하나는 최상위 쉼표로 가른다. 각 대입문에서 첫 최상위 {@code =} 왼쪽의 이름들을 모으되, 점으로
+     * 이어지는 한정자({@code t.col}의 {@code t})는 뺀다. {@code (a, b) = (...)} 형태는 괄호 안 이름 둘을 모두 담는다.
+     * {@code =} 왼쪽을 확정할 수 없는 조각은 건너뛴다 — 뜻이 불확실한 것을 "안 바뀐다"로 읽지 않기 위해서가 아니라,
+     * 그 문장은 대상 DB가 어차피 거부하기 때문이다.
+     */
+    static List<String> updateSetColumns(String statement) {
+        String sql = trimTerminator(statement == null ? "" : statement);
+        List<Token> tokens = tokenize(sql);
+        if (tokens.isEmpty() || !tokens.get(0).word("update")) {
+            return List.of();
+        }
+        int start = skipWords(tokens, 1, "low_priority", "ignore", "only");
+        int set = findTop(tokens, start, "set");
+        if (set < 0) {
+            return List.of();
+        }
+        int end = firstTop(tokens, set + 1, "from", "where", "order", "limit", "returning");
+        if (end < 0) {
+            end = tokens.size();
+        }
+        List<String> columns = new ArrayList<>();
+        int segmentStart = set + 1;
+        for (int boundary = segmentStart; boundary <= end; boundary++) {
+            boolean cut = boundary == end
+                    || (tokens.get(boundary).depth() == 0 && tokens.get(boundary).type() == Type.PUNCT
+                        && ",".equals(tokens.get(boundary).text()));
+            if (!cut) {
+                continue;
+            }
+            int equals = -1;
+            for (int q = segmentStart; q < boundary; q++) {
+                Token tok = tokens.get(q);
+                if (tok.depth() == 0 && tok.type() == Type.PUNCT && "=".equals(tok.text())) {
+                    equals = q;
+                    break;
+                }
+            }
+            if (equals > segmentStart) {
+                for (int r = segmentStart; r < equals; r++) {
+                    Token name = tokens.get(r);
+                    if (!name.name()) {
+                        continue;
+                    }
+                    boolean qualifier = r + 1 < equals && tokens.get(r + 1).type() == Type.PUNCT
+                            && ".".equals(tokens.get(r + 1).text());
+                    if (!qualifier) {
+                        columns.add(unquote(name.text()));
+                    }
+                }
+            }
+            segmentStart = boundary + 1;
+        }
+        return columns;
+    }
+
+    /** 인용 식별자에서 감싼 따옴표를 벗긴다 — 비교는 인용 부호를 무시한다. */
+    private static String unquote(String text) {
+        if (text.length() >= 2) {
+            char first = text.charAt(0);
+            char last = text.charAt(text.length() - 1);
+            if ((first == '"' && last == '"') || (first == '`' && last == '`')
+                    || (first == '[' && last == ']')) {
+                return text.substring(1, text.length() - 1);
+            }
+        }
+        return text;
+    }
+
+    /**
      * 원문 WHERE(또는 ORDER BY·LIMIT) 이하를 그대로 떼어 둔다 — 조건을 다시 쓰지 않아야 실제 변경 대상과 같은 행을 본다.
      * 끝은 마지막 토큰에서 자른다: 뒤에 붙은 줄 주석(-- ...)이 남으면 오퍼레이터가 덧붙이는 FOR UPDATE를 주석으로 삼킨다.
      */
