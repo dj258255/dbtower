@@ -66,7 +66,8 @@ class AshBackpressureExperimentIT {
 
     record Result(Policy policy, long delayMs, int samples, int samplesInWindow, int episodes, int captured,
                   int capturedAtRightTime, long skewP50Ms, long skewMaxMs, int maxConcurrent, long lastSnapshotAfterWindowMs,
-                  int appQueries, long appP50Ms, long appP95Ms, long appP99Ms) {
+                  int appQueries, long appP50Ms, long appP95Ms, long appP99Ms,
+                  double targetCpuAvgPct, int targetCpuSamples, long targetReadMb) {
     }
 
     private static Connection open(String app) throws SQLException {
@@ -140,6 +141,12 @@ class AshBackpressureExperimentIT {
         Thread app = new Thread(() -> appLoad(t0, stop, appLatency), "e4-app");
         app.start();
 
+        // 대상 자원: 컨테이너 CPU%와 DB 디스크 읽기를 같은 창에서 모은다. 관측이 대상을 태우는지를 이 축으로 본다.
+        List<Double> targetCpu = Collections.synchronizedList(new ArrayList<>());
+        Thread host = new Thread(() -> sampleTargetCpu(t0, stop, targetCpu), "e4-host");
+        host.start();
+        long readStart = targetReadBlocks();
+
         AtomicInteger concurrent = new AtomicInteger();
         AtomicInteger maxConcurrent = new AtomicInteger();
         switch (policy) {
@@ -195,6 +202,8 @@ class AshBackpressureExperimentIT {
         stop.set(true);
         generator.join(10_000);
         app.join(10_000);
+        host.join(10_000);
+        long readBlocks = targetReadBlocks() - readStart;
 
         List<Sample> all = new ArrayList<>(samples);
         all.sort((a, b) -> Long.compare(a.intendedMs(), b.intendedMs()));
@@ -222,9 +231,45 @@ class AshBackpressureExperimentIT {
         Result r = new Result(policy, delayMs, all.size(), inWindow, eps.size(), captured, rightTime,
                 skews.isEmpty() ? 0 : skews.get(skews.size() / 2), skews.isEmpty() ? 0 : skews.get(skews.size() - 1),
                 maxConcurrent.get(), lastAfter,
-                appSamples.size(), pct(appSamples, 0.50), pct(appSamples, 0.95), pct(appSamples, 0.99));
+                appSamples.size(), pct(appSamples, 0.50), pct(appSamples, 0.95), pct(appSamples, 0.99),
+                targetCpu.isEmpty() ? -1 : targetCpu.stream().mapToDouble(Double::doubleValue).average().orElse(-1),
+                targetCpu.size(), readBlocks * 8 / 1024);
         System.out.println("[E4] " + r);
         return r;
+    }
+
+    /** 대상 컨테이너 CPU%를 2초마다 샘플. docker 가 없으면 -1 을 넣지 않고 건너뛴다. */
+    private static void sampleTargetCpu(long t0, AtomicBoolean stop, List<Double> cpu) {
+        while (!stop.get() && System.currentTimeMillis() - t0 < WINDOW_MS) {
+            try {
+                Process p = new ProcessBuilder("docker", "stats", "--no-stream", "--format", "{{.CPUPerc}}", "dbtower-postgres")
+                        .redirectErrorStream(true).start();
+                String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+                p.waitFor(10, TimeUnit.SECONDS);
+                String pctOnly = out.replace("%", "").trim();
+                if (!pctOnly.isEmpty() && !out.contains("Error")) {
+                    cpu.add(Double.parseDouble(pctOnly));
+                }
+            } catch (Exception ignored) {
+                return;
+            }
+            try {
+                Thread.sleep(2_000);
+            } catch (InterruptedException e) {
+                return;
+            }
+        }
+    }
+
+    /** 대상 DB 디스크 읽기 블록 누적값. 관측 조회가 캐시를 타는지 디스크를 쓰는지 이 축으로 본다. */
+    private static long targetReadBlocks() {
+        try (Connection c = open("e4-host"); Statement st = c.createStatement();
+             ResultSet rs = st.executeQuery("SELECT blks_read FROM pg_stat_database WHERE datname = 'sample'")) {
+            rs.next();
+            return rs.getLong(1);
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     /** 앱 조회 지연을 백분위로. 표본이 비면 0. */
@@ -319,12 +364,16 @@ class AshBackpressureExperimentIT {
         md.append("  - 수정 전(틱 시작 시각을 기록): 수집이 2초 걸리면 기록 시각이 실제 조회보다 2초 앞서 이 칸이 0이 됐다\n");
         md.append("  - 수정 후(#98, 인스턴스를 실제로 조회한 시각을 기록): 기록 시각 = 실제 조회 시각이라 잡은 사건과 같다. 제품의 기록 시각과 실제 조회 시각의 차이는 `AshSamplerObservedTimeTest`가 잰다\n");
         md.append("- 앱 조회: 같은 창 동안 `exp_app` 에 짧은 조회를 반복해 지연 분포를 잰다. `NONE`(관측 없음) 기준선과 비교해 **관측이 대상을 얼마나 더 느리게 만드는지**를 본다\n");
-        md.append("- 한계: 주입 지연은 부하와 무관하다. 이 실험이 재는 것은 앱 조회 지연의 차이이고, 대상의 CPU·디스크 포화까지는 재지 않는다\n\n");
-        md.append("| 지연 | 정책 | 앱 조회 p50 | 앱 조회 p95 | 앱 조회 p99 | 앱 조회 수 | 창 안 샘플 | 막힘 사건 | 잡은 사건 | 기록 시각도 사건 안(수정 전: 틱 시작) | 기록 시각도 사건 안(수정 후: 실제 조회) | 실제 조회 시각 - 계획 시각 중앙값 | 최대 | 동시 대상 조회 최대 | 창이 끝난 뒤 마지막 샘플 |\n");
-        md.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
+        md.append("- 대상 자원: 컨테이너 CPU%(docker stats, 2초 간격)와 DB 디스크 읽기(pg_stat_database.blks_read)를 같은 창에서 잰다\n");
+        md.append("- 한계: 주입 지연은 부하와 무관하다. 앱 조회는 캐시에 적중하는 짧은 조회라 디스크 축은 거의 0으로 나온다\n\n");
+        md.append("| 지연 | 정책 | 앱 조회 p50 | 앱 조회 p95 | 앱 조회 p99 | 앱 조회 수 | 대상 CPU 평균 | 표본 | 대상 디스크 읽기 | 창 안 샘플 | 막힘 사건 | 잡은 사건 | 기록 시각도 사건 안(수정 전: 틱 시작) | 기록 시각도 사건 안(수정 후: 실제 조회) | 실제 조회 시각 - 계획 시각 중앙값 | 최대 | 동시 대상 조회 최대 | 창이 끝난 뒤 마지막 샘플 |\n");
+        md.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
         for (Result r : results) {
-            md.append(String.format(Locale.ROOT, "| %dms | %s | %dms | %dms | %dms | %d | %d | %d | %d | %d | %dms | %dms | %d | %s |%n",
+            md.append(String.format(Locale.ROOT, "| %dms | %s | %dms | %dms | %dms | %d | %s | %s | %s | %d | %d | %d | %d | %dms | %dms | %d | %s |%n",
                     r.delayMs(), r.policy(), r.appP50Ms(), r.appP95Ms(), r.appP99Ms(), r.appQueries(),
+                    r.targetCpuAvgPct() < 0 ? "-" : String.format(Locale.ROOT, "%.1f%%", r.targetCpuAvgPct()),
+                    r.targetCpuSamples() == 0 ? "-" : String.valueOf(r.targetCpuSamples()),
+                    r.targetReadMb() + "MB",
                     r.samplesInWindow(), r.episodes(), r.captured(), r.capturedAtRightTime(), r.skewP50Ms(), r.skewMaxMs(), r.maxConcurrent(),
                     r.lastSnapshotAfterWindowMs() > 0 ? "+" + r.lastSnapshotAfterWindowMs() + "ms" : "-"));
         }
