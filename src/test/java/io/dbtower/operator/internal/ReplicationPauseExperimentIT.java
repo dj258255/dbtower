@@ -49,12 +49,13 @@ class ReplicationPauseExperimentIT {
     private static final int ROWS = 1_000_000;
     private static final int BATCH_ROWS = 1_000;
     private static final long[] PAUSES_MS = {0, 100, 300};
-    private static final int WRITERS = 2;
+    /** 동시 작성자 수. 0이면 쉼 자체의 효과만 본다 — 작성자가 계속 쓰면 쉼은 "다른 writer에게 준 시간"이 된다 */
+    private static final int[] WRITER_COUNTS = {0, 2};
     private static final int TIMEOUT_SECONDS = 120;
     private static final Path DOC = Path.of("docs", "experiments", "replication-pause.md");
     private static final Path CSV = Path.of("docs", "experiments", "replication-pause.csv");
 
-    record Run(long pauseMs, long totalMillis, int batches, long affected,
+    record Run(long pauseMs, int writers, long totalMillis, int batches, long affected,
                long lagMaxMs, long lagAvgMs, int lagSamples,
                double writerP50Ms, double writerP95Ms, double writerMaxMs, int writerCommits) {
     }
@@ -66,9 +67,11 @@ class ReplicationPauseExperimentIT {
         seed();
 
         List<Run> runs = new ArrayList<>();
-        StringBuilder csv = new StringBuilder("pause_ms,step,event,millis_or_lag\n");
-        for (long pause : PAUSES_MS) {
-            runs.add(runOnce(pause, csv));
+        StringBuilder csv = new StringBuilder("pause_ms,writers,step,event,millis_or_lag\n");
+        for (int writers : WRITER_COUNTS) {
+            for (long pause : PAUSES_MS) {
+                runs.add(runOnce(pause, writers, csv));
+            }
         }
         Files.writeString(CSV, csv, StandardCharsets.UTF_8);
         Files.writeString(DOC, document(runs, startedAt), StandardCharsets.UTF_8);
@@ -78,15 +81,17 @@ class ReplicationPauseExperimentIT {
         assertTrue(runs.stream().allMatch(r -> r.lagSamples() > 0), "replica lag 표본이 하나도 없다 — 복제 대상이 서 있지 않다");
     }
 
-    private Run runOnce(long pauseMs, StringBuilder csv) throws Exception {
+    private Run runOnce(long pauseMs, int writers, StringBuilder csv) throws Exception {
         resetNote();
         AtomicBoolean stop = new AtomicBoolean();
-        CountDownLatch ready = new CountDownLatch(WRITERS);
+        CountDownLatch ready = new CountDownLatch(Math.max(writers, 1));
         List<Long> writerMicros = Collections.synchronizedList(new ArrayList<>());
-        for (int i = 0; i < WRITERS; i++) {
+        for (int i = 0; i < writers; i++) {
             Thread.ofPlatform().name("e6b-writer-" + i).start(() -> writer(stop, ready, writerMicros));
         }
-        assertTrue(ready.await(30, TimeUnit.SECONDS), "동시 작성자가 준비되지 않았다");
+        if (writers > 0) {
+            assertTrue(ready.await(30, TimeUnit.SECONDS), "동시 작성자가 준비되지 않았다");
+        }
 
         List<Long> lags = new ArrayList<>();
         long affected = 0;
@@ -117,10 +122,10 @@ class ReplicationPauseExperimentIT {
             List<Long> lagSorted = new ArrayList<>(lags);
             Collections.sort(lagSorted);
             for (int i = 0; i < lags.size(); i++) {
-                csv.append(String.format(Locale.ROOT, "%d,%d,lag_ms,%d%n", pauseMs, i, lags.get(i)));
+                csv.append(String.format(Locale.ROOT, "%d,%d,%d,lag_ms,%d%n", pauseMs, writers, i, lags.get(i)));
             }
-            csv.append(String.format(Locale.ROOT, "%d,%d,total_ms,%d%n", pauseMs, batches, totalMillis));
-            Run r = new Run(pauseMs, totalMillis, batches, affected,
+            csv.append(String.format(Locale.ROOT, "%d,%d,%d,total_ms,%d%n", pauseMs, writers, batches, totalMillis));
+            Run r = new Run(pauseMs, writers, totalMillis, batches, affected,
                     lagSorted.isEmpty() ? 0 : lagSorted.get(lagSorted.size() - 1),
                     lagSorted.isEmpty() ? 0 : (long) lagSorted.stream().mapToLong(Long::longValue).average().orElse(0),
                     lagSorted.size(),
@@ -240,18 +245,20 @@ class ReplicationPauseExperimentIT {
         md.append("- 실행 일시: ").append(startedAt).append('\n');
         md.append("- 대상: PostgreSQL 16 primary(`e6-pg-primary`, 16432) + streaming replica(`e6-pg-replica`, 16433, async)\n");
         md.append("- 변경: `bulk_scale` ").append(ROWS).append("행을 1,000행 배치로 `note` 갱신. 배치 사이 쉼만 바꾼다(0 / 100 / 300ms)\n");
-        md.append("- 동시 작성자 2개가 범위 안 임의 행을 쉬지 않고 고친다. 표의 writer 수치는 그 커밋들의 소요다\n");
+        md.append("- 동시 작성자: 0개(쉼의 순수 효과)와 2개(쉼 동안 다른 writer가 계속 쓰는 현실 조건)를 나눠 잰다. 표의 writer 수치는 그 커밋들의 소요다\n");
         md.append("- replica lag: 배치마다 primary의 `pg_stat_replication.replay_lag`를 읽는다(조건 시작 전 따라잡기를 기다린다)\n");
-        md.append("- 한계: 쉼 동안에도 동시 작성자가 계속 쓴다. 그래서 쉼은 primary를 쉬게 하는 것이 아니라 다른 writer에게 시간을 주는 것이다. "
-                + "쉼 자체의 효과만 분리하려면 writer를 멈춘 조건이 따로 필요하다\n\n");
-        md.append("| 쉼 | 총 소요 | 배치 수 | 바뀐 행 | replay lag 최대 | replay lag 평균 | 표본 | writer p50 | writer p95 | writer 최대 | writer 커밋 수 |\n");
-        md.append("|---|---|---|---|---|---|---|---|---|---|---|\n");
+        md.append("- 읽는 법: 작성자 0 조건이 쉼 자체의 효과를 분리한 것이고, 2 조건은 운영에 가까운 조건이다. 두 표를 나란히 봐야 한다\n\n");
+        md.append("| 작성자 | 쉼 | 총 소요 | 배치 수 | 바뀐 행 | replay lag 최대 | replay lag 평균 | 표본 | writer p50 | writer p95 | writer 최대 | writer 커밋 수 |\n");
+        md.append("|---|---|---|---|---|---|---|---|---|---|---|---|\n");
         for (Run r : runs) {
             md.append(String.format(Locale.ROOT,
-                    "| %dms | %.1f초 | %d | %d | %dms | %dms | %d | %.2fms | %.2fms | %.2fms | %d |%n",
-                    r.pauseMs(), r.totalMillis() / 1000.0, r.batches(), r.affected(),
+                    "| %d | %dms | %.1f초 | %d | %d | %dms | %dms | %d | %s | %s | %s | %d |%n",
+                    r.writers(), r.pauseMs(), r.totalMillis() / 1000.0, r.batches(), r.affected(),
                     r.lagMaxMs(), r.lagAvgMs(), r.lagSamples(),
-                    r.writerP50Ms(), r.writerP95Ms(), r.writerMaxMs(), r.writerCommits()));
+                    r.writerCommits() == 0 ? "-" : String.format(Locale.ROOT, "%.2fms", r.writerP50Ms()),
+                    r.writerCommits() == 0 ? "-" : String.format(Locale.ROOT, "%.2fms", r.writerP95Ms()),
+                    r.writerCommits() == 0 ? "-" : String.format(Locale.ROOT, "%.2fms", r.writerMaxMs()),
+                    r.writerCommits()));
         }
         return md.toString();
     }
