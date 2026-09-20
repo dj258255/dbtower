@@ -52,6 +52,8 @@ class AshBackpressureExperimentIT {
     private static final long EPISODE_EVERY_MS = 4_000;
     private static final long EPISODE_HOLD_MS = 1_500;
     private static final long[] DELAYS_MS = {0, 2_000};
+    /** 조건당 반복 횟수. 1회로는 실행 간 변동이 조건 간 차이를 덮는다(ash-backpressure.md 참조) */
+    private static final int REPEATS = 3;
     private static final Path DOC = Path.of("docs", "experiments", "ash-backpressure.md");
     private static final Path CSV = Path.of("docs", "experiments", "ash-backpressure.csv");
 
@@ -114,9 +116,11 @@ class AshBackpressureExperimentIT {
         String startedAt = OffsetDateTime.now().toString();
         List<Result> results = new ArrayList<>();
         StringBuilder csv = new StringBuilder("policy,delay_ms,intended_ms,snapshot_ms,blocked\n");
-        for (long delay : DELAYS_MS) {
-            for (Policy policy : Policy.values()) {
-                results.add(runOnce(policy, delay, csv));
+        for (int rep = 0; rep < REPEATS; rep++) {
+            for (long delay : DELAYS_MS) {
+                for (Policy policy : Policy.values()) {
+                    results.add(runOnce(policy, delay, csv));
+                }
             }
         }
         Files.writeString(CSV, csv, StandardCharsets.UTF_8);
@@ -366,6 +370,20 @@ class AshBackpressureExperimentIT {
         md.append("- 앱 조회: 같은 창 동안 `exp_app` 에 짧은 조회를 반복해 지연 분포를 잰다. `NONE`(관측 없음) 기준선과 비교해 **관측이 대상을 얼마나 더 느리게 만드는지**를 본다\n");
         md.append("- 대상 자원: 컨테이너 CPU%(docker stats, 2초 간격)와 DB 디스크 읽기(pg_stat_database.blks_read)를 같은 창에서 잰다\n");
         md.append("- 한계: 주입 지연은 부하와 무관하다. 앱 조회는 캐시에 적중하는 짧은 조회라 디스크 축은 거의 0으로 나온다\n\n");
+        md.append("\n### 같은 조건의 반복 (지연 0ms, ").append(REPEATS).append("회)\n\n");
+        md.append("실행 간 변동이 조건 간 차이보다 큰지 보려고 같은 조건을 반복했다. 처리량은 min / 중앙 / max 다.\n\n");
+        md.append("| 정책 | 앱 조회 수 min / 중앙 / max | 대상 CPU 중앙 |\n|---|---|---|\n");
+        for (Policy policy : Policy.values()) {
+            List<Result> rs = results.stream().filter(r -> r.policy() == policy && r.delayMs() == 0).toList();
+            List<Integer> q = rs.stream().map(Result::appQueries).sorted().toList();
+            List<Double> c = rs.stream().map(Result::targetCpuAvgPct).sorted().toList();
+            if (q.isEmpty()) {
+                continue;
+            }
+            md.append(String.format(Locale.ROOT, "| %s | %d / %d / %d | %.1f%% |%n",
+                    policy, q.get(0), q.get(q.size() / 2), q.get(q.size() - 1), c.get(c.size() / 2)));
+        }
+        md.append("\n");
         md.append("| 지연 | 정책 | 앱 조회 p50 | 앱 조회 p95 | 앱 조회 p99 | 앱 조회 수 | 대상 CPU 평균 | 표본 | 대상 디스크 읽기 | 창 안 샘플 | 막힘 사건 | 잡은 사건 | 기록 시각도 사건 안(수정 전: 틱 시작) | 기록 시각도 사건 안(수정 후: 실제 조회) | 실제 조회 시각 - 계획 시각 중앙값 | 최대 | 동시 대상 조회 최대 | 창이 끝난 뒤 마지막 샘플 |\n");
         md.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
         for (Result r : results) {
