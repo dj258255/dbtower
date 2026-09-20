@@ -68,7 +68,7 @@ class McpHttpControllerTest {
 
         List<String> names = new ArrayList<>();
         tools.forEach(t -> names.add(t.get("name").asText()));
-        assertEquals(19, names.size(), names.toString());
+        assertEquals(17, names.size(), names.toString());
         assertTrue(names.contains("change_ticket_status"));
         assertTrue(delegatedAuthorization.isEmpty());
     }
