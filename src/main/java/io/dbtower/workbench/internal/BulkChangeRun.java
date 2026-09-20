@@ -32,7 +32,7 @@ public class BulkChangeRun {
     public enum State { RUNNING, PAUSED_LAG, PAUSED_BY_USER, CANCELLED, DONE, FAILED }
 
     /**
-     * @param pauseMillis        배치 사이 쉬는 간격 — 복제·purge가 따라올 시간을 준다
+     * @param pauseMillis        배치 사이 쉬는 간격 — 커밋 직후 다음 배치를 바로 시작하지 않아 다른 쓰기가 실행될 구간을 둔다
      * @param lagThresholdSecond 이 값을 넘는 실측 복제 지연이면 멈춘다
      * @param lagPollMillis      멈춘 뒤 다시 지연을 확인하는 간격
      * @param maxBatches         안전판 — 이 수를 넘기면 멈춘다(경계가 전진하지 않는 상황을 무한히 돌지 않게)
