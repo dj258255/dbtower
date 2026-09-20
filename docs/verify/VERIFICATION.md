@@ -1872,8 +1872,8 @@ instant화 — 차트 축·드래그 선택·입력 표시가 전부 브라우�
 인지의 구분은 정규식으로 정확히 못 잡는다.
 
 - **QueryMasker**(analysis 루트 — alert·insight·mcp가 공유): apply(enabled 게이트, 기본 true),
-  applyForAiPrompt(enabled && mask-ai-prompt, 기본 false — 리터럴을 가리면 IN절 개수·상수 분포
-  판정 정확도가 떨어지는 트레이드오프라 명시적 선택).
+  applyForAiPrompt(enabled && mask-ai-prompt, #131 재판단으로 기본 true — 리터럴을 가리면 IN절 개수·상수 분포
+  판정 정확도가 떨어지는 트레이드오프가 있지만 #131 재판단으로 기본 true).
 - **배선 4곳**: RegressionDetector(d.queryText — 웹훅·AI 프롬프트 공통 상류. MySQL/PG 정규화
   텍스트에는 멱등, Oracle V$SQL 원문·Mongo 명령 JSON이 실보호 대상), InquiryService(파싱은 원문
   으로 FROM·JOIN 추출, 발신 렌더링은 마스킹본 — 문의 SQL은 사용자가 친 원문이라 대표 경로),
@@ -10433,7 +10433,7 @@ L10은 기대 원인(풀스캔이 정상)과 실제 계획(커버링 range 스�
 | MongoDB | `filter`·`parsedQuery`·`indexBounds` 서브트리의 잎 |
 
 앞뒤 `%`·정규식 앵커 자리는 남긴다 — 앞 와일드카드는 인덱스를 못 쓰는 이유 그 자체다.
-설정은 `dbtower.masking.mask-ai-plan`, 기본 꺼짐. 화면·DB팀 문의에는 가리지 않은 계획을 그대로 준다.
+설정은 `dbtower.masking.mask-ai-plan`, #131 재판단으로 기본 켜짐. 화면·DB팀 문의에는 가리지 않은 계획을 그대로 준다.
 
 ### 확인
 
@@ -10664,7 +10664,7 @@ Plan Rows: 199978
 | `MaskShape` | 값을 지우고 남길 모양 — `%` 자리, 자릿수, 지금으로부터의 거리 |
 | `TableScale` | 대상 테이블의 전체 행수 한 줄. 상한 3개, 실패하면 조용히 빈다 |
 
-설정은 `dbtower.masking.ai-plan-level`이고 `mask-ai-plan`이 켜져 있을 때만 걸린다. 기본값은 꺼짐 그대로다.
+설정은 `dbtower.masking.ai-plan-level`이고 `mask-ai-plan`이 켜져 있을 때만 걸린다. #131 재판단으로 기본값은 켜짐 + `STRUCTURE`다.
 
 ### 측정
 
@@ -10687,7 +10687,7 @@ FULL에서는 세 번 다 "실제 패턴을 확인할 수 없다"로 내려갔�
 ("조건값이 약 27년 전 날짜라 거의 모든 행이 걸린다"). 반대로 깊은 OFFSET 사례는 가리면 잃었다 —
 자릿수만으로는 되살아나지 않았다.
 
-노출이 같고 진단력이 다르므로 켰을 때 걸리는 수준을 `STRUCTURE`로 정했다. 기본값은 꺼진 채로 둔다.
+노출이 같고 진단력이 다르므로 수준을 `STRUCTURE`로 정했다. #131 재판단으로 기본값은 켜짐 + `STRUCTURE`다.
 자세한 표는 `docs/experiments/ai-masking-levels.md`.
 
 ### 남는 것
