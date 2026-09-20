@@ -38,6 +38,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>측정: ① 총 작업 시간 ② 동시 writer의 커밋 대기(p50/p95/max) ③ 배치 중 replica replay lag(최대·평균, ms)
  *
  * <p>게이트: {@code DBTOWER_EXPERIMENT=1 ./gradlew cleanTest test --tests '*ReplicationPauseExperimentIT'}
+ *
+ * <p>대상 컨테이너를 먼저 세운다(실험 후 지워도 된다):
+ * <pre>
+ * docker network create e6-net
+ * docker run -d --name e6-pg-primary --network e6-net -e POSTGRES_PASSWORD=dbtower1234 \
+ *   -e POSTGRES_DB=sample -p 16432:5432 postgres:16 \
+ *   -c wal_level=replica -c max_wal_senders=4 -c hot_standby=on
+ * docker exec e6-pg-primary bash -c "echo 'host replication all all scram-sha-256' >> /var/lib/postgresql/data/pg_hba.conf"
+ * docker exec e6-pg-primary psql -U postgres -c "SELECT pg_reload_conf()"
+ * docker volume create e6-pg-replica-data
+ * docker run --rm --user postgres --network e6-net -e PGPASSWORD=dbtower1234 \
+ *   -v e6-pg-replica-data:/var/lib/postgresql/data postgres:16 \
+ *   bash -c "pg_basebackup -h e6-pg-primary -U postgres -D /var/lib/postgresql/data -Fp -Xs -R -P"
+ * docker run -d --name e6-pg-replica --network e6-net -p 16433:5432 \
+ *   -v e6-pg-replica-data:/var/lib/postgresql/data postgres:16
+ * </pre>
  */
 @EnabledIfEnvironmentVariable(named = "DBTOWER_EXPERIMENT", matches = "1")
 class ReplicationPauseExperimentIT {
