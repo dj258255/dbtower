@@ -61,9 +61,10 @@ public class AiAnalysisRunner {
         String plan = operator.explain(sql);
         List<String> findings = analyzer.analyze(instance.getType(), plan);
         listener.plan(plan, findings);
-        // AI 프롬프트 마스킹은 mask-ai-prompt(기본 false)로만 켠다 — 리터럴을 가리면
-        // IN절 개수·상수 분포 같은 판정 정확도가 떨어지는 트레이드오프가 있어 명시적 선택.
-        // 계획은 따로 켠다(mask-ai-plan) — 문장만 가려도 옵티마이저가 조건 값을 계획에 찍어 값이 계획을 타고 나간다
+        // AI 프롬프트 마스킹은 기본 켜짐(#131 재판단) — 외부 모델로 원문을 보내는 것을 기본으로 두지 않는다.
+        // 대가는 IN절 개수·상수 분포 같은 리터럴 기반 판정의 정확도이고, 실측에서 42건 중 3건이다
+        // (docs/experiments/ai-masking-levels.md). 사내 설치 모델일 때만 mask-ai-prompt=false로 끈다.
+        // 계획도 함께 켠다(mask-ai-plan) — 문장만 가려도 옵티마이저가 조건 값을 계획에 찍어 값이 계획을 타고 나간다
         // (docs/experiments/ai-masking-tradeoff.md 표 1: SQL만 가려도 41개 중 19개가 프롬프트에 남았다).
         // 화면·문의에는 가리지 않은 계획(plan)을 그대로 준다 — 사람이 보는 근거를 가리는 설정이 아니다.
         String planForAi = planMasker.applyForAiPrompt(instance.getType(), plan);

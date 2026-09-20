@@ -26,12 +26,12 @@ public class QueryMasker {
     private final boolean maskAiPrompt;
 
     public QueryMasker(@Value("${dbtower.masking.enabled:true}") boolean enabled,
-                       @Value("${dbtower.masking.mask-ai-prompt:false}") boolean maskAiPrompt) {
+                       @Value("${dbtower.masking.mask-ai-prompt:true}") boolean maskAiPrompt) {
         this.enabled = enabled;
         this.maskAiPrompt = maskAiPrompt;
     }
 
-    /** AI 프롬프트에도 마스킹을 적용할지 — 기본 false(마스킹은 AI 판정 정확도와 트레이드오프라 명시적 선택). */
+    /** AI 프롬프트에도 마스킹을 적용할지 — 기본 true(#131 재판단). 사내 모델처럼 값이 밖으로 나가지 않을 때만 false로 끈다. */
     public boolean maskAiPrompt() {
         return maskAiPrompt;
     }
@@ -42,9 +42,10 @@ public class QueryMasker {
     }
 
     /**
-     * AI 프롬프트 전용 — 기본은 원문(마스킹하면 리터럴 기반 판정, 예: IN절 개수·상수 분포 진단의
-     * 정확도가 떨어지는 트레이드오프가 있어 명시적 선택으로 둔다). enabled와 mask-ai-prompt가
-     * 둘 다 켜져 있을 때만 가린다.
+     * AI 프롬프트 전용 — 기본은 가림(#131 재판단). 외부 모델로 원문을 보내는 것을 기본으로 두지 않는다.
+     * 대가는 리터럴 기반 판정(IN절 개수·상수 분포)의 정확도이고, 실측에서 42건 중 3건이다
+     * (docs/experiments/ai-masking-levels.md). 사내 설치 모델처럼 값이 밖으로 나가지 않을 때만
+     * mask-ai-prompt=false로 끈다. enabled와 mask-ai-prompt가 둘 다 켜져 있을 때만 가린다.
      */
     public String applyForAiPrompt(String sql) {
         return (enabled && maskAiPrompt) ? maskLiterals(sql) : sql;
