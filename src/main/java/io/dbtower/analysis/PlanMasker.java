@@ -75,7 +75,7 @@ public class PlanMasker {
 
     @Autowired
     public PlanMasker(@Value("${dbtower.masking.enabled:true}") boolean enabled,
-                      @Value("${dbtower.masking.mask-ai-plan:false}") boolean maskAiPlan,
+                      @Value("${dbtower.masking.mask-ai-plan:true}") boolean maskAiPlan,
                       @Value("${dbtower.masking.ai-plan-level:STRUCTURE}") AiMaskLevel level) {
         this(enabled, maskAiPlan, level, Clock.systemDefaultZone());
     }
@@ -95,8 +95,8 @@ public class PlanMasker {
 
     /**
      * AI 프롬프트 전용 — {@code enabled}와 {@code mask-ai-plan}이 둘 다 켜져 있을 때만 가린다.
-     * 기본이 꺼진 이유는 {@link QueryMasker#applyForAiPrompt}와 같다: 가림은 진단 정확도와의 거래라
-     * 명시적 선택으로 둔다. 다만 SQL 가림만 켜고 이걸 끄면 값이 계획을 타고 나간다(위 주석).
+     * 기본은 가림이며 이유는 {@link QueryMasker#applyForAiPrompt}와 같다. SQL 가림만 켜고 이걸 끄면
+     * 값이 계획을 타고 나간다(위 주석) — 그래서 둘을 함께 켠다.
      */
     public String applyForAiPrompt(DbmsType type, String plan) {
         return masking() ? maskPlan(type, plan, level, clock) : plan;

@@ -102,7 +102,7 @@ TLS가 필요한 대상은 `"useTls": true`를 추가합니다. 인증서 검증
 워크벤치 조회에는 `READ`, 승인 티켓 실행에는 `WRITE` 자격증명을 별도로 등록합니다.
 승인 없이 변경 SQL을 실행하는 API는 없습니다.
 
-AI로 나가는 값의 가림은 `dbtower.masking.mask-ai-prompt`(SQL 문장)와 `dbtower.masking.mask-ai-plan`(실행계획)으로
+AI로 나가는 값의 가림은 `dbtower.masking.mask-ai-prompt`(SQL 문장)와 `dbtower.masking.mask-ai-plan`(실행계획)으로, 둘 다 기본 켜짐이고
 켜고, 켰을 때의 정도는 `dbtower.masking.ai-plan-level`로 고릅니다 — `NONE`(가리지 않음)·`STRUCTURE`(값은 지우고
 모양만 남김)·`FULL`(전부 물음표). 기본은 꺼짐이고, 켜면 `STRUCTURE`가 걸립니다. 어느 수준에서 무엇이 남는지는
 `docs/experiments/ai-masking-tradeoff.md`와 `ai-masking-repeat-review.md`의 실측에 있습니다.
