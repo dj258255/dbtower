@@ -49,6 +49,8 @@ class AshBackpressureExperimentIT {
     private static final String PASSWORD = "dbtower1234";
     private static final long WINDOW_MS = 40_000;
     private static final long INTERVAL_MS = 1_000;
+    /** 간격 축 — 같은 조건에서 계획 간격을 늘리면 탐지율이 어떻게 달라지는가(기준선 NONE 은 관측이 없어 제외) */
+    private static final long[] INTERVALS_MS = {1_000, 2_000, 4_000};
     private static final long EPISODE_EVERY_MS = 4_000;
     private static final long EPISODE_HOLD_MS = 1_500;
     private static final long[] DELAYS_MS = {0, 2_000};
@@ -66,7 +68,7 @@ class AshBackpressureExperimentIT {
     record Episode(long blockStartMs, long blockEndMs) {
     }
 
-    record Result(Policy policy, long delayMs, int samples, int samplesInWindow, int episodes, int captured,
+    record Result(Policy policy, long delayMs, long intervalMs, int samples, int samplesInWindow, int episodes, int captured,
                   int capturedAtRightTime, long skewP50Ms, long skewMaxMs, int maxConcurrent, long lastSnapshotAfterWindowMs,
                   int appQueries, long appP50Ms, long appP95Ms, long appP99Ms,
                   double targetCpuAvgPct, int targetCpuSamples, long targetReadMb) {
@@ -115,23 +117,33 @@ class AshBackpressureExperimentIT {
     void 샘플러가_느려질_때_세_정책의_대가를_잰다() throws Exception {
         String startedAt = OffsetDateTime.now().toString();
         List<Result> results = new ArrayList<>();
-        StringBuilder csv = new StringBuilder("policy,delay_ms,intended_ms,snapshot_ms,blocked\n");
+        StringBuilder csv = new StringBuilder("policy,delay_ms,interval_ms,intended_ms,snapshot_ms,blocked\n");
         for (int rep = 0; rep < REPEATS; rep++) {
             for (long delay : DELAYS_MS) {
                 for (Policy policy : Policy.values()) {
-                    results.add(runOnce(policy, delay, csv));
+                    results.add(runOnce(policy, delay, INTERVAL_MS, csv));
                 }
+            }
+        }
+        for (long interval : INTERVALS_MS) {
+            for (Policy policy : Policy.values()) {
+                if (policy == Policy.NONE) {
+                    continue;
+                }
+                results.add(runOnce(policy, 0, interval, csv));
             }
         }
         Files.writeString(CSV, csv, StandardCharsets.UTF_8);
         Files.writeString(DOC, document(results, startedAt), StandardCharsets.UTF_8);
         System.out.println("[E4] 결과 기록: " + DOC.toAbsolutePath());
         assertTrue(results.stream().allMatch(r -> r.episodes() > 0), "막힘 사건이 만들어지지 않았다 — 측정 조건이 서지 않았다");
-        assertTrue(results.stream().filter(r -> r.delayMs() == 0 && r.policy() != Policy.NONE).allMatch(r -> r.captured() > 0),
-                "지연이 없을 때도 한 사건도 못 잡았다 — 샘플러 조회가 막힘을 보지 못하는 설정이다");
+        // 간격을 늘리면 사건을 놓치는 것이 이 축의 결과다 — 게이트는 제품 기본값(1초)에서만 건다
+        assertTrue(results.stream().filter(r -> r.delayMs() == 0 && r.policy() != Policy.NONE && r.intervalMs() == INTERVAL_MS)
+                        .allMatch(r -> r.captured() > 0),
+                "1초 간격에서도 한 사건도 못 잡았다 — 샘플러 조회가 막힘을 보지 못하는 설정이다");
     }
 
-    private Result runOnce(Policy policy, long delayMs, StringBuilder csv) throws Exception {
+    private Result runOnce(Policy policy, long delayMs, long intervalMs, StringBuilder csv) throws Exception {
         List<Episode> episodes = Collections.synchronizedList(new ArrayList<>());
         List<Sample> samples = Collections.synchronizedList(new ArrayList<>());
         AtomicBoolean stop = new AtomicBoolean();
@@ -160,14 +172,14 @@ class AshBackpressureExperimentIT {
                     while (System.currentTimeMillis() - t0 < WINDOW_MS) {
                         long intended = System.currentTimeMillis();
                         samples.add(sampleOnce(c, intended, delayMs, concurrent, maxConcurrent));
-                        Thread.sleep(INTERVAL_MS);
+                        Thread.sleep(intervalMs);
                     }
                 }
             }
             case QUEUE -> {
                 try (Connection c = open("e4-sampler")) {
                     for (long k = 0; ; k++) {
-                        long intended = t0 + k * INTERVAL_MS;
+                        long intended = t0 + k * intervalMs;
                         if (intended - t0 >= WINDOW_MS) {
                             break;
                         }
@@ -182,7 +194,7 @@ class AshBackpressureExperimentIT {
             case PARALLEL -> {
                 ExecutorService pool = Executors.newCachedThreadPool();
                 for (long k = 0; ; k++) {
-                    long intended = t0 + k * INTERVAL_MS;
+                    long intended = t0 + k * intervalMs;
                     if (intended - t0 >= WINDOW_MS) {
                         break;
                     }
@@ -212,7 +224,7 @@ class AshBackpressureExperimentIT {
         List<Sample> all = new ArrayList<>(samples);
         all.sort((a, b) -> Long.compare(a.intendedMs(), b.intendedMs()));
         for (Sample s : all) {
-            csv.append(String.format(Locale.ROOT, "%s,%d,%d,%d,%d%n", policy, delayMs, s.intendedMs() - t0, s.snapshotMs() - t0, s.blocked()));
+            csv.append(String.format(Locale.ROOT, "%s,%d,%d,%d,%d,%d%n", policy, delayMs, intervalMs, s.intendedMs() - t0, s.snapshotMs() - t0, s.blocked()));
         }
         List<Episode> eps = new ArrayList<>(episodes);
         int captured = 0;
@@ -220,7 +232,7 @@ class AshBackpressureExperimentIT {
         for (Episode e : eps) {
             boolean seen = all.stream().anyMatch(s -> s.blocked() > 0 && s.snapshotMs() >= e.blockStartMs() && s.snapshotMs() <= e.blockEndMs());
             boolean seenOnTime = all.stream().anyMatch(s -> s.blocked() > 0 && s.snapshotMs() >= e.blockStartMs() && s.snapshotMs() <= e.blockEndMs()
-                    && s.intendedMs() >= e.blockStartMs() - INTERVAL_MS && s.intendedMs() <= e.blockEndMs());
+                    && s.intendedMs() >= e.blockStartMs() - intervalMs && s.intendedMs() <= e.blockEndMs());
             if (seen) {
                 captured++;
             }
@@ -232,7 +244,7 @@ class AshBackpressureExperimentIT {
         long lastAfter = all.stream().mapToLong(Sample::snapshotMs).max().orElse(t0) - (t0 + WINDOW_MS);
         int inWindow = (int) all.stream().filter(s -> s.snapshotMs() - t0 < WINDOW_MS).count();
         List<Long> appSamples = new ArrayList<>(appLatency);
-        Result r = new Result(policy, delayMs, all.size(), inWindow, eps.size(), captured, rightTime,
+        Result r = new Result(policy, delayMs, intervalMs, all.size(), inWindow, eps.size(), captured, rightTime,
                 skews.isEmpty() ? 0 : skews.get(skews.size() / 2), skews.isEmpty() ? 0 : skews.get(skews.size() - 1),
                 maxConcurrent.get(), lastAfter,
                 appSamples.size(), pct(appSamples, 0.50), pct(appSamples, 0.95), pct(appSamples, 0.99),
@@ -374,7 +386,7 @@ class AshBackpressureExperimentIT {
         md.append("실행 간 변동이 조건 간 차이보다 큰지 보려고 같은 조건을 반복했다. 처리량은 min / 중앙 / max 다.\n\n");
         md.append("| 정책 | 앱 조회 수 min / 중앙 / max | 대상 CPU 중앙 |\n|---|---|---|\n");
         for (Policy policy : Policy.values()) {
-            List<Result> rs = results.stream().filter(r -> r.policy() == policy && r.delayMs() == 0).toList();
+            List<Result> rs = results.stream().filter(r -> r.policy() == policy && r.delayMs() == 0 && r.intervalMs() == INTERVAL_MS).toList();
             List<Integer> q = rs.stream().map(Result::appQueries).sorted().toList();
             List<Double> c = rs.stream().map(Result::targetCpuAvgPct).sorted().toList();
             if (q.isEmpty()) {
@@ -384,9 +396,25 @@ class AshBackpressureExperimentIT {
                     policy, q.get(0), q.get(q.size() / 2), q.get(q.size() - 1), c.get(c.size() / 2)));
         }
         md.append("\n");
+        md.append("### 샘플 간격별 탐지율 (지연 0ms, 각 1회)\n\n");
+        md.append("계획 간격을 늘리면 대상 조회를 아끼는 대신 무엇을 놓치는가.\n\n");
+        md.append("| 간격 | 정책 | 창 안 샘플 | 막힘 사건 | 잡은 사건 |\n|---|---|---|---|---|\n");
+        for (long interval : INTERVALS_MS) {
+            for (Policy policy : Policy.values()) {
+                if (policy == Policy.NONE) {
+                    continue;
+                }
+                results.stream()
+                        .filter(r -> r.intervalMs() == interval && r.policy() == policy && r.delayMs() == 0)
+                        .findFirst()
+                        .ifPresent(r -> md.append(String.format(Locale.ROOT, "| %dms | %s | %d | %d | %d |%n",
+                                interval, policy, r.samplesInWindow(), r.episodes(), r.captured())));
+            }
+        }
+        md.append("\n");
         md.append("| 지연 | 정책 | 앱 조회 p50 | 앱 조회 p95 | 앱 조회 p99 | 앱 조회 수 | 대상 CPU 평균 | 표본 | 대상 디스크 읽기 | 창 안 샘플 | 막힘 사건 | 잡은 사건 | 기록 시각도 사건 안(수정 전: 틱 시작) | 기록 시각도 사건 안(수정 후: 실제 조회) | 실제 조회 시각 - 계획 시각 중앙값 | 최대 | 동시 대상 조회 최대 | 창이 끝난 뒤 마지막 샘플 |\n");
         md.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
-        for (Result r : results) {
+        for (Result r : results.stream().filter(x -> x.intervalMs() == INTERVAL_MS).toList()) {
             md.append(String.format(Locale.ROOT, "| %dms | %s | %dms | %dms | %dms | %d | %s | %s | %s | %d | %d | %d | %d | %dms | %dms | %d | %s |%n",
                     r.delayMs(), r.policy(), r.appP50Ms(), r.appP95Ms(), r.appP99Ms(), r.appQueries(),
                     r.targetCpuAvgPct() < 0 ? "-" : String.format(Locale.ROOT, "%.1f%%", r.targetCpuAvgPct()),
