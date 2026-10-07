@@ -333,6 +333,11 @@ class OnlineSwapMysqlExperimentIT {
         }
         try (Connection con = open()) {
             con.setAutoCommit(false);
+            // 복사가 만드는 binlog를 재생 클라이언트가 소화하면 drain(컷오버)이 길어진다(1차 측정 3.9초).
+            // 복제 없는 단일 인스턴스 전제로 복사·적용은 로그에서 뺀다. 복제가 있으면 이 선택지는 없다
+            try (Statement st = con.createStatement()) {
+                st.execute("SET sql_log_bin = 0");
+            }
             try (PreparedStatement ps = con.prepareStatement(
                     "INSERT IGNORE INTO " + TABLE + "_ghost " +
                     "SELECT id, CONCAT('v2:', note) FROM " + TABLE + " WHERE id BETWEEN ? AND ?")) {
@@ -394,6 +399,9 @@ class OnlineSwapMysqlExperimentIT {
         private BinlogReplayer() throws SQLException {
             applyCon = open();
             applyCon.setAutoCommit(true);
+            try (Statement st = applyCon.createStatement()) {
+                st.execute("SET sql_log_bin = 0"); // 적용이 다시 이벤트를 만들지 않게
+            }
             replace = applyCon.prepareStatement(
                     "REPLACE INTO " + TABLE + "_ghost VALUES (?, ?)");
             delete = applyCon.prepareStatement(
@@ -653,6 +661,7 @@ class OnlineSwapMysqlExperimentIT {
         md.append("- 동시 writer ").append(WRITERS).append("개: 임의 행 UPDATE 90% + 새 행 INSERT 10%, 커밋마다 소요 기록\n");
         md.append("- 혼합 노출: 고정 표본 ").append(SAMPLE_IDS).append("행을 ").append(SAMPLE_INTERVAL_MS)
                 .append("ms마다 읽어 신·구 형식이 공존한 구간\n");
+        md.append("- SWAP의 복사·적용 커넥션은 sql_log_bin=0(복제 없는 단일 인스턴스 전제). 복제가 있으면 끌 수 없고 drain 비용이 컷오버에 더해진다(끈 적 없는 1차 측정에서 3.9초)\n");
         md.append("- 유실 판정(사전): 최종 값이 {마지막 writer 값, 'v2:'+그 값} 어디에도 없으면 유실. "
                 + "변환 누락은 writer 값만 남고 v2가 안 덮인 행(교체 방식의 레이스 비용)\n\n");
         md.append("| 방식 | 총 소요 | 컷오버 | 혼합 노출 | 유실 | INSERT 누락 | 변환 누락 "

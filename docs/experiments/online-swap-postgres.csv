@@ -1,0 +1,3 @@
+mode,total_ms,cutover_ms,mixed_exposure_ms,lost,missing_inserts,untransformed,writer_p50_ms,writer_p95_ms,writer_max_ms,writer_max_gap_ms,writer_commits,extra_space_bytes,slot_backlog_max_bytes,cutover_leak_rows
+BATCH,123175,0,123098,0,0,55971,1.30,6.04,275.13,237,97616,0,255527016,0
+SWAP_TRIGGER,6612,21,873,0,0,6256,1.65,4.43,34.89,34,6292,67059712,255491560,3
