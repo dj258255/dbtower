@@ -267,31 +267,39 @@ class OnlineBackfillMongoExperimentIT {
         }
     }
 
-    /** 스트림이 모은 id를 조건부로 재변환한다. writer와의 경합은 재시도 한 바퀴로 흡수한다 */
+    /**
+     * 스트림이 모은 id를 조건부로 재변환한다. writer와의 경합은 재시도 두 바퀴로 흡수한다.
+     * id 하나씩 왕복하면 1,000,000 규모에서 따라잡기 창이 수십 분으로 벌어진다 — $in 배치로 왕복을 줄인다.
+     */
     private void catchup(MongoCollection<Document> col, Set<Long> ids) {
-        for (int attempt = 0; attempt < 3; attempt++) {
+        List<Long> pending = new ArrayList<>(ids);
+        for (int attempt = 0; attempt < 3 && !pending.isEmpty(); attempt++) {
             List<Long> remaining = new ArrayList<>();
-            for (Long id : ids) {
-                Document d = col.find(Filters.eq("_id", id)).first();
-                if (d == null) {
+            for (int from = 0; from < pending.size(); from += BATCH_DOCS) {
+                List<Long> chunk = pending.subList(from, Math.min(from + BATCH_DOCS, pending.size()));
+                List<WriteModel<Document>> ops = new ArrayList<>();
+                List<Long> chunkIds = new ArrayList<>();
+                for (Document d : col.find(Filters.in("_id", chunk))) {
+                    String note = d.getString("note");
+                    if (note.startsWith("v2:")) {
+                        continue;
+                    }
+                    long id = d.getLong("_id");
+                    chunkIds.add(id);
+                    ops.add(new UpdateOneModel<>(
+                            Filters.and(Filters.eq("_id", id), Filters.eq("ver", d.getLong("ver"))),
+                            Updates.combine(Updates.set("note", "v2:" + d.getString("note")),
+                                    Updates.inc("ver", 1L))));
+                }
+                if (ops.isEmpty()) {
                     continue;
                 }
-                String note = d.getString("note");
-                if (note.startsWith("v2:")) {
-                    continue;
-                }
-                var result = col.updateOne(
-                        Filters.and(Filters.eq("_id", id), Filters.eq("ver", d.getLong("ver"))),
-                        Updates.combine(Updates.set("note", "v2:" + note), Updates.inc("ver", 1L)));
-                if (result.getModifiedCount() == 0) {
-                    remaining.add(id);
+                long modified = col.bulkWrite(ops).getModifiedCount();
+                if (modified < ops.size()) {
+                    remaining.addAll(chunkIds); // 경합으로 빗나간 것만 다음 바퀴에서 다시 본다
                 }
             }
-            if (remaining.isEmpty()) {
-                return;
-            }
-            ids = ConcurrentHashMap.newKeySet();
-            ids.addAll(remaining);
+            pending = remaining;
         }
     }
 
